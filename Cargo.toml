@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>"]
 
 [dependencies]
+futures = "0.1"
+hyper = "0.11"
+tokio-core = "0.1"
