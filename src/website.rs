@@ -5,7 +5,7 @@ use reqwest;
 #[derive(Debug)]
 pub struct Website {
     domain: String,
-    links: Vec<String>,
+    links: Vec<Link>,
 }
 
 impl Website {
@@ -27,11 +27,7 @@ impl Website {
 
                     // Keep only links for this domains
                     match href.find('/') {
-                        Some(0) => {
-                            self.links.push(
-                                format!("{}{}", self.domain, href.to_string()),
-                            )
-                        }
+                        Some(0) => self.links.push(Link::new(&self.domain, href)),
                         Some(_) => (),
                         None => (),
                     };
@@ -48,5 +44,21 @@ impl Website {
         res.read_to_string(&mut body).unwrap();
 
         Html::parse_document(&body)
+    }
+}
+
+/// Represent a link who can be visited
+#[derive(Debug)]
+struct Link {
+    url: String,
+    visited: bool,
+}
+
+impl Link {
+    fn new(domain: &str, url: &str) -> Self {
+        Self {
+            url: format!("{}{}", domain, url),
+            visited: false,
+        }
     }
 }
