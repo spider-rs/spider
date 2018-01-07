@@ -2,6 +2,7 @@ use std::io::Read;
 use scraper::{Html, Selector};
 use reqwest;
 
+/// Represent a website with many links to visit
 #[derive(Debug)]
 pub struct Website {
     domain: String,
@@ -9,12 +10,11 @@ pub struct Website {
 }
 
 impl Website {
+    /// Initialize Website object with one link
     pub fn new(domain: &str) -> Self {
-
-        let links Vec<Link>= Vec::new(){
-            Link::new(domain, "/")
-        }; 
-
+        // create home link
+        let mut links: Vec<Link> = Vec::new();
+        links.push(Link::new(domain, "/"));
 
         Self {
             domain: domain.to_string(),
@@ -23,33 +23,32 @@ impl Website {
     }
 
     pub fn crawl(&mut self) {
-        let body: Html = Self::get(&self.domain);
-        let selector = Selector::parse("a").unwrap();
 
-        for element in body.select(&selector) {
+        let mut new_links: Vec<Link> = Vec::new();
 
-            match element.value().attr("href") {
-                Some(href) => {
+        for mut link in &self.links {
+            let body: Html = link.visit();
+            let selector = Selector::parse("a").unwrap();
 
-                    // Keep only links for this domains
-                    match href.find('/') {
-                        Some(0) => self.links.push(Link::new(&self.domain, href)),
-                        Some(_) => (),
-                        None => (),
-                    };
-                }
-                None => (),
-            };
+            for element in body.select(&selector) {
+
+                match element.value().attr("href") {
+                    Some(href) => {
+
+                        // Keep only links for this domains
+                        match href.find('/') {
+                            Some(0) => new_links.push(Link::new(&self.domain, href)),
+                            Some(_) => (),
+                            None => (),
+                        };
+                    }
+                    None => (),
+                };
+            }
+
         }
-    }
 
-    /// Launch an HTTP GET query to te given URL & parse body response content
-    fn get(url: &str) -> Html {
-        let mut res = reqwest::get(url).unwrap();
-        let mut body = String::new();
-        res.read_to_string(&mut body).unwrap();
-
-        Html::parse_document(&body)
+        self.links.append(&mut new_links);
     }
 }
 
@@ -66,5 +65,16 @@ impl Link {
             url: format!("{}{}", domain, url),
             visited: false,
         }
+    }
+
+    /// Launch an HTTP GET query to te given URL & parse body response content
+    fn visit(&self) -> Html {
+        let mut res = reqwest::get(&self.url).unwrap();
+        let mut body = String::new();
+        res.read_to_string(&mut body).unwrap();
+
+        // todo: set link visited
+
+        Html::parse_document(&body)
     }
 }
