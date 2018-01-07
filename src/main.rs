@@ -1,24 +1,25 @@
-extern crate futures;
-extern crate hyper;
-extern crate tokio_core;
+extern crate reqwest;
+extern crate scraper;
 
-use std::io::{self, Write};
-use futures::{Future, Stream};
-use hyper::Client;
-use tokio_core::reactor::Core;
+use std::io::Read;
+use scraper::{Html, Selector};
+
+/// Launch an HTTP GET query to te given URL & parse body response content
+fn get(url: &str) -> Html {
+    let mut res = reqwest::get(url).unwrap();
+    let mut body = String::new();
+    res.read_to_string(&mut body).unwrap();
+
+    Html::parse_document(&body)
+}
 
 
 fn main() {
-    let mut core = Core::new().unwrap();
-    let client = Client::new(&core.handle());
+    let body: Html = get("http://localhost:4000");
+    let selector = Selector::parse("a").unwrap();
 
-    let uri = "http://localhost:4000".parse().unwrap();
-    let work = client.get(uri).and_then(|res| {
-        println!("Response: {}", res.status());
-
-        res.body().for_each(|chunk| {
-            io::stdout().write_all(&chunk).map_err(From::from)
-        })
-    });
-    core.run(work).unwrap();
+    for element in body.select(&selector) {
+        assert_eq!("a", element.value().name());
+        println!("{:?}", element.value());
+    }
 }
