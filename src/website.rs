@@ -10,9 +10,15 @@ pub struct Website {
 
 impl Website {
     pub fn new(domain: &str) -> Self {
+
+        let links Vec<Link>= Vec::new(){
+            Link::new(domain, "/")
+        }; 
+
+
         Self {
             domain: domain.to_string(),
-            links: Vec::new(),
+            links: links,
         }
     }
 
