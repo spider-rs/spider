@@ -23,7 +23,19 @@ impl Website {
         for element in body.select(&selector) {
 
             match element.value().attr("href") {
-                Some(href) => self.links.push(href.to_string()),
+                Some(href) => {
+
+                    // Keep only links for this domains
+                    match href.find('/') {
+                        Some(0) => {
+                            self.links.push(
+                                format!("{}{}", self.domain, href.to_string()),
+                            )
+                        }
+                        Some(_) => (),
+                        None => (),
+                    };
+                }
                 None => (),
             };
         }
