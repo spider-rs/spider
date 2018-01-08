@@ -29,26 +29,28 @@ impl Website {
         }
     }
 
-    /// Start to crawling website
-    /// @todo iterate while links exists
+    /// Start to crawling website and continue to crawling while new links found
     pub fn crawl(&mut self) {
-        let mut new_links: Vec<String> = Vec::new();
+        // while we have links, we continue to iteate
+        while self.links.len() > 0 {
+            let mut new_links: Vec<String> = Vec::new();
+            for link in &self.links {
+                if self.links_visited.contains(link) {
+                    continue;
+                }
 
-        for link in &self.links {
-            if self.links_visited.contains(link) {
-                continue;
+                let page = Page::new(link, &self.domain);
+                for link in page.links.clone() {
+                    new_links.push(link);
+                }
+
+                self.pages.push(page);
+                self.links_visited.push(link.to_string());
             }
 
-            let page = Page::new(link, &self.domain);
-            for link in page.links.clone() {
-                new_links.push(link);
-            }
-
-            self.pages.push(page);
-            self.links_visited.push(link.to_string());
+            self.links= new_links;
         }
 
-        self.links.append(&mut new_links);
     }
 
     /// Output this website to console
