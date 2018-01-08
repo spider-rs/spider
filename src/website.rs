@@ -50,7 +50,6 @@ impl Website {
 
             self.links= new_links;
         }
-
     }
 
     /// Output this website to console
@@ -78,7 +77,6 @@ impl Page {
 
     /// Launch an HTTP GET query & get all informations
     pub fn new(url: &str, domain : &str) -> Self {
-        println!("[x] Fetch {}", url);
         // fetch HTML & measure time
         let now = Instant::now();
         let html = Self::visit(url);
@@ -88,13 +86,17 @@ impl Page {
         let links: Vec<String> = Self::get_links(&html, domain);
         let h1: Vec<String> = Self::get_h1(&html);
 
-        Self {
+        let page = Self {
             url: url.to_string(),
             links: links,
             loaded_time : loaded_time,
             title: Self::get_title(&html),
             h1: h1
-        }
+        };
+
+        page.print();
+
+        page
     }
 
 
@@ -196,6 +198,9 @@ impl Page {
             h1_output.push_str("not found");
             println!("{}", h1_output.red());
         }
+
+        // blank line
+        println!("");
     }
 }
 
