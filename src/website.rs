@@ -52,14 +52,13 @@ impl Website {
         }
     }
 
-    /// Output this website to console
-    pub fn print(&self){
-        for page in &self.pages {
-            println!("");
-            page.print();
-        }
-
-    }
+    // Output this website to console
+    // pub fn print(&self){
+    //     for page in &self.pages {
+    //         println!("");
+    //         page.print();
+    //     }
+    // }
 }
 
 /// Represent a page of a website
@@ -68,7 +67,13 @@ pub struct Page {
     url: String,
     /// List of content of h1 tag founded
     h1: Vec<String>,
+    /// <title> tag
     title: Option<String>,
+    /// <meta name="description" .. > tag 
+    meta_description: Option<String>,
+    /// <meta name="keywords" .. > tag 
+    meta_keywords: Option<String>,
+    /// links founded on this page
     links: Vec<String>,
     loaded_time : f64,
 }
@@ -83,15 +88,14 @@ impl Page {
         let elapsed = now.elapsed();
         let loaded_time = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
 
-        let links: Vec<String> = Self::get_links(&html, domain);
-        let h1: Vec<String> = Self::get_h1(&html);
-
         let page = Self {
             url: url.to_string(),
-            links: links,
+            links: Self::get_links(&html, domain),
             loaded_time : loaded_time,
             title: Self::get_title(&html),
-            h1: h1
+            meta_description: Self::get_meta(&html, "description"),
+            meta_keywords: Self::get_meta(&html, "keywords"),
+            h1: Self::get_h1(&html)
         };
 
         page.print();
@@ -118,6 +122,25 @@ impl Page {
             let title : String =  element.inner_html();
 
             return Some(title);
+        }
+
+        None
+    }
+
+    /// Scrape this page & get some information
+    pub fn get_meta(html: &Html, name: &str)-> Option<String>{
+        let meta_selector = format!("meta[name={}]", name);
+        let selector = Selector::parse(&meta_selector).unwrap();
+
+        for element in html.select(&selector) {
+            match element.value().attr("content") {
+                Some(content) => {
+                    if !content.is_empty() {
+                        return Some(content.to_string())
+                    }
+                },
+                None => ()
+            };
         }
 
         None
@@ -184,6 +207,18 @@ impl Page {
         match &self.title {
             &Some(ref title) => println!("\t{}", format!("- title: {}", title).green()),
             &None => println!("\t{}", "- title: not found".red()),
+        }
+
+        // DISPLAY description
+        match &self.meta_description {
+            &Some(ref description) => println!("\t{}", format!("- description: {}", description).green()),
+            &None => println!("\t{}", "- description: not found".red()),
+        }
+
+        // DISPLAY description
+        match &self.meta_keywords {
+            &Some(ref keywords) => println!("\t{}", format!("- Meta keywords: {}", keywords).green()),
+            &None => println!("\t{}", "- Meta keywords: not found".red()),
         }
 
         // DISPLAY H1
