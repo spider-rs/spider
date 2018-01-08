@@ -33,22 +33,29 @@ impl Website {
         let mut new_links: Vec<String> = Vec::new();
 
         for link in &self.links {
-
             if self.links_visited.contains(link) {
                 continue;
             }
 
             let page = Page::new(link, &self.domain);
-            let mut links_founded = page.links.clone();
-
-            new_links.append(&mut links_founded);
+            for link in page.links.clone() {
+                new_links.push(link);
+            }
 
             self.pages.push(page);
-
             self.links_visited.push(link.to_string());
         }
 
         self.links.append(&mut new_links);
+    }
+
+    /// Output this website to console
+    pub fn print(&self){
+        for page in &self.pages {
+            println!("");
+            page.print();
+        }
+
     }
 }
 
@@ -96,7 +103,7 @@ impl Page {
         let selector = Selector::parse("h1").unwrap();
 
         for element in html.select(&selector) {
-            let h1 : String =  element.value().name().to_string();
+            let h1 : String =  element.inner_html();
             h1s.push(h1);
         }
 
@@ -126,6 +133,16 @@ impl Page {
         }
 
         urls
+    }
+
+    pub fn print(&self){
+        println!("{}", self.url);
+
+        println!("\t- h1:");
+
+        for h1 in &self.h1 {
+            println!("\t\t{}", h1);
+        }
     }
 }
 

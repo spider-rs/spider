@@ -12,4 +12,6 @@ fn main() {
     localhost.crawl();
     localhost.crawl();
     localhost.crawl();
+
+    localhost.print();
 }
