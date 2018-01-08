@@ -64,7 +64,9 @@ impl Website {
 #[derive(Debug)]
 pub struct Page {
     url: String,
-    h1 : Vec<String>,
+    /// List of content of h1 tag founded
+    h1: Vec<String>,
+    title: Option<String>,
     links: Vec<String>,
 }
 
@@ -82,6 +84,7 @@ impl Page {
         Self {
             url: url.to_string(),
             links: links,
+            title: Self::get_title(&html),
             h1: h1
         }
     }
@@ -94,6 +97,20 @@ impl Page {
         res.read_to_string(&mut body).unwrap();
 
         Html::parse_document(&body)
+    }
+
+
+    /// Scrape this page & get some information
+    pub fn get_title(html: &Html)-> Option<String>{
+        let selector = Selector::parse("title").unwrap();
+
+        for element in html.select(&selector) {
+            let title : String =  element.inner_html();
+
+            return Some(title);
+        }
+
+        None
     }
 
 
@@ -137,17 +154,25 @@ impl Page {
     }
 
     pub fn print(&self){
+        // DISPLAY URL
         println!("{}", self.url.bold());
-        let mut h1_output : String= "\t-h1".to_string();
+
+        // DISPLAY title
+        match &self.title {
+            &Some(ref title) => println!("\t{}", format!("- title: {}", title).green()),
+            &None => println!("\t{}", "- title: not found".red()),
+        }
 
         // DISPLAY H1
+        let mut h1_output : String= "\t- h1: ".to_string();
         for h1 in &self.h1 {
-            h1_output.push_str(&format!("\r\n\t\t{}", h1));
+            h1_output.push_str(&format!("`{}` ", h1));
         }
         // display in red if no h1 or multiple found
         if self.h1.len() == 1 {
             println!("{}", h1_output.green());
         } else {
+            h1_output.push_str("not found");
             println!("{}", h1_output.red());
         }
 
