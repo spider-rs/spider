@@ -7,6 +7,7 @@ use reqwest;
 pub struct Website {
     domain: String,
     links: Vec<String>,
+    links_visited: Vec<String>,
     pages: Vec<Page>,
 }
 
@@ -20,6 +21,7 @@ impl Website {
         Self {
             domain: domain.to_string(),
             links: links,
+            links_visited: Vec::new(),
             pages: Vec::new(),
         }
     }
@@ -28,15 +30,22 @@ impl Website {
         let mut new_links: Vec<String> = Vec::new();
 
         for link in &self.links {
+
+            if self.links_visited.contains(link) {
+                continue;
+            }
+
             let page = Page::new(link);
             let mut links_founded = page.links(&self.domain);
 
             new_links.append(&mut links_founded);
 
             self.pages.push(page);
+
+            self.links_visited.push(link.to_string());
         }
 
-        self.links = new_links;
+        self.links.append(&mut new_links);
     }
 }
 
@@ -49,6 +58,8 @@ struct Page {
 
 impl Page {
     fn new(url: &str) -> Self {
+        println!("[x] Fetch {}", url);
+
         let html = Self::visit(url);
 
         Self {
