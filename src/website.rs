@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::time::Instant;
 
 use scraper::{Html, Selector};
 use reqwest;
@@ -68,6 +69,7 @@ pub struct Page {
     h1: Vec<String>,
     title: Option<String>,
     links: Vec<String>,
+    loaded_time : f64,
 }
 
 impl Page {
@@ -75,8 +77,11 @@ impl Page {
     /// Launch an HTTP GET query & get all informations
     pub fn new(url: &str, domain : &str) -> Self {
         println!("[x] Fetch {}", url);
-
+        // fetch HTML & measure time
+        let now = Instant::now();
         let html = Self::visit(url);
+        let elapsed = now.elapsed();
+        let loaded_time = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
 
         let links: Vec<String> = Self::get_links(&html, domain);
         let h1: Vec<String> = Self::get_h1(&html);
@@ -84,6 +89,7 @@ impl Page {
         Self {
             url: url.to_string(),
             links: links,
+            loaded_time : loaded_time,
             title: Self::get_title(&html),
             h1: h1
         }
@@ -153,9 +159,22 @@ impl Page {
         urls
     }
 
+    /// 
     pub fn print(&self){
         // DISPLAY URL
         println!("{}", self.url.bold());
+
+        // DISPLAY LOADED TIME
+        let loaded_time_output = if self.loaded_time < 0.400 {
+            format!("\t- Loaded time: {}", self.loaded_time).green()
+        } else if self.loaded_time < 0.800 {
+
+            format!("\t- Loaded time: {}", self.loaded_time).yellow()
+        }else {
+            format!("\t- Loaded time: {}", self.loaded_time).red()
+
+        };
+        println!("{}", loaded_time_output);
 
         // DISPLAY title
         match &self.title {
@@ -166,7 +185,7 @@ impl Page {
         // DISPLAY H1
         let mut h1_output : String= "\t- h1: ".to_string();
         for h1 in &self.h1 {
-            h1_output.push_str(&format!("`{}` ", h1));
+            h1_output.push_str(&format!("'{}' ", h1));
         }
         // display in red if no h1 or multiple found
         if self.h1.len() == 1 {
@@ -175,7 +194,6 @@ impl Page {
             h1_output.push_str("not found");
             println!("{}", h1_output.red());
         }
-
     }
 }
 
