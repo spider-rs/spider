@@ -2,6 +2,7 @@ use std::io::Read;
 
 use scraper::{Html, Selector};
 use reqwest;
+use colored::*;
 
 /// Represent a website with many links to visit
 #[derive(Debug)]
@@ -136,13 +137,20 @@ impl Page {
     }
 
     pub fn print(&self){
-        println!("{}", self.url);
+        println!("{}", self.url.bold());
+        let mut h1_output : String= "\t-h1".to_string();
 
-        println!("\t- h1:");
-
+        // DISPLAY H1
         for h1 in &self.h1 {
-            println!("\t\t{}", h1);
+            h1_output.push_str(&format!("\r\n\t\t{}", h1));
         }
+        // display in red if no h1 or multiple found
+        if self.h1.len() == 1 {
+            println!("{}", h1_output.green());
+        } else {
+            println!("{}", h1_output.red());
+        }
+
     }
 }
 
