@@ -2,6 +2,12 @@
 
 Web spider framework that can spider a domain and collect useful informations about the pages it visits.
 
+## Depensencies
+
+~~~bash
+$ apt install openssl libssl-dev
+~~~
+
 ## Instalation
 
     $ cargo build --release

@@ -8,7 +8,7 @@ use website::Website;
 
 
 fn main() {
-    let mut localhost = Website::new("http://localhost:4000");
+    let mut localhost = Website::new("http://rousseau-alexandre.fr");
     localhost.crawl();
     localhost.crawl();
     localhost.crawl();

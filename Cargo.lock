@@ -1,11 +1,3 @@
-[root]
-name = "spider"
-version = "0.1.0"
-dependencies = [
- "reqwest 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "scraper 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
 [[package]]
 name = "adler32"
 version = "1.0.2"
@@ -751,6 +743,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "smallvec"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "spider"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "scraper 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "string_cache"

@@ -1,4 +1,5 @@
 use std::io::Read;
+
 use scraper::{Html, Selector};
 use reqwest;
 
@@ -26,6 +27,8 @@ impl Website {
         }
     }
 
+    /// Start to crawling website
+    /// @todo iterate while links exists
     pub fn crawl(&mut self) {
         let mut new_links: Vec<String> = Vec::new();
 
@@ -35,8 +38,8 @@ impl Website {
                 continue;
             }
 
-            let page = Page::new(link);
-            let mut links_founded = page.links(&self.domain);
+            let page = Page::new(link, &self.domain);
+            let mut links_founded = page.links.clone();
 
             new_links.append(&mut links_founded);
 
@@ -49,24 +52,32 @@ impl Website {
     }
 }
 
-/// Represent a link who can be visited
+/// Represent a page of a website
 #[derive(Debug)]
-struct Page {
+pub struct Page {
     url: String,
-    html: Html,
+    h1 : Vec<String>,
+    links: Vec<String>,
 }
 
 impl Page {
-    fn new(url: &str) -> Self {
+
+    /// Launch an HTTP GET query & get all informations
+    pub fn new(url: &str, domain : &str) -> Self {
         println!("[x] Fetch {}", url);
 
         let html = Self::visit(url);
 
+        let links: Vec<String> = Self::get_links(&html, domain);
+        let h1: Vec<String> = Self::get_h1(&html);
+
         Self {
             url: url.to_string(),
-            html: html,
+            links: links,
+            h1: h1
         }
     }
+
 
     /// Launch an HTTP GET query to te given URL & parse body response content
     fn visit(url: &str) -> Html {
@@ -77,12 +88,28 @@ impl Page {
         Html::parse_document(&body)
     }
 
-    fn links(&self, domain: &str) -> Vec<String> {
+
+    /// Scrape this page & get some information
+    pub fn get_h1(html: &Html)-> Vec<String>{
+        let mut h1s: Vec<String> = Vec::new();
+
+        let selector = Selector::parse("h1").unwrap();
+
+        for element in html.select(&selector) {
+            let h1 : String =  element.value().name().to_string();
+            h1s.push(h1);
+        }
+
+        h1s
+    }
+
+    /// Parse given page & get all links on it
+    fn get_links(html: &Html, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
 
         let selector = Selector::parse("a").unwrap();
 
-        for element in self.html.select(&selector) {
+        for element in html.select(&selector) {
 
             match element.value().attr("href") {
                 Some(href) => {
@@ -101,3 +128,5 @@ impl Page {
         urls
     }
 }
+
+
