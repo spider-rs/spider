@@ -14,3 +14,12 @@ or directly with
 
 `./target/debug/rust-crawler`
 
+## Use
+
+~~~rust
+let mut localhost = Website::new("http://localhost:4000");
+localhost.crawl();
+~~~
+
+
+
