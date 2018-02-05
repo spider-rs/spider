@@ -32,22 +32,24 @@ Add this dependency to your _Cargo.toml_ file.
 
 ~~~toml
 [dependencies]
-TODO
+spider = "1.0.2"
 ~~~
 
-## Use
+and then you'll be able to use library. Here a simple example
 
 ~~~rust
-// insert crate here
+extern crate spider;
 
-let mut localhost = Website::new("http://localhost:4000");
-localhost.crawl();
+use spider::website::Website;
 
-for page in localhost.get_pages() {
-    println!("- {}", page.get_url());
+fn main() {
+    let mut localhost = Website::new("http://localhost:4000");
+    localhost.crawl();
+
+    for page in localhost.get_pages() {
+        println!("- {}", page.get_url());
+    }
 }
-
-// TODO
 ~~~
 
 

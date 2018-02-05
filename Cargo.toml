@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.0.1"
+version = "1.0.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>"]
 description = "Web spider framework that can spider a domain and collect pages it visits."
 repository = "https://github.com/madeindjs/spider"
