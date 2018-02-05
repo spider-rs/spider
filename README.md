@@ -1,5 +1,7 @@
 # Spider
 
+![crate version](https://img.shields.io/crates/v/spider.svg)
+
 Web spider framework that can spider a domain and collect pages it visits.
 
 ## Depensencies
