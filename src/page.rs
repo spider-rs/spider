@@ -3,8 +3,7 @@ use reqwest;
 use std::io::Read;
 
 /// Represent a link who can be visited
-#[derive(Debug)]
-
+#[derive(Debug, Clone)]
 pub struct Page {
     url: String,
     html: Html,
@@ -12,14 +11,22 @@ pub struct Page {
 
 impl Page {
     pub fn new(url: &str) -> Self {
-        println!("[x] Fetch {}", url);
-
         let html = Self::visit(url);
 
         Self {
             url: url.to_string(),
             html: html,
         }
+    }
+
+    /// URL getter
+    pub fn get_url(&self) -> String {
+        self.url.clone()
+    }
+
+    /// HTML getter
+    pub fn get_html(&self) -> Html {
+        self.html.clone()
     }
 
     /// Launch an HTTP GET query to te given URL & parse body response content

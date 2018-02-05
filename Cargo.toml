@@ -6,4 +6,3 @@ authors = ["madeindjs <contact@rousseau-alexandre.fr>"]
 [dependencies]
 reqwest = "0.8.2"
 scraper = "0.4.0"
-colored = "1.6"
