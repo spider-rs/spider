@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.0.2"
+version = "1.0.3"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>"]
 description = "Web spider framework that can spider a domain and collect pages it visits."
 repository = "https://github.com/madeindjs/spider"
@@ -8,7 +8,9 @@ readme = "README.md"
 keywords = ["crawler", "spider"]
 categories = ["web-programming"]
 license = "MIT"
-license-file = "LICENSE"
+documentation = "https://docs.rs/spider"
+
+[badges]
 maintenance = { status = "as-is" }
 
 [dependencies]

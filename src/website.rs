@@ -1,17 +1,30 @@
 use page::Page;
 
-
-/// Represent a website with many links to visit
+/// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
+/// <pre>
+/// let mut localhost = Website::new("http://example.com");
+/// localhost.crawl();
+/// </pre>
+/// `Website` will be filled with `Pages` when crawled. To get them, just use
+/// <pre>
+/// for page in localhost.get_pages() {
+///     // do something
+/// }
+/// </pre>
 #[derive(Debug)]
 pub struct Website {
+    /// this is a start URL given when instanciate with `new`
     domain: String,
+    /// contains all non-visited URL
     links: Vec<String>,
+    /// contains all visited URL
     links_visited: Vec<String>,
+    /// contains page visited
     pages: Vec<Page>,
 }
 
 impl Website {
-    /// Initialize Website object with one link
+    /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
         // create home link
         let mut links: Vec<String> = Vec::new();
@@ -23,6 +36,11 @@ impl Website {
             links_visited: Vec::new(),
             pages: Vec::new(),
         }
+    }
+
+    /// page getter
+    pub fn get_pages(&self) -> Vec<Page> {
+        self.pages.clone()
     }
 
     /// Start to crawl website
@@ -53,9 +71,4 @@ impl Website {
             self.links = new_links.clone();
         }
     }
-
-    pub fn get_pages(&self) -> Vec<Page> {
-        self.pages.clone()
-    }
-
 }

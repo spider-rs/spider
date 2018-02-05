@@ -2,17 +2,20 @@ use scraper::{Html, Selector};
 use reqwest;
 use std::io::Read;
 
-/// Represent a link who can be visited
+/// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
+///
+/// **TODO**: store some usefull informations like code status, response time, headers, etc..
 #[derive(Debug, Clone)]
 pub struct Page {
+    /// URL of this page
     url: String,
+    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib
     html: Html,
 }
 
 impl Page {
+    /// Instanciate a new page a start to scrape it.
     pub fn new(url: &str) -> Self {
-        println!("[x] Fetch {}", url);
-
         let html = Self::visit(url);
 
         Self {
@@ -41,6 +44,7 @@ impl Page {
         Html::parse_document(&body)
     }
 
+    /// Find all href links and return them
     pub fn links(&self, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
 
