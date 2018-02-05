@@ -746,7 +746,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "spider"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "reqwest 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "scraper 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
