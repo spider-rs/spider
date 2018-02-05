@@ -1,5 +1,5 @@
 extern crate reqwest;
 extern crate scraper;
 
-mod website;
-mod page;
+pub mod website;
+pub mod page;
