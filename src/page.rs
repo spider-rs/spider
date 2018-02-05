@@ -11,6 +11,8 @@ pub struct Page {
 
 impl Page {
     pub fn new(url: &str) -> Self {
+        println!("[x] Fetch {}", url);
+
         let html = Self::visit(url);
 
         Self {
@@ -31,6 +33,7 @@ impl Page {
 
     /// Launch an HTTP GET query to te given URL & parse body response content
     fn visit(url: &str) -> Html {
+        // TODO: handle uwrap here
         let mut res = reqwest::get(url).unwrap();
         let mut body = String::new();
         res.read_to_string(&mut body).unwrap();

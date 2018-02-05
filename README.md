@@ -16,8 +16,15 @@ $ apt install openssl libssl-dev
 $ git clone https://github.com/madeindjs/spider.git
 $ cd spider
 $ cargo build --release
-$ ./target/debug/rust-crawler # TODO: parse command line arguments
+$ ./target/debug/rust-crawler http://localhost:4000
 ~~~
+
+Will produce something like this
+
+    - http://localhost:4000/
+    - http://localhost:4000/portfolio
+    - http://localhost:4000/resume
+    - http://localhost:4000/blog
 
 ## as crate for librairy usage
 
