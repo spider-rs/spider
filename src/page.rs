@@ -69,3 +69,11 @@ impl Page {
         urls
     }
 }
+
+#[test]
+fn parse_links() {
+    let page : Page = Page::new("http://rousseau-alexandre.fr");
+    assert!(page.links("http://rousseau-alexandre.fr").contains(
+            &"http://rousseau-alexandre.fr/blog".to_string()
+    ));
+}

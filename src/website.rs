@@ -27,8 +27,7 @@ impl Website {
     /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
         // create home link
-        let mut links: Vec<String> = Vec::new();
-        links.push(format!("{}/", domain));
+        let links: Vec<String> = vec![format!("{}/", domain)];
 
         Self {
             domain: domain.to_string(),
@@ -71,4 +70,13 @@ impl Website {
             self.links = new_links.clone();
         }
     }
+}
+
+#[test]
+fn crawl() {
+    let mut website: Website = Website::new("http://rousseau-alexandre.fr");
+    website.crawl();
+    assert!(website.links_visited.contains(
+        &"http://rousseau-alexandre.fr/blog".to_string(),
+    ));
 }
