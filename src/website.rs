@@ -1,4 +1,6 @@
 use page::Page;
+use std::thread;
+use std::thread::JoinHandle;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -46,25 +48,38 @@ impl Website {
     pub fn crawl(&mut self) {
         // scrawl while links exists
         while self.links.len() > 0 {
+            let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
             for link in &self.links {
+                // extends visibility
+                let thread_link: String = link.to_string();
+
                 // verify that URL was not already scrawled
                 if self.links_visited.contains(link) {
                     continue;
                 }
 
-                // scrape page & found links
-                let page = Page::new(link);
-                for link_founded in page.links(&self.domain) {
-                    // add only links not already vistited
-                    if !self.links_visited.contains(&link_founded) {
-                        new_links.push(link_founded);
-                    }
-                }
-                // add page to scrawled pages
+                workers.push(thread::spawn(move || Page::new(&thread_link)));
+            }
 
-                self.pages.push(page);
-                self.links_visited.push(link.to_string());
+            for worker in workers {
+                match worker.join() {
+                    Ok(page) => {
+                        // get links founded on
+                        for link_founded in page.links(&self.domain) {
+                            // add only links not already vistited
+                            if !self.links_visited.contains(&link_founded) {
+                                new_links.push(link_founded);
+                            }
+                        }
+                        // add page to scrawled pages
+
+                        self.links_visited.push(page.get_url());
+                        self.pages.push(page);
+
+                    }
+                    Err(_) => (),
+                }
             }
 
             self.links = new_links.clone();

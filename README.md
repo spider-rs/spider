@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Web spider framework that can spider a domain and collect pages it visits.
+Multithreaded Web spider crawler written in Rust.
 
 ## Depensencies
 
@@ -39,7 +39,7 @@ fn main() {
 
 ## TODO
 
-- [ ] multi-threaded system
+- [x] multi-threaded system
 - [ ] respect _robot.txt_ file
 - [ ] add configuratioon object for polite delay, etc..
 - [ ] parse command line arguments

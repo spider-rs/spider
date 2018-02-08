@@ -10,17 +10,20 @@ pub struct Page {
     /// URL of this page
     url: String,
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib
-    html: Html,
+    html: String,
 }
 
 impl Page {
     /// Instanciate a new page a start to scrape it.
     pub fn new(url: &str) -> Self {
-        let html = Self::visit(url);
+        // TODO: handle uwrap here
+        let mut res = reqwest::get(url).unwrap();
+        let mut body = String::new();
+        res.read_to_string(&mut body).unwrap();
 
         Self {
             url: url.to_string(),
-            html: html,
+            html: body,
         }
     }
 
@@ -29,29 +32,21 @@ impl Page {
         self.url.clone()
     }
 
-    /// HTML getter
+    /// HTML parser
     pub fn get_html(&self) -> Html {
-        self.html.clone()
+        Html::parse_document(&self.html)
     }
 
-    /// Launch an HTTP GET query to te given URL & parse body response content
-    fn visit(url: &str) -> Html {
-        // TODO: handle uwrap here
-        let mut res = reqwest::get(url).unwrap();
-        let mut body = String::new();
-        res.read_to_string(&mut body).unwrap();
-
-        Html::parse_document(&body)
+    pub fn get_plain_html(&self) -> String {
+        self.html.clone()
     }
 
     /// Find all href links and return them
     pub fn links(&self, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
-
         let selector = Selector::parse("a").unwrap();
 
-        for element in self.html.select(&selector) {
-
+        for element in self.get_html().select(&selector) {
             match element.value().attr("href") {
                 Some(href) => {
 
