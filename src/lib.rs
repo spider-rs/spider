@@ -5,3 +5,5 @@ extern crate scraper;
 pub mod website;
 /// A page scraped
 pub mod page;
+/// Configuration structure for `Website`
+pub mod configuration;

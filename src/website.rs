@@ -1,6 +1,7 @@
 use page::Page;
 use std::thread;
 use std::thread::JoinHandle;
+use configuration::Configuration;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -15,6 +16,8 @@ use std::thread::JoinHandle;
 /// </pre>
 #[derive(Debug)]
 pub struct Website {
+
+    pub configuration: Configuration,
     /// this is a start URL given when instanciate with `new`
     domain: String,
     /// contains all non-visited URL
@@ -32,6 +35,7 @@ impl Website {
         let links: Vec<String> = vec![format!("{}/", domain)];
 
         Self {
+            configuration: Configuration::new(),
             domain: domain.to_string(),
             links: links,
             links_visited: Vec::new(),
@@ -56,6 +60,10 @@ impl Website {
 
                 // verify that URL was not already scrawled
                 if self.links_visited.contains(link) {
+                    continue;
+                }
+
+                if self.configuration.blacklist_url.contains(link) {
                     continue;
                 }
 
@@ -94,6 +102,18 @@ fn crawl() {
     website.crawl();
     assert!(
         website.links_visited.contains(
+            &"https://choosealicense.com/licenses/".to_string()),
+        format!("{:?}", website.links_visited)
+    );
+}
+
+#[test]
+fn not_crawl_blacklist() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
+    website.crawl();
+    assert!(
+        !website.links_visited.contains(
             &"https://choosealicense.com/licenses/".to_string()),
         format!("{:?}", website.links_visited)
     );

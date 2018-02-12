@@ -27,6 +27,14 @@ impl Page {
         }
     }
 
+    /// Instanciate a new page without scraping it (used for testing purposes)
+    pub fn build(url: &str, html: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            html: html.to_string(),
+        }
+    }
+
     /// URL getter
     pub fn get_url(&self) -> String {
         self.url.clone()
