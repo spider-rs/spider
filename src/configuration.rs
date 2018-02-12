@@ -1,8 +1,6 @@
 /// Structure to configure `Website` crawler
 #[derive(Debug)]
 pub struct Configuration {
-    /// time to wait between all queries (not implemented)
-    pub polite_delay: i8,
     /// Respect robots.txt file and not scrape not allowed files (not implemented)
     pub respect_robots_txt: bool,
     /// Print page visited on standart output
@@ -14,7 +12,6 @@ pub struct Configuration {
 impl Configuration {
     pub fn new() -> Self {
         Self {
-            polite_delay: 0,
             respect_robots_txt: false,
             verbose: false,
             blacklist_url: Vec::new(),

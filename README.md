@@ -41,7 +41,8 @@ fn main() {
 
 - [x] multi-threaded system
 - [x] respect _robot.txt_ file
-- [ ] add configuratioon object for polite delay, etc..
+- [x] add configuration object for polite delay, etc..
+- [ ] add polite delay
 - [ ] parse command line arguments
 
 ## Contribute
