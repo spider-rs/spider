@@ -2,6 +2,7 @@ use page::Page;
 use std::thread;
 use std::thread::JoinHandle;
 use configuration::Configuration;
+use robotparser::RobotFileParser;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -26,6 +27,7 @@ pub struct Website {
     links_visited: Vec<String>,
     /// contains page visited
     pages: Vec<Page>,
+
 }
 
 impl Website {
@@ -59,11 +61,7 @@ impl Website {
                 let thread_link: String = link.to_string();
 
                 // verify that URL was not already scrawled
-                if self.links_visited.contains(link) {
-                    continue;
-                }
-
-                if self.configuration.blacklist_url.contains(link) {
+                if !self.is_allowed(link) {
                     continue;
                 }
 
@@ -97,6 +95,34 @@ impl Website {
             self.links = new_links.clone();
         }
     }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    pub fn is_allowed(&self, link: &String) -> bool {
+        if self.links_visited.contains(link) {
+            return false;
+        }
+
+        if self.configuration.blacklist_url.contains(link) {
+            return false;
+        }
+
+        if self.configuration.respect_robots_txt {
+            let robot_txt_url = &format!("{}/robots.txt", self.domain);
+            let parser = RobotFileParser::new(robot_txt_url);
+            parser.read();
+            println!("{:?}", parser);
+            let path : String = str::replace(link, &self.domain, "");
+            if !parser.can_fetch("*", &path) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 
@@ -121,4 +147,11 @@ fn not_crawl_blacklist() {
             &"https://choosealicense.com/licenses/".to_string()),
         format!("{:?}", website.links_visited)
     );
+}
+
+#[test]
+fn test_get_robots_txt() {
+    let mut website: Website = Website::new("https://stackoverflow.com");
+    website.configuration.respect_robots_txt = true;
+    assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
 }
