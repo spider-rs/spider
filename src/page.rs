@@ -67,8 +67,15 @@ impl Page {
 
 #[test]
 fn parse_links() {
-    let page : Page = Page::new("http://rousseau-alexandre.fr");
-    assert!(page.links("http://rousseau-alexandre.fr").contains(
-            &"http://rousseau-alexandre.fr/blog".to_string()
-    ));
+    let page : Page = Page::new("https://choosealicense.com/");
+
+    assert!(
+        page.links("https://choosealicense.com").contains(
+            &"https://choosealicense.com/about/".to_string()),
+        format!(
+            "Could not find {}. Theses URLs was found {:?}", 
+            page.url,
+            page.links("https://choosealicense.com")
+        )
+    );
 }

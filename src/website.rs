@@ -87,11 +87,14 @@ impl Website {
     }
 }
 
+
 #[test]
 fn crawl() {
-    let mut website: Website = Website::new("http://rousseau-alexandre.fr");
+    let mut website: Website = Website::new("https://choosealicense.com");
     website.crawl();
-    assert!(website.links_visited.contains(
-        &"http://rousseau-alexandre.fr/blog".to_string(),
-    ));
+    assert!(
+        website.links_visited.contains(
+            &"https://choosealicense.com/licenses/".to_string()),
+        format!("{:?}", website.links_visited)
+    );
 }
