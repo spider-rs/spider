@@ -27,7 +27,7 @@ extern crate spider;
 use spider::website::Website;
 
 fn main() {
-    let mut localhost = Website::new("http://localhost:4000");
+    let mut website: Website = Website::new("https://choosealicense.com");
     localhost.crawl();
 
     for page in localhost.get_pages() {
@@ -36,6 +36,17 @@ fn main() {
 }
 ~~~
 
+You can use `Configuration` object to configure your crawler:
+
+~~~rust
+// ..
+let mut website: Website = Website::new("https://choosealicense.com");
+website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
+website.configuration.respect_robots_txt = true;
+website.configuration.verbose = true;
+localhost.crawl();
+// ..
+~~~
 
 ## TODO
 

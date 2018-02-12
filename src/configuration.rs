@@ -1,4 +1,11 @@
 /// Structure to configure `Website` crawler
+/// ~~~rust
+/// let mut website: Website = Website::new("https://choosealicense.com");
+/// website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
+/// website.configuration.respect_robots_txt = true;
+/// website.configuration.verbose = true;
+/// localhost.crawl();
+/// ~~~
 #[derive(Debug)]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files (not implemented)
