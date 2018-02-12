@@ -16,8 +16,8 @@ use robotparser::RobotFileParser;
 /// }
 /// </pre>
 #[derive(Debug)]
-pub struct Website {
-
+pub struct Website<'a> {
+    // configuration properies
     pub configuration: Configuration,
     /// this is a start URL given when instanciate with `new`
     domain: String,
@@ -27,14 +27,21 @@ pub struct Website {
     links_visited: Vec<String>,
     /// contains page visited
     pages: Vec<Page>,
+    /// Robot.txt parser holder
+    robot_file_parser : RobotFileParser<'a>
 
 }
 
-impl Website {
+impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
         // create home link
         let links: Vec<String> = vec![format!("{}/", domain)];
+        // robots.txt parser
+        let robot_txt_url = &format!("{}/robots.txt", domain);
+        let parser = RobotFileParser::new(robot_txt_url);
+        parser.read();
+        
 
         Self {
             configuration: Configuration::new(),
@@ -42,6 +49,7 @@ impl Website {
             links: links,
             links_visited: Vec::new(),
             pages: Vec::new(),
+            robot_file_parser: parser
         }
     }
 
@@ -111,12 +119,8 @@ impl Website {
         }
 
         if self.configuration.respect_robots_txt {
-            let robot_txt_url = &format!("{}/robots.txt", self.domain);
-            let parser = RobotFileParser::new(robot_txt_url);
-            parser.read();
-            println!("{:?}", parser);
             let path : String = str::replace(link, &self.domain, "");
-            if !parser.can_fetch("*", &path) {
+            if !self.robot_file_parser.can_fetch("*", &path) {
                 return false;
             }
         }

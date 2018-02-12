@@ -40,7 +40,7 @@ fn main() {
 ## TODO
 
 - [x] multi-threaded system
-- [ ] respect _robot.txt_ file
+- [x] respect _robot.txt_ file
 - [ ] add configuratioon object for polite delay, etc..
 - [ ] parse command line arguments
 
