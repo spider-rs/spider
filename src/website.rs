@@ -67,6 +67,10 @@ impl Website {
                     continue;
                 }
 
+                if self.configuration.verbose {
+                    println!("- fetch {}", link);
+                }
+
                 workers.push(thread::spawn(move || Page::new(&thread_link)));
             }
 

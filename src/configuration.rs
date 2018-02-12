@@ -5,7 +5,7 @@ pub struct Configuration {
     pub polite_delay: i8,
     /// Respect robot.txt file and not scrape not allowed files (not implemented)
     pub respect_robot_txt: bool,
-    /// Print page visited with (not implemented)
+    /// Print page visited on standart output
     pub verbose: bool,
     /// List of page to not crawl
     pub blacklist_url: Vec<String>,
