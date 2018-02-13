@@ -4,7 +4,7 @@
 
 Multithreaded Web spider crawler written in Rust.
 
-## Depensencies
+## Dependencies
 
 ~~~bash
 $ apt install openssl libssl-dev
