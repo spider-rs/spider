@@ -5,16 +5,16 @@ use configuration::Configuration;
 use robotparser::RobotFileParser;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
-/// ~~~rust
+/// <pre>
 /// let mut localhost = Website::new("http://example.com");
 /// localhost.crawl();
-/// ~~~
+/// </pre>
 /// `Website` will be filled with `Pages` when crawled. To get them, just use
-/// ~~~rust
+/// <pre>
 /// for page in localhost.get_pages() {
 ///     // do something
 /// }
-/// ~~~
+/// </pre>
 #[derive(Debug)]
 pub struct Website<'a> {
     // configuration properies
