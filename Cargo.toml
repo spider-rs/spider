@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.1.1"
+version = "1.1.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>"]
 description = "Multithreaded Web spider crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
@@ -14,6 +14,6 @@ documentation = "https://docs.rs/spider"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = "0.8.2"
-scraper = "0.4.0"
+reqwest = "0.9.22"
+scraper = "0.11.0"
 robotparser = "0.10"
