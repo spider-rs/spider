@@ -54,16 +54,20 @@ impl Page {
         let mut urls: Vec<String> = Vec::new();
         let selector = Selector::parse("a").unwrap();
 
-        for element in self.get_html().select(&selector) {
-            match element.value().attr("href") {
-                Some(href) => {
+        let html = self.get_html();
+        let anchors = html.select(&selector)
+                          .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
 
-                    // Keep only links for this domains
-                    match href.find('/') {
-                        Some(0) => urls.push(format!("{}{}", domain, href)),
-                        Some(_) => (),
-                        None => (),
-                    };
+        for anchor in anchors {
+            match anchor.value().attr("href") {
+                Some(href) => {
+                    if href.starts_with(domain) {
+                        urls.push(format!("{}", href));
+                    } else if href.starts_with('/') {
+                        urls.push(format!("{}{}", domain, href))
+                    } else if !href.starts_with("http") && !href.starts_with("/") {
+                        urls.push(format!("{}/{}", domain, href))
+                    }
                 }
                 None => (),
             };
