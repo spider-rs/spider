@@ -23,7 +23,7 @@ impl Page {
                 if res.status() == reqwest::StatusCode::OK {
                     match res.text() {
                         Ok(text) => body = text,
-                        Err(e) => println!("[error] {}: {}", url, e),
+                        Err(e) => eprintln!("[error] {}: {}", url, e),
                     }
                 }
             },
