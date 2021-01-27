@@ -27,7 +27,7 @@ impl Page {
                     }
                 }
             },
-            Err(e) => println!("[error] {}: {}", url, e),
+            Err(e) => eprintln!("[error] {}: {}", url, e),
         }
 
         Self {
