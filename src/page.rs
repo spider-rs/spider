@@ -14,12 +14,21 @@ pub struct Page {
 }
 
 impl Page {
-    /// Instanciate a new page a start to scrape it.
+    /// Instanciate a new page and start to scrape it.
     pub fn new(url: &str) -> Self {
-        // TODO: handle uwrap here
-        let mut res = reqwest::get(url).unwrap();
         let mut body = String::new();
-        res.read_to_string(&mut body).unwrap();
+
+        match reqwest::get(url) {
+            Ok(mut res) => {
+                if res.status() == reqwest::StatusCode::OK {
+                    match res.text() {
+                        Ok(text) => body = text,
+                        Err(e) => eprintln!("[error] {}: {}", url, e),
+                    }
+                }
+            },
+            Err(e) => eprintln!("[error] {}: {}", url, e),
+        }
 
         Self {
             url: url.to_string(),
