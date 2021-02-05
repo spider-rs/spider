@@ -1,6 +1,6 @@
 use scraper::{Html, Selector};
 use reqwest;
-use std::io::Read;
+use url::{Url, ParseError};
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -14,12 +14,21 @@ pub struct Page {
 }
 
 impl Page {
-    /// Instanciate a new page a start to scrape it.
+    /// Instanciate a new page and start to scrape it.
     pub fn new(url: &str) -> Self {
-        // TODO: handle uwrap here
-        let mut res = reqwest::get(url).unwrap();
         let mut body = String::new();
-        res.read_to_string(&mut body).unwrap();
+
+        match reqwest::get(url) {
+            Ok(mut res) => {
+                if res.status() == reqwest::StatusCode::OK {
+                    match res.text() {
+                        Ok(text) => body = text,
+                        Err(e) => eprintln!("[error] {}: {}", url, e),
+                    }
+                }
+            },
+            Err(e) => eprintln!("[error] {}: {}", url, e),
+        }
 
         Self {
             url: url.to_string(),
@@ -61,12 +70,10 @@ impl Page {
         for anchor in anchors {
             match anchor.value().attr("href") {
                 Some(href) => {
-                    if href.starts_with(domain) {
-                        urls.push(format!("{}", href));
-                    } else if href.starts_with('/') {
-                        urls.push(format!("{}{}", domain, href))
-                    } else if !href.starts_with("http") && !href.starts_with("/") {
-                        urls.push(format!("{}/{}", domain, href))
+                    let abs_path = self.abs_path(href).unwrap();
+
+                    if abs_path.as_str().starts_with(domain) {
+                        urls.push(format!("{}", abs_path));
                     }
                 }
                 None => (),
@@ -74,6 +81,13 @@ impl Page {
         }
 
         urls
+    }
+
+    fn abs_path(&self, href: &str) -> Result<Url, ParseError> {
+        let base = Url::parse(&self.url.to_string()).expect("Invalid page URL");
+        let joined = base.join(href)?;
+
+        Ok(joined)
     }
 }
 
