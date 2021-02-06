@@ -1,6 +1,6 @@
 use scraper::{Html, Selector};
 use reqwest;
-use std::io::Read;
+use url::{Url, ParseError};
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -63,22 +63,31 @@ impl Page {
         let mut urls: Vec<String> = Vec::new();
         let selector = Selector::parse("a").unwrap();
 
-        for element in self.get_html().select(&selector) {
-            match element.value().attr("href") {
-                Some(href) => {
+        let html = self.get_html();
+        let anchors = html.select(&selector)
+                          .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
 
-                    // Keep only links for this domains
-                    match href.find('/') {
-                        Some(0) => urls.push(format!("{}{}", domain, href)),
-                        Some(_) => (),
-                        None => (),
-                    };
+        for anchor in anchors {
+            match anchor.value().attr("href") {
+                Some(href) => {
+                    let abs_path = self.abs_path(href).unwrap();
+
+                    if abs_path.as_str().starts_with(domain) {
+                        urls.push(format!("{}", abs_path));
+                    }
                 }
                 None => (),
             };
         }
 
         urls
+    }
+
+    fn abs_path(&self, href: &str) -> Result<Url, ParseError> {
+        let base = Url::parse(&self.url.to_string()).expect("Invalid page URL");
+        let joined = base.join(href)?;
+
+        Ok(joined)
     }
 }
 
