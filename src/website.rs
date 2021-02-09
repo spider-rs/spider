@@ -1,8 +1,8 @@
+use configuration::Configuration;
 use page::Page;
+use robotparser::RobotFileParser;
 use std::thread;
 use std::thread::JoinHandle;
-use configuration::Configuration;
-use robotparser::RobotFileParser;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -28,8 +28,7 @@ pub struct Website<'a> {
     /// contains page visited
     pages: Vec<Page>,
     /// Robot.txt parser holder
-    robot_file_parser : RobotFileParser<'a>
-
+    robot_file_parser: RobotFileParser<'a>,
 }
 
 impl<'a> Website<'a> {
@@ -41,7 +40,6 @@ impl<'a> Website<'a> {
         let robot_txt_url = &format!("{}/robots.txt", domain);
         let parser = RobotFileParser::new(robot_txt_url);
         parser.read();
-        
 
         Self {
             configuration: Configuration::new(),
@@ -49,7 +47,7 @@ impl<'a> Website<'a> {
             links: links,
             links_visited: Vec::new(),
             pages: Vec::new(),
-            robot_file_parser: parser
+            robot_file_parser: parser,
         }
     }
 
@@ -64,11 +62,13 @@ impl<'a> Website<'a> {
         while self.links.len() > 0 {
             let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
+            let user_agent = self.configuration.user_agent;
+
             for link in &self.links {
                 // extends visibility
                 let thread_link: String = link.to_string();
 
-                // verify that URL was not already scrawled
+                // verify that URL was not already crawled
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -77,7 +77,7 @@ impl<'a> Website<'a> {
                     println!("- fetch {}", link);
                 }
 
-                workers.push(thread::spawn(move || Page::new(&thread_link)));
+                workers.push(thread::spawn(move || Page::new(&thread_link, user_agent)));
             }
 
             for worker in workers {
@@ -94,7 +94,6 @@ impl<'a> Website<'a> {
 
                         self.links_visited.push(page.get_url());
                         self.pages.push(page);
-
                     }
                     Err(_) => (),
                 }
@@ -119,7 +118,7 @@ impl<'a> Website<'a> {
         }
 
         if self.configuration.respect_robots_txt {
-            let path : String = str::replace(link, &self.domain, "");
+            let path: String = str::replace(link, &self.domain, "");
             if !self.robot_file_parser.can_fetch("*", &path) {
                 return false;
             }
@@ -129,14 +128,14 @@ impl<'a> Website<'a> {
     }
 }
 
-
 #[test]
 fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.crawl();
     assert!(
-        website.links_visited.contains(
-            &"https://choosealicense.com/licenses/".to_string()),
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
         format!("{:?}", website.links_visited)
     );
 }
@@ -144,11 +143,15 @@ fn crawl() {
 #[test]
 fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
+    website
+        .configuration
+        .blacklist_url
+        .push("https://choosealicense.com/licenses/".to_string());
     website.crawl();
     assert!(
-        !website.links_visited.contains(
-            &"https://choosealicense.com/licenses/".to_string()),
+        !website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
         format!("{:?}", website.links_visited)
     );
 }
