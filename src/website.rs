@@ -1,5 +1,5 @@
 use page::Page;
-use std::thread;
+use std::{thread, time};
 use std::thread::JoinHandle;
 use configuration::Configuration;
 use robotparser::RobotFileParser;
@@ -64,6 +64,8 @@ impl<'a> Website<'a> {
         while self.links.len() > 0 {
             let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
+            let delay = time::Duration::from_millis(self.configuration.delay);
+
             for link in &self.links {
                 // extends visibility
                 let thread_link: String = link.to_string();
@@ -78,6 +80,8 @@ impl<'a> Website<'a> {
                 }
 
                 workers.push(thread::spawn(move || Page::new(&thread_link)));
+
+                thread::sleep(delay);
             }
 
             for worker in workers {
