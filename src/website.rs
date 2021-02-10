@@ -1,7 +1,7 @@
 use configuration::Configuration;
 use page::Page;
 use robotparser::RobotFileParser;
-use std::thread;
+use std::{thread, time};
 use std::thread::JoinHandle;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
@@ -63,6 +63,7 @@ impl<'a> Website<'a> {
             let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
             let user_agent = self.configuration.user_agent;
+            let delay = time::Duration::from_millis(self.configuration.delay);
 
             for link in &self.links {
                 // extends visibility
@@ -78,6 +79,8 @@ impl<'a> Website<'a> {
                 }
 
                 workers.push(thread::spawn(move || Page::new(&thread_link, user_agent)));
+
+                thread::sleep(delay);
             }
 
             for worker in workers {
