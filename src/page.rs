@@ -1,6 +1,6 @@
-use scraper::{Html, Selector};
 use reqwest;
-use url::{Url, ParseError};
+use scraper::{Html, Selector};
+use url::{ParseError, Url};
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -15,18 +15,20 @@ pub struct Page {
 
 impl Page {
     /// Instanciate a new page and start to scrape it.
-    pub fn new(url: &str) -> Self {
+    pub fn new(url: &str, user_agent: &str) -> Self {
         let mut body = String::new();
 
-        match reqwest::get(url) {
-            Ok(mut res) => {
-                if res.status() == reqwest::StatusCode::OK {
-                    match res.text() {
-                        Ok(text) => body = text,
-                        Err(e) => eprintln!("[error] {}: {}", url, e),
-                    }
-                }
+        let client = reqwest::blocking::Client::builder()
+            .user_agent(user_agent)
+            .build()
+            .unwrap();
+
+        match client.get(url).send() {
+            Ok(res) if res.status() == reqwest::StatusCode::OK => match res.text() {
+                Ok(text) => body = text,
+                Err(e) => eprintln!("[error] {}: {}", url, e),
             },
+            Ok(_) => (),
             Err(e) => eprintln!("[error] {}: {}", url, e),
         }
 
@@ -64,8 +66,9 @@ impl Page {
         let selector = Selector::parse("a").unwrap();
 
         let html = self.get_html();
-        let anchors = html.select(&selector)
-                          .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
+        let anchors = html
+            .select(&selector)
+            .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
 
         for anchor in anchors {
             match anchor.value().attr("href") {
@@ -93,13 +96,13 @@ impl Page {
 
 #[test]
 fn parse_links() {
-    let page : Page = Page::new("https://choosealicense.com/");
+    let page: Page = Page::new("https://choosealicense.com/", "spider/1.1.2");
 
     assert!(
-        page.links("https://choosealicense.com").contains(
-            &"https://choosealicense.com/about/".to_string()),
+        page.links("https://choosealicense.com")
+            .contains(&"https://choosealicense.com/about/".to_string()),
         format!(
-            "Could not find {}. Theses URLs was found {:?}", 
+            "Could not find {}. Theses URLs was found {:?}",
             page.url,
             page.links("https://choosealicense.com")
         )

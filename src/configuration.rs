@@ -14,6 +14,8 @@ pub struct Configuration {
     pub verbose: bool,
     /// List of page to not crawl
     pub blacklist_url: Vec<String>,
+    /// User-Agent
+    pub user_agent: &'static str,
     /// Polite crawling delay in milli seconds
     pub delay: u64,
 }
@@ -24,6 +26,7 @@ impl Configuration {
             respect_robots_txt: false,
             verbose: false,
             blacklist_url: Vec::new(),
+            user_agent: "spider/1.1.2",
             delay: 0,
         }
     }
