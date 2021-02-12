@@ -14,7 +14,7 @@ documentation = "https://docs.rs/spider"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = "0.9.22"
-scraper = "0.11.0"
+reqwest = { version = "0.11", features = ["blocking"] }
+scraper = "0.12"
 robotparser = "0.10"
-url = "2.2.0"
+url = "2.2"
