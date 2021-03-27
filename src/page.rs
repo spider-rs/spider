@@ -88,11 +88,11 @@ impl Page {
 
     fn abs_path(&self, href: &str) -> Result<Url, ParseError> {
         let base = Url::parse(&self.url.to_string()).expect("Invalid page URL");
-        let mut joined = base.join(href)?;
-        
+        let mut joined = base.join(href).unwrap_or(base);
+
         joined.set_fragment(None);
 
-        Ok(joined)
+        joined
     }
 }
 
