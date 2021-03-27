@@ -73,7 +73,7 @@ impl Page {
         for anchor in anchors {
             match anchor.value().attr("href") {
                 Some(href) => {
-                    let abs_path = self.abs_path(href).unwrap();
+                    let abs_path = self.abs_path(href);
 
                     if abs_path.as_str().starts_with(domain) {
                         urls.push(format!("{}", abs_path));
@@ -86,7 +86,7 @@ impl Page {
         urls
     }
 
-    fn abs_path(&self, href: &str) -> Result<Url, ParseError> {
+    fn abs_path(&self, href: &str) -> Url {
         let base = Url::parse(&self.url.to_string()).expect("Invalid page URL");
         let mut joined = base.join(href).unwrap_or(base);
 
