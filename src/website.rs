@@ -1,8 +1,8 @@
 use configuration::Configuration;
 use page::Page;
 use robotparser::RobotFileParser;
-use std::{thread, time};
 use std::thread::JoinHandle;
+use std::{thread, time};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>

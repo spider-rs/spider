@@ -1,6 +1,6 @@
 use reqwest;
 use scraper::{Html, Selector};
-use url::{ParseError, Url};
+use url::Url;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
