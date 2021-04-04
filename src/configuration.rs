@@ -6,7 +6,7 @@
 /// website.configuration.verbose = true;
 /// localhost.crawl();
 /// </pre>
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files (not implemented)
     pub respect_robots_txt: bool,

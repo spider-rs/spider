@@ -71,16 +71,13 @@ impl Page {
             .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
 
         for anchor in anchors {
-            match anchor.value().attr("href") {
-                Some(href) => {
-                    let abs_path = self.abs_path(href);
+            if let Some(href) = anchor.value().attr("href") {
+                let abs_path = self.abs_path(href);
 
-                    if abs_path.as_str().starts_with(domain) {
-                        urls.push(format!("{}", abs_path));
-                    }
+                if abs_path.as_str().starts_with(domain) {
+                    urls.push(format!("{}", abs_path));
                 }
-                None => (),
-            };
+            }
         }
 
         urls
