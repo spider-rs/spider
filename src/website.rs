@@ -1,8 +1,8 @@
 use configuration::Configuration;
 use page::Page;
+use rayon::ThreadPoolBuilder;
 use robotparser::RobotFileParser;
-use std::thread::JoinHandle;
-use std::{thread, time};
+use std::{sync, thread, time};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -58,12 +58,17 @@ impl<'a> Website<'a> {
 
     /// Start to crawl website
     pub fn crawl(&mut self) {
-        // scrawl while links exists
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(self.configuration.concurrency)
+            .build()
+            .expect("Failed building thread pool.");
+
+        // crawl while links exists
         while !self.links.is_empty() {
-            let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
             let user_agent = self.configuration.user_agent;
             let delay = time::Duration::from_millis(self.configuration.delay);
+            let (tx, rx) = sync::mpsc::channel();
 
             for link in &self.links {
                 // extends visibility
@@ -78,25 +83,27 @@ impl<'a> Website<'a> {
                     println!("- fetch {}", link);
                 }
 
-                workers.push(thread::spawn(move || Page::new(&thread_link, user_agent)));
+                let tx = tx.clone();
 
-                thread::sleep(delay);
+                pool.spawn(move || {
+                    tx.send(Page::new(&thread_link, user_agent)).unwrap();
+                    thread::sleep(delay);
+                });
             }
 
-            for worker in workers {
-                if let Ok(page) = worker.join() {
-                    // get links founded on
-                    for link_founded in page.links(&self.domain) {
-                        // add only links not already vistited
-                        if !self.links_visited.contains(&link_founded) {
-                            new_links.push(link_founded);
-                        }
-                    }
-                    // add page to scrawled pages
+            drop(tx);
 
-                    self.links_visited.push(page.get_url());
-                    self.pages.push(page);
+            for page in rx {
+                for link_found in page.links(&self.domain) {
+                    // add only links not already vistited
+                    if !self.links_visited.contains(&link_found) {
+                        new_links.push(link_found);
+                    }
                 }
+
+                // add page to crawled pages
+                self.links_visited.push(page.get_url());
+                self.pages.push(page);
             }
 
             self.links = new_links.clone();

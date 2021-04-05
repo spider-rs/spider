@@ -18,3 +18,4 @@ reqwest = { version = "0.11", features = ["blocking"] }
 scraper = "0.12"
 robotparser = "0.10"
 url = "2.2"
+rayon = "1.1"
