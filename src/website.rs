@@ -44,7 +44,7 @@ impl<'a> Website<'a> {
         Self {
             configuration: Configuration::new(),
             domain: domain.to_string(),
-            links: links,
+            links,
             links_visited: Vec::new(),
             pages: Vec::new(),
             robot_file_parser: parser,
@@ -59,7 +59,7 @@ impl<'a> Website<'a> {
     /// Start to crawl website
     pub fn crawl(&mut self) {
         // scrawl while links exists
-        while self.links.len() > 0 {
+        while !self.links.is_empty() {
             let mut workers: Vec<JoinHandle<Page>> = Vec::new();
             let mut new_links: Vec<String> = Vec::new();
             let user_agent = self.configuration.user_agent;
@@ -84,21 +84,18 @@ impl<'a> Website<'a> {
             }
 
             for worker in workers {
-                match worker.join() {
-                    Ok(page) => {
-                        // get links founded on
-                        for link_founded in page.links(&self.domain) {
-                            // add only links not already vistited
-                            if !self.links_visited.contains(&link_founded) {
-                                new_links.push(link_founded);
-                            }
+                if let Ok(page) = worker.join() {
+                    // get links founded on
+                    for link_founded in page.links(&self.domain) {
+                        // add only links not already vistited
+                        if !self.links_visited.contains(&link_founded) {
+                            new_links.push(link_founded);
                         }
-                        // add page to scrawled pages
-
-                        self.links_visited.push(page.get_url());
-                        self.pages.push(page);
                     }
-                    Err(_) => (),
+                    // add page to scrawled pages
+
+                    self.links_visited.push(page.get_url());
+                    self.pages.push(page);
                 }
             }
 
@@ -127,7 +124,7 @@ impl<'a> Website<'a> {
             }
         }
 
-        return true;
+        true
     }
 }
 
