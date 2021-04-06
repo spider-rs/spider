@@ -25,7 +25,7 @@ pub struct Configuration {
 impl Configuration {
     pub fn new() -> Self {
         Self {
-            user_agent: "spider/1.1.2",
+            user_agent: "spider/1.2.1",
             delay: 250,
             concurrency: 4,
             ..Default::default()
