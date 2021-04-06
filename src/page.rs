@@ -107,3 +107,33 @@ fn parse_links() {
         )
     );
 }
+
+#[test]
+fn test_abs_path() {
+    let page: Page = Page::new("https://choosealicense.com/", "spider/1.1.2");
+
+    assert_eq!(
+        page.abs_path("/page"),
+        Url::parse("https://choosealicense.com/page").unwrap()
+    );
+    assert_eq!(
+        page.abs_path("/page?query=keyword"),
+        Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
+    );
+    assert_eq!(
+        page.abs_path("/page#hash"),
+        Url::parse("https://choosealicense.com/page").unwrap()
+    );
+    assert_eq!(
+        page.abs_path("/page?query=keyword#hash"),
+        Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
+    );
+    assert_eq!(
+        page.abs_path("#hash"),
+        Url::parse("https://choosealicense.com/").unwrap()
+    );
+    assert_eq!(
+        page.abs_path("tel://+212 3456"),
+        Url::parse("https://choosealicense.com/").unwrap()
+    );
+}
