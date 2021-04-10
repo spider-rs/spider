@@ -9,6 +9,7 @@ keywords = ["crawler", "spider"]
 categories = ["web-programming"]
 license = "MIT"
 documentation = "https://docs.rs/spider"
+edition = "2018"
 
 [badges]
 maintenance = { status = "as-is" }
@@ -19,3 +20,4 @@ scraper = "0.12"
 robotparser = "0.10"
 url = "2.2"
 rayon = "1.1"
+regex = "1"

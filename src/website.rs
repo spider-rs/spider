@@ -1,8 +1,9 @@
-use configuration::Configuration;
-use page::Page;
+use crate::configuration::Configuration;
+use crate::page::Page;
 use rayon::ThreadPoolBuilder;
+use regex::Regex;
 use robotparser::RobotFileParser;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::{sync, thread, time};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
@@ -16,8 +17,8 @@ use std::{sync, thread, time};
 ///     // do something
 /// }
 /// </pre>
-#[derive(Debug)]
-pub struct Website<'a> {
+//#[derive(Debug)]
+pub struct Website<'a, F: Fn(&Page)> {
     // configuration properies
     pub configuration: Configuration,
     /// this is a start URL given when instanciate with `new`
@@ -30,9 +31,11 @@ pub struct Website<'a> {
     pages: Vec<Page>,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
+    /// Parsers to run against matched routes
+    parsers: HashMap<String, F>,
 }
 
-impl<'a> Website<'a> {
+impl<'a, F: Fn(&Page)> Website<'a, F> {
     /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
         // create home link
@@ -49,6 +52,7 @@ impl<'a> Website<'a> {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: parser,
+            parsers: HashMap::new(),
         }
     }
 
@@ -92,12 +96,20 @@ impl<'a> Website<'a> {
             drop(tx);
 
             rx.into_iter().for_each(|page| {
+                let page_url = page.get_url();
+
                 if self.configuration.verbose {
-                    println!("- parse {}", page.get_url());
+                    println!("- parse {}", page_url);
+                }
+
+                for (route, parser) in &self.parsers {
+                    let routex = Regex::new(&route).unwrap();
+                    if routex.is_match(&page_url) {
+                        parser(&page);
+                    }
                 }
 
                 new_links.extend(page.links(&self.domain));
-
                 self.links_visited.insert(page.get_url());
                 self.pages.push(page);
             });
@@ -129,11 +141,15 @@ impl<'a> Website<'a> {
 
         true
     }
+
+    pub fn when(&mut self, route: String, parser: F) {
+        self.parsers.insert(route, parser);
+    }
 }
 
 #[test]
 fn crawl() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let mut website: Website<F> = Website::new("https://choosealicense.com");
     website.crawl();
     assert!(
         website
@@ -145,7 +161,7 @@ fn crawl() {
 
 #[test]
 fn not_crawl_blacklist() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let mut website: Website<F> = Website::new("https://choosealicense.com");
     website
         .configuration
         .blacklist_url
@@ -161,7 +177,7 @@ fn not_crawl_blacklist() {
 
 #[test]
 fn test_get_robots_txt() {
-    let mut website: Website = Website::new("https://stackoverflow.com");
+    let mut website: Website<F> = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
     assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
 }
@@ -177,7 +193,7 @@ fn test_link_duplicates() {
         iter.into_iter().all(move |x| uniq.insert(x))
     }
 
-    let mut website: Website = Website::new("http://0.0.0.0:8000");
+    let mut website: Website<F> = Website::new("http://0.0.0.0:8000");
     website.crawl();
 
     assert!(has_unique_elements(website.links_visited));
