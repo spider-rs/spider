@@ -2,12 +2,18 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Multithreaded Web spider crawler written in Rust.
+Multithreaded web crawler written in Rust.
 
 ## Dependencies
 
+On Debian or other DEB based distributions:
 ~~~bash
-$ apt install openssl libssl-dev
+$ sudo apt install openssl libssl-dev
+~~~
+
+On Fedora and other RPM based distributions:
+~~~bash
+$ sudo dnf install openssl-devel
 ~~~
 
 ## Usage
@@ -16,10 +22,10 @@ Add this dependency to your _Cargo.toml_ file.
 
 ~~~toml
 [dependencies]
-spider = "1.0.2"
+spider = "1.2.1"
 ~~~
 
-and then you'll be able to use library. Here a simple example
+Then you'll be able to use library. Here is a simple example:
 
 ~~~rust
 extern crate spider;
@@ -43,10 +49,11 @@ You can use `Configuration` object to configure your crawler:
 let mut website: Website = Website::new("https://choosealicense.com");
 website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
 website.configuration.respect_robots_txt = true;
-website.configuration.verbose = true;
-website.configuration.delay = 2000;
+website.configuration.verbose = true; // Defaults to false
+website.configuration.delay = 2000; // Defaults to 250 ms
+website.configuration.concurrency = 10; // Defaults to 4
+website.configuration.user_agent = "myapp/version" // Defaults to spider/x.y.z, where x.y.z is the library version
 website.crawl();
-// ..
 ~~~
 
 ## TODO
@@ -60,5 +67,3 @@ website.crawl();
 ## Contribute
 
 I am open-minded to any contribution. Just fork & `commit` on another branch.
-
-

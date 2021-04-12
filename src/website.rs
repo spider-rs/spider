@@ -1,8 +1,9 @@
 use configuration::Configuration;
 use page::Page;
+use rayon::ThreadPoolBuilder;
 use robotparser::RobotFileParser;
-use std::thread::JoinHandle;
-use std::{thread, time};
+use std::collections::HashSet;
+use std::{sync, thread, time};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -22,9 +23,9 @@ pub struct Website<'a> {
     /// this is a start URL given when instanciate with `new`
     domain: String,
     /// contains all non-visited URL
-    links: Vec<String>,
+    links: HashSet<String>,
     /// contains all visited URL
-    links_visited: Vec<String>,
+    links_visited: HashSet<String>,
     /// contains page visited
     pages: Vec<Page>,
     /// Robot.txt parser holder
@@ -35,7 +36,7 @@ impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
         // create home link
-        let links: Vec<String> = vec![format!("{}/", domain)];
+        let links: HashSet<String> = vec![format!("{}/", domain)].into_iter().collect();
         // robots.txt parser
         let robot_txt_url = &format!("{}/robots.txt", domain);
         let parser = RobotFileParser::new(robot_txt_url);
@@ -45,7 +46,7 @@ impl<'a> Website<'a> {
             configuration: Configuration::new(),
             domain: domain.to_string(),
             links,
-            links_visited: Vec::new(),
+            links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: parser,
         }
@@ -58,46 +59,48 @@ impl<'a> Website<'a> {
 
     /// Start to crawl website
     pub fn crawl(&mut self) {
-        // scrawl while links exists
+        let delay = time::Duration::from_millis(self.configuration.delay);
+        let user_agent = self.configuration.user_agent;
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(self.configuration.concurrency)
+            .build()
+            .expect("Failed building thread pool.");
+
+        // crawl while links exists
         while !self.links.is_empty() {
-            let mut workers: Vec<JoinHandle<Page>> = Vec::new();
-            let mut new_links: Vec<String> = Vec::new();
-            let user_agent = self.configuration.user_agent;
-            let delay = time::Duration::from_millis(self.configuration.delay);
+            let mut new_links: HashSet<String> = HashSet::new();
+            let (tx, rx) = sync::mpsc::channel();
 
-            for link in &self.links {
-                // extends visibility
-                let thread_link: String = link.to_string();
+            self.links
+                .iter()
+                .filter(|link| self.is_allowed(link))
+                .for_each(|link| {
+                    let thread_link: String = link.to_string();
 
-                // verify that URL was not already crawled
-                if !self.is_allowed(link) {
-                    continue;
-                }
-
-                if self.configuration.verbose {
-                    println!("- fetch {}", link);
-                }
-
-                workers.push(thread::spawn(move || Page::new(&thread_link, user_agent)));
-
-                thread::sleep(delay);
-            }
-
-            for worker in workers {
-                if let Ok(page) = worker.join() {
-                    // get links founded on
-                    for link_founded in page.links(&self.domain) {
-                        // add only links not already vistited
-                        if !self.links_visited.contains(&link_founded) {
-                            new_links.push(link_founded);
-                        }
+                    if self.configuration.verbose {
+                        println!("- fetch {}", link);
                     }
-                    // add page to scrawled pages
 
-                    self.links_visited.push(page.get_url());
-                    self.pages.push(page);
+                    let tx = tx.clone();
+
+                    pool.spawn(move || {
+                        tx.send(Page::new(&thread_link, user_agent)).unwrap();
+                        thread::sleep(delay);
+                    });
+                });
+
+            drop(tx);
+
+            rx.into_iter().for_each(|page| {
+                if self.configuration.verbose {
+                    println!("- parse {}", page.get_url());
                 }
-            }
+
+                new_links.extend(page.links(&self.domain));
+
+                self.links_visited.insert(page.get_url());
+                self.pages.push(page);
+            });
 
             self.links = new_links.clone();
         }
@@ -161,4 +164,21 @@ fn test_get_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
     assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
+}
+
+#[test]
+fn test_link_duplicates() {
+    fn has_unique_elements<T>(iter: T) -> bool
+    where
+        T: IntoIterator,
+        T::Item: Eq + std::hash::Hash,
+    {
+        let mut uniq = std::collections::HashSet::new();
+        iter.into_iter().all(move |x| uniq.insert(x))
+    }
+
+    let mut website: Website = Website::new("http://0.0.0.0:8000");
+    website.crawl();
+
+    assert!(has_unique_elements(website.links_visited));
 }

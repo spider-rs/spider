@@ -18,16 +18,17 @@ pub struct Configuration {
     pub user_agent: &'static str,
     /// Polite crawling delay in milli seconds
     pub delay: u64,
+    /// How many request can be run simultaneously
+    pub concurrency: usize,
 }
 
 impl Configuration {
     pub fn new() -> Self {
         Self {
-            respect_robots_txt: false,
-            verbose: false,
-            blacklist_url: Vec::new(),
-            user_agent: "spider/1.1.2",
-            delay: 0,
+            user_agent: "spider/1.2.1",
+            delay: 250,
+            concurrency: 4,
+            ..Default::default()
         }
     }
 }
