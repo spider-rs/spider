@@ -28,6 +28,8 @@ pub struct Website<'a> {
     links_visited: HashSet<String>,
     /// contains page visited
     pages: Vec<Page>,
+    /// callback when a link is found
+    on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
 }
@@ -49,6 +51,7 @@ impl<'a> Website<'a> {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: parser,
+            on_link_find_callback: |s| s
         }
     }
 
@@ -92,6 +95,8 @@ impl<'a> Website<'a> {
             drop(tx);
 
             rx.into_iter().for_each(|page| {
+                (self.on_link_find_callback)(page.get_url());
+
                 if self.configuration.verbose {
                     println!("- parse {}", page.get_url());
                 }
@@ -135,6 +140,23 @@ impl<'a> Website<'a> {
 fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.crawl();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        format!("{:?}", website.links_visited)
+    );
+}
+
+#[test]
+fn crawl_link_callback() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.on_link_find_callback = |s| { 
+        println!("callback link target: {}", s); 
+        s 
+    };
+    website.crawl();
+
     assert!(
         website
             .links_visited
