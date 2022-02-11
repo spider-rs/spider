@@ -28,6 +28,8 @@ pub struct Website<'a> {
     links_visited: HashSet<String>,
     /// contains page visited
     pages: Vec<Page>,
+    /// callback when a link is found
+    on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
 }
@@ -49,6 +51,7 @@ impl<'a> Website<'a> {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: parser,
+            on_link_find_callback: |s| s
         }
     }
 
@@ -92,6 +95,8 @@ impl<'a> Website<'a> {
             drop(tx);
 
             rx.into_iter().for_each(|page| {
+                (self.on_link_find_callback)(page.get_url());
+
                 if self.configuration.verbose {
                     println!("- parse {}", page.get_url());
                 }

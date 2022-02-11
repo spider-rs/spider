@@ -24,7 +24,7 @@ Add this dependency to your _Cargo.toml_ file.
 
 ```toml
 [dependencies]
-spider = "1.2.1"
+spider = "1.2.2"
 ```
 
 Then you'll be able to use library. Here is a simple example:
@@ -55,6 +55,8 @@ website.configuration.verbose = true; // Defaults to false
 website.configuration.delay = 2000; // Defaults to 250 ms
 website.configuration.concurrency = 10; // Defaults to 4
 website.configuration.user_agent = "myapp/version"; // Defaults to spider/x.y.z, where x.y.z is the library version
+website.on_link_find_callback = |s| { println!("link target: {}", s); s } // Callback to run on each link find
+
 website.crawl();
 ```
 
