@@ -149,6 +149,23 @@ fn crawl() {
 }
 
 #[test]
+fn crawl_link_callback() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.on_link_find_callback = |s| { 
+        println!("callback link target: {}", s); 
+        s 
+    };
+    website.crawl();
+
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        format!("{:?}", website.links_visited)
+    );
+}
+
+#[test]
 fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website
