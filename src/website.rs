@@ -29,7 +29,7 @@ pub struct Website<'a> {
     /// contains page visited
     pages: Vec<Page>,
     /// callback when a link is found
-    on_link_find_callback: fn(String) -> String,
+    pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
 }
