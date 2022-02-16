@@ -68,7 +68,6 @@ cargo run --example example
 
 ## TODO
 
-- [x] multi-threaded system
 - [x] respect _robot.txt_ file
 - [x] add configuration object for polite delay, etc..
 - [x] add polite delay
