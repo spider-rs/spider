@@ -69,7 +69,7 @@ cargo run --example example
 ## Cli
 
 The following can also be ran via command line to run the crawler.
-All website options are available except `website.configuration.user_agent` and `website.on_link_find_callback`.
+All website options are available except `website.on_link_find_callback`.
 
 ```sh
 cargo run -- --domain https://choosealicense.com --verbose true --delay 2000

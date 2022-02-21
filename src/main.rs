@@ -26,27 +26,25 @@ fn main() {
     let mut website: Website = Website::new(&options["domain"]);
 
     if options.contains_key("respect_robots_txt") {
-        website.configuration.respect_robots_txt = &options["respect_robots_txt"] == "true";
+        website.configuration.respect_robots_txt = options["respect_robots_txt"] == "true";
     }
     if options.contains_key("verbose") {
-        website.configuration.verbose = &options["verbose"] == "true";
+        website.configuration.verbose = options["verbose"] == "true";
     }
     if options.contains_key("delay") {
-        let delay = &options["delay"];
-        website.configuration.delay = delay.parse::<u64>().unwrap();
+        website.configuration.delay = options["delay"].parse::<u64>().unwrap();
     }
     if options.contains_key("concurrency") {
-        let concurrency = &options["concurrency"];
-        website.configuration.concurrency = concurrency.parse::<usize>().unwrap();
+        website.configuration.concurrency = options["concurrency"].parse::<usize>().unwrap();
     }
     if options.contains_key("blacklist_url") {
         website.configuration.blacklist_url.push(options["blacklist_url"].to_string());
     }
 
-    // TODO: add user_agent ability as static
-    // if options.contains_key("user_agent") {
-    //     website.configuration.user_agent = options["user_agent"].to_string();
-    // }
+    if options.contains_key("user_agent") {
+        website.configuration.user_agent = Box::leak(options["user_agent"].to_owned().into_boxed_str());
+    }
+
     // TODO: add on_link_find_callback eval function
     // if options.contains_key("on_link_find_callback") {
     //     website.on_link_find_callback = options["on_link_find_callback"];
