@@ -66,13 +66,14 @@ You can get a working example at [`example.rs`](./example.rs) and run it with
 cargo run --example example
 ```
 
-## TODO
+## Cli
 
-- [x] multi-threaded system
-- [x] respect _robot.txt_ file
-- [x] add configuration object for polite delay, etc..
-- [x] add polite delay
-- [ ] parse command line arguments
+The following can also be ran via command line to run the crawler.
+All website options are available except `website.on_link_find_callback`.
+
+```sh
+cargo run -- --domain https://choosealicense.com --verbose true --delay 2000
+```
 
 ## Contribute
 
