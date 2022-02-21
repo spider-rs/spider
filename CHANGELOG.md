@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v1.4.0
 
 - feat(cli): add cli ability ([#16](https://github.com/madeindjs/spider/pull/16) thanks to [@j-mendez](https://github.com/j-mendez))
 - feat(concurrency): dynamic concurrent cpu defaults ([#15](https://github.com/madeindjs/spider/pull/15) thanks to [@j-mendez](https://github.com/j-mendez))
