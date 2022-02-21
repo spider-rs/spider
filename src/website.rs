@@ -88,8 +88,8 @@ impl<'a> Website<'a> {
                     let tx = tx.clone();
 
                     pool.spawn(move || {
-                        on_link_find_callback(thread_link.clone());
-                        tx.send(Page::new(&thread_link, user_agent)).unwrap();
+                        let link_result = on_link_find_callback(thread_link);
+                        tx.send(Page::new(&link_result, user_agent)).unwrap();
                         thread::sleep(delay);
                     });
                 });
