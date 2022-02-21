@@ -1,3 +1,5 @@
+use num_cpus;
+
 /// Structure to configure `Website` crawler
 /// <pre>
 /// let mut website: Website = Website::new("https://choosealicense.com");
@@ -25,9 +27,9 @@ pub struct Configuration {
 impl Configuration {
     pub fn new() -> Self {
         Self {
-            user_agent: "spider/1.2.1",
+            user_agent: "spider/1.3.2",
             delay: 250,
-            concurrency: 4,
+            concurrency: num_cpus::get() * 4,
             ..Default::default()
         }
     }

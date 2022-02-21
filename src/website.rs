@@ -73,6 +73,7 @@ impl<'a> Website<'a> {
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
             let (tx, rx) = sync::mpsc::channel();
+            let on_link_find_callback = self.on_link_find_callback;
 
             self.links
                 .iter()
@@ -87,7 +88,8 @@ impl<'a> Website<'a> {
                     let tx = tx.clone();
 
                     pool.spawn(move || {
-                        tx.send(Page::new(&thread_link, user_agent)).unwrap();
+                        let link_result = on_link_find_callback(thread_link);
+                        tx.send(Page::new(&link_result, user_agent)).unwrap();
                         thread::sleep(delay);
                     });
                 });
@@ -95,8 +97,6 @@ impl<'a> Website<'a> {
             drop(tx);
 
             rx.into_iter().for_each(|page| {
-                (self.on_link_find_callback)(page.get_url());
-
                 if self.configuration.verbose {
                     println!("- parse {}", page.get_url());
                 }
