@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## Unreleased
+
+- chore(bin): fix bin executable [#17](https://github.com/madeindjs/spider/pull/17/commits/b41e25fc507c6cd3ef251d2e25c97b936865e1a9)
+- feat(cli): add cli separation binary [#17](https://github.com/madeindjs/spider/pull/17/commits/b41e25fc507c6cd3ef251d2e25c97b936865e1a9)
+
 ## v1.4.0
 
 - feat(cli): add cli ability ([#16](https://github.com/madeindjs/spider/pull/16) thanks to [@j-mendez](https://github.com/j-mendez))
