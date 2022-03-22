@@ -44,17 +44,13 @@ impl Page {
     }
 
     /// URL getter
-    pub fn get_url(&self) -> String {
-        self.url.clone()
+    pub fn get_url(&self) -> &String {
+        &self.url
     }
 
     /// HTML parser
     pub fn get_html(&self) -> Html {
         Html::parse_document(&self.html)
-    }
-
-    pub fn get_plain_html(&self) -> String {
-        self.html.clone()
     }
 
     /// Find all href links and return them
@@ -72,7 +68,7 @@ impl Page {
                 let abs_path = self.abs_path(href);
 
                 if abs_path.as_str().starts_with(domain) {
-                    urls.push(format!("{}", abs_path));
+                    urls.push(abs_path.to_string());
                 }
             }
         }
