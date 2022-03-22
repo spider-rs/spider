@@ -32,10 +32,7 @@ impl Page {
             Err(e) => eprintln!("[error] {}: {}", url, e),
         }
 
-        Self {
-            url: url.to_string(),
-            html: body,
-        }
+        Page::build(url, &body)
     }
 
     /// Instanciate a new page without scraping it (used for testing purposes)
@@ -100,11 +97,9 @@ fn parse_links() {
     assert!(
         page.links("https://choosealicense.com")
             .contains(&"https://choosealicense.com/about/".to_string()),
-        format!(
             "Could not find {}. Theses URLs was found {:?}",
             page.url,
             page.links("https://choosealicense.com")
-        )
     );
 }
 

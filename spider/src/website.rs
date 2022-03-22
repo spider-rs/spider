@@ -144,7 +144,7 @@ fn crawl() {
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
@@ -161,7 +161,7 @@ fn crawl_link_callback() {
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
@@ -177,7 +177,7 @@ fn not_crawl_blacklist() {
         !website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
