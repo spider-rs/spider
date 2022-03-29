@@ -1,6 +1,7 @@
 use reqwest;
 use scraper::{Html, Selector};
 use url::Url;
+use reqwest::Error;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -13,26 +14,33 @@ pub struct Page {
     html: String,
 }
 
+// TODO: RE-EXPORTING RUNTIME FROM RAYON instead install matching
+#[tokio::main]
+pub async fn fetch_page_html(url: &str, user_agent: &str) -> Result<String, Error> {
+    let client = reqwest::Client::builder()
+        .user_agent(user_agent)
+        .build()
+        .unwrap();
+
+    let mut body = String::new();
+
+	let res = client
+		.get(url)
+		.send()
+		.await;
+
+    match res {
+        Ok(result) => body = result.text().await?,
+        Err(e) => eprintln!("[error] {}: {}", url, e),
+    }
+
+    Ok(body)
+}
+
 impl Page {
     /// Instanciate a new page and start to scrape it.
     pub fn new(url: &str, user_agent: &str) -> Self {
-        let mut body = String::new();
-
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(user_agent)
-            .build()
-            .unwrap();
-
-        match client.get(url).send() {
-            Ok(res) if res.status() == reqwest::StatusCode::OK => match res.text() {
-                Ok(text) => body = text,
-                Err(e) => eprintln!("[error] {}: {}", url, e),
-            },
-            Ok(_) => (),
-            Err(e) => eprintln!("[error] {}: {}", url, e),
-        }
-
-        Page::build(url, &body)
+        Page::build(url, &fetch_page_html(url, user_agent).unwrap())
     }
 
     /// Instanciate a new page without scraping it (used for testing purposes)
