@@ -40,8 +40,7 @@ impl<'a> Website<'a> {
         // create home link
         let links: HashSet<String> = vec![format!("{}/", domain)].into_iter().collect();
         // robots.txt parser
-        let robot_txt_url = &format!("{}/robots.txt", domain);
-        let parser = RobotFileParser::new(robot_txt_url);
+        let parser = RobotFileParser::new(&format!("{}/robots.txt", domain));
         parser.read();
 
         Self {
@@ -56,8 +55,8 @@ impl<'a> Website<'a> {
     }
 
     /// page getter
-    pub fn get_pages(&self) -> Vec<Page> {
-        self.pages.clone()
+    pub fn get_pages(&self) -> &Vec<Page> {
+        &self.pages
     }
 
     /// Start to crawl website
@@ -89,25 +88,29 @@ impl<'a> Website<'a> {
 
                     pool.spawn(move || {
                         let link_result = on_link_find_callback(thread_link);
-                        tx.send(Page::new(&link_result, user_agent)).unwrap();
+                        tx.send(Page::new(&link_result, &user_agent)).unwrap();
                         thread::sleep(delay);
                     });
                 });
 
             drop(tx);
+            drop(&self.robot_file_parser);
+            drop(&self.on_link_find_callback);
+            drop(&self.links);
 
             rx.into_iter().for_each(|page| {
+                let url = page.get_url();
                 if self.configuration.verbose {
-                    println!("- parse {}", page.get_url());
+                    println!("- parse {}", &url);
                 }
 
                 new_links.extend(page.links(&self.domain));
 
-                self.links_visited.insert(page.get_url());
+                self.links_visited.insert(String::from(url));
                 self.pages.push(page);
             });
 
-            self.links = new_links.clone();
+            self.links = new_links;
         }
     }
 
@@ -136,6 +139,10 @@ impl<'a> Website<'a> {
     }
 }
 
+impl<'a> Drop for Website<'a> {
+  fn drop(&mut self)  {}  
+} 
+
 #[test]
 fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
@@ -144,7 +151,7 @@ fn crawl() {
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
@@ -161,7 +168,7 @@ fn crawl_link_callback() {
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
@@ -177,7 +184,7 @@ fn not_crawl_blacklist() {
         !website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        format!("{:?}", website.links_visited)
+        "{:?}", website.links_visited
     );
 }
 
@@ -202,5 +209,5 @@ fn test_link_duplicates() {
     let mut website: Website = Website::new("http://0.0.0.0:8000");
     website.crawl();
 
-    assert!(has_unique_elements(website.links_visited));
+    assert!(has_unique_elements(&website.links_visited));
 }
