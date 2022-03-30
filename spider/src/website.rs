@@ -1,9 +1,10 @@
 use configuration::Configuration;
 use page::Page;
 use rayon::ThreadPoolBuilder;
-use robotparser::RobotFileParser;
+use robotparser_fork::RobotFileParser;
+
 use std::collections::HashSet;
-use std::{sync, thread, time};
+use std::{sync, thread, time::Duration};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -32,6 +33,8 @@ pub struct Website<'a> {
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
+    // Configured the robots parser
+    configured_robots_parser: bool
 }
 
 impl<'a> Website<'a> {
@@ -39,17 +42,15 @@ impl<'a> Website<'a> {
     pub fn new(domain: &str) -> Self {
         // create home link
         let links: HashSet<String> = vec![format!("{}/", domain)].into_iter().collect();
-        // robots.txt parser
-        let parser = RobotFileParser::new(&format!("{}/robots.txt", domain));
-        parser.read();
 
         Self {
             configuration: Configuration::new(),
+            configured_robots_parser: false,
             domain: domain.to_string(),
             links,
             links_visited: HashSet::new(),
             pages: Vec::new(),
-            robot_file_parser: parser,
+            robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
             on_link_find_callback: |s| s
         }
     }
@@ -58,10 +59,27 @@ impl<'a> Website<'a> {
     pub fn get_pages(&self) -> &Vec<Page> {
         &self.pages
     }
+    
+    /// configure the robots parser on initial crawl attempt and run
+    pub fn configure_robots_parser(&mut self) {
+        if self.configuration.respect_robots_txt && !self.configured_robots_parser {
+            self.configured_robots_parser = true;
+            self.robot_file_parser.user_agent = self.configuration.user_agent.to_string();
+            self.robot_file_parser.read();
 
+            // returns the crawl delay in seconds
+            let ms = self.robot_file_parser.get_crawl_delay(&self.configuration.user_agent)
+                .unwrap_or_else(|| Duration::from_millis(self.configuration.delay))
+                .as_millis();
+
+            self.configuration.delay = ms as u64;
+        }
+    }
+    
     /// Start to crawl website
     pub fn crawl(&mut self) {
-        let delay = time::Duration::from_millis(self.configuration.delay);
+        self.configure_robots_parser();
+        let delay = Duration::from_millis(self.configuration.delay);
         let user_agent = self.configuration.user_agent;
         let pool = ThreadPoolBuilder::new()
             .num_threads(self.configuration.concurrency)
@@ -189,10 +207,26 @@ fn not_crawl_blacklist() {
 }
 
 #[test]
-fn test_get_robots_txt() {
+fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
+    assert_eq!(website.configuration.delay, 250);
     assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
+
+    // test match for bing bot
+    let mut website_second: Website = Website::new("https://www.mongodb.com");
+    website_second.configuration.respect_robots_txt = true;
+    website_second.configuration.user_agent = "bingbot";
+    website_second.configure_robots_parser();
+    assert_eq!(website_second.configuration.user_agent, website_second.robot_file_parser.user_agent);
+    assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
+
+    // test crawl delay with wildcard agent [DOES not work when using set agent]
+    let mut website_third: Website = Website::new("https://www.mongodb.com");
+    website_third.configuration.respect_robots_txt = true;
+    website_third.configure_robots_parser();
+
+    assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }
 
 #[test]

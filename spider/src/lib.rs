@@ -1,6 +1,6 @@
 extern crate rayon;
 extern crate reqwest;
-extern crate robotparser;
+extern crate robotparser_fork;
 extern crate scraper;
 extern crate url;
 extern crate num_cpus;
