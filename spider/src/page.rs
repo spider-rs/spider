@@ -1,7 +1,5 @@
-use reqwest;
 use scraper::{Html, Selector};
 use url::Url;
-use reqwest::Error;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -14,33 +12,10 @@ pub struct Page {
     html: String,
 }
 
-// TODO: RE-EXPORTING RUNTIME FROM RAYON instead install matching
-#[tokio::main]
-pub async fn fetch_page_html(url: &str, user_agent: &str) -> Result<String, Error> {
-    let client = reqwest::Client::builder()
-        .user_agent(user_agent)
-        .build()
-        .unwrap();
-
-    let mut body = String::new();
-
-	let res = client
-		.get(url)
-		.send()
-		.await;
-
-    match res {
-        Ok(result) => body = result.text().await?,
-        Err(e) => eprintln!("[error] {}: {}", url, e),
-    }
-
-    Ok(body)
-}
-
 impl Page {
     /// Instanciate a new page and start to scrape it.
-    pub fn new(url: &str, user_agent: &str) -> Self {
-        Page::build(url, &fetch_page_html(url, user_agent).unwrap())
+    pub fn new(url: &str, html: &str) -> Self {
+        Page::build(url, html)
     }
 
     /// Instanciate a new page without scraping it (used for testing purposes)
@@ -96,7 +71,15 @@ impl Page {
 
 #[test]
 fn parse_links() {
-    let page: Page = Page::new("https://choosealicense.com/", "spider/1.1.2");
+    use crate::utils::{Client, fetch_page_html};
+    let client = Client::builder()
+        .user_agent("spider/1.1.2")
+        .build()
+        .unwrap();
+
+    let link_result = "https://choosealicense.com/";
+    let html = fetch_page_html(&link_result, &client).unwrap();
+    let page: Page = Page::new(&link_result, &html);
 
     assert!(
         page.links("https://choosealicense.com")
@@ -109,7 +92,14 @@ fn parse_links() {
 
 #[test]
 fn test_abs_path() {
-    let page: Page = Page::new("https://choosealicense.com/", "spider/1.1.2");
+    use crate::utils::{Client, fetch_page_html};
+    let client = Client::builder()
+        .user_agent("spider/1.1.2")
+        .build()
+        .unwrap();
+    let link_result = "https://choosealicense.com/";
+    let html = fetch_page_html(&link_result, &client).unwrap();
+    let page: Page = Page::new(&link_result, &html);
 
     assert_eq!(
         page.abs_path("/page"),
