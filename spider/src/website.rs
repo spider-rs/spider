@@ -1,5 +1,5 @@
-use configuration::Configuration;
-use page::Page;
+use crate::configuration::Configuration;
+use crate::page::Page;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
