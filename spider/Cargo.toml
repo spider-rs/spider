@@ -21,4 +21,4 @@ robotparser-fork = "0.10.5"
 url = "2.2"
 rayon = "1.1"
 num_cpus = "1.13.0"
-tokio = { version = "^1.17.0", features = ["full"] }
+tokio = { version = "^1.17.0", features = ["rt-multi-thread", "net", "macros"] }
