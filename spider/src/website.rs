@@ -5,6 +5,7 @@ use robotparser_fork::RobotFileParser;
 
 use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
+use crate::utils::{fetch_page_html, Client};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -33,8 +34,10 @@ pub struct Website<'a> {
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
-    // Configured the robots parser
-    configured_robots_parser: bool
+    // configured the robots parser
+    configured_robots_parser: bool,
+    // fetch client
+    client: Client,
 }
 
 impl<'a> Website<'a> {
@@ -51,7 +54,8 @@ impl<'a> Website<'a> {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
-            on_link_find_callback: |s| s
+            on_link_find_callback: |s| s,
+            client: Client::new()
         }
     }
 
@@ -85,6 +89,11 @@ impl<'a> Website<'a> {
             .num_threads(self.configuration.concurrency)
             .build()
             .expect("Failed building thread pool.");
+        self.client = Client::builder()
+            .user_agent(user_agent)
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("Failed building client.");
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -103,18 +112,17 @@ impl<'a> Website<'a> {
                     }
 
                     let tx = tx.clone();
+                    let cx = self.client.clone();
 
                     pool.spawn(move || {
                         let link_result = on_link_find_callback(thread_link);
-                        tx.send(Page::new(&link_result, &user_agent)).unwrap();
+                        let html = fetch_page_html(&link_result, &cx).unwrap_or("".to_string());
+                        tx.send(Page::new(&link_result, &html)).unwrap();
                         thread::sleep(delay);
                     });
                 });
 
             drop(tx);
-            drop(&self.robot_file_parser);
-            drop(&self.on_link_find_callback);
-            drop(&self.links);
 
             rx.into_iter().for_each(|page| {
                 let url = page.get_url();
@@ -174,6 +182,17 @@ fn crawl() {
 }
 
 #[test]
+fn crawl_invalid() {
+    let url = "https://w.com";
+    let mut website: Website = Website::new(url);
+    website.crawl();
+    let mut uniq = HashSet::new();
+    uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
+
+    assert_eq!(website.links_visited, uniq); // only the target url should exist
+}
+
+#[test]
 fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.on_link_find_callback = |s| { 
@@ -181,7 +200,6 @@ fn crawl_link_callback() {
         s 
     };
     website.crawl();
-
     assert!(
         website
             .links_visited
@@ -236,7 +254,7 @@ fn test_link_duplicates() {
         T: IntoIterator,
         T::Item: Eq + std::hash::Hash,
     {
-        let mut uniq = std::collections::HashSet::new();
+        let mut uniq = HashSet::new();
         iter.into_iter().all(move |x| uniq.insert(x))
     }
 

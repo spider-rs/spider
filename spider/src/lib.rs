@@ -12,3 +12,5 @@ pub mod configuration;
 pub mod page;
 /// A website to crawl
 pub mod website;
+/// Application utils
+pub mod utils;
