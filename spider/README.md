@@ -24,7 +24,7 @@ Add this dependency to your _Cargo.toml_ file.
 
 ```toml
 [dependencies]
-spider = "1.4.0"
+spider = "1.5.0"
 ```
 
 Then you'll be able to use library. Here is a simple example:
