@@ -1,4 +1,5 @@
 use num_cpus;
+use std::env;
 
 /// Structure to configure `Website` crawler
 /// <pre>
@@ -24,10 +25,11 @@ pub struct Configuration {
     pub concurrency: usize,
 }
 
+
 impl Configuration {
     pub fn new() -> Self {
         Self {
-            user_agent: "spider/1.5.0",
+            user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
             delay: 250,
             concurrency: num_cpus::get() * 4,
             ..Default::default()
