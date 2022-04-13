@@ -71,35 +71,35 @@ impl Page {
 
 #[test]
 fn parse_links() {
-    use crate::utils::{Client, fetch_page_html};
+    use crate::utils::{fetch_page_html, Client};
     let client = Client::builder()
         .user_agent("spider/1.1.2")
         .build()
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let html = fetch_page_html(&link_result, &client).unwrap();
-    let page: Page = Page::new(&link_result, &html);
+    let html = fetch_page_html(link_result, &client).unwrap();
+    let page: Page = Page::new(link_result, &html);
 
     assert!(
         page.links("https://choosealicense.com")
             .contains(&"https://choosealicense.com/about/".to_string()),
-            "Could not find {}. Theses URLs was found {:?}",
-            page.url,
-            page.links("https://choosealicense.com")
+        "Could not find {}. Theses URLs was found {:?}",
+        page.url,
+        page.links("https://choosealicense.com")
     );
 }
 
 #[test]
 fn test_abs_path() {
-    use crate::utils::{Client, fetch_page_html};
+    use crate::utils::{fetch_page_html, Client};
     let client = Client::builder()
         .user_agent("spider/1.1.2")
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/";
-    let html = fetch_page_html(&link_result, &client).unwrap();
-    let page: Page = Page::new(&link_result, &html);
+    let html = fetch_page_html(link_result, &client).unwrap();
+    let page: Page = Page::new(link_result, &html);
 
     assert_eq!(
         page.abs_path("/page"),

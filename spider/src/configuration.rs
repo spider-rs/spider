@@ -14,8 +14,10 @@ pub struct Configuration {
     pub respect_robots_txt: bool,
     /// Print page visited on standart output
     pub verbose: bool,
-    /// List of page to not crawl
+    /// List of pages to not crawl
     pub blacklist_url: Vec<String>,
+    /// Blacklist any link containing these patterns
+    pub blacklist_pattern: Vec<String>,
     /// User-Agent
     pub user_agent: &'static str,
     /// Polite crawling delay in milli seconds
@@ -25,6 +27,7 @@ pub struct Configuration {
 }
 
 impl Configuration {
+    /// Create default Spider Configuration
     pub fn new() -> Self {
         Self {
             user_agent: "spider/1.5.0",
@@ -32,5 +35,15 @@ impl Configuration {
             concurrency: num_cpus::get() * 4,
             ..Default::default()
         }
+    }
+
+    /// Add pattern, for which any link containing it will be blacklisted
+    pub fn add_blacklist_pattern(&mut self, pattern: impl Into<String>) {
+        self.blacklist_pattern.push(pattern.into());
+    }
+
+    /// Add specific url to blacklist
+    pub fn add_blacklist_url(&mut self, url: impl Into<String>) {
+        self.blacklist_url.push(url.into());
     }
 }

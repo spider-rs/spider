@@ -3,9 +3,9 @@ use crate::page::Page;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
+use crate::utils::{fetch_page_html, Client};
 use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
-use crate::utils::{fetch_page_html, Client};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -55,7 +55,7 @@ impl<'a> Website<'a> {
             pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
             on_link_find_callback: |s| s,
-            client: Client::new()
+            client: Client::new(),
         }
     }
 
@@ -63,7 +63,7 @@ impl<'a> Website<'a> {
     pub fn get_pages(&self) -> &Vec<Page> {
         &self.pages
     }
-    
+
     /// configure the robots parser on initial crawl attempt and run
     pub fn configure_robots_parser(&mut self) {
         if self.configuration.respect_robots_txt && !self.configured_robots_parser {
@@ -72,14 +72,16 @@ impl<'a> Website<'a> {
             self.robot_file_parser.read();
 
             // returns the crawl delay in seconds
-            let ms = self.robot_file_parser.get_crawl_delay(&self.configuration.user_agent)
+            let ms = self
+                .robot_file_parser
+                .get_crawl_delay(&self.configuration.user_agent)
                 .unwrap_or_else(|| Duration::from_millis(self.configuration.delay))
                 .as_millis();
 
             self.configuration.delay = ms as u64;
         }
     }
-    
+
     /// Start to crawl website
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
@@ -116,7 +118,8 @@ impl<'a> Website<'a> {
 
                     pool.spawn(move || {
                         let link_result = on_link_find_callback(thread_link);
-                        let html = fetch_page_html(&link_result, &cx).unwrap_or("".to_string());
+                        let html =
+                            fetch_page_html(&link_result, &cx).unwrap_or_else(|_| "".to_string());
                         tx.send(Page::new(&link_result, &html)).unwrap();
                         thread::sleep(delay);
                     });
@@ -154,6 +157,12 @@ impl<'a> Website<'a> {
             return false;
         }
 
+        for pattern in &self.configuration.blacklist_pattern {
+            if link.contains(pattern) {
+                return false;
+            }
+        }
+
         if self.configuration.respect_robots_txt {
             let path: String = str::replace(link, &self.domain, "");
             if !self.robot_file_parser.can_fetch("*", &path) {
@@ -166,8 +175,8 @@ impl<'a> Website<'a> {
 }
 
 impl<'a> Drop for Website<'a> {
-  fn drop(&mut self)  {}  
-} 
+    fn drop(&mut self) {}
+}
 
 #[test]
 fn crawl() {
@@ -177,7 +186,8 @@ fn crawl() {
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        "{:?}", website.links_visited
+        "{:?}",
+        website.links_visited
     );
 }
 
@@ -187,7 +197,7 @@ fn crawl_invalid() {
     let mut website: Website = Website::new(url);
     website.crawl();
     let mut uniq = HashSet::new();
-    uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
+    uniq.insert(format!("{}/", url)); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -195,16 +205,17 @@ fn crawl_invalid() {
 #[test]
 fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.on_link_find_callback = |s| { 
-        println!("callback link target: {}", s); 
-        s 
+    website.on_link_find_callback = |s| {
+        println!("callback link target: {}", s);
+        s
     };
     website.crawl();
     assert!(
         website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        "{:?}", website.links_visited
+        "{:?}",
+        website.links_visited
     );
 }
 
@@ -220,7 +231,8 @@ fn not_crawl_blacklist() {
         !website
             .links_visited
             .contains(&"https://choosealicense.com/licenses/".to_string()),
-        "{:?}", website.links_visited
+        "{:?}",
+        website.links_visited
     );
 }
 
@@ -236,7 +248,10 @@ fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = "bingbot";
     website_second.configure_robots_parser();
-    assert_eq!(website_second.configuration.user_agent, website_second.robot_file_parser.user_agent);
+    assert_eq!(
+        website_second.configuration.user_agent,
+        website_second.robot_file_parser.user_agent
+    );
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 
     // test crawl delay with wildcard agent [DOES not work when using set agent]

@@ -3,4 +3,5 @@ members = [
     "spider",
     "spider_cli",
     "examples",
+    "tools/ci"
 ]
