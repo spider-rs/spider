@@ -39,20 +39,13 @@ impl Page {
     /// Find all href links and return them
     pub fn links(&self, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
-        let selector = Selector::parse("a").unwrap();
-
+        let selector = Selector::parse(&format!(r#" a[href^="{}"] a[href$=".html"], a:not([href*="."]) "#, domain)).unwrap();
         let html = self.get_html();
-        let anchors = html
-            .select(&selector)
-            .filter(|a| a.value().attrs().any(|attr| attr.0 == "href"));
+        let anchors = html.select(&selector);
 
         for anchor in anchors {
             if let Some(href) = anchor.value().attr("href") {
-                let abs_path = self.abs_path(href);
-
-                if abs_path.as_str().starts_with(domain) {
-                    urls.push(abs_path.to_string());
-                }
+                urls.push(self.abs_path(href).to_string());
             }
         }
 
