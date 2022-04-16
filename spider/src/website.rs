@@ -159,7 +159,7 @@ impl<'a> Website<'a> {
     }
 
     /// log to console if configuration verbose
-    fn log(&self, pre_format: &str, message: &str) {
+    pub fn log(&self, pre_format: &str, message: &str) {
         if self.configuration.verbose {
             println!("{}{}", pre_format, message);
         }

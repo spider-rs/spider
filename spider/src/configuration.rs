@@ -25,7 +25,6 @@ pub struct Configuration {
     pub concurrency: usize,
 }
 
-
 impl Configuration {
     pub fn new() -> Self {
         Self {
