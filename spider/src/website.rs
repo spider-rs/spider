@@ -107,7 +107,7 @@ impl<'a> Website<'a> {
                 .iter()
                 .filter(|link| self.is_allowed(link))
                 .for_each(|link| {
-                    self.log("- fetch {}", link);
+                    self.log(&format!("- fetch {}", link));
                     let thread_link: String = link.to_string();
                     let tx = tx.clone();
                     let cx = self.client.clone();
@@ -124,7 +124,7 @@ impl<'a> Website<'a> {
 
             rx.into_iter().for_each(|page| {
                 let url = page.get_url();
-                self.log("- parse {}", &url);
+                self.log(&format!("- parse {}", url));
                 new_links.extend(page.links(&self.domain));
                 self.links_visited.insert(String::from(url));
                 self.pages.push(page);
@@ -159,9 +159,9 @@ impl<'a> Website<'a> {
     }
 
     /// log to console if configuration verbose
-    pub fn log(&self, pre_format: &str, message: &str) {
+    pub fn log(&self, message: &str) {
         if self.configuration.verbose {
-            println!("{}{}", pre_format, message);
+            println!("{}", message);
         }
     }
 }
