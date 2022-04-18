@@ -3,6 +3,7 @@ use crate::page::Page;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
+use crate::black_list::contains;
 use crate::utils::{fetch_page_html, Client};
 use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
@@ -72,13 +73,11 @@ impl<'a> Website<'a> {
             self.robot_file_parser.read();
 
             // returns the crawl delay in seconds
-            let ms = self
+            self.configuration.delay = self
                 .robot_file_parser
-                .get_crawl_delay(&self.configuration.user_agent)
+                .get_crawl_delay(&self.robot_file_parser.user_agent)
                 .unwrap_or_else(|| Duration::from_millis(self.configuration.delay))
-                .as_millis();
-
-            self.configuration.delay = ms as u64;
+                .as_millis() as u64;
         }
     }
 
@@ -86,13 +85,12 @@ impl<'a> Website<'a> {
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
         let delay = Duration::from_millis(self.configuration.delay);
-        let user_agent = self.configuration.user_agent;
         let pool = ThreadPoolBuilder::new()
             .num_threads(self.configuration.concurrency)
             .build()
             .expect("Failed building thread pool.");
         self.client = Client::builder()
-            .user_agent(user_agent)
+            .user_agent(self.configuration.user_agent)
             .pool_max_idle_per_host(0)
             .build()
             .expect("Failed building client.");
@@ -108,7 +106,7 @@ impl<'a> Website<'a> {
                 .filter(|link| self.is_allowed(link))
                 .for_each(|link| {
                     self.log(&format!("- fetch {}", link));
-                    let thread_link: String = link.to_string();
+                    let thread_link = link.to_string();
                     let tx = tx.clone();
                     let cx = self.client.clone();
 
@@ -144,13 +142,12 @@ impl<'a> Website<'a> {
             return false;
         }
 
-        if self.configuration.blacklist_url.contains(link) {
+        if contains(&self.configuration.blacklist_url, link) {
             return false;
         }
 
         if self.configuration.respect_robots_txt {
-            let path: String = str::replace(link, &self.domain, "");
-            if !self.robot_file_parser.can_fetch("*", &path) {
+            if !self.robot_file_parser.can_fetch("*", link) {
                 return false;
             }
         }
