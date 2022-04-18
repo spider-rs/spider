@@ -39,7 +39,11 @@ impl Page {
     /// Find all href links and return them
     pub fn links(&self, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
-        let selector = Selector::parse(&format!(r#" a[href^="{}"] a[href$=".html"], a:not([href*="."]) "#, domain)).unwrap();
+        let selector = Selector::parse(&format!(
+            r#" a[href^="{}"] a[href$=".html"], a:not([href*="."]) "#,
+            domain
+        ))
+        .unwrap();
         let html = self.get_html();
         let anchors = html.select(&selector);
 
@@ -64,7 +68,7 @@ impl Page {
 
 #[test]
 fn parse_links() {
-    use crate::utils::{Client, fetch_page_html};
+    use crate::utils::{fetch_page_html, Client};
     let client = Client::builder()
         .user_agent("spider/1.1.2")
         .build()
@@ -77,15 +81,15 @@ fn parse_links() {
     assert!(
         page.links("https://choosealicense.com")
             .contains(&"https://choosealicense.com/about/".to_string()),
-            "Could not find {}. Theses URLs was found {:?}",
-            page.url,
-            page.links("https://choosealicense.com")
+        "Could not find {}. Theses URLs was found {:?}",
+        page.url,
+        page.links("https://choosealicense.com")
     );
 }
 
 #[test]
 fn test_abs_path() {
-    use crate::utils::{Client, fetch_page_html};
+    use crate::utils::{fetch_page_html, Client};
     let client = Client::builder()
         .user_agent("spider/1.1.2")
         .build()

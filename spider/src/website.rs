@@ -1,10 +1,12 @@
+use crate::black_list::contains;
 use crate::configuration::Configuration;
 use crate::page::Page;
+use crate::utils::{fetch_page_html, Client};
+
+use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
-use crate::black_list::contains;
-use crate::utils::{fetch_page_html, Client};
 use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
 
@@ -65,6 +67,10 @@ impl<'a> Website<'a> {
         &self.pages
     }
 
+    pub fn get_delay(&self) -> Duration {
+        Duration::from_millis(self.configuration.delay)
+    }
+
     /// configure the robots parser on initial crawl attempt and run
     pub fn configure_robots_parser(&mut self) {
         if self.configuration.respect_robots_txt && !self.configured_robots_parser {
@@ -76,30 +82,40 @@ impl<'a> Website<'a> {
             self.configuration.delay = self
                 .robot_file_parser
                 .get_crawl_delay(&self.robot_file_parser.user_agent)
-                .unwrap_or_else(|| Duration::from_millis(self.configuration.delay))
+                .unwrap_or(self.get_delay())
                 .as_millis() as u64;
         }
+    }
+
+    /// configure http client
+    pub fn configure_http_client(&mut self, user_agent: Option<String>) {
+        self.client = Client::builder()
+            .user_agent(user_agent.unwrap_or(self.configuration.user_agent.to_string()))
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("Failed building client.")
+    }
+
+    /// configure rayon thread pool
+    fn create_thread_pool(&mut self) -> ThreadPool {
+        ThreadPoolBuilder::new()
+            .num_threads(self.configuration.concurrency)
+            .build()
+            .expect("Failed building thread pool.")
     }
 
     /// Start to crawl website
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
-        let delay = Duration::from_millis(self.configuration.delay);
-        let pool = ThreadPoolBuilder::new()
-            .num_threads(self.configuration.concurrency)
-            .build()
-            .expect("Failed building thread pool.");
-        self.client = Client::builder()
-            .user_agent(self.configuration.user_agent)
-            .pool_max_idle_per_host(0)
-            .build()
-            .expect("Failed building client.");
+        self.configure_http_client(None);
+        let delay = self.get_delay();
+        let pool = self.create_thread_pool();
+        let on_link_find_callback = self.on_link_find_callback;
 
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
             let (tx, rx) = sync::mpsc::channel();
-            let on_link_find_callback = self.on_link_find_callback;
 
             self.links
                 .iter()
@@ -112,7 +128,7 @@ impl<'a> Website<'a> {
 
                     pool.spawn(move || {
                         let link_result = on_link_find_callback(thread_link);
-                        let html = fetch_page_html(&link_result, &cx).unwrap_or("".to_string());
+                        let html = fetch_page_html(&link_result, &cx).unwrap_or_default();
                         tx.send(Page::new(&link_result, &html)).unwrap();
                         thread::sleep(delay);
                     });
