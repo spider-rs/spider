@@ -15,7 +15,7 @@ pub struct Configuration {
     pub respect_robots_txt: bool,
     /// Print page visited on standart output
     pub verbose: bool,
-    /// List of page to not crawl
+    /// List of pages to not crawl [optional: regex pattern matching]
     pub blacklist_url: Vec<String>,
     /// User-Agent
     pub user_agent: &'static str,
