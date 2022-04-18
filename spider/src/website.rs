@@ -226,6 +226,18 @@ fn not_crawl_blacklist() {
 }
 
 #[test]
+#[cfg(feature = "regex")]
+fn not_crawl_blacklist_regex() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website
+        .configuration
+        .blacklist_url
+        .push("/choosealicense.com/".to_string());
+    website.crawl();
+    assert_eq!(website.links_visited.len(), 0);
+}
+
+#[test]
 fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
