@@ -37,8 +37,6 @@ pub struct Website<'a> {
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
-    // configured the robots parser
-    configured_robots_parser: bool,
     // fetch client
     client: Client,
 }
@@ -51,7 +49,6 @@ impl<'a> Website<'a> {
 
         Self {
             configuration: Configuration::new(),
-            configured_robots_parser: false,
             domain: domain.to_string(),
             links,
             links_visited: HashSet::new(),
@@ -67,21 +64,19 @@ impl<'a> Website<'a> {
         &self.pages
     }
 
+    /// crawl delay getter
     pub fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
     }
 
     /// configure the robots parser on initial crawl attempt and run
     pub fn configure_robots_parser(&mut self) {
-        if self.configuration.respect_robots_txt && !self.configured_robots_parser {
-            self.configured_robots_parser = true;
+        if self.configuration.respect_robots_txt && self.robot_file_parser.mtime() == 0 {
             self.robot_file_parser.user_agent = self.configuration.user_agent.to_string();
             self.robot_file_parser.read();
-
-            // returns the crawl delay in seconds
             self.configuration.delay = self
                 .robot_file_parser
-                .get_crawl_delay(&self.robot_file_parser.user_agent)
+                .get_crawl_delay(&self.robot_file_parser.user_agent) // returns the crawl delay in seconds
                 .unwrap_or(self.get_delay())
                 .as_millis() as u64;
         }
