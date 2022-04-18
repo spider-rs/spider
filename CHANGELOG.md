@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.5.3
+
 - feat(regex): add optional regex black listing
 
 ## v1.5.0

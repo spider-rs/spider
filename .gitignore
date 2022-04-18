@@ -3,3 +3,4 @@ target
 Cargo.lock
 !spider_cli/Cargo.lock
 .env
+.DS_Store
