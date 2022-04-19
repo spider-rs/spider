@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 spider = { version = "1.5.5", path = "../spider" }
-tester = "0.5.0"
+criterion = "0.3"
 
 [[bench]]
 name = "crawl"

@@ -1,12 +1,20 @@
-extern crate spider;
-use crate::spider::website::Website;
+use criterion::{criterion_group, criterion_main, Criterion};
+use spider::website::Website;
 
-fn main() {
+#[inline]
+fn crawl() {
     let mut website: Website = Website::new("https://rsseau.fr");
-    website.configuration.blacklist_url.push("https://rsseau.fr/resume".to_string());
     website.configuration.respect_robots_txt = true;
-    website.configuration.verbose = true;
-    website.configure_robots_parser();
     website.crawl();
 }
 
+pub fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("crawl-duration-example");
+
+    group.significance_level(0.1).sample_size(10);
+    group.bench_function("crawl 10 times", |b| b.iter(|| crawl()));
+    group.finish();
+}
+
+criterion_group!(benches, criterion_benchmark);
+criterion_main!(benches);
