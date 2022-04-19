@@ -17,5 +17,11 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose --all-features
+      - name: Install Benchmark Dependencies
+        run: |
+          sudo apt update && sudo apt-get install build-essential
+          npm install -g n
+          sudo n v14.18.3
+          npm install -g node-crawler
       - name: Run Benchmarks
-        run: cargo bench
+        run: cargo bench -- --verbose

@@ -1,20 +1,26 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use spider::website::Website;
+use std::process::{Command};
+use std::time::Duration;
+pub mod node_crawler;
 
-#[inline]
-fn crawl() {
-    let mut website: Website = Website::new("https://rsseau.fr");
-    website.configuration.respect_robots_txt = true;
-    website.crawl();
-}
-
-pub fn criterion_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("crawl-duration-example");
-
-    group.significance_level(0.1).sample_size(10);
-    group.bench_function("crawl 10 times", |b| b.iter(|| crawl()));
+/// bench spider crawling between different libs
+pub fn bench_speed(c: &mut Criterion) {
+    let node_crawl_script = node_crawler::gen_crawl();
+    let mut group = c.benchmark_group("crawl-speed");
+    
+    group.sample_size(10).measurement_time(Duration::new(85, 0) + Duration::from_millis(500));
+    group.bench_function("Rust[spider]: with crawl 10 times", |b| b.iter(||Command::new("spider")
+        .args(["--delay", "0", "--domain", "https://rsseau.fr", "crawl"])
+        .output()
+        .expect("rust command failed to start")
+    ));
+    group.bench_function("Node.js[crawler]: with crawl 10 times", |b| b.iter(|| Command::new("node")
+        .arg(&node_crawl_script)
+        .output()
+        .expect("node command failed to start")
+    ));
     group.finish();
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, bench_speed);
 criterion_main!(benches);
