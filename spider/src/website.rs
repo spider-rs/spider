@@ -157,10 +157,8 @@ impl<'a> Website<'a> {
             return false;
         }
 
-        if self.configuration.respect_robots_txt {
-            if !self.robot_file_parser.can_fetch("*", link) {
-                return false;
-            }
+        if self.configuration.respect_robots_txt && !self.robot_file_parser.can_fetch("*", link) {
+            return false;
         }
 
         true

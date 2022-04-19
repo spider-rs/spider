@@ -36,14 +36,37 @@ impl Page {
         Html::parse_document(&self.html)
     }
 
+    /// html selector for valid web pages for domain
+    pub fn get_page_selectors(&self, domain: &str) -> Selector {
+        let media_ignore_selector = r#":not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])"#;
+        let relative_selector = &format!(
+            r#"a[href^="/"]{}"#,
+            media_ignore_selector,
+        );
+        let absolute_selector = &format!(
+            r#"a[href^="{}"]{}"#,
+            domain,
+            media_ignore_selector,
+        );
+        let static_html_selector = &format!(
+            r#"{} [href$=".html"], {} [href$=".html"]"#,
+            relative_selector,
+            absolute_selector,
+        );
+        Selector::parse(&format!(
+            "{},{},{}",
+            relative_selector,
+            absolute_selector,
+            static_html_selector
+        ))
+        .unwrap()
+    }
+
     /// Find all href links and return them
     pub fn links(&self, domain: &str) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
-        let selector = Selector::parse(&format!(
-            r#" a[href^="{}"] a[href$=".html"], a:not([href*="."]) "#,
-            domain
-        ))
-        .unwrap();
+        let selector = self.get_page_selectors(&domain);
+
         let html = self.get_html();
         let anchors = html.select(&selector);
 

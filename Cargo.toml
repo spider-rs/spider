@@ -2,5 +2,7 @@
 members = [
     "spider",
     "spider_cli",
+    # internal
     "examples",
+    "benches",
 ]
