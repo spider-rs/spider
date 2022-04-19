@@ -112,22 +112,22 @@ impl<'a> Website<'a> {
             let mut new_links: HashSet<String> = HashSet::new();
             let (tx, rx) = sync::mpsc::channel();
 
-            self.links
-                .iter()
-                .filter(|link| self.is_allowed(link))
-                .for_each(|link| {
-                    self.log(&format!("- fetch {}", link));
-                    let thread_link = link.to_string();
-                    let tx = tx.clone();
-                    let cx = self.client.clone();
+            for link in self.links.iter() {
+                if !self.is_allowed(link) {
+                    continue;
+                }
+                self.log(&format!("- fetch {}", &link));
+                let thread_link = link.to_string();
+                let tx = tx.clone();
+                let cx = self.client.clone();
 
-                    pool.spawn(move || {
-                        let link_result = on_link_find_callback(thread_link);
-                        let html = fetch_page_html(&link_result, &cx).unwrap_or_default();
-                        tx.send(Page::new(&link_result, &html)).unwrap();
-                        thread::sleep(delay);
-                    });
+                pool.spawn(move || {
+                    let link_result = on_link_find_callback(thread_link);
+                    let html = fetch_page_html(&link_result, &cx).unwrap_or_default();
+                    tx.send(Page::new(&link_result, &html)).unwrap();
+                    thread::sleep(delay);
                 });
+            }
 
             drop(tx);
 
@@ -135,7 +135,7 @@ impl<'a> Website<'a> {
                 let url = page.get_url();
                 self.log(&format!("- parse {}", url));
                 new_links.extend(page.links(&self.domain));
-                self.links_visited.insert(String::from(url));
+                self.links_visited.insert(url.to_string());
                 self.pages.push(page);
             });
 

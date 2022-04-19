@@ -9,7 +9,7 @@ use std::env;
 /// website.configuration.verbose = true;
 /// localhost.crawl();
 /// </pre>
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files (not implemented)
     pub respect_robots_txt: bool,
