@@ -142,7 +142,9 @@ impl<'a> Website<'a> {
                 new_links.extend(page.links(&self.domain));
                 self.links_visited.insert(url.to_string());
                 self.pages.push(page);
-                thread::sleep(delay);
+                if self.configuration.delay > 0 {
+                    thread::sleep(delay);
+                }
             });
 
             self.links = new_links;

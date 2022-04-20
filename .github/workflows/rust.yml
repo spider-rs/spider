@@ -21,5 +21,8 @@ jobs:
         run: |
           sudo apt update && sudo apt-get install build-essential
           npm install crawler -g
+          # install the local cli latest
+          cd ./spider_cli && cargo install  --path . && cd ../
+          # rustup default nightly
       - name: Run Benchmarks
-        run: cargo bench -- --verbose
+        run: cargo bench
