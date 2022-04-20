@@ -38,7 +38,7 @@ impl Page {
 
     /// html selector for valid web pages for domain
     pub fn get_page_selectors(&self, domain: &str) -> Selector {
-        let media_ignore_selector = r#":not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])"#;
+        let media_ignore_selector = r#":not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"]):not([href$=".pdf"])"#;
         let relative_selector = &format!(
             r#"a[href^="/"]{}"#,
             media_ignore_selector,
