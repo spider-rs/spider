@@ -3,6 +3,7 @@ use std::io::{BufWriter, Write};
 
 pub fn crawl_stub() -> String {
     r#"
+
     const Crawler = require("crawler");
 
     const base = "https://rsseau.fr";
@@ -38,14 +39,14 @@ pub fn crawl_stub() -> String {
     
     const directCrawl = (uri) => {
       crawler.direct({
-        uri: uri || `${base}${elem.attribs.href}`,
+        uri,
         callback,
         ...crawlOptions,
       });
     };
     
-    directCrawl(base);
-        
+    directCrawl(base);    
+  
     "#.to_string()
 }
 
