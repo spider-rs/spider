@@ -63,9 +63,9 @@ impl Page {
     }
 
     /// Find all href links and return them
-    pub fn links(&self, domain: &str) -> Vec<String> {
+    pub fn links(&self) -> Vec<String> {
         let mut urls: Vec<String> = Vec::new();
-        let selector = self.get_page_selectors(&domain);
+        let selector = self.get_page_selectors(&self.url);
 
         let html = self.get_html();
         let anchors = html.select(&selector);
@@ -102,11 +102,11 @@ fn parse_links() {
     let page: Page = Page::new(&link_result, &html);
 
     assert!(
-        page.links("https://choosealicense.com")
+        page.links()
             .contains(&"https://choosealicense.com/about/".to_string()),
         "Could not find {}. Theses URLs was found {:?}",
         page.url,
-        page.links("https://choosealicense.com")
+        page.links()
     );
 }
 

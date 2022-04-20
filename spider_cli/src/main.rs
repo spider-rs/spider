@@ -18,6 +18,7 @@ fn main() {
     website.configuration.verbose = cli.verbose;
     website.configuration.delay = delay;
     website.configuration.concurrency = concurrency;
+    website.page_store_ignore = true;
 
     if !blacklist_url.is_empty() {
         website.configuration.blacklist_url.push(blacklist_url);
