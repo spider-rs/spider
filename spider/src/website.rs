@@ -131,7 +131,6 @@ impl<'a> Website<'a> {
                     let link_result = on_link_find_callback(thread_link);
                     let html = fetch_page_html(&link_result, &cx).unwrap_or_default();
                     tx.send(Page::new(&link_result, &html)).unwrap();
-                    thread::sleep(delay);
                 });
             }
 
@@ -143,6 +142,7 @@ impl<'a> Website<'a> {
                 new_links.extend(page.links(&self.domain));
                 self.links_visited.insert(url.to_string());
                 self.pages.push(page);
+                thread::sleep(delay);
             });
 
             self.links = new_links;
