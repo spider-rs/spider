@@ -9,6 +9,8 @@ use robotparser_fork::RobotFileParser;
 
 use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
+use reqwest::header::CONNECTION;
+use reqwest::header;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -84,7 +86,11 @@ impl<'a> Website<'a> {
 
     /// configure http client
     pub fn configure_http_client(&mut self, user_agent: Option<String>) {
+        let mut headers = header::HeaderMap::new();
+        headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
+
         self.client = Client::builder()
+            .default_headers(headers)
             .user_agent(user_agent.unwrap_or(self.configuration.user_agent.to_string()))
             .pool_max_idle_per_host(0)
             .build()
