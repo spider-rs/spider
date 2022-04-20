@@ -20,9 +20,14 @@ jobs:
       - name: Install Benchmark Dependencies
         run: |
           sudo apt update && sudo apt-get install build-essential
+          # install node-crawler
           npm install crawler -g
           # install the local cli latest
           cd ./spider_cli && cargo install  --path . && cd ../
-          # rustup default nightly
+          # install go and deps
+          echo "module github.com/x/y" >> go.mod
+          echo "go 1.14" >> go.mod
+          echo "require github.com/gocolly/colly/v2 v2.1.0" >> go.mod
+          go mod tidy
       - name: Run Benchmarks
         run: cargo bench
