@@ -114,19 +114,19 @@ impl<'a> Website<'a> {
         self.configure_http_client(None);
         let delay = self.get_delay();
         let on_link_find_callback = self.on_link_find_callback;
-
+        let pool = self.create_thread_pool();
+        
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, rx) = sync::mpsc::channel();
-            let pool = self.create_thread_pool();
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
                     continue;
                 }
+                self.log(&format!("- fetch {}", &link));
                 self.links_visited.insert(link.to_string());
 
-                self.log(&format!("- fetch {}", &link));
                 let thread_link = link.to_string();
 
                 let tx = tx.clone();
@@ -138,7 +138,7 @@ impl<'a> Website<'a> {
                     let page = Page::new(&link_result, &html);
                     let links = page.links();
 
-                    tx.send((page, links)).unwrap_or(println!("channel hung"));
+                    tx.send((page, links)).unwrap();
                 });
             }
 
@@ -148,8 +148,7 @@ impl<'a> Website<'a> {
 
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
-                let url = page.get_url();
-                self.log(&format!("- parse {}", url));
+                self.log(&format!("- parse {}", page.get_url()));
 
                 new_links.extend(links);
 

@@ -64,19 +64,12 @@ impl Page {
 
     /// Find all href links and return them
     pub fn links(&self) -> Vec<String> {
-        let mut urls: Vec<String> = Vec::new();
         let selector = self.get_page_selectors(&self.url);
-
         let html = self.get_html();
-        let anchors = html.select(&selector);
 
-        for anchor in anchors {
-            if let Some(href) = anchor.value().attr("href") {
-                urls.push(self.abs_path(href).to_string());
-            }
-        }
-
-        urls
+        html.select(&selector)
+            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())
+            .collect()
     }
 
     fn abs_path(&self, href: &str) -> Url {
