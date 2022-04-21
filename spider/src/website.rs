@@ -39,8 +39,6 @@ pub struct Website<'a> {
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
-    // fetch client
-    client: Client,
     // ignore holding page in memory, pages will always be empty
     pub page_store_ignore: bool,
 }
@@ -50,14 +48,13 @@ impl<'a> Website<'a> {
     pub fn new(domain: &str) -> Self {
         Self {
             configuration: Configuration::new(),
-            domain: domain.to_string(),
-            links: HashSet::from([format!("{}/", domain)]),
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
+            links: HashSet::from([format!("{}/", domain)]),
             on_link_find_callback: |s| s,
-            client: Client::new(),
-            page_store_ignore: false
+            page_store_ignore: false,
+            domain: domain.to_owned(),
         }
     }
 
@@ -85,14 +82,13 @@ impl<'a> Website<'a> {
     }
 
     /// configure http client
-    pub fn configure_http_client(&mut self, user_agent: Option<String>) {
+    fn configure_http_client(&mut self, user_agent: Option<String>) -> Client {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
-        self.client = Client::builder()
+        Client::builder()
             .default_headers(headers)
             .user_agent(user_agent.unwrap_or(self.configuration.user_agent.to_string()))
-            .pool_max_idle_per_host(0)
             .build()
             .expect("Failed building client.")
     }
@@ -108,7 +104,7 @@ impl<'a> Website<'a> {
     /// Start to crawl website
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
-        self.configure_http_client(None);
+        let client = self.configure_http_client(None);
         let delay = self.get_delay();
         let on_link_find_callback = self.on_link_find_callback;
         let pool = self.create_thread_pool();
@@ -122,16 +118,15 @@ impl<'a> Website<'a> {
                     continue;
                 }
                 self.log(&format!("- fetch {}", &link));
-                self.links_visited.insert(link.to_string());
+                self.links_visited.insert(String::from(link));
 
-                let thread_link = link.to_string();
-
+                let link = link.clone();
                 let tx = tx.clone();
-                let cx = self.client.clone();
+                let cx = client.clone();
 
                 pool.spawn(move || {
-                    let link_result = on_link_find_callback(thread_link);
-                    let html = fetch_page_html(&link_result, &cx).unwrap_or_default();
+                    let link_result = on_link_find_callback(link);
+                    let html = fetch_page_html(&link_result, &cx);
                     let page = Page::new(&link_result, &html);
                     let links = page.links();
 
@@ -156,11 +151,9 @@ impl<'a> Website<'a> {
                 if self.configuration.delay > 0 {
                     thread::sleep(delay);
                 }
-
             });
 
             self.links = new_links;
-
         }
     }
 

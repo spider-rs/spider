@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 
 pub fn crawl_stub() -> String {
     r#"
-    package main
+    package spider
 
     import (
         "fmt"

@@ -1,4 +1,4 @@
-name: CI
+name: Benches
 on:
   push:
     branches: [master]
@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_LOG: "off"
 
 jobs:
   build:
@@ -23,7 +24,16 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose --all-features
+      - name: Install Benchmark Dependencies
+        run: |
+          # install node-crawler
+          npm install -g crawler
+          # install go and deps
+          go mod init example.com/spider
+          go get github.com/gocolly/colly/v2
+          cat go.mod
+          go mod tidy
+          # install the local cli latest
+          cd ./spider_cli && cargo install  --path . && cd ../
+      - name: Run Benchmarks
+        run: cargo bench
