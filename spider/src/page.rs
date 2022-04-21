@@ -76,19 +76,18 @@ impl Page {
         self.html.clear();
         
         html.select(&selector)
-            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()))
+            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())
             .collect()
     }
 
-    fn abs_path(&self, href: &str) -> String {
+    fn abs_path(&self, href: &str) -> Url {
         let mut joined = self.base.join(href).unwrap_or(Url::parse(&self.url.to_string()).expect("Invalid page URL"));
 
         joined.set_fragment(None);
 
-        format!("{}", joined.as_str())
+        joined
     }
 }
-
 #[test]
 fn parse_links() {
     let client = Client::builder()

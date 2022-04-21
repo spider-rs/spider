@@ -26,14 +26,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Benchmark Dependencies
         run: |
-          # install node-crawler
-          npm init -y
-          npm i crawler --save
-          # install go and deps
-          go mod init example.com/spider
-          go get -u github.com/gocolly/colly/v2
-          go mod tidy
           # install the local cli latest
           cd ./spider_cli && cargo install  --path . && cd ../
+          cd benches && cargo build
       - name: Run Benchmarks
         run: cargo bench

@@ -6,3 +6,5 @@ go-crolly.go
 go.mod
 go.sum
 output.txt
+gospider
+build
