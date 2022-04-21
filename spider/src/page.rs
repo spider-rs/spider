@@ -81,9 +81,7 @@ impl Page {
     }
 
     fn abs_path(&self, href: &str) -> String {
-        let mut joined = self.base.join(href)
-            .unwrap_or(Url::parse(&self.url.to_string())
-            .expect("Invalid page URL"));
+        let mut joined = self.base.join(href).unwrap_or(Url::parse(&self.url.to_string()).expect("Invalid page URL"));
 
         joined.set_fragment(None);
 

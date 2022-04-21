@@ -123,6 +123,10 @@ impl<'a> Website<'a> {
                 let tx = tx.clone();
                 let cx = client.clone();
 
+                if self.configuration.delay > 0 {
+                    thread::sleep(self.get_delay());
+                }
+                
                 pool.spawn(move || {
                     let link_result = on_link_find_callback(link);
                     let mut page = Page::new(&link_result, &cx);
@@ -146,9 +150,6 @@ impl<'a> Website<'a> {
                     self.pages.push(page);
                 }
 
-                if self.configuration.delay > 0 {
-                    thread::sleep(self.get_delay());
-                }
             });
 
             self.links = new_links;
