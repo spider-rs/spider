@@ -91,7 +91,7 @@ fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let html = fetch_page_html(&link_result, &client).unwrap();
+    let html = fetch_page_html(&link_result, &client);
     let page: Page = Page::new(&link_result, &html);
 
     assert!(
@@ -111,7 +111,7 @@ fn test_abs_path() {
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/";
-    let html = fetch_page_html(&link_result, &client).unwrap();
+    let html = fetch_page_html(&link_result, &client);
     let page: Page = Page::new(&link_result, &html);
 
     assert_eq!(
