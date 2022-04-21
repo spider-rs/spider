@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Multithreaded web crawler written in Rust.
+The fastest web spider.
 
 ## Getting Started
 
@@ -14,6 +14,6 @@ You can get a working example at [`examples/example.rs`](./example.rs) and run i
 cargo run --example example
 ```
 
-## Contribute
+## Contributing
 
-I am open-minded to any contribution. Just fork & `commit` on another branch.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
