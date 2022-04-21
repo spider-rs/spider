@@ -1,7 +1,7 @@
 use crate::black_list::contains;
 use crate::configuration::Configuration;
 use crate::page::Page;
-use crate::utils::{fetch_page_html, Client};
+use crate::utils::{Client};
 
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -105,7 +105,6 @@ impl<'a> Website<'a> {
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
         let client = self.configure_http_client(None);
-        let delay = self.get_delay();
         let on_link_find_callback = self.on_link_find_callback;
         let pool = self.create_thread_pool();
         
@@ -126,8 +125,7 @@ impl<'a> Website<'a> {
 
                 pool.spawn(move || {
                     let link_result = on_link_find_callback(link);
-                    let html = fetch_page_html(&link_result, &cx);
-                    let page = Page::new(&link_result, &html);
+                    let mut page = Page::new(&link_result, &cx);
                     let links = page.links();
 
                     tx.send((page, links)).unwrap();
@@ -149,7 +147,7 @@ impl<'a> Website<'a> {
                 }
 
                 if self.configuration.delay > 0 {
-                    thread::sleep(delay);
+                    thread::sleep(self.get_delay());
                 }
             });
 
