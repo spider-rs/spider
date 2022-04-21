@@ -6,9 +6,9 @@ pub mod go_crolly;
 
 /// bench spider crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
+    let mut group = c.benchmark_group("crawl-speed");
     let node_crawl_script = node_crawler::gen_crawl();
     let go_crawl_script = go_crolly::gen_crawl();
-    let mut group = c.benchmark_group("crawl-speed");
         
     group.sample_size(10).measurement_time(Duration::new(180, 0) + Duration::from_millis(500));
     group.bench_function("Rust[spider]: with crawl 10 times", |b| b.iter(||Command::new("spider")

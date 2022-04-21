@@ -27,11 +27,11 @@ jobs:
       - name: Install Benchmark Dependencies
         run: |
           # install node-crawler
-          npm install -g crawler
+          npm init -y
+          npm i crawler --save
           # install go and deps
           go mod init example.com/spider
-          go get github.com/gocolly/colly/v2
-          cat go.mod
+          go get -u github.com/gocolly/colly/v2
           go mod tidy
           # install the local cli latest
           cd ./spider_cli && cargo install  --path . && cd ../

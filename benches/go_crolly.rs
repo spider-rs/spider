@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 
 pub fn crawl_stub() -> String {
     r#"
-    package spider
+    package main
 
     import (
         "fmt"
@@ -14,6 +14,10 @@ pub fn crawl_stub() -> String {
     func main() {
         c := colly.NewCollector()
     
+        c.Limit(&colly.LimitRule{
+            Delay:      0,
+        })
+
         c.OnHTML(`a[href^="/"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"]),
         a[href^="https://rsseau.fr"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`, func(e *colly.HTMLElement) {
             e.Request.Visit(e.Attr("href"))
