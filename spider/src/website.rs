@@ -48,13 +48,10 @@ pub struct Website<'a> {
 impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
     pub fn new(domain: &str) -> Self {
-        // create home link
-        let links: HashSet<String> = vec![format!("{}/", domain)].into_iter().collect();
-
         Self {
             configuration: Configuration::new(),
             domain: domain.to_string(),
-            links,
+            links: HashSet::from([format!("{}/", domain)]),
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish

@@ -17,6 +17,7 @@ pub fn bench_speed(c: &mut Criterion) {
         .expect("rust command failed to start")
     ));
     group.bench_function("Go[crolly]: with crawl 10 times", |b| b.iter(||Command::new("go")
+        .arg("run")
         .arg(&go_crawl_script)
         .output()
         .expect("go command failed to start")
