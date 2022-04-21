@@ -11,6 +11,8 @@ pub struct Page {
     url: String,
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib
     html: String,
+    /// Base absolute url for domain
+    base: Url
 }
 
 impl Page {
@@ -26,6 +28,7 @@ impl Page {
         Self {
             url: url.to_string(),
             html: html.to_string(),
+            base: Url::parse(&url).expect("Invalid page URL")
         }
     }
 
@@ -73,17 +76,18 @@ impl Page {
         self.html.clear();
         
         html.select(&selector)
-            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())
+            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()))
             .collect()
     }
 
-    fn abs_path(&self, href: &str) -> Url {
-        let base = Url::parse(&self.url.to_string()).expect("Invalid page URL");
-        let mut joined = base.join(href).unwrap_or(base);
+    fn abs_path(&self, href: &str) -> String {
+        let mut joined = self.base.join(href)
+            .unwrap_or(Url::parse(&self.url.to_string())
+            .expect("Invalid page URL"));
 
         joined.set_fragment(None);
 
-        joined
+        format!("{}", joined.as_str())
     }
 }
 
