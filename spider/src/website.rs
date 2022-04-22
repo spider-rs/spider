@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::{sync, thread, time::Duration};
 use reqwest::header::CONNECTION;
 use reqwest::header;
+use sync::mpsc::{channel, Sender, Receiver};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -42,6 +43,8 @@ pub struct Website<'a> {
     // ignore holding page in memory, pages will always be empty
     pub page_store_ignore: bool,
 }
+
+type Message = (Page, Vec<String>);
 
 impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
@@ -110,7 +113,7 @@ impl<'a> Website<'a> {
         
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, rx) = sync::mpsc::channel();
+            let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
@@ -152,7 +155,7 @@ impl<'a> Website<'a> {
 
             });
 
-            self.links = new_links;
+            self.links = new_links.difference(&self.links_visited).cloned().collect();
         }
     }
 

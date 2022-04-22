@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.6.1
+
+- perf(links): filter dup links after async batch
+- chore(delay): fix crawl delay thread groups
+- perf(page): slim channel page sending required props
+
 ## v1.5.3
 
 - feat(regex): add optional regex black listing

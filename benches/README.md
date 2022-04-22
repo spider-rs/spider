@@ -10,7 +10,7 @@ We have comparisons set against 3 different languages and libs that can be used 
 
 How fast can we crawl all pages on a medium sized website. Tests are ordered between the largest to smallest runtimes needed. All examples use the same html selector to gather the pages for a website.
 
-### v1.6.0
+### v1.6.1
 
 Case: `https://rsseau.fr`
 
