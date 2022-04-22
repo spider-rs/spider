@@ -119,17 +119,16 @@ impl<'a> Website<'a> {
                 if !self.is_allowed(link) {
                     continue;
                 }
+                if self.configuration.delay > 0 {
+                    thread::sleep(self.get_delay());
+                }
                 self.log(&format!("- fetch {}", &link));
-                self.links_visited.insert(String::from(link));
+                self.links_visited.insert(link.into());
 
                 let link = link.clone();
                 let tx = tx.clone();
                 let cx = client.clone();
 
-                if self.configuration.delay > 0 {
-                    thread::sleep(self.get_delay());
-                }
-                
                 pool.spawn(move || {
                     let link_result = on_link_find_callback(link);
                     let mut page = Page::new(&link_result, &cx);
@@ -146,7 +145,6 @@ impl<'a> Website<'a> {
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
                 self.log(&format!("- parse {}", &page.get_url()));
-
                 new_links.extend(links);
 
                 if !self.page_store_ignore {
@@ -155,7 +153,7 @@ impl<'a> Website<'a> {
 
             });
 
-            self.links = new_links.difference(&self.links_visited).cloned().collect();
+            self.links = &new_links - &self.links_visited;
         }
     }
 
