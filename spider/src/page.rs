@@ -1,6 +1,7 @@
 use scraper::{Html, Selector};
 use url::Url;
 use crate::utils::{fetch_page_html, Client};
+use hashbrown::HashSet;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 ///
@@ -69,7 +70,7 @@ impl Page {
     }
 
     /// Find all href links and return them: this also clears the set html for the page
-    pub fn links(&mut self) -> Vec<String> {
+    pub fn links(&mut self) -> HashSet<String> {
         let selector = self.get_page_selectors(&self.url);
         let html = self.get_html();
 

@@ -5,6 +5,7 @@ extern crate robotparser_fork;
 extern crate scraper;
 extern crate tokio;
 extern crate url;
+extern crate hashbrown;
 
 /// Configuration structure for `Website`
 pub mod configuration;

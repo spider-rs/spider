@@ -7,7 +7,7 @@ use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
-use std::collections::HashSet;
+use hashbrown::HashSet;
 use std::{sync, thread, time::Duration};
 use reqwest::header::CONNECTION;
 use reqwest::header;
@@ -44,7 +44,7 @@ pub struct Website<'a> {
     pub page_store_ignore: bool,
 }
 
-type Message = (Page, Vec<String>);
+type Message = (Page, HashSet<String>);
 
 impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
@@ -145,7 +145,7 @@ impl<'a> Website<'a> {
 
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
-                self.log(&format!("- parse {}", page.get_url()));
+                self.log(&format!("- parse {}", &page.get_url()));
 
                 new_links.extend(links);
 
@@ -179,9 +179,9 @@ impl<'a> Website<'a> {
     }
 
     /// log to console if configuration verbose
-    pub fn log(&self, message: &str) {
+    pub fn log(&self, message: impl AsRef<str>) {
         if self.configuration.verbose {
-            println!("{}", message);
+            println!("{}", message.as_ref());
         }
     }
 }
