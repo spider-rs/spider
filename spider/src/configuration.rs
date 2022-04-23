@@ -13,8 +13,6 @@ use std::env;
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files (not implemented)
     pub respect_robots_txt: bool,
-    /// Print page visited on standart output
-    pub verbose: bool,
     /// List of pages to not crawl [optional: regex pattern matching]
     pub blacklist_url: Vec<String>,
     /// User-Agent

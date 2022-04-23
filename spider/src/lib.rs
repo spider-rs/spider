@@ -6,6 +6,7 @@ extern crate scraper;
 extern crate tokio;
 extern crate url;
 extern crate hashbrown;
+extern crate log;
 
 /// Configuration structure for `Website`
 pub mod configuration;

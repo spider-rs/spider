@@ -14,9 +14,6 @@ pub struct Cli {
     /// Respect robots.txt file
     #[clap(short, long)]
     pub respect_robots_txt: bool,
-    /// Print page visited on standard output
-    #[clap(short, long)]
-    pub verbose: bool,
     /// Polite crawling delay in milli seconds
     #[clap(short, long)]
     pub delay: Option<u64>,

@@ -7,7 +7,6 @@ fn main() {
   let mut website: Website = Website::new("https://rsseau.fr");
   website.configuration.blacklist_url.push("https://rsseau.fr/resume".to_string());
   website.configuration.respect_robots_txt = true;
-  website.configuration.verbose = true; // Defaults to false
   website.crawl_stack(None);
 }
 
