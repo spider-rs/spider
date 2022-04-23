@@ -5,6 +5,7 @@ use crate::utils::{Client};
 
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
+use rayon::iter::{IntoParallelRefIterator, ParallelExtend, ParallelIterator};
 use robotparser_fork::RobotFileParser;
 
 use hashbrown::HashSet;
@@ -64,6 +65,11 @@ impl<'a> Website<'a> {
     /// page getter
     pub fn get_pages(&self) -> &Vec<Page> {
         &self.pages
+    }
+
+    /// links visited getter
+    pub fn get_links(&self) -> &HashSet<String> {
+        &self.links_visited
     }
 
     /// crawl delay getter
@@ -145,15 +151,61 @@ impl<'a> Website<'a> {
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
                 self.log(&format!("- parse {}", &page.get_url()));
-                new_links.extend(links);
-
+                new_links.par_extend(links);
                 if !self.page_store_ignore {
                     self.pages.push(page);
                 }
-
             });
 
             self.links = &new_links - &self.links_visited;
+        }
+    }
+
+
+    /// Start to crawl website using the stack buffer [Experimental: may perform worse or better depending on system specs]
+    /// ATM API only modifies self.links_visited for extracting via website.get_links();
+    pub fn crawl_stack(&mut self, client: Option<Client>) {
+        self.configure_robots_parser();
+        let client = client.unwrap_or(self.configure_http_client(None));
+        let on_link_find_callback = self.on_link_find_callback;
+        
+        let (links_visited, new_links): (Vec<_>, Vec<_>) = self.links.par_iter().map(|link| {
+            let link_clone = link.clone();
+            let link_result = on_link_find_callback(link_clone);
+            let mut page = Page::new(&link_result, &client);
+            let page_links = page.links();
+            
+            (page.get_url().to_string(), page_links)
+        }).collect();
+
+        self.links_visited.par_extend(links_visited);
+
+        let current_links = &self.links_visited;
+        let black_list = &self.configuration.blacklist_url;
+        
+        // par filter and flatten new links
+        let new_links: HashSet<String> = new_links.par_iter().flatten().filter(|l| {
+            let link = l.to_string();
+            if current_links.contains(&link) {
+                return false
+            }
+            if contains(&black_list, &link) {
+                return false;
+            }
+            
+            return true
+        }).cloned().collect();
+
+        if self.configuration.respect_robots_txt {
+            // robots needs to be non static lifetime to allow parr usage.
+            self.links = new_links.iter().filter(|link| self.is_allowed_robots(&link)).cloned().collect();
+        } else {
+            self.links = new_links.iter().cloned().collect();
+        }
+
+        // re-crawl if links exist
+        if !self.links.is_empty() {
+            self.crawl_stack(Some(client));
         }
     }
 
@@ -169,11 +221,19 @@ impl<'a> Website<'a> {
         if contains(&self.configuration.blacklist_url, link) {
             return false;
         }
-        if self.configuration.respect_robots_txt && !self.robot_file_parser.can_fetch("*", link) {
+        if self.configuration.respect_robots_txt && !self.is_allowed_robots(link) {
             return false;
         }
 
         true
+    }
+
+
+    /// return `true` if URL:
+    ///
+    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    pub fn is_allowed_robots(&self, link: &String) -> bool {
+        self.robot_file_parser.can_fetch("*", link)
     }
 
     /// log to console if configuration verbose
@@ -192,6 +252,19 @@ impl<'a> Drop for Website<'a> {
 fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.crawl();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
+#[test]
+fn crawl_stack() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.crawl_stack(None);
     assert!(
         website
             .links_visited

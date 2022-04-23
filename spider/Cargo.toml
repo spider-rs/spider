@@ -23,7 +23,7 @@ rayon = "1.5"
 num_cpus = "1.13.0"
 tokio = { version = "^1.17.0", features = ["rt-multi-thread", "net", "macros"] }
 regex = { version = "^1.5.0", optional = true }
-hashbrown = "0.12"
+hashbrown = { version = "0.12", features = ["rayon"] }
 
 [features]
 regex = ["dep:regex"]
