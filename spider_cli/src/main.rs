@@ -29,8 +29,12 @@ fn main() {
     }
 
     match &cli.command {
-        Some(Commands::CRAWL {}) => {
-            website.crawl();
+        Some(Commands::CRAWL { stack }) => {
+            if *stack {
+                website.crawl_stack(None);
+            } else {
+                website.crawl();
+            }
         }
         None => {}
     }

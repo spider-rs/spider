@@ -22,3 +22,7 @@ default-features = false
 [[example]]
 name = "example"
 path = "example.rs"
+
+[[example]]
+name = "stack"
+path = "stack.rs"
