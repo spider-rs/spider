@@ -119,12 +119,13 @@ impl<'a> Website<'a> {
         let pool = self.create_thread_pool();
         
         // get delay time duration as ms [TODO: move delay checking outside while and use method defined prior]
-        let delay_enabled = &(self.configuration.delay > 0);
-        let delay: Duration = if *delay_enabled {
+        let delay_enabled = self.configuration.delay > 0;
+
+        let delay: Option<Duration> = if delay_enabled {
             Some(self.get_delay())
         } else {
             None
-        }.unwrap();
+        };
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -141,22 +142,23 @@ impl<'a> Website<'a> {
                 let tx = tx.clone();
                 let cx = client.clone();
 
-                if *delay_enabled {
-                    let pspawn = pool.spawn(move || {
-                        let link_result = on_link_find_callback(link);
-                        let mut page = Page::new(&link_result, &cx);
-                        let links = page.links();
-    
-                        tx.send((page, links)).unwrap();
-                    });
-
-                    rayon::join(|| tokio_sleep(&delay), || pspawn);
+                // no concurrency enabled run on main thread [TODO: remove channel usage]
+                if self.configuration.concurrency == 0 {
+                    if delay_enabled {
+                        tokio_sleep(&delay.unwrap())
+                    };
+                    let link_result = on_link_find_callback(link);
+                    let mut page = Page::new(&link_result, &cx);
+                    let links = page.links();
+                    tx.send((page, links)).unwrap();
                 } else {
                     pool.spawn(move || {
+                        if delay_enabled {
+                            tokio_sleep(&delay.unwrap());
+                        }
                         let link_result = on_link_find_callback(link);
                         let mut page = Page::new(&link_result, &cx);
                         let links = page.links();
-    
                         tx.send((page, links)).unwrap();
                     });
                 }
@@ -227,6 +229,21 @@ async fn tokio_sleep(delay: &Duration){
 #[test]
 fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
+    website.crawl();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
+#[test]
+fn crawl_subsequential() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configuration.delay = 1000;
+    website.configuration.concurrency = 0;
     website.crawl();
     assert!(
         website
