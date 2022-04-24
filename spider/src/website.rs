@@ -8,11 +8,12 @@ use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 
 use hashbrown::HashSet;
-use std::{sync, thread, time::Duration};
+use std::{sync, time::{Duration}};
 use reqwest::header::CONNECTION;
 use reqwest::header;
 use sync::mpsc::{channel, Sender, Receiver};
 use log::{log_enabled, info, Level};
+use tokio::time::sleep;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -117,6 +118,14 @@ impl<'a> Website<'a> {
         let on_link_find_callback = self.on_link_find_callback;
         let pool = self.create_thread_pool();
         
+        // get delay time duration as ms [TODO: move delay checking outside while and use method defined prior]
+        let delay_enabled = &(self.configuration.delay > 0);
+        let delay: Duration = if *delay_enabled {
+            Some(self.get_delay())
+        } else {
+            None
+        }.unwrap();
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
@@ -125,24 +134,32 @@ impl<'a> Website<'a> {
                 if !self.is_allowed(link) {
                     continue;
                 }
-                if self.configuration.delay > 0 {
-                    thread::sleep(self.get_delay());
-                }
                 log("- fetch {}", link);
-
                 self.links_visited.insert(link.into());
 
                 let link = link.clone();
                 let tx = tx.clone();
                 let cx = client.clone();
 
-                pool.spawn(move || {
-                    let link_result = on_link_find_callback(link);
-                    let mut page = Page::new(&link_result, &cx);
-                    let links = page.links();
+                if *delay_enabled {
+                    let pspawn = pool.spawn(move || {
+                        let link_result = on_link_find_callback(link);
+                        let mut page = Page::new(&link_result, &cx);
+                        let links = page.links();
+    
+                        tx.send((page, links)).unwrap();
+                    });
 
-                    tx.send((page, links)).unwrap();
-                });
+                    rayon::join(|| tokio_sleep(&delay), || pspawn);
+                } else {
+                    pool.spawn(move || {
+                        let link_result = on_link_find_callback(link);
+                        let mut page = Page::new(&link_result, &cx);
+                        let links = page.links();
+    
+                        tx.send((page, links)).unwrap();
+                    });
+                }
             }
 
             drop(tx);
@@ -199,6 +216,12 @@ pub fn log(message: &str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {
         info!("{}{}", &message, data.as_ref());
     }
+}
+
+// delay the process duration and send
+#[tokio::main]
+async fn tokio_sleep(delay: &Duration){
+    sleep(*delay).await;
 }
 
 #[test]
