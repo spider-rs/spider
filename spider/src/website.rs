@@ -153,7 +153,7 @@ impl<'a> Website<'a> {
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
                 log("- parse {}", page.get_url());
-                new_links.par_extend(links);
+                new_links.extend(links);
                 if !self.page_store_ignore {
                     self.pages.push(page);
                 }
