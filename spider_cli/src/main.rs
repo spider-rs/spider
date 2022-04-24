@@ -15,7 +15,6 @@ fn main() {
     let blacklist_url = cli.blacklist_url.unwrap_or_default();
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
-    website.configuration.verbose = cli.verbose;
     website.configuration.delay = delay;
     website.configuration.concurrency = concurrency;
     website.page_store_ignore = true;

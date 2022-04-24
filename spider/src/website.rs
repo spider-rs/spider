@@ -13,6 +13,7 @@ use std::{sync, thread, time::Duration};
 use reqwest::header::CONNECTION;
 use reqwest::header;
 use sync::mpsc::{channel, Sender, Receiver};
+use log::{log_enabled, info, Level};
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
 /// <pre>
@@ -128,7 +129,8 @@ impl<'a> Website<'a> {
                 if self.configuration.delay > 0 {
                     thread::sleep(self.get_delay());
                 }
-                self.log(&format!("- fetch {}", &link));
+                log("- fetch {}", link);
+
                 self.links_visited.insert(link.into());
 
                 let link = link.clone();
@@ -150,7 +152,7 @@ impl<'a> Website<'a> {
 
             rx.into_iter().for_each(|page| {
                 let (page, links) = page;
-                self.log(&format!("- parse {}", &page.get_url()));
+                log("- parse {}", page.get_url());
                 new_links.par_extend(links);
                 if !self.page_store_ignore {
                     self.pages.push(page);
@@ -235,17 +237,17 @@ impl<'a> Website<'a> {
     pub fn is_allowed_robots(&self, link: &String) -> bool {
         self.robot_file_parser.can_fetch("*", link)
     }
-
-    /// log to console if configuration verbose
-    pub fn log(&self, message: impl AsRef<str>) {
-        if self.configuration.verbose {
-            println!("{}", message.as_ref());
-        }
-    }
 }
 
 impl<'a> Drop for Website<'a> {
     fn drop(&mut self) {}
+}
+
+/// log to console if configuration verbose
+pub fn log(message: &str, data: impl AsRef<str>) {
+    if log_enabled!(Level::Info) {
+        info!("{}{}", &message, data.as_ref());
+    }
 }
 
 #[test]
@@ -289,7 +291,7 @@ fn crawl_invalid() {
 fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.on_link_find_callback = |s| {
-        println!("callback link target: {}", s);
+       log("callback link target: {}", &s);
         s
     };
     website.crawl();
