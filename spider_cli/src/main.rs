@@ -9,9 +9,10 @@ use spider::website::Website;
 fn main() {
     let cli = Cli::parse();
     let mut website: Website = Website::new(&cli.domain);
-    let delay = cli.delay.unwrap_or_default();
-    let concurrency = cli.concurrency.unwrap_or_default();
-    let user_agent = cli.user_agent.unwrap_or_default();
+    
+    let delay = cli.delay.unwrap_or(website.configuration.delay);
+    let concurrency = cli.concurrency.unwrap_or(website.configuration.concurrency);
+    let user_agent = cli.user_agent.unwrap_or(website.configuration.user_agent.to_string());
     let blacklist_url = cli.blacklist_url.unwrap_or_default();
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
@@ -27,8 +28,12 @@ fn main() {
     }
 
     match &cli.command {
-        Some(Commands::CRAWL { }) => {
-            website.crawl();
+        Some(Commands::CRAWL { sync }) => {
+            if *sync {
+                website.crawl_sync();
+            } else {
+                website.crawl();
+            }
         }
         None => {}
     }

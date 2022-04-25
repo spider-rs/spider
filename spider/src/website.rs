@@ -105,16 +105,26 @@ impl<'a> Website<'a> {
             .expect("Failed building thread pool.")
     }
 
-    /// Start to crawl website
-    pub fn crawl(&mut self) {
+    /// setup config for crawl
+    pub fn setup(&mut self) -> Client {
         self.configure_robots_parser();
         let client = self.configure_http_client(None);
 
-        if self.configuration.concurrency == 0 {
-            self.crawl_sequential(&client);
-        } else {
-            self.crawl_concurrent(&client);
-        }
+        client
+    }
+    
+    /// Start to crawl website blocking with async parallelization
+    pub fn crawl(&mut self) {
+        let client = self.setup();
+
+        self.crawl_concurrent(&client);
+    }
+
+    /// Start to crawl website in sync
+    pub fn crawl_sync(&mut self) {
+        let client = self.setup();
+
+        self.crawl_sequential(&client);
     }
 
     /// Start to crawl website concurrently
@@ -258,9 +268,8 @@ fn crawl() {
 #[test]
 fn crawl_subsequential() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.delay = 1000;
-    website.configuration.concurrency = 0;
-    website.crawl();
+    website.configuration.delay = 250;
+    website.crawl_sync();
     assert!(
         website
             .links_visited
