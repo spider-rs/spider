@@ -36,17 +36,13 @@ pub struct Website<'a> {
     links: HashSet<String>,
     /// contains all visited URL
     links_visited: HashSet<String>,
-    /// contains page visited
-    pages: Vec<Page>,
     /// callback when a link is found
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder
     robot_file_parser: RobotFileParser<'a>,
-    // ignore holding page in memory, pages will always be empty
-    pub page_store_ignore: bool,
 }
 
-type Message = (Page, HashSet<String>);
+type Message = HashSet<String>;
 
 impl<'a> Website<'a> {
     /// Initialize Website object with a start link to scrawl.
@@ -54,18 +50,16 @@ impl<'a> Website<'a> {
         Self {
             configuration: Configuration::new(),
             links_visited: HashSet::new(),
-            pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
             links: HashSet::from([format!("{}/", domain)]),
             on_link_find_callback: |s| s,
-            page_store_ignore: false,
             domain: domain.to_owned(),
         }
     }
 
     /// page getter
-    pub fn get_pages(&self) -> &Vec<Page> {
-        &self.pages
+    pub fn get_pages(&self) -> Vec<Page> {
+        self.links_visited.iter().map(|l| Page::build(l, "")).collect()
     }
 
     /// links visited getter
@@ -115,18 +109,21 @@ impl<'a> Website<'a> {
     pub fn crawl(&mut self) {
         self.configure_robots_parser();
         let client = self.configure_http_client(None);
+
+        if self.configuration.concurrency == 0 {
+            self.crawl_sequential(&client);
+        } else {
+            self.crawl_concurrent(&client);
+        }
+    }
+
+    /// Start to crawl website concurrently
+    fn crawl_concurrent(&mut self, client: &Client) {
+        let delay = self.configuration.delay;
+        let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
         let pool = self.create_thread_pool();
         
-        // get delay time duration as ms [TODO: move delay checking outside while and use method defined prior]
-        let delay_enabled = self.configuration.delay > 0;
-
-        let delay: Option<Duration> = if delay_enabled {
-            Some(self.get_delay())
-        } else {
-            None
-        };
-
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
@@ -136,51 +133,70 @@ impl<'a> Website<'a> {
                     continue;
                 }
                 log("- fetch {}", link);
+
                 self.links_visited.insert(link.into());
 
                 let link = link.clone();
                 let tx = tx.clone();
                 let cx = client.clone();
 
-                // no concurrency enabled run on main thread [TODO: remove channel usage]
-                if self.configuration.concurrency == 0 {
+                pool.spawn(move || {
                     if delay_enabled {
-                        tokio_sleep(&delay.unwrap())
-                    };
+                        tokio_sleep(&Duration::from_millis(delay));
+                    }
                     let link_result = on_link_find_callback(link);
                     let mut page = Page::new(&link_result, &cx);
                     let links = page.links();
-                    tx.send((page, links)).unwrap();
-                } else {
-                    pool.spawn(move || {
-                        if delay_enabled {
-                            tokio_sleep(&delay.unwrap());
-                        }
-                        let link_result = on_link_find_callback(link);
-                        let mut page = Page::new(&link_result, &cx);
-                        let links = page.links();
-                        tx.send((page, links)).unwrap();
-                    });
-                }
+
+                    tx.send(links).unwrap();
+                });
             }
 
             drop(tx);
 
             let mut new_links: HashSet<String> = HashSet::new();
 
-            rx.into_iter().for_each(|page| {
-                let (page, links) = page;
-                log("- parse {}", page.get_url());
+            rx.into_iter().for_each(|links| {
                 new_links.extend(links);
-                if !self.page_store_ignore {
-                    self.pages.push(page);
-                }
             });
 
             self.links = &new_links - &self.links_visited;
         }
     }
 
+    /// Start to crawl website sequential
+    fn crawl_sequential(&mut self, client: &Client) {
+        let delay = self.configuration.delay;
+        let delay_enabled = delay > 0;
+        let on_link_find_callback = self.on_link_find_callback;
+        
+        // crawl while links exists
+        while !self.links.is_empty() {
+            let mut new_links: HashSet<String> = HashSet::new();
+
+            for link in self.links.iter() {
+                if !self.is_allowed(link) {
+                    continue;
+                }
+                log("- fetch {}", link);
+                self.links_visited.insert(link.into());
+                if delay_enabled {
+                    tokio_sleep(&Duration::from_millis(delay));
+                }
+
+                let link = link.clone();
+                let cx = client.clone();
+                let link_result = on_link_find_callback(link);
+                let mut page = Page::new(&link_result, &cx);
+                let links = page.links();
+
+                new_links.extend(links);
+            }
+
+            self.links = &new_links - &self.links_visited;
+        }
+    }
+    
     /// return `true` if URL:
     ///
     /// - is not already crawled
@@ -220,7 +236,7 @@ pub fn log(message: &str, data: impl AsRef<str>) {
     }
 }
 
-// delay the process duration and send
+// blocking sleep keeping thread alive
 #[tokio::main]
 async fn tokio_sleep(delay: &Duration){
     sleep(*delay).await;
