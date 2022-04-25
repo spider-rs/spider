@@ -1,7 +1,7 @@
 use crate::black_list::contains;
 use crate::configuration::Configuration;
 use crate::page::Page;
-use crate::utils::{Client};
+use crate::utils::{log, Client};
 
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -12,7 +12,6 @@ use std::{sync, time::{Duration}};
 use reqwest::header::CONNECTION;
 use reqwest::header;
 use sync::mpsc::{channel, Sender, Receiver};
-use log::{log_enabled, info, Level};
 use tokio::time::sleep;
 
 /// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
@@ -237,13 +236,6 @@ impl<'a> Website<'a> {
 
 impl<'a> Drop for Website<'a> {
     fn drop(&mut self) {}
-}
-
-/// log to console if configuration verbose
-pub fn log(message: &str, data: impl AsRef<str>) {
-    if log_enabled!(Level::Info) {
-        info!("{}{}", &message, data.as_ref());
-    }
 }
 
 // blocking sleep keeping thread alive
