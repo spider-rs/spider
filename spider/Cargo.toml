@@ -16,7 +16,7 @@ maintenance = { status = "as-is" }
 
 [dependencies]
 reqwest = { version = "0.11.10", features = ["blocking"] }
-scraper = "0.12"
+scraper = "0.13"
 robotparser-fork = "0.10.5"
 url = "2.2"
 rayon = "1.5"
