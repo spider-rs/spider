@@ -17,7 +17,6 @@ fn main() {
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
     website.configuration.delay = delay;
     website.configuration.concurrency = concurrency;
-    website.page_store_ignore = true;
 
     if !blacklist_url.is_empty() {
         website.configuration.blacklist_url.push(blacklist_url);
