@@ -17,3 +17,7 @@ cargo run --example example
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Stargazers over time
+
+[![Stargazers over time](https://starchart.cc/madeindjs/spider.svg)](https://starchart.cc/madeindjs/spider)
