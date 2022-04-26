@@ -25,10 +25,20 @@ pub struct Configuration {
 
 impl Configuration {
     pub fn new() -> Self {
+        let logical_cpus = num_cpus::get();
+        let physical_cpus = num_cpus::get_physical();
+
+        // determine simultaneous multithreading
+        let concurrency = if logical_cpus > physical_cpus {
+            logical_cpus / physical_cpus
+        } else {
+            logical_cpus
+        };
+        
         Self {
             user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
             delay: 250,
-            concurrency: num_cpus::get() * 4,
+            concurrency,
             ..Default::default()
         }
     }
