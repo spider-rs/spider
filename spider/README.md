@@ -10,20 +10,18 @@ On Linux
 
 - OpenSSL 1.0.1, 1.0.2, 1.1.0, or 1.1.1
 
-````
+## Example
 
-## Usage
-
-Add this dependency to your _Cargo.toml_ file.
+This is a basic blocking example crawling a web page, add spider to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 spider = "1.7.6"
-````
+```
 
-Then you'll be able to use library. Here is a simple example:
+And then the code:
 
-```rust
+```rust,no_run
 extern crate spider;
 
 use spider::website::Website;
@@ -51,4 +49,29 @@ website.configuration.user_agent = "myapp/version"; // Defaults to spider/x.y.z,
 website.on_link_find_callback = |s| { println!("link target: {}", s); s }; // Callback to run on each link find
 
 website.crawl();
+```
+
+## Regex Blacklisting
+
+There is an optional "regex" crate that can be enabled:
+
+```toml
+[dependencies]
+spider = { version = "1.7.6", features = ["regex"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::website::Website;
+
+fn main() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configuration.blacklist_url.push("/licenses/".to_string());
+    website.crawl();
+
+    for page in website.get_pages() {
+        println!("- {}", page.get_url());
+    }
+}
 ```
