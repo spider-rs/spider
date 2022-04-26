@@ -33,7 +33,7 @@ impl Configuration {
             logical_cpus / physical_cpus
         } else {
             logical_cpus
-        };
+        } * 4;
         
         Self {
             user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
