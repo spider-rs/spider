@@ -20,7 +20,7 @@ pub struct Cli {
     /// How many request can be run simultaneously
     #[clap(short, long)]
     pub concurrency: Option<usize>,
-    /// List of page to not crawl
+    /// Comma seperated string list of pages to not crawl or regex with feature enabled
     #[clap(short, long)]
     pub blacklist_url: Option<String>,
     /// User-Agent

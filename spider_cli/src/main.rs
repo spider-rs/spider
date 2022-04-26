@@ -20,7 +20,8 @@ fn main() {
     website.configuration.concurrency = concurrency;
 
     if !blacklist_url.is_empty() {
-        website.configuration.blacklist_url.push(blacklist_url);
+        let blacklist_url: Vec<String> = blacklist_url.split(",").map(|l| l.to_string()).collect();
+        website.configuration.blacklist_url.extend(blacklist_url);
     }
 
     if !user_agent.is_empty() {
