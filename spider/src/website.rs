@@ -67,7 +67,7 @@ impl<'a> Website<'a> {
     }
 
     /// crawl delay getter
-    pub fn get_delay(&self) -> Duration {
+    fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
     }
 
@@ -105,7 +105,7 @@ impl<'a> Website<'a> {
     }
 
     /// setup config for crawl
-    pub fn setup(&mut self) -> Client {
+    fn setup(&mut self) -> Client {
         self.configure_robots_parser();
         let client = self.configure_http_client(None);
 

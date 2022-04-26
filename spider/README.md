@@ -18,7 +18,7 @@ Add this dependency to your _Cargo.toml_ file.
 
 ```toml
 [dependencies]
-spider = "1.7.4"
+spider = "1.7.5"
 ```
 
 Then you'll be able to use library. Here is a simple example:
