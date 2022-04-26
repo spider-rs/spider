@@ -1,4 +1,5 @@
 extern crate spider;
+extern crate env_logger;
 
 pub mod options;
 
@@ -8,6 +9,16 @@ use spider::website::Website;
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.verbose {
+        use env_logger::Env;
+        let env = Env::default()
+            .filter_or("RUST_LOG", "info")
+            .write_style_or("RUST_LOG_STYLE", "always");
+
+        env_logger::init_from_env(env);
+    }
+
     let mut website: Website = Website::new(&cli.domain);
     
     let delay = cli.delay.unwrap_or(website.configuration.delay);

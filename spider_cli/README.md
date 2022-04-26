@@ -21,10 +21,10 @@ cargo install spider_cli
 ## Cli
 
 The following can also be ran via command line to run the crawler.
-Website args are optional except `domain`.
+Website args are optional except `domain`. If you need verbose output pass in the `-v` flag.
 
 ```sh
-spider --domain https://choosealicense.com --delay 2000 --blacklist-url license,books --user-agent something@1.20 crawl
+spider -v --domain https://choosealicense.com crawl
 ```
 
 All website options are available except `website.on_link_find_callback`.

@@ -141,7 +141,7 @@ impl<'a> Website<'a> {
                 if !self.is_allowed(link) {
                     continue;
                 }
-                log("- fetch {}", link);
+                log("fetch", link);
 
                 self.links_visited.insert(link.into());
 
@@ -187,7 +187,7 @@ impl<'a> Website<'a> {
                 if !self.is_allowed(link) {
                     continue;
                 }
-                log("- fetch {}", link);
+                log("fetch", link);
                 self.links_visited.insert(link.into());
                 if delay_enabled {
                     tokio_sleep(&Duration::from_millis(delay));

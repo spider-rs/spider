@@ -22,8 +22,8 @@ pub fn fetch_page_html(url: &str, client: &Client) -> String {
 }
 
 /// log to console if configuration verbose
-pub fn log(message: &str, data: impl AsRef<str>) {
+pub fn log(message: &'static str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {
-        info!("{}{}", &message, data.as_ref());
+        info!("{message} - {}", data.as_ref());
     }
 }
