@@ -2,6 +2,7 @@ pub use crate::reqwest::blocking::{Client};
 use reqwest::StatusCode;
 use log::{log_enabled, info, Level};
 
+/// Perform a network request to a resource extracting all content as text
 pub fn fetch_page_html(url: &str, client: &Client) -> String {
     let mut body = String::new();
 

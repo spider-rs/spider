@@ -17,6 +17,7 @@ pub mod utils;
 /// A website to crawl
 pub mod website;
 
+/// Black list checking url exist with Regex
 #[cfg(feature = "regex")]
 mod black_list {
     use regex::Regex;
@@ -33,6 +34,7 @@ mod black_list {
     }
 }
 
+/// Black list checking url exist
 #[cfg(not(feature = "regex"))]
 mod black_list {
     /// check if link exist in blacklists
