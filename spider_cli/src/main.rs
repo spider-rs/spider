@@ -6,6 +6,7 @@ pub mod options;
 use clap::Parser;
 use options::{Cli, Commands};
 use spider::website::Website;
+use std::io::{self, Write};
 
 fn main() {
     let cli = Cli::parse();
@@ -40,12 +41,18 @@ fn main() {
     }
 
     match &cli.command {
-        Some(Commands::CRAWL { sync }) => {
+        Some(Commands::CRAWL { sync, output_links }) => {
             if *sync {
                 website.crawl_sync();
             } else {
                 website.crawl();
             }
+
+            if *output_links {
+                let links: Vec<_> = website.get_links().iter().collect();
+                io::stdout().write_all(format!("{:?}", links).as_bytes()).unwrap();
+            }
+
         }
         None => {}
     }

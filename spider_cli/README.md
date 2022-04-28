@@ -27,4 +27,10 @@ Website args are optional except `domain`. If you need verbose output pass in th
 spider -v --domain https://choosealicense.com crawl
 ```
 
+Crawl and output all links visited on finished to a file.
+
+```sh
+spider  --domain https://choosealicense.com crawl -o > spider_choosealicense.json
+```
+
 All website options are available except `website.on_link_find_callback`.
