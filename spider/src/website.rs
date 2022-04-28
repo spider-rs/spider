@@ -14,7 +14,7 @@ use reqwest::header;
 use sync::mpsc::{channel, Sender, Receiver};
 use tokio::time::sleep;
 
-/// Represent a website to scrawl. To start crawling, instanciate a new `struct` using
+/// Represent a website to crawl. To start crawling, instanciate a new `struct` using
 /// <pre>
 /// let mut localhost = Website::new("http://example.com");
 /// localhost.crawl();
@@ -44,7 +44,7 @@ pub struct Website<'a> {
 type Message = HashSet<String>;
 
 impl<'a> Website<'a> {
-    /// Initialize Website object with a start link to scrawl.
+    /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
         Self {
             configuration: Configuration::new(),
@@ -156,6 +156,7 @@ impl<'a> Website<'a> {
                     let link_result = on_link_find_callback(link);
                     let mut page = Page::new(&link_result, &cx);
                     let links = page.links();
+                    page.clear_html(); // clear the html before sending back to main thread
 
                     tx.send(links).unwrap();
                 });
@@ -196,7 +197,7 @@ impl<'a> Website<'a> {
                 let link = link.clone();
                 let cx = client.clone();
                 let link_result = on_link_find_callback(link);
-                let mut page = Page::new(&link_result, &cx);
+                let page = Page::new(&link_result, &cx);
                 let links = page.links();
 
                 new_links.extend(links);

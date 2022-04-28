@@ -17,8 +17,8 @@ pub mod utils;
 /// A website to crawl
 pub mod website;
 
-/// Black list checking url exist with Regex
 #[cfg(feature = "regex")]
+/// Black list checking url exist with Regex
 mod black_list {
     use regex::Regex;
     /// check if link exist in blacklists with regex
@@ -34,8 +34,8 @@ mod black_list {
     }
 }
 
-/// Black list checking url exist
 #[cfg(not(feature = "regex"))]
+/// Black list checking url exist
 mod black_list {
     /// check if link exist in blacklists
     pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {

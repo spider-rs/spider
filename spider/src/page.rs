@@ -4,8 +4,6 @@ use crate::utils::{fetch_page_html, Client};
 use hashbrown::HashSet;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
-///
-/// **TODO**: store some usefull informations like code status, response time, headers, etc..
 #[derive(Debug, Clone)]
 pub struct Page {
     /// URL of this page
@@ -17,9 +15,9 @@ pub struct Page {
 }
 
 impl Page {
-    /// Instanciate a new page and start to scrape it.
+    /// Instantiate a new page and start to scrape it.
     pub fn new(url: &str, client: &Client) -> Self {
-        let html = fetch_page_html(&url, &client);
+        let html = fetch_page_html(&url, &client); // TODO: remove heavy cpu / network from new
 
         Page::build(url, &html)
     }
@@ -41,6 +39,11 @@ impl Page {
     /// HTML parser
     pub fn get_html(&self) -> Html {
         Html::parse_document(&self.html)
+    }
+
+    /// Clear the html for a page
+    pub fn clear_html(&mut self) {
+        self.html.clear();
     }
 
     /// html selector for valid web pages for domain
@@ -69,12 +72,10 @@ impl Page {
         .unwrap()
     }
 
-    /// Find all href links and return them: this also clears the set html for the page
-    pub fn links(&mut self) -> HashSet<String> {
+    /// Find all href links and return them
+    pub fn links(&self) -> HashSet<String> {
         let selector = self.get_page_selectors(&self.url);
         let html = self.get_html();
-
-        self.html.clear();
         
         html.select(&selector)
             .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())
@@ -97,8 +98,7 @@ fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let mut page: Page = Page::new(&link_result, &client);
-
+    let page: Page = Page::new(&link_result, &client);
     let links = page.links();
 
     assert!(
