@@ -2,11 +2,9 @@ use crate::black_list::contains;
 use crate::configuration::Configuration;
 use crate::page::Page;
 use crate::utils::{log, Client};
-
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
-
 use hashbrown::HashSet;
 use std::{sync, time::{Duration}};
 use reqwest::header::CONNECTION;

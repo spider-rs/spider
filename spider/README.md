@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.7.12"
+spider = "1.7.13"
 ```
 
 And then the code:
@@ -57,7 +57,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.7.12", features = ["regex"] }
+spider = { version = "1.7.13", features = ["regex"] }
 ```
 
 ```rust,no_run
