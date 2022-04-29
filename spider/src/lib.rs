@@ -7,6 +7,8 @@ extern crate tokio;
 extern crate url;
 extern crate hashbrown;
 extern crate log;
+#[macro_use]
+extern crate lazy_static;
 
 /// Configuration structure for `Website`
 pub mod configuration;
