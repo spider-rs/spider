@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.7.13"
+version = "1.7.14"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
@@ -25,6 +25,7 @@ tokio = { version = "^1.17.0", features = [ "rt-multi-thread", "net", "macros", 
 regex = { version = "^1.5.0", optional = true }
 hashbrown = { version = "0.12" }
 log = "0.4.16"
+lazy_static = "1.4.0"
 
 [features]
 regex = ["dep:regex"]

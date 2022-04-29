@@ -14,6 +14,23 @@ pub struct Page {
     base: Url
 }
 
+/// Macro to get all media selectors that should be ignored for link gathering
+macro_rules! media_ignore_selector {
+    () => ( 
+        concat!(
+        r#":not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"])"#, // images
+        r#":not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"])"#, // videos
+        r#":not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#) // else
+    )
+}
+
+lazy_static! {
+    /// CSS query selector to ignore all resources that are not valid web pages
+    static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
+    /// CSS query selector for all relative links
+    static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
+}
+
 impl Page {
     /// Instantiate a new page and start to scrape it.
     pub fn new(url: &str, client: &Client) -> Self {
@@ -48,24 +65,22 @@ impl Page {
 
     /// html selector for valid web pages for domain
     pub fn get_page_selectors(&self, domain: &str) -> Selector {
-        let media_ignore_selector = r#":not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"]):not([href$=".pdf"])"#;
-        let relative_selector = &format!(
-            r#"a[href^="/"]{}"#,
-            media_ignore_selector,
-        );
+        // select all absolute links
         let absolute_selector = &format!(
             r#"a[href^="{}"]{}"#,
             domain,
-            media_ignore_selector,
+            *MEDIA_IGNORE_SELECTOR,
         );
+        // allow relative and absolute .html files
         let static_html_selector = &format!(
             r#"{} [href$=".html"], {} [href$=".html"]"#,
-            relative_selector,
+            *MEDIA_SELECTOR_RELATIVE,
             absolute_selector,
         );
+        // select all relative links, absolute, and static .html files for a domain
         Selector::parse(&format!(
             "{},{},{}",
-            relative_selector,
+            *MEDIA_SELECTOR_RELATIVE,
             absolute_selector,
             static_html_selector
         ))
