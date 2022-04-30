@@ -6,15 +6,15 @@ use hashbrown::HashSet;
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
 pub struct Page {
-    /// URL of this page
+    /// URL of this page.
     url: String,
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is cleared when crawling concurrently before sending to main thread.
     html: String,
-    /// Base absolute url for domain
+    /// Base absolute url for domain.
     base: Url
 }
 
-/// Macro to get all media selectors that should be ignored for link gathering
+/// Macro to get all media selectors that should be ignored for link gathering.
 macro_rules! media_ignore_selector {
     () => ( 
         concat!(
@@ -25,7 +25,7 @@ macro_rules! media_ignore_selector {
 }
 
 lazy_static! {
-    /// CSS query selector to ignore all resources that are not valid web pages
+    /// CSS query selector to ignore all resources that are not valid web pages.
     static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
     /// CSS query selector for all relative links
     static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
@@ -39,7 +39,7 @@ impl Page {
         Page::build(url, &html)
     }
 
-    /// Instanciate a new page without scraping it (used for testing purposes)
+    /// Instanciate a new page without scraping it (used for testing purposes).
     pub fn build(url: &str, html: &str) -> Self {
         Self {
             url: url.to_string(),
@@ -48,22 +48,22 @@ impl Page {
         }
     }
 
-    /// URL getter
+    /// URL getter for page.
     pub fn get_url(&self) -> &String {
         &self.url
     }
 
-    /// HTML parser
+    /// HTML returned from Scraper.
     pub fn get_html(&self) -> Html {
         Html::parse_document(&self.html)
     }
 
-    /// Clear the html for a page
+    /// Clear the html for the page.
     pub fn clear_html(&mut self) {
         self.html.clear();
     }
 
-    /// html selector for valid web pages for domain
+    /// html selector for valid web pages for domain.
     pub fn get_page_selectors(&self, domain: &str) -> Selector {
         // select all absolute links
         let absolute_selector = &format!(
@@ -87,7 +87,7 @@ impl Page {
         .unwrap()
     }
 
-    /// Find all href links and return them
+    /// Find all href links and return them using CSS selectors.
     pub fn links(&self) -> HashSet<String> {
         let selector = self.get_page_selectors(&self.url);
         let html = self.get_html();
@@ -97,6 +97,7 @@ impl Page {
             .collect()
     }
 
+    /// Convert a URL to its absolute path without any fragments or params.
     fn abs_path(&self, href: &str) -> Url {
         let mut joined = self.base.join(href).unwrap_or(Url::parse(&self.url.to_string()).expect("Invalid page URL"));
 

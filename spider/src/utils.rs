@@ -2,7 +2,7 @@ pub use crate::reqwest::blocking::{Client};
 use reqwest::StatusCode;
 use log::{log_enabled, info, Level};
 
-/// Perform a network request to a resource extracting all content as text
+/// Perform a network request to a resource extracting all content as text.
 pub fn fetch_page_html(url: &str, client: &Client) -> String {
     let mut body = String::new();
 
@@ -22,7 +22,7 @@ pub fn fetch_page_html(url: &str, client: &Client) -> String {
     body
 }
 
-/// log to console if configuration verbose
+/// log to console if configuration verbose.
 pub fn log(message: &'static str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {
         info!("{message} - {}", data.as_ref());

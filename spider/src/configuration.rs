@@ -11,19 +11,20 @@ use std::env;
 /// ```
 #[derive(Debug, Default)]
 pub struct Configuration {
-    /// Respect robots.txt file and not scrape not allowed files
+    /// Respect robots.txt file and not scrape not allowed files.
     pub respect_robots_txt: bool,
-    /// List of pages to not crawl [optional: regex pattern matching]
+    /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Vec<String>,
     /// User-Agent
     pub user_agent: &'static str,
-    /// Polite crawling delay in milli seconds
+    /// Polite crawling delay in milli seconds.
     pub delay: u64,
-    /// How many request can be run simultaneously
+    /// How many request can be run simultaneously.
     pub concurrency: usize,
 }
 
 impl Configuration {
+    /// Represents crawl configuration for a website.
     pub fn new() -> Self {
         let logical_cpus = num_cpus::get();
         let physical_cpus = num_cpus::get_physical();

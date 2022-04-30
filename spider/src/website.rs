@@ -18,7 +18,6 @@ use tokio::time::sleep;
 /// let mut localhost = Website::new("http://example.com");
 /// localhost.crawl();
 /// // `Website` will be filled with `Pages` when crawled. To get them, just use
-/// 
 /// for page in localhost.get_pages() {
 ///     // do something
 /// }

@@ -10,20 +10,20 @@ extern crate log;
 #[macro_use]
 extern crate lazy_static;
 
-/// Configuration structure for `Website`
+/// Configuration structure for `Website`.
 pub mod configuration;
-/// A page scraped
+/// A page scraped.
 pub mod page;
-/// Application utils
+/// Application utils.
 pub mod utils;
-/// A website to crawl
+/// A website to crawl.
 pub mod website;
 
 #[cfg(feature = "regex")]
-/// Black list checking url exist with Regex
+/// Black list checking url exist with Regex.
 pub mod black_list {
     use regex::Regex;
-    /// check if link exist in blacklists with regex
+    /// check if link exist in blacklists with regex.
     pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
         for pattern in blacklist_url {
             let re = Regex::new(pattern).unwrap();
@@ -37,9 +37,9 @@ pub mod black_list {
 }
 
 #[cfg(not(feature = "regex"))]
-/// Black list checking url exist
+/// Black list checking url exist.
 pub mod black_list {
-    /// check if link exist in blacklists
+    /// check if link exist in blacklists.
     pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
         blacklist_url.contains(&link)
     }
