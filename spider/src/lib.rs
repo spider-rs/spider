@@ -1,3 +1,29 @@
+#![warn(missing_docs)]
+
+//! Website crawling library that rapidly crawls all pages to
+//! gather links in parallel
+//!
+//! Spider is multi-threaded crawler that can be configured
+//! to scrape web pages. It has the ability to gather
+//! tens of thousands of pages within seconds.
+//!
+//! # How to use Spider
+//!
+//! There are two ways to use Spider:
+//!
+//! - **Concurrent** is the fastest way to start crawling a web page and
+//!   typically the most efficient.
+//!   - [`website.crawl`] is used to crawl concurrently :blocking.
+//! - **Sequentially** lets you crawl the web pages one after another respecting delay sequences.
+//!   - [`website.crawl_sync`] is used to crawl in sync :blocking.
+//!
+//! # Basic usage
+//!
+//! First, you will need to add `spider` to your `Cargo.toml`.
+//!
+//! Next, simply add the website url in the struct of website and crawl,
+//! you can also crawl sequentially.
+
 extern crate num_cpus;
 extern crate rayon;
 extern crate reqwest;

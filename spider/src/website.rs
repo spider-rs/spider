@@ -7,10 +7,10 @@ use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;
 use hashbrown::HashSet;
-use std::{sync, time::{Duration}};
+use std::{time::{Duration}};
+use std::sync::mpsc::{channel, Sender, Receiver};
 use reqwest::header::CONNECTION;
 use reqwest::header;
-use sync::mpsc::{channel, Sender, Receiver};
 use tokio::time::sleep;
 
 /// Represents a website to crawl and gather all links.
@@ -25,17 +25,17 @@ use tokio::time::sleep;
 /// ```
 #[derive(Debug)]
 pub struct Website<'a> {
-    // configuration properies
+    /// configuration properties for website.
     pub configuration: Configuration,
-    /// this is a start URL given when instanciate with `new`
+    /// this is a start URL given when instanciate with `new`.
     pub domain: String,
-    /// contains all non-visited URL
+    /// contains all non-visited URL.
     links: HashSet<String>,
-    /// contains all visited URL
+    /// contains all visited URL.
     links_visited: HashSet<String>,
-    /// callback when a link is found
+    /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
-    /// Robot.txt parser holder
+    /// Robot.txt parser holder.
     robot_file_parser: RobotFileParser<'a>,
 }
 
