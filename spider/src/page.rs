@@ -8,7 +8,7 @@ use hashbrown::HashSet;
 pub struct Page {
     /// URL of this page
     url: String,
-    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib
+    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is cleared when crawling concurrently before sending to main thread.
     html: String,
     /// Base absolute url for domain
     base: Url

@@ -12,17 +12,17 @@ use reqwest::header;
 use sync::mpsc::{channel, Sender, Receiver};
 use tokio::time::sleep;
 
-/// Represent a website to crawl. To start crawling, instanciate a new `struct` using
-/// <pre>
+/// Represents a website to crawl and gather all links.
+/// ```rust
+/// use spider::website::Website;
 /// let mut localhost = Website::new("http://example.com");
 /// localhost.crawl();
-/// </pre>
-/// `Website` will be filled with `Pages` when crawled. To get them, just use
-/// <pre>
+/// // `Website` will be filled with `Pages` when crawled. To get them, just use
+/// 
 /// for page in localhost.get_pages() {
 ///     // do something
 /// }
-/// </pre>
+/// ```
 #[derive(Debug)]
 pub struct Website<'a> {
     // configuration properies
