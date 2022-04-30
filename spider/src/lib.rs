@@ -13,10 +13,13 @@
 //!
 //! - **Concurrent** is the fastest way to start crawling a web page and
 //!   typically the most efficient.
-//!   - [`website.crawl`] is used to crawl concurrently :blocking.
-//! - **Sequentially** lets you crawl the web pages one after another respecting delay sequences.
-//!   - [`website.crawl_sync`] is used to crawl in sync :blocking.
+//!   - [`crawl`] is used to crawl concurrently :blocking.
+//! - **Sequential** lets you crawl the web pages one after another respecting delay sequences.
+//!   - [`crawl_sync`] is used to crawl in sync :blocking.
 //!
+//! [`crawl`]: website/struct.Website.html#method.crawl
+//! [`crawl_sync`]: website/struct.Website.html#method.crawl_sync
+//! 
 //! # Basic usage
 //!
 //! First, you will need to add `spider` to your `Cargo.toml`.
