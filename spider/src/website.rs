@@ -1,7 +1,8 @@
 use crate::black_list::contains;
 use crate::configuration::Configuration;
 use crate::page::Page;
-use crate::utils::{log, Client};
+use crate::utils::{log};
+use reqwest::blocking::{Client};
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use robotparser_fork::RobotFileParser;

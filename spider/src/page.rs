@@ -1,6 +1,7 @@
 use scraper::{Html, Selector};
 use url::Url;
-use crate::utils::{fetch_page_html, Client};
+use crate::utils::{fetch_page_html};
+use reqwest::blocking::{Client};
 use hashbrown::HashSet;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).

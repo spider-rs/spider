@@ -1,4 +1,4 @@
-pub use crate::reqwest::blocking::{Client};
+use reqwest::blocking::{Client};
 use reqwest::StatusCode;
 use log::{log_enabled, info, Level};
 
