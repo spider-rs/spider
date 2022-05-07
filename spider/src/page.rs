@@ -30,6 +30,8 @@ lazy_static! {
     static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
     /// CSS query selector for all relative links
     static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
+    /// CSS query selector for all common static MIME types.
+    static ref MEDIA_SELECTOR_STATIC: &'static str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
 }
 
 impl Page {
@@ -74,9 +76,11 @@ impl Page {
         );
         // allow relative and absolute .html files
         let static_html_selector = &format!(
-            r#"{} [href$=".html"], {} [href$=".html"]"#,
+            r#"{} {}, {} {}"#,
             *MEDIA_SELECTOR_RELATIVE,
+            *MEDIA_SELECTOR_STATIC,
             absolute_selector,
+            *MEDIA_SELECTOR_STATIC
         );
         // select all relative links, absolute, and static .html files for a domain
         Selector::parse(&format!(
