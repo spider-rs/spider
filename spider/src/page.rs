@@ -9,7 +9,7 @@ use hashbrown::HashSet;
 pub struct Page {
     /// URL of this page.
     url: String,
-    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is cleared when crawling concurrently before sending to main thread.
+    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
     html: String,
     /// Base absolute url for domain.
     base: Url
@@ -57,7 +57,7 @@ impl Page {
     }
 
     /// HTML returned from Scraper.
-    pub fn get_html(&self) -> Html {
+    fn parse_html(&self) -> Html {
         Html::parse_document(&self.html)
     }
 
@@ -95,7 +95,7 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     pub fn links(&self) -> HashSet<String> {
         let selector = self.get_page_selectors(&self.url);
-        let html = self.get_html();
+        let html = self.parse_html();
         
         html.select(&selector)
             .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())

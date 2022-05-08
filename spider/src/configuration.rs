@@ -20,7 +20,7 @@ pub struct Configuration {
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
     /// How many request can be run simultaneously.
-    pub concurrency: usize,
+    pub concurrency: usize
 }
 
 impl Configuration {
