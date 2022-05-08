@@ -15,4 +15,8 @@ pub fn main() {
     // install node deps
     Command::new("npm").arg("init").arg("-y").output().expect("go init failed");
     Command::new("npm").arg("i").arg("crawler").arg("--save").output().expect("go init failed");
+
+    if cfg!(target_os = "linux") {
+        Command::new("apt-get").arg("install").arg("wget").output().expect("wget install failed");
+    }
 }
