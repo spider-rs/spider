@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Multithreaded web crawler written in Rust main repo.
+Multithreaded web crawler/indexer written in Rust main repo.
 
 ## Dependencies
 
@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.7.21"
+spider = "1.7.22"
 ```
 
 And then the code:
@@ -57,7 +57,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.7.21", features = ["regex"] }
+spider = { version = "1.7.22", features = ["regex"] }
 ```
 
 ```rust,no_run

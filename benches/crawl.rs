@@ -24,7 +24,7 @@ pub fn bench_speed(c: &mut Criterion) {
         .expect("node command failed to start"))
     ));
     group.bench_function("C[wget]: with crawl 10 times", |b| b.iter(|| black_box(Command::new("wget")
-        .args(["--recursive", "--no-parent", "--ignore-tags=img,link,script", "--spider", "-q". "https://rsseau.fr"])
+        .args(["--recursive", "--no-parent", "--ignore-tags=img,link,script", "--spider", "-q", "https://rsseau.fr"])
         .output()
         .expect("wget command failed to start"))
     ));

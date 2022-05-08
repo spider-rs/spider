@@ -126,10 +126,10 @@ impl<'a> Website<'a> {
 
     /// Start to crawl website concurrently
     fn crawl_concurrent(&mut self, client: &Client) {
+        let pool = self.create_thread_pool();
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-        let pool = self.create_thread_pool();
         
         // crawl while links exists
         while !self.links.is_empty() {
@@ -152,9 +152,8 @@ impl<'a> Website<'a> {
                         tokio_sleep(&Duration::from_millis(delay));
                     }
                     let link_result = on_link_find_callback(link);
-                    let mut page = Page::new(&link_result, &cx);
+                    let page = Page::new(&link_result, &cx);
                     let links = page.links();
-                    page.clear_html(); // clear the html before sending back to main thread
 
                     tx.send(links).unwrap();
                 });
