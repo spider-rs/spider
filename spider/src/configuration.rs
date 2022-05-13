@@ -16,7 +16,7 @@ pub struct Configuration {
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Vec<String>,
     /// User-Agent
-    pub user_agent: &'static str,
+    pub user_agent: String,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
     /// How many request can be run simultaneously.
@@ -37,7 +37,7 @@ impl Configuration {
         } * 4;
         
         Self {
-            user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
+            user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).into(),
             delay: 250,
             concurrency,
             ..Default::default()

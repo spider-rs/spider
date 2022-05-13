@@ -336,7 +336,7 @@ fn test_respect_robots_txt() {
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");
     website_second.configuration.respect_robots_txt = true;
-    website_second.configuration.user_agent = "bingbot";
+    website_second.configuration.user_agent = "bingbot".into();
     website_second.configure_robots_parser();
     assert_eq!(
         website_second.configuration.user_agent,

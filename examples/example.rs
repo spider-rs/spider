@@ -8,7 +8,7 @@ fn main() {
   website.configuration.respect_robots_txt = true;
   website.configuration.delay = 15; // Defaults to 250 ms
   website.configuration.concurrency = 10; // Defaults to number of cpus available
-  website.configuration.user_agent = "SpiderBot"; // Defaults to spider/x.y.z, where x.y.z is the library version
+  website.configuration.user_agent = "SpiderBot".into(); // Defaults to spider/x.y.z, where x.y.z is the library version
   website.crawl();
 
   for page in website.get_pages() {

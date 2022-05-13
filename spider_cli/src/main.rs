@@ -37,7 +37,7 @@ fn main() {
     }
 
     if !user_agent.is_empty() {
-        website.configuration.user_agent = Box::leak(user_agent.to_owned().into_boxed_str());
+        website.configuration.user_agent = user_agent;
     }
 
     match &cli.command {
