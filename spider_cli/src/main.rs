@@ -1,5 +1,6 @@
 extern crate spider;
 extern crate env_logger;
+extern crate serde_json;
 
 pub mod options;
 
@@ -52,6 +53,40 @@ fn main() {
                 let links: Vec<_> = website.get_links().iter().collect();
                 io::stdout().write_all(format!("{:?}", links).as_bytes()).unwrap();
             }
+
+        }
+        Some(Commands::SCRAPE { output_html, output_links }) => {
+            use serde_json::{json};
+
+            website.scrape();
+
+            let mut page_objects: Vec<_> = vec![];
+
+            for page in website.get_pages() {
+                let mut links: Vec<String> = vec![];
+                let mut html: &String = &String::new();
+
+                if *output_links {
+                    let page_links = page.links();
+                    links.extend(page_links);
+                }
+
+                if *output_html {
+                    html = page.get_html();
+                }
+
+                let page_json = json!({
+                    "url": page.get_url(),
+                    "links": links,
+                    "html": html,
+                });
+
+                page_objects.push(page_json);
+            }
+            
+            let j = serde_json::to_string_pretty(&page_objects).unwrap();
+
+            io::stdout().write_all(j.as_bytes()).unwrap();
 
         }
         None => {}

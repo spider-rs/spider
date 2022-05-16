@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-The fastest web indexer. (SpiderBot)
+The fastest web crawler and indexer.
 
 ## Getting Started
 
