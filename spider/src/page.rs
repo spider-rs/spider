@@ -56,6 +56,11 @@ impl Page {
         &self.url
     }
 
+    /// Html getter for page.
+    pub fn get_html(&self) -> &String {
+        &self.html
+    }
+
     /// HTML returned from Scraper.
     fn parse_html(&self) -> Html {
         Html::parse_document(&self.html)

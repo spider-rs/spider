@@ -33,6 +33,8 @@ pub struct Website<'a> {
     links: HashSet<String>,
     /// contains all visited URL.
     links_visited: HashSet<String>,
+    /// contains page visited
+    pages: Vec<Page>,
     /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
@@ -47,6 +49,7 @@ impl<'a> Website<'a> {
         Self {
             configuration: Configuration::new(),
             links_visited: HashSet::new(),
+            pages: Vec::new(),
             robot_file_parser: RobotFileParser::new(&format!("{}/robots.txt", domain)), // TODO: lazy establish
             links: HashSet::from([format!("{}/", domain)]),
             on_link_find_callback: |s| s,
@@ -56,7 +59,11 @@ impl<'a> Website<'a> {
 
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
-        self.links_visited.iter().map(|l| Page::build(l, "")).collect()
+        if !self.pages.is_empty(){
+            self.pages.clone()
+        } else {
+            self.links_visited.iter().map(|l| Page::build(l, "")).collect()
+        }
     }
 
     /// links visited getter
@@ -110,11 +117,18 @@ impl<'a> Website<'a> {
         client
     }
     
-    /// Start to crawl website blocking with async parallelization
+    /// Start to crawl website with async parallelization
     pub fn crawl(&mut self) {
         let client = self.setup();
 
         self.crawl_concurrent(&client);
+    }
+
+    /// Start to scrape website with async parallelization
+    pub fn scrape(&mut self) {
+        let client = self.setup();
+
+        self.scrape_concurrent(&client);
     }
 
     /// Start to crawl website in sync
@@ -203,6 +217,54 @@ impl<'a> Website<'a> {
             self.links = &new_links - &self.links_visited;
         }
     }
+
+    /// Start to scape website concurrently and store html
+    fn scrape_concurrent(&mut self, client: &Client) {
+        let pool = self.create_thread_pool();
+        let delay = self.configuration.delay;
+        let delay_enabled = delay > 0;
+        let on_link_find_callback = self.on_link_find_callback;
+        
+        // crawl while links exists
+        while !self.links.is_empty() {
+            let (tx, rx): (Sender<Page>, Receiver<Page>) = channel();
+
+            for link in self.links.iter() {
+                if !self.is_allowed(link) {
+                    continue;
+                }
+                log("fetch", link);
+
+                self.links_visited.insert(link.into());
+
+                let link = link.clone();
+                let tx = tx.clone();
+                let cx = client.clone();
+
+                pool.spawn(move || {
+                    if delay_enabled {
+                        tokio_sleep(&Duration::from_millis(delay));
+                    }
+                    let link_result = on_link_find_callback(link);
+                    let page = Page::new(&link_result, &cx);
+
+                    tx.send(page).unwrap();
+                });
+            }
+
+            drop(tx);
+
+            let mut new_links: HashSet<String> = HashSet::new();
+
+            rx.into_iter().for_each(|page| {
+                let links = page.links();
+                new_links.extend(links);
+                self.pages.push(page);
+            });
+
+            self.links = &new_links - &self.links_visited;
+        }
+    }
     
     /// return `true` if URL:
     ///
@@ -253,6 +315,24 @@ fn crawl() {
         "{:?}",
         website.links_visited
     );
+}
+
+#[test]
+fn scrape() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.scrape();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
+
+    assert_eq!(
+        website.get_pages()[0].get_html().is_empty(),
+        false
+    );  
 }
 
 #[test]
