@@ -114,6 +114,10 @@ impl<'a> Website<'a> {
         self.configure_robots_parser();
         let client = self.configure_http_client(None);
 
+        if self.configuration.random_spoof_ua {
+            self.configuration.spoof_ua();
+        }
+
         client
     }
     
