@@ -18,7 +18,7 @@ pub struct Cli {
     #[clap(short, long)]
     pub verbose: bool,
     /// Polite crawling delay in milli seconds
-    #[clap(short, long)]
+    #[clap(short = 'D', long)]
     pub delay: Option<u64>,
     /// How many request can be run simultaneously
     #[clap(short, long)]

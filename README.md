@@ -14,6 +14,10 @@ You can get a working example at [`examples/example.rs`](./example.rs) and run i
 cargo run --example example
 ```
 
+## Benchmarks
+
+See [BENCHMARKS](./benches/BENCHMARKS.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

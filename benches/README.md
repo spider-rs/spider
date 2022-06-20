@@ -2,27 +2,18 @@
 
 This folder consists of benches between different cases within the library and including comparison between other choices.
 
-## Initial bench marks
+## Initial benchmarks
 
 We have comparisons set against 3 different languages and libs that can be used to crawl a web page.
 
-## Crawl
+### Crawl
 
 How fast can we crawl all pages on a medium sized website. Tests are ordered between the largest to smallest runtimes needed. All examples use the same html selector to gather the pages for a website.
 
-### v1.6.0
+10 samples between each run on `https://rsseau.fr`:
 
-Case: `https://rsseau.fr`
+1. [Node.js](./node_crawler.rs) - node-crawler
+1. [Go](./go_crolly.rs) - Crolly
+1. [Rust](./crawl.rs) - Spider
 
-10x simultaneous runs each.
-
-1. `Node.js` - node-crawler
-   . [example](./node_crawler.rs) recursive stack buffer.
-1. `Go Lang` - Crolly
-   . [example](./go_crolly.rs) recursive stack buffer.
-1. `Rust` - Spider
-   . [example](./crawl.rs) default example from CLI.
-
-10x concurrent 2x runs each.
-
-TODO:
+You can view the latest [benches here](./BENCHMARKS.md)
