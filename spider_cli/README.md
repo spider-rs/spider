@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Is a command line tool to utilize the spider.
+A fast command line spider or crawler.
 
 ## Dependencies
 
@@ -21,16 +21,58 @@ cargo install spider_cli
 ## Cli
 
 The following can also be ran via command line to run the crawler.
-Website args are optional except `domain`. If you need verbose output pass in the `-v` flag.
+If you need loging pass in the `-v` flag.
 
 ```sh
 spider -v --domain https://choosealicense.com crawl
 ```
 
-Crawl and output all links visited on finished to a file.
+Crawl and output all links visited to a file.
 
 ```sh
-spider  --domain https://choosealicense.com crawl -o > spider_choosealicense.json
+spider --domain https://choosealicense.com crawl -o > spider_choosealicense.json
 ```
 
-All website options are available except `website.on_link_find_callback`.
+```sh
+spider_cli 1.8.3
+madeindjs <contact@rousseau-alexandre.fr>, j-mendez <jeff@a11ywatch.com>
+Multithreaded web crawler written in Rust.
+
+USAGE:
+    spider [OPTIONS] --domain <DOMAIN> [SUBCOMMAND]
+
+OPTIONS:
+    -b, --blacklist-url <BLACKLIST_URL>
+            Comma seperated string list of pages to not crawl or regex with feature enabled
+
+    -c, --concurrency <CONCURRENCY>
+            How many request can be run simultaneously
+
+    -d, --domain <DOMAIN>
+            Domain to crawl
+
+    -D, --delay <DELAY>
+            Polite crawling delay in milli seconds
+
+    -h, --help
+            Print help information
+
+    -r, --respect-robots-txt
+            Respect robots.txt file
+
+    -u, --user-agent <USER_AGENT>
+            User-Agent
+
+    -v, --verbose
+            Print page visited on standard output
+
+    -V, --version
+            Print version information
+
+SUBCOMMANDS:
+    crawl     crawl the website extracting links
+    help      Print this message or the help of the given subcommand(s)
+    scrape    scrape the website extracting html and links
+```
+
+All features are available except the Website struct `on_link_find_callback` configuration option.

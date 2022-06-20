@@ -1,12 +1,12 @@
 [package]
 name = "spider"
-version = "1.8.2"
+version = "1.8.3"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider"]
-categories = ["web-programming"]
+categories = ["web-programming", "command-line-utilities"]
 license = "MIT"
 documentation = "https://docs.rs/spider"
 edition = "2018"
@@ -19,11 +19,11 @@ reqwest = { version = "0.11.10", features = ["blocking"] }
 scraper = "0.13"
 robotparser-fork = "0.10.5"
 url = "2.2.2"
-rayon = "1.5.2"
+rayon = "1.5.3"
 num_cpus = "1.13.1"
 tokio = { version = "^1.17.0", features = [ "rt-multi-thread", "net", "macros", "time" ] }
 regex = { version = "^1.5.0", optional = true }
-hashbrown = { version = "0.12" }
+hashbrown = { version = "0.12.1" }
 log = "0.4.16"
 lazy_static = "1.4.0"
 
