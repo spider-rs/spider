@@ -84,46 +84,60 @@ impl Page {
     }
 
     /// html selector for valid web pages for domain.
-    pub fn get_page_selectors(&self, url: &str, subdomains: bool) -> Selector {
-        // select all absolute links
-        let absolute_selector = &if subdomains {
+    pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
+        if tld || subdomains {
             let dname = self.domain_name(&self.base);
             let scheme = self.base.scheme();
-
-            format!(
-                r#"a[href^="{url}"]{}, a[href^="https://{dname}"]{}, a[href^="http://{dname}"]{}, a[href^="{scheme}"][href*=".{dname}."]{}"#,
-                *MEDIA_IGNORE_SELECTOR,
-                *MEDIA_IGNORE_SELECTOR,
-                *MEDIA_IGNORE_SELECTOR,
-                *MEDIA_IGNORE_SELECTOR,
-            )
+            // . extension
+            let tlds = if tld {
+                format!(r#"a[href^="{scheme}://{dname}"]{},"#, *MEDIA_IGNORE_SELECTOR) // match everything that follows the base.
+            } else {
+                "".to_string()
+            };
+            // absolute urls with subdomains
+            let absolute_selector = &if subdomains {
+                format!(
+                    r#"a[href^="{url}"]{},{tlds}a[href^="{scheme}"][href*=".{dname}."]{}"#,
+                    *MEDIA_IGNORE_SELECTOR,
+                    *MEDIA_IGNORE_SELECTOR,
+                )
+            } else {
+                format!(
+                    r#"a[href^="{url}"]{}"#,
+                    *MEDIA_IGNORE_SELECTOR,
+                )
+            };
+            let static_html_selector = &format!(
+                r#"{} {}, {absolute_selector} {}"#,
+                *MEDIA_SELECTOR_RELATIVE,
+                *MEDIA_SELECTOR_STATIC,
+                *MEDIA_SELECTOR_STATIC
+            );
+            Selector::parse(&format!(
+                "{tlds}{},{absolute_selector},{static_html_selector}",
+                *MEDIA_SELECTOR_RELATIVE
+            )).unwrap()
         } else {
-            format!(
+            let absolute_selector = format!(
                 r#"a[href^="{url}"]{}"#,
                 *MEDIA_IGNORE_SELECTOR,
-            )
-        };
-        // allow relative and absolute .html files
-        let static_html_selector = &format!(
-            r#"{} {}, {} {}"#,
-            *MEDIA_SELECTOR_RELATIVE,
-            *MEDIA_SELECTOR_STATIC,
-            absolute_selector,
-            *MEDIA_SELECTOR_STATIC
-        );
-        // select all relative links, absolute, and static .html files for a domain
-        Selector::parse(&format!(
-            "{},{},{}",
-            *MEDIA_SELECTOR_RELATIVE,
-            absolute_selector,
-            static_html_selector
-        ))
-        .unwrap()
+            );
+            let static_html_selector = &format!(
+                r#"{} {}, {absolute_selector} {}"#,
+                *MEDIA_SELECTOR_RELATIVE,
+                *MEDIA_SELECTOR_STATIC,
+                *MEDIA_SELECTOR_STATIC
+            );
+            Selector::parse(&format!(
+                "{},{absolute_selector},{static_html_selector}",
+                *MEDIA_SELECTOR_RELATIVE
+            )).unwrap()
+        }
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, subdomains: bool) -> HashSet<String> {
-        let selector = self.get_page_selectors(&self.url, subdomains);
+    pub fn links(&self, subdomains: bool, tld: bool) -> HashSet<String> {
+        let selector = self.get_page_selectors(&self.url, subdomains, tld);
         let html = self.parse_html();
         let anchors = html.select(&selector);
 
@@ -163,7 +177,7 @@ fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client);
-    let links = page.links(false);
+    let links = page.links(false, false);
 
     assert!(
         links

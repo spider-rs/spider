@@ -14,9 +14,12 @@ pub struct Cli {
     /// Respect robots.txt file
     #[clap(short, long)]
     pub respect_robots_txt: bool,
-    /// Allow sub-domain crawling with tld ignore.
+    /// Allow sub-domain crawling.
     #[clap(short, long)]
     pub subdomains: bool,
+    /// Allow all tlds for domain.
+    #[clap(short, long)]
+    pub tld: bool,
     /// Print page visited on standard output
     #[clap(short, long)]
     pub verbose: bool,

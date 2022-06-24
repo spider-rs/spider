@@ -143,6 +143,7 @@ impl<'a> Website<'a> {
         let pool = self.create_thread_pool();
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
+        let tld = self.configuration.tld;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
@@ -168,7 +169,7 @@ impl<'a> Website<'a> {
                     }
                     let link_result = on_link_find_callback(link);
                     let page = Page::new(&link_result, &cx);
-                    let links = page.links(subdomains);
+                    let links = page.links(subdomains, tld);
 
                     tx.send(links).unwrap();
                 });
@@ -190,6 +191,7 @@ impl<'a> Website<'a> {
     fn crawl_sequential(&mut self, client: &Client) {
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
+        let tld = self.configuration.tld;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
@@ -211,7 +213,7 @@ impl<'a> Website<'a> {
                 let cx = client.clone();
                 let link_result = on_link_find_callback(link);
                 let page = Page::new(&link_result, &cx);
-                let links = page.links(subdomains);
+                let links = page.links(subdomains, tld);
 
                 new_links.extend(links);
             }
@@ -259,7 +261,7 @@ impl<'a> Website<'a> {
             let mut new_links: HashSet<String> = HashSet::new();
 
             rx.into_iter().for_each(|page| {
-                let links = page.links(self.configuration.subdomains);
+                let links = page.links(self.configuration.subdomains, self.configuration.tld);
                 new_links.extend(links);
                 self.pages.push(page);
             });
@@ -447,6 +449,21 @@ fn test_crawl_subdomains() {
         website.links_visited
     );
 }
+
+#[test]
+fn test_crawl_tld() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configuration.subdomains = true;
+    website.crawl();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
 
 #[test]
 fn test_link_duplicates() {

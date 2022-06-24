@@ -32,6 +32,7 @@ fn main() {
     website.configuration.delay = delay;
     website.configuration.concurrency = concurrency;
     website.configuration.subdomains = cli.subdomains;
+    website.configuration.tld = cli.tld;
 
     if !blacklist_url.is_empty() {
         let blacklist_url: Vec<String> = blacklist_url.split(",").map(|l| l.to_string()).collect();
@@ -68,7 +69,7 @@ fn main() {
                 let mut html: &String = &String::new();
 
                 if *output_links {
-                    let page_links = page.links(cli.subdomains);
+                    let page_links = page.links(cli.subdomains, cli.tld);
                     links.extend(page_links);
                 }
 
