@@ -1,5 +1,5 @@
 use scraper::{Html, Selector};
-use url::Url;
+use url::{Url};
 use crate::utils::{fetch_page_html};
 use reqwest::blocking::{Client};
 use hashbrown::HashSet;
@@ -11,7 +11,7 @@ pub struct Page {
     url: String,
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
     html: String,
-    /// Base absolute url for domain.
+    /// Base absolute url for page.
     base: Url
 }
 
@@ -71,40 +71,92 @@ impl Page {
         self.html.clear();
     }
 
+    /// get the host name for url without tld
+    fn domain_name(&self, domain: &Url) -> String {
+        let b = domain.host_str().unwrap_or("").to_string();
+        let mut b = b.split(".").collect::<Vec<&str>>();
+        if b.len() >= 2 {
+            b.pop(); // remove the tld
+        }
+        let b = b[b.len() - 1];
+
+        b.to_string()
+    }
+
     /// html selector for valid web pages for domain.
-    pub fn get_page_selectors(&self, domain: &str) -> Selector {
-        // select all absolute links
-        let absolute_selector = &format!(
-            r#"a[href^="{}"]{}"#,
-            domain,
-            *MEDIA_IGNORE_SELECTOR,
-        );
-        // allow relative and absolute .html files
-        let static_html_selector = &format!(
-            r#"{} {}, {} {}"#,
-            *MEDIA_SELECTOR_RELATIVE,
-            *MEDIA_SELECTOR_STATIC,
-            absolute_selector,
-            *MEDIA_SELECTOR_STATIC
-        );
-        // select all relative links, absolute, and static .html files for a domain
-        Selector::parse(&format!(
-            "{},{},{}",
-            *MEDIA_SELECTOR_RELATIVE,
-            absolute_selector,
-            static_html_selector
-        ))
-        .unwrap()
+    pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
+        if tld || subdomains {
+            let dname = self.domain_name(&self.base);
+            let scheme = self.base.scheme();
+            // . extension
+            let tlds = if tld {
+                format!(r#"a[href^="{scheme}://{dname}"]{},"#, *MEDIA_IGNORE_SELECTOR) // match everything that follows the base.
+            } else {
+                "".to_string()
+            };
+            // absolute urls with subdomains
+            let absolute_selector = &if subdomains {
+                format!(
+                    r#"a[href^="{url}"]{},{tlds}a[href^="{scheme}"][href*=".{dname}."]{}"#,
+                    *MEDIA_IGNORE_SELECTOR,
+                    *MEDIA_IGNORE_SELECTOR,
+                )
+            } else {
+                format!(
+                    r#"a[href^="{url}"]{}"#,
+                    *MEDIA_IGNORE_SELECTOR,
+                )
+            };
+            let static_html_selector = &format!(
+                r#"{} {}, {absolute_selector} {}"#,
+                *MEDIA_SELECTOR_RELATIVE,
+                *MEDIA_SELECTOR_STATIC,
+                *MEDIA_SELECTOR_STATIC
+            );
+            Selector::parse(&format!(
+                "{tlds}{},{absolute_selector},{static_html_selector}",
+                *MEDIA_SELECTOR_RELATIVE
+            )).unwrap()
+        } else {
+            let absolute_selector = format!(
+                r#"a[href^="{url}"]{}"#,
+                *MEDIA_IGNORE_SELECTOR,
+            );
+            let static_html_selector = &format!(
+                r#"{} {}, {absolute_selector} {}"#,
+                *MEDIA_SELECTOR_RELATIVE,
+                *MEDIA_SELECTOR_STATIC,
+                *MEDIA_SELECTOR_STATIC
+            );
+            Selector::parse(&format!(
+                "{},{absolute_selector},{static_html_selector}",
+                *MEDIA_SELECTOR_RELATIVE
+            )).unwrap()
+        }
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self) -> HashSet<String> {
-        let selector = self.get_page_selectors(&self.url);
+    pub fn links(&self, subdomains: bool, tld: bool) -> HashSet<String> {
+        let selector = self.get_page_selectors(&self.url, subdomains, tld);
         let html = self.parse_html();
-        
-        html.select(&selector)
-            .map(|a| self.abs_path(a.value().attr("href").unwrap_or_default()).to_string())
-            .collect()
+        let anchors = html.select(&selector);
+
+        if subdomains {
+            let base_domain = self.domain_name(&self.base);
+
+            anchors.filter_map(|a| {
+                let abs = self.abs_path(a.value().attr("href").unwrap_or_default()).to_string();
+                let url_domain = self.domain_name(&Url::parse(&abs).unwrap());
+
+                if base_domain == url_domain  {
+                    Some(abs)
+                } else {
+                    None
+                }
+            }).collect()
+        } else {
+            anchors.map(|a| self.abs_path(a.value().attr("href").unwrap_or("")).to_string()).collect()
+        }
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
@@ -125,7 +177,7 @@ fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client);
-    let links = page.links();
+    let links = page.links(false, false);
 
     assert!(
         links

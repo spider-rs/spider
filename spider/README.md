@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.8.3"
+spider = "1.9.0"
 ```
 
 And then the code:
@@ -43,6 +43,7 @@ You can use `Configuration` object to configure your crawler:
 let mut website: Website = Website::new("https://choosealicense.com");
 website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
 website.configuration.respect_robots_txt = true;
+website.configuration.subdomains = true;
 website.configuration.delay = 2000; // Defaults to 250 ms
 website.configuration.concurrency = 10; // Defaults to number of cpus available * 4
 website.configuration.user_agent = "myapp/version".to_string(); // Defaults to spider/x.y.z, where x.y.z is the library version
@@ -57,7 +58,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.8.3", features = ["regex"] }
+spider = { version = "1.9.0", features = ["regex"] }
 ```
 
 ```rust,no_run
