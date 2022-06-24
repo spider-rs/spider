@@ -16,10 +16,10 @@ use tokio::time::sleep;
 /// Represents a website to crawl and gather all links.
 /// ```rust
 /// use spider::website::Website;
-/// let mut localhost = Website::new("http://example.com");
-/// localhost.crawl();
+/// let mut website = Website::new("http://example.com");
+/// website.crawl();
 /// // `Website` will be filled with `Pages` when crawled. To get them, just use
-/// for page in localhost.get_pages() {
+/// for page in website.get_pages() {
 ///     // do something
 /// }
 /// ```
@@ -142,9 +142,10 @@ impl<'a> Website<'a> {
     fn crawl_concurrent(&mut self, client: &Client) {
         let pool = self.create_thread_pool();
         let delay = self.configuration.delay;
+        let subdomains = self.configuration.subdomains;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-        
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
@@ -167,7 +168,7 @@ impl<'a> Website<'a> {
                     }
                     let link_result = on_link_find_callback(link);
                     let page = Page::new(&link_result, &cx);
-                    let links = page.links();
+                    let links = page.links(subdomains);
 
                     tx.send(links).unwrap();
                 });
@@ -188,9 +189,10 @@ impl<'a> Website<'a> {
     /// Start to crawl website sequential
     fn crawl_sequential(&mut self, client: &Client) {
         let delay = self.configuration.delay;
+        let subdomains = self.configuration.subdomains;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-        
+
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
@@ -209,7 +211,7 @@ impl<'a> Website<'a> {
                 let cx = client.clone();
                 let link_result = on_link_find_callback(link);
                 let page = Page::new(&link_result, &cx);
-                let links = page.links();
+                let links = page.links(subdomains);
 
                 new_links.extend(links);
             }
@@ -257,7 +259,7 @@ impl<'a> Website<'a> {
             let mut new_links: HashSet<String> = HashSet::new();
 
             rx.into_iter().for_each(|page| {
-                let links = page.links();
+                let links = page.links(self.configuration.subdomains);
                 new_links.extend(links);
                 self.pages.push(page);
             });
@@ -430,6 +432,20 @@ fn test_respect_robots_txt() {
     website_third.configure_robots_parser();
 
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
+}
+
+#[test]
+fn test_crawl_subdomains() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configuration.subdomains = true;
+    website.crawl();
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
 }
 
 #[test]
