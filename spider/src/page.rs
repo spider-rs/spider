@@ -25,15 +25,6 @@ macro_rules! media_ignore_selector {
     )
 }
 
-lazy_static! {
-    /// CSS query selector to ignore all resources that are not valid web pages.
-    static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
-    /// CSS query selector for all relative links
-    static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
-    /// CSS query selector for all common static MIME types.
-    static ref MEDIA_SELECTOR_STATIC: &'static str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
-}
-
 impl Page {
     /// Instantiate a new page and start to scrape it.
     pub fn new(url: &str, client: &Client) -> Self {
@@ -85,6 +76,15 @@ impl Page {
 
     /// html selector for valid web pages for domain.
     pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
+        lazy_static! {
+            /// CSS query selector to ignore all resources that are not valid web pages.
+            static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
+            /// CSS query selector for all relative links
+            static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
+            /// CSS query selector for all common static MIME types.
+            static ref MEDIA_SELECTOR_STATIC: &'static str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
+        }
+
         if tld || subdomains {
             let dname = self.domain_name(&self.base);
             let scheme = self.base.scheme();

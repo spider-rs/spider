@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.9.0"
+version = "1.9.1"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
@@ -15,7 +15,7 @@ publish = false
 maintenance = { status = "as-is" }
 
 [dependencies.spider]
-version = "1.9.0"
+version = "1.9.1"
 path = "../spider"
 default-features = false
 
