@@ -411,6 +411,14 @@ fn not_crawl_blacklist_regex() {
 }
 
 #[test]
+#[cfg(feature = "ua_generator")]
+fn randomize_website_agent() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    
+    assert_eq!(website.configuration.user_agent.is_empty(), false);
+}
+
+#[test]
 fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;

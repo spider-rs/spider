@@ -1,5 +1,7 @@
 use num_cpus;
 use std::env;
+#[cfg(feature = "ua_generator")]
+use ua_generator;
 
 /// Structure to configure `Website` crawler
 /// ```rust
@@ -29,6 +31,19 @@ pub struct Configuration {
     pub concurrency: usize
 }
 
+
+/// get a random user agent from the top agent list.
+#[cfg(any(feature = "ua_generator"))]
+fn get_ua() -> String {
+    ua_generator::ua::spoof_ua()
+}
+
+/// get the user agent via cargo package + version
+#[cfg(not(any(feature = "ua_generator")))]
+fn get_ua() -> String {
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).into()
+}
+
 impl Configuration {
     /// Represents crawl configuration for a website.
     pub fn new() -> Self {
@@ -41,9 +56,9 @@ impl Configuration {
         } else {
             logical_cpus
         } * 4;
-        
+
         Self {
-            user_agent: concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).into(),
+            user_agent: get_ua(),
             delay: 250,
             concurrency,
             ..Default::default()

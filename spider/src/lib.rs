@@ -38,6 +38,8 @@ extern crate hashbrown;
 extern crate log;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(feature = "ua_generator")]
+extern crate ua_generator;
 
 /// Configuration structure for `Website`.
 pub mod configuration;
