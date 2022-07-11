@@ -1,6 +1,6 @@
-use std::process::{Command};
-pub mod node_crawler;
+use std::process::Command;
 pub mod go_crolly;
+pub mod node_crawler;
 
 /// build executables for bench marks
 pub fn main() {
@@ -8,15 +8,36 @@ pub fn main() {
     go_crolly::gen_crawl();
 
     // install go deps
-    Command::new("go").arg("mod").arg("init").arg("example.com/gospider").output().expect("go init failed");
-    Command::new("go").arg("get").arg("-u").arg("github.com/gocolly/colly/v2").output().expect("go get colly failed");
-    Command::new("go").arg("mod").arg("tidy").output().expect("go tidy failed");
-    Command::new("go").arg("build").output().expect("go build failed");
+    Command::new("go")
+        .args(["mod", "init", "example.com/gospider"])
+        .output()
+        .expect("go init failed");
+    Command::new("go")
+        .args(["get", "-u", "github.com/gocolly/colly/v2"])
+        .output()
+        .expect("go get colly failed");
+    Command::new("go")
+        .args(["mod", "tidy"])
+        .output()
+        .expect("go tidy failed");
+    Command::new("go")
+        .arg("build")
+        .output()
+        .expect("go build failed");
     // install node deps
-    Command::new("npm").arg("init").arg("-y").output().expect("go init failed");
-    Command::new("npm").arg("i").arg("crawler").arg("--save").output().expect("go init failed");
+    Command::new("npm")
+        .args(["init", "-y"])
+        .output()
+        .expect("npm init failed");
+    Command::new("npm")
+        .args(["i", "crawler", "--save"])
+        .output()
+        .expect("npm install crawler failed");
 
     if cfg!(target_os = "linux") {
-        Command::new("apt-get").arg("install").arg("wget").output().expect("wget install failed");
+        Command::new("apt-get")
+            .args(["install", "wget"])
+            .output()
+            .expect("wget install failed");
     }
 }
