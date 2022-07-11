@@ -9,6 +9,7 @@
 
 ```sh
 ----------------------
+linux ubuntu-latest
 2-core CPU
 7 GB of RAM memory
 14 GB of SSD disk space
