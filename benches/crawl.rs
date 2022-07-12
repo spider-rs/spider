@@ -72,7 +72,7 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     let concurrency_count: Vec<_> = (0..10).collect();
 
     group.sample_size(sample_count);
-    group.measurement_time(Duration::from_secs(305));
+    group.measurement_time(Duration::from_secs(350));
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
@@ -95,6 +95,8 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
+    group.measurement_time(Duration::from_secs(360));
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
@@ -116,6 +118,8 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
+    group.measurement_time(Duration::from_secs(405));
     group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
@@ -138,6 +142,8 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
+    group.measurement_time(Duration::from_secs(485));
     group.bench_function(format!("C[wget]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count

@@ -39,5 +39,5 @@ runs with 10 samples:
 | :--------------------------------------- | :------------------------- |
 | **`Rust[spider]: crawl 10 samples`**     | `2.1600 s` (✅ **10.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `3.2500 s` (✅ **10.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `20.474 s` (✅ **10.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `12.352 s` (✅ **10.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `30.474 s` (✅ **10.00x**) |
+| **`C[wget]: crawl 10 samples`**          | `24.487 s` (✅ **10.00x**) |
