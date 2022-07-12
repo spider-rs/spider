@@ -1,7 +1,4 @@
 use num_cpus;
-use std::env;
-#[cfg(feature = "ua_generator")]
-use ua_generator;
 
 /// Structure to configure `Website` crawler
 /// ```rust
@@ -32,15 +29,17 @@ pub struct Configuration {
 }
 
 
-/// get a random user agent from the top agent list.
+/// get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
 fn get_ua() -> String {
+    use ua_generator;
     ua_generator::ua::spoof_ua()
 }
 
-/// get the user agent via cargo package + version
+/// get the user agent via cargo package + version.
 #[cfg(not(any(feature = "ua_generator")))]
 fn get_ua() -> String {
+    use std::env;
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).into()
 }
 

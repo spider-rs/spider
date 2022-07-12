@@ -37,7 +37,14 @@ runs with 10 samples:
 
 |                                          | `libraries`                |
 | :--------------------------------------- | :------------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `2.1600 s` (✅ **10.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `3.2500 s` (✅ **10.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `20.474 s` (✅ **10.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `12.352 s` (✅ **10.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `2.1670 s` (✅ **10.00x**) |
+| **`Go[crolly]: crawl 10 samples`**       | `3.4310 s` (✅ **10.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `22.174 s` (✅ **10.00x**) |
+| **`C[wget]: crawl 10 samples`**          | `20.952 s` (✅ **10.00x**) |
+
+The concurrent benchmarks are averaged across 10 individual runs for 10 concurrent crawls with 10 sample counts.
+
+In order for us to get better metrics we need to test the concurrency and simultaneous runs with a larger website and favorably a website that can spin up inside the local container so latency is not being tracked. The multi-threaded crawling capabilities shines bright the larger the website.
+Currently even with a small website this package still runs faster than the top OSS crawlers to date.
+
+_Note_: Nodejs concurrency heavily impacts each additional run.

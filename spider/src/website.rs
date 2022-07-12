@@ -413,7 +413,7 @@ fn not_crawl_blacklist_regex() {
 #[test]
 #[cfg(feature = "ua_generator")]
 fn randomize_website_agent() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let website: Website = Website::new("https://choosealicense.com");
     
     assert_eq!(website.configuration.user_agent.is_empty(), false);
 }
