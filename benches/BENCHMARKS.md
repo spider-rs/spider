@@ -31,13 +31,13 @@ runs with 10 samples:
 | **`Node.js[crawler]: crawl 10 samples`** | `2.9992 s` (✅ **1.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `12.019 s` (✅ **1.00x**) |
 
-### crawl-speed-concurrentx10
+### crawl-speed-concurrentx4
 
-10 concurrent runs with 10 samples:
+8 concurrent runs with 10 samples:
 
-|                                          | `libraries`                |
-| :--------------------------------------- | :------------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `2.1600 s` (✅ **10.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `3.2500 s` (✅ **10.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `30.474 s` (✅ **10.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `24.487 s` (✅ **10.00x**) |
+|                                          | `libraries`               |
+| :--------------------------------------- | :------------------------ |
+| **`Rust[spider]: crawl 10 samples`**     | `2.2576 s` (✅ **8.00x**) |
+| **`Go[crolly]: crawl 10 samples`**       | `3.2337 s` (✅ **8.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `20.317 s` (✅ **8.00x**) |
+| **`C[wget]: crawl 10 samples`**          | `13.944 s` (✅ **8.00x**) |
