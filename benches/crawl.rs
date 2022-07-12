@@ -71,8 +71,8 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     let sample_title = format!("crawl {} samples", sample_count);
     let concurrency_count: Vec<_> = (0..10).collect();
 
-    group.measurement_time(Duration::from_secs(166));
     group.sample_size(sample_count);
+    group.measurement_time(Duration::from_secs(305));
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
