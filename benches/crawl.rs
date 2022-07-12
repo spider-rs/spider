@@ -3,9 +3,8 @@ use std::process::Command;
 pub mod go_crolly;
 pub mod node_crawler;
 use std::thread;
-use std::time::Duration;
 
-/// bench spider crawling between different libs
+/// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
     let mut group = c.benchmark_group("crawl-speed/libraries");
     let sample_count = 10;
@@ -63,15 +62,14 @@ pub fn bench_speed(c: &mut Criterion) {
     group.finish();
 }
 
-/// bench spider crawling between different libs parallel 3x
+/// bench concurrent crawling between different libs parallel 10x
 pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     let mut group = c.benchmark_group("crawl-speed-concurrent/libraries");
     let sample_count = 10;
     let query = "https://rsseau.fr";
-    let sample_title = format!("crawl {} samples", sample_count);
+    let sample_title = format!("crawl concurrent {} samples", sample_count);
     let concurrency_count: Vec<_> = (0..10).collect();
 
-    group.measurement_time(Duration::from_secs(166));
     group.sample_size(sample_count);
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
         b.iter(|| {
@@ -95,6 +93,7 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
@@ -116,6 +115,7 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
     group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
@@ -138,6 +138,7 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
             }
         })
     });
+
     group.bench_function(format!("C[wget]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
