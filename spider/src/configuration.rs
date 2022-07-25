@@ -33,7 +33,7 @@ pub struct Configuration {
 #[cfg(any(feature = "ua_generator"))]
 fn get_ua() -> String {
     use ua_generator;
-    ua_generator::ua::spoof_ua()
+    ua_generator::ua::spoof_ua().into()
 }
 
 /// get the user agent via cargo package + version.
