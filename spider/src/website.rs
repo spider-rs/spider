@@ -5,7 +5,7 @@ use crate::utils::{log};
 use reqwest::blocking::{Client};
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
-use robotparser_fork::RobotFileParser;
+use crate::packages::robotparser::RobotFileParser;
 use hashbrown::HashSet;
 use std::{time::{Duration}};
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -77,10 +77,10 @@ impl<'a> Website<'a> {
     }
 
     /// configure the robots parser on initial crawl attempt and run
-    pub fn configure_robots_parser(&mut self) {
+    pub fn configure_robots_parser(&mut self, client: &Client) {
         if self.configuration.respect_robots_txt && self.robot_file_parser.mtime() == 0 {
             self.robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
-            self.robot_file_parser.read();
+            self.robot_file_parser.read(client);
             self.configuration.delay = self
                 .robot_file_parser
                 .get_crawl_delay(&self.robot_file_parser.user_agent) // returns the crawl delay in seconds
@@ -117,10 +117,10 @@ impl<'a> Website<'a> {
     }
 
     /// setup config for crawl
-    fn setup(&mut self) -> Client {
+    pub fn setup(&mut self) -> Client {
         self.configure_agent();
-        self.configure_robots_parser();
         let client = self.configure_http_client();
+        self.configure_robots_parser(&client);
 
         client
     }
@@ -297,7 +297,6 @@ impl<'a> Website<'a> {
         true
     }
 
-
     /// return `true` if URL:
     ///
     /// - is not forbidden in robot.txt file (if parameter is defined)  
@@ -438,7 +437,9 @@ fn test_respect_robots_txt() {
     let mut website_second: Website = Website::new("https://www.mongodb.com");
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = "bingbot".into();
-    website_second.configure_robots_parser();
+    let client_second = website_second.setup();
+
+    website_second.configure_robots_parser(&client_second);
     assert_eq!(
         website_second.configuration.user_agent,
         website_second.robot_file_parser.user_agent
@@ -448,7 +449,9 @@ fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    website_third.configure_robots_parser();
+    let client_third = website_third.setup();
+
+    website_third.configure_robots_parser(&client_third);
 
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }

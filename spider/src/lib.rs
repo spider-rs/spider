@@ -30,7 +30,6 @@
 extern crate num_cpus;
 extern crate rayon;
 extern crate reqwest;
-extern crate robotparser_fork;
 extern crate scraper;
 extern crate tokio;
 extern crate url;
@@ -49,6 +48,8 @@ pub mod page;
 pub mod utils;
 /// A website to crawl.
 pub mod website;
+/// Internal packages customized.
+pub mod packages;
 
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
