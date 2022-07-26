@@ -31,16 +31,20 @@ pub struct Configuration {
 
 /// get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
-fn get_ua() -> String {
-    use ua_generator;
+pub fn get_ua() -> String {
     ua_generator::ua::spoof_ua().into()
 }
 
 /// get the user agent via cargo package + version.
 #[cfg(not(any(feature = "ua_generator")))]
-fn get_ua() -> String {
+pub fn get_ua() -> String {
     use std::env;
-    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).into()
+
+    format!(
+        "{}/{}",
+        env!("CARGO_PKG_NAME"), 
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 impl Configuration {
@@ -57,7 +61,6 @@ impl Configuration {
         } * 4;
 
         Self {
-            user_agent: get_ua(),
             delay: 250,
             concurrency,
             ..Default::default()

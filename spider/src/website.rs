@@ -1,5 +1,5 @@
 use crate::black_list::contains;
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, get_ua};
 use crate::page::Page;
 use crate::utils::{log};
 use reqwest::blocking::{Client};
@@ -79,7 +79,7 @@ impl<'a> Website<'a> {
     /// configure the robots parser on initial crawl attempt and run
     pub fn configure_robots_parser(&mut self) {
         if self.configuration.respect_robots_txt && self.robot_file_parser.mtime() == 0 {
-            self.robot_file_parser.user_agent = self.configuration.user_agent.to_string();
+            self.robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
             self.robot_file_parser.read();
             self.configuration.delay = self
                 .robot_file_parser
@@ -89,14 +89,21 @@ impl<'a> Website<'a> {
         }
     }
 
+    /// configure the user agent for the request
+    fn configure_agent(&mut self) {
+        if self.configuration.user_agent.is_empty() {
+            self.configuration.user_agent = get_ua();
+        }
+    }
+
     /// configure http client
-    fn configure_http_client(&mut self, user_agent: Option<String>) -> Client {
+    fn configure_http_client(&mut self) -> Client {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
         Client::builder()
             .default_headers(headers)
-            .user_agent(user_agent.unwrap_or(self.configuration.user_agent.to_string()))
+            .user_agent(&self.configuration.user_agent)
             .build()
             .expect("Failed building client.")
     }
@@ -111,8 +118,9 @@ impl<'a> Website<'a> {
 
     /// setup config for crawl
     fn setup(&mut self) -> Client {
+        self.configure_agent();
         self.configure_robots_parser();
-        let client = self.configure_http_client(None);
+        let client = self.configure_http_client();
 
         client
     }
@@ -413,8 +421,9 @@ fn not_crawl_blacklist_regex() {
 #[test]
 #[cfg(feature = "ua_generator")]
 fn randomize_website_agent() {
-    let website: Website = Website::new("https://choosealicense.com");
-    
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.configure_agent();
+
     assert_eq!(website.configuration.user_agent.is_empty(), false);
 }
 
