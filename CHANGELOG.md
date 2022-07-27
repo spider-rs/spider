@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.10.7
+
+- perf(req): enable brotli
+- chore(tls): add ALPN tls defaults
+- chore(statics): add initial static media ignore
+- chore(robots): add shared client handling across parsers
+- feat(crawl): add subdomain and tld crawling
+
 ## v1.6.1
 
 - perf(links): filter dup links after async batch
