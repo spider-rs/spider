@@ -1,3 +1,4 @@
+//! `cargo run --example example`
 extern crate spider;
 
 use spider::website::Website;

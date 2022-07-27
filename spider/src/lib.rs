@@ -35,8 +35,6 @@ extern crate tokio;
 extern crate url;
 extern crate hashbrown;
 extern crate log;
-#[macro_use]
-extern crate lazy_static;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
 
