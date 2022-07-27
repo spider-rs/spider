@@ -104,6 +104,7 @@ impl<'a> Website<'a> {
         Client::builder()
             .default_headers(headers)
             .user_agent(&self.configuration.user_agent)
+            .brotli(true)
             .build()
             .expect("Failed building client.")
     }

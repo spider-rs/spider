@@ -1,7 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::process::Command;
 pub mod go_crolly;
 pub mod node_crawler;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::process::Command;
 use std::thread;
 
 /// bench crawling between different libs

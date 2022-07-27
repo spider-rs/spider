@@ -15,15 +15,12 @@ pub struct Page {
     base: Url
 }
 
-/// Macro to get all media selectors that should be ignored for link gathering.
-macro_rules! media_ignore_selector {
-    () => ( 
-        concat!(
-        r#":not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"])"#, // images
-        r#":not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"])"#, // videos
-        r#":not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#) // else
-    )
-}
+/// CSS query selector to ignore all resources that are not valid web pages.
+const MEDIA_IGNORE_SELECTOR: &str = r#":not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
+/// CSS query selector for all relative links that includes MEDIA_IGNORE_SELECTOR
+const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
+/// CSS query selector for all common static MIME types.
+const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
 
 impl Page {
     /// Instantiate a new page and start to scrape it.
@@ -76,21 +73,12 @@ impl Page {
 
     /// html selector for valid web pages for domain.
     pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
-        lazy_static! {
-            /// CSS query selector to ignore all resources that are not valid web pages.
-            static ref MEDIA_IGNORE_SELECTOR: &'static str = media_ignore_selector!();
-            /// CSS query selector for all relative links
-            static ref MEDIA_SELECTOR_RELATIVE: &'static str = concat!(r#"a[href^="/"]"#, media_ignore_selector!());
-            /// CSS query selector for all common static MIME types.
-            static ref MEDIA_SELECTOR_STATIC: &'static str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
-        }
-
         if tld || subdomains {
             let dname = self.domain_name(&self.base);
             let scheme = self.base.scheme();
             // . extension
             let tlds = if tld {
-                format!(r#"a[href^="{scheme}://{dname}"]{},"#, *MEDIA_IGNORE_SELECTOR) // match everything that follows the base.
+                format!(r#"a[href^="{scheme}://{dname}"]{},"#, MEDIA_IGNORE_SELECTOR) // match everything that follows the base.
             } else {
                 "".to_string()
             };
@@ -98,39 +86,39 @@ impl Page {
             let absolute_selector = &if subdomains {
                 format!(
                     r#"a[href^="{url}"]{},{tlds}a[href^="{scheme}"][href*=".{dname}."]{}"#,
-                    *MEDIA_IGNORE_SELECTOR,
-                    *MEDIA_IGNORE_SELECTOR,
+                    MEDIA_IGNORE_SELECTOR,
+                    MEDIA_IGNORE_SELECTOR,
                 )
             } else {
                 format!(
                     r#"a[href^="{url}"]{}"#,
-                    *MEDIA_IGNORE_SELECTOR,
+                    MEDIA_IGNORE_SELECTOR,
                 )
             };
             let static_html_selector = &format!(
                 r#"{} {}, {absolute_selector} {}"#,
-                *MEDIA_SELECTOR_RELATIVE,
-                *MEDIA_SELECTOR_STATIC,
-                *MEDIA_SELECTOR_STATIC
+                MEDIA_SELECTOR_RELATIVE,
+                MEDIA_SELECTOR_STATIC,
+                MEDIA_SELECTOR_STATIC
             );
             Selector::parse(&format!(
                 "{tlds}{},{absolute_selector},{static_html_selector}",
-                *MEDIA_SELECTOR_RELATIVE
+                MEDIA_SELECTOR_RELATIVE
             )).unwrap()
         } else {
             let absolute_selector = format!(
                 r#"a[href^="{url}"]{}"#,
-                *MEDIA_IGNORE_SELECTOR,
+                MEDIA_IGNORE_SELECTOR,
             );
             let static_html_selector = &format!(
                 r#"{} {}, {absolute_selector} {}"#,
-                *MEDIA_SELECTOR_RELATIVE,
-                *MEDIA_SELECTOR_STATIC,
-                *MEDIA_SELECTOR_STATIC
+                MEDIA_SELECTOR_RELATIVE,
+                MEDIA_SELECTOR_STATIC,
+                MEDIA_SELECTOR_STATIC
             );
             Selector::parse(&format!(
                 "{},{absolute_selector},{static_html_selector}",
-                *MEDIA_SELECTOR_RELATIVE
+                MEDIA_SELECTOR_RELATIVE
             )).unwrap()
         }
     }
