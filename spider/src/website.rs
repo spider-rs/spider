@@ -57,6 +57,32 @@ impl<'a> Website<'a> {
         }
     }
 
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    pub fn is_allowed(&self, link: &String) -> bool {
+        if self.links_visited.contains(link) {
+            return false;
+        }
+        if contains(&self.configuration.blacklist_url, link) {
+            return false;
+        }
+        if self.configuration.respect_robots_txt && !self.is_allowed_robots(link) {
+            return false;
+        }
+
+        true
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    pub fn is_allowed_robots(&self, link: &String) -> bool {
+        self.robot_file_parser.can_fetch("*", link)
+    }
+
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
         if !self.pages.is_empty(){
@@ -279,31 +305,6 @@ impl<'a> Website<'a> {
         }
     }
     
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)  
-    pub fn is_allowed(&self, link: &String) -> bool {
-        if self.links_visited.contains(link) {
-            return false;
-        }
-        if contains(&self.configuration.blacklist_url, link) {
-            return false;
-        }
-        if self.configuration.respect_robots_txt && !self.is_allowed_robots(link) {
-            return false;
-        }
-
-        true
-    }
-
-    /// return `true` if URL:
-    ///
-    /// - is not forbidden in robot.txt file (if parameter is defined)  
-    pub fn is_allowed_robots(&self, link: &String) -> bool {
-        self.robot_file_parser.can_fetch("*", link)
-    }
 }
 
 impl<'a> Drop for Website<'a> {

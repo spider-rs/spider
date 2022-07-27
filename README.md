@@ -17,7 +17,7 @@ See [BENCHMARKS](./benches/BENCHMARKS.md).
 
 ## Examples
 
-See [EXAMPLES](./examples/example.rs).
+See [EXAMPLES](./examples/).
 
 ## Contributing
 

@@ -156,6 +156,7 @@ impl Page {
         joined
     }
 }
+
 #[test]
 fn parse_links() {
     let client = Client::builder()

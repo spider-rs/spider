@@ -14,6 +14,11 @@ publish = false
 [badges]
 maintenance = { status = "as-is" }
 
+[dev-dependencies]
+convert_case = "0.5.0"
+env_logger = "0.9.0"
+htr = "0.5.23"
+
 [dependencies.spider]
 version = "1.10.7"
 path = "../spider"
@@ -22,3 +27,19 @@ default-features = false
 [[example]]
 name = "example"
 path = "example.rs"
+
+[[example]]
+name = "scrape"
+path = "scrape.rs"
+
+[[example]]
+name = "debug"
+path = "debug.rs"
+
+[[example]]
+name = "download"
+path = "download.rs"
+
+[[example]]
+name = "download_to_react"
+path = "download_to_react.rs"
