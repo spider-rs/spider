@@ -22,7 +22,3 @@ See [EXAMPLES](./examples/).
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md).
-
-## Stargazers over time
-
-[![Stargazers over time](https://starchart.cc/madeindjs/spider.svg)](https://starchart.cc/madeindjs/spider)

@@ -12,7 +12,7 @@
 
 - `cargo run --example scrape`
 
-1. Scrape and download the html file to fs [Download Html](./download.rs).
+1. Scrape and download the html file to fs [Download Html](./download.rs). \*Note: Only HTML is downloaded.
 
 - `cargo run --example download`
 
