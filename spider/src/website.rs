@@ -24,7 +24,7 @@ use tokio::time::sleep;
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Website<'a> {
+pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
     /// this is a start URL given when instanciate with `new`.
@@ -38,12 +38,12 @@ pub struct Website<'a> {
     /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
-    robot_file_parser: RobotFileParser<'a>,
+    robot_file_parser: RobotFileParser,
 }
 
 type Message = HashSet<String>;
 
-impl<'a> Website<'a> {
+impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
         Self {
@@ -305,10 +305,6 @@ impl<'a> Website<'a> {
         }
     }
     
-}
-
-impl<'a> Drop for Website<'a> {
-    fn drop(&mut self) {}
 }
 
 // blocking sleep keeping thread alive
