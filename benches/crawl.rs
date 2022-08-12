@@ -17,7 +17,7 @@ pub fn bench_speed(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 Command::new("spider")
-                    .args(["--delay", "0", "--domain", &query, "crawl"])
+                    .args(["--delay", "0", "-r", "false", "--domain", &query, "crawl"])
                     .output()
                     .expect("rust command failed to start"),
             )
