@@ -87,22 +87,15 @@ pub struct RobotFileParser {
 }
 
 impl RuleLine {
-    fn new(path: String, allowance: bool) -> RuleLine
-    {
-        let path = path.into();
-        let mut allow = allowance;
-        if path == "" && !allowance {
-            // an empty value means allow all
-            allow = true;
-        }
+    fn new(path: &str, allowance: bool) -> RuleLine {
         RuleLine {
-            path: path,
-            allowance: allow,
+            path: path.into(),
+            allowance: path == "" && !allowance || allowance,
         }
     }
 
     fn applies_to(&self, filename: &str) -> bool {
-        self.path == "*" || filename.starts_with(&self.path[..])
+        self.path == "*" || filename.starts_with(&self.path)
     }
 }
 
@@ -345,13 +338,13 @@ impl RobotFileParser {
                     }
                     ref x if x.to_lowercase() == "disallow" => {
                         if state != 0 {
-                            entry.push_ruleline(RuleLine::new(part1, false));
+                            entry.push_ruleline(RuleLine::new(&part1, false));
                             state = 2;
                         }
                     }
                     ref x if x.to_lowercase() == "allow" => {
                         if state != 0 {
-                            entry.push_ruleline(RuleLine::new(part1, true));
+                            entry.push_ruleline(RuleLine::new(&part1, true));
                             state = 2;
                         }
                     }
