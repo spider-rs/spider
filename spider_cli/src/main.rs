@@ -35,8 +35,7 @@ fn main() {
     website.configuration.tld = cli.tld;
 
     if !blacklist_url.is_empty() {
-        let blacklist_url: Vec<String> = blacklist_url.split(",").map(|l| l.to_string()).collect();
-        website.configuration.blacklist_url.extend(blacklist_url);
+        website.configuration.blacklist_url = blacklist_url.split(",").map(|l| l.to_string()).collect();
     }
 
     if !user_agent.is_empty() {
