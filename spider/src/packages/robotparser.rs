@@ -234,7 +234,7 @@ impl RobotFileParser {
 
     /// Reads the robots.txt URL and feeds it to the parser.
     pub fn read(&self, client: &Client) {
-        let request = client.get(self.url.clone());
+        let request = client.get(self.url.as_ref());
         let request = request.header(USER_AGENT, &self.user_agent);
         let mut res = match request.send() {
             Ok(res) => res,
