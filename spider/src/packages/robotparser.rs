@@ -413,16 +413,20 @@ impl RobotFileParser {
         // the first match counts
         let decoded_url = String::from_utf8(percent_decode(url.trim().as_bytes()).collect())
             .unwrap_or("".to_string());
+
         let url_str = match decoded_url {
             ref u if !u.is_empty() => u,
             _ => "/",
         };
+
         let entries = self.entries.borrow();
+
         for entry in &*entries {
             if entry.applies_to(useragent) {
                 return entry.allowance(&url_str);
             }
         }
+
         // try the default entry last
         let default_entry = self.default_entry.borrow();
 
