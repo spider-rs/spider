@@ -11,3 +11,8 @@ criterion = { version = "0.3.5", features = ["html_reports"] }
 name = "crawl"
 path = "crawl.rs"
 harness = false
+
+[dependencies.spider]
+version = "1.11.3"
+path = "../spider"
+default-features = false

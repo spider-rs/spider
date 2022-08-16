@@ -4,6 +4,7 @@ pub mod node_crawler;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::process::Command;
 use std::thread;
+use spider::website::Website;
 
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
@@ -14,12 +15,14 @@ pub fn bench_speed(c: &mut Criterion) {
 
     group.sample_size(sample_count);
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
+        
         b.iter(|| {
+            let mut website: Website = Website::new(&query);
+    
+            website.configuration.delay = 0;
+
             black_box(
-                Command::new("spider")
-                    .args(["--delay", "0", "--domain", &query, "crawl"])
-                    .output()
-                    .expect("rust command failed to start"),
+                website.crawl(),
             )
         })
     });
