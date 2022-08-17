@@ -1,5 +1,4 @@
 use std::process::Command;
-
 pub mod go_crolly;
 pub mod node_crawler;
 
@@ -7,6 +6,35 @@ pub mod node_crawler;
 pub fn main() {
     node_crawler::gen_crawl();
     go_crolly::gen_crawl();
+
+    // clone the swr website for testing
+    Command::new("git")
+        .args([
+            "clone",
+            "https://github.com/madeindjs/portfolio.git",
+        ])
+        .output()
+        .expect("git clone command failed");
+
+    Command::new("npm")
+        .args([
+            "--prefix",
+            "./portfolio",
+            "install",
+            "--force",
+        ])
+        .output()
+        .expect("npm install command failed");
+
+    Command::new("npm")
+        .args([
+            "--prefix",
+            "./portfolio",
+            "run",
+            "build",
+        ])
+        .output()
+        .expect("npm build command failed");
 
     // install go deps
     Command::new("go")

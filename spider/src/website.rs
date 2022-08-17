@@ -1,16 +1,16 @@
 use crate::black_list::contains;
-use crate::configuration::{Configuration, get_ua};
+use crate::configuration::{get_ua, Configuration};
+use crate::packages::robotparser::RobotFileParser;
 use crate::page::Page;
-use crate::utils::{log};
-use reqwest::blocking::{Client};
+use crate::utils::log;
+use hashbrown::HashSet;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
-use crate::packages::robotparser::RobotFileParser;
-use hashbrown::HashSet;
-use std::{time::{Duration}};
-use std::sync::mpsc::{channel, Sender, Receiver};
-use reqwest::header::CONNECTION;
+use reqwest::blocking::Client;
 use reqwest::header;
+use reqwest::header::CONNECTION;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Duration;
 use tokio::time::sleep;
 
 /// Represents a website to crawl and gather all links.
@@ -91,10 +91,13 @@ impl Website {
 
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
-        if !self.pages.is_empty(){
+        if !self.pages.is_empty() {
             self.pages.clone()
         } else {
-            self.links_visited.iter().map(|l| Page::build(l, "")).collect()
+            self.links_visited
+                .iter()
+                .map(|l| Page::build(l, ""))
+                .collect()
         }
     }
 
@@ -111,9 +114,10 @@ impl Website {
     /// configure the robots parser on initial crawl attempt and run
     pub fn configure_robots_parser(&mut self, client: &Client) {
         if self.configuration.respect_robots_txt {
-            let mut robot_file_parser = RobotFileParser::new(&format!("{}/robots.txt", &self.domain));
+            let mut robot_file_parser =
+                RobotFileParser::new(&format!("{}/robots.txt", &self.domain));
             robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
-            
+
             // get the latest robots
             if robot_file_parser.mtime() == 0 {
                 // println!("{:?}", &robot_file_parser);
@@ -164,7 +168,7 @@ impl Website {
 
         client
     }
-    
+
     /// Start to crawl website with async parallelization
     pub fn crawl(&mut self) {
         let client = self.setup();
@@ -276,7 +280,7 @@ impl Website {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-        
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, rx): (Sender<Page>, Receiver<Page>) = channel();
@@ -317,12 +321,11 @@ impl Website {
             self.links = &new_links - &self.links_visited;
         }
     }
-    
 }
 
 // blocking sleep keeping thread alive
 #[tokio::main]
-async fn tokio_sleep(delay: &Duration){
+async fn tokio_sleep(delay: &Duration) {
     sleep(*delay).await;
 }
 
@@ -351,10 +354,7 @@ fn scrape() {
         website.links_visited
     );
 
-    assert_eq!(
-        website.get_pages()[0].get_html().is_empty(),
-        false
-    );  
+    assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn crawl_invalid() {
 fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.on_link_find_callback = |s| {
-       log("callback link target: {}", &s);
+        log("callback link target: {}", &s);
         s
     };
     website.crawl();
@@ -457,10 +457,14 @@ fn test_respect_robots_txt() {
 
     let client_second = website_second.setup();
     website_second.configure_robots_parser(&client_second);
-    
+
     assert_eq!(
         website_second.configuration.user_agent,
-        website_second.robot_file_parser.as_ref().unwrap().user_agent
+        website_second
+            .robot_file_parser
+            .as_ref()
+            .unwrap()
+            .user_agent
     );
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 
@@ -501,7 +505,6 @@ fn test_crawl_tld() {
         website.links_visited
     );
 }
-
 
 #[test]
 fn test_link_duplicates() {

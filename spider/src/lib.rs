@@ -19,7 +19,7 @@
 //!
 //! [`crawl`]: website/struct.Website.html#method.crawl
 //! [`crawl_sync`]: website/struct.Website.html#method.crawl_sync
-//! 
+//!
 //! # Basic usage
 //!
 //! First, you will need to add `spider` to your `Cargo.toml`.
@@ -27,27 +27,27 @@
 //! Next, simply add the website url in the struct of website and crawl,
 //! you can also crawl sequentially.
 
+extern crate hashbrown;
+extern crate log;
 extern crate num_cpus;
 extern crate rayon;
 extern crate reqwest;
 extern crate scraper;
 extern crate tokio;
-extern crate url;
-extern crate hashbrown;
-extern crate log;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
+extern crate url;
 
 /// Configuration structure for `Website`.
 pub mod configuration;
+/// Internal packages customized.
+pub mod packages;
 /// A page scraped.
 pub mod page;
 /// Application utils.
 pub mod utils;
 /// A website to crawl.
 pub mod website;
-/// Internal packages customized.
-pub mod packages;
 
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.

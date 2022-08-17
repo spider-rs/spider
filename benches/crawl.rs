@@ -2,28 +2,29 @@ pub mod go_crolly;
 pub mod node_crawler;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use spider::website::Website;
 use std::process::Command;
 use std::thread;
-use spider::website::Website;
 
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
     let mut group = c.benchmark_group("crawl-speed/libraries");
     let sample_count = 10;
-    let query = "https://rsseau.fr";
+    let query = "http://localhost:3000";
     let sample_title = format!("crawl {} samples", sample_count);
+
+    Command::new("npm")
+        .args(["--prefix", "./portfolio", "run", "serve", "--", "-p", "3000"])
+        .spawn()
+        .expect("http local server command failed to start");
 
     group.sample_size(sample_count);
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
-        
-        b.iter(|| {
-            let mut website: Website = Website::new(&query);
-    
-            website.configuration.delay = 0;
+        let mut website: Website = Website::new(&query);
+        website.configuration.delay = 0;
 
-            black_box(
-                website.crawl(),
-            )
+        b.iter(move || {
+            black_box(website.crawl())
         })
     });
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
@@ -50,12 +51,8 @@ pub fn bench_speed(c: &mut Criterion) {
             black_box(
                 Command::new("wget")
                     .args([
-                        "-4",
-                        "--recursive",
-                        "--no-parent",
-                        "--ignore-tags=img,link,script",
                         "--spider",
-                        "-q",
+                        "-r",
                         &query,
                     ])
                     .output()
@@ -64,13 +61,18 @@ pub fn bench_speed(c: &mut Criterion) {
         })
     });
     group.finish();
+
+    Command::new("kill")
+    .arg("$(lsof -t -i:3000)")
+    .output()
+    .expect("shutting down http server failed");
 }
 
 /// bench concurrent crawling between different libs parallel 10x
 pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     let mut group = c.benchmark_group("crawl-speed-concurrent/libraries");
     let sample_count = 10;
-    let query = "https://rsseau.fr";
+    let query = "http://localhost:3000";
     let sample_title = format!("crawl concurrent {} samples", sample_count);
     let concurrency_count: Vec<_> = (0..10).collect();
 
@@ -78,17 +80,14 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
         b.iter(|| {
             let threads: Vec<_> = concurrency_count
-                .clone()
-                .into_iter()
-                .map(|_| {
-                    thread::spawn(move || {
-                        black_box(
-                            Command::new("spider")
-                                .args(["--delay", "0", "--domain", &query, "crawl"])
-                                .output()
-                                .expect("rust command failed to start"),
-                        );
-                    })
+            .clone()
+            .into_iter()
+            .map(|_| {
+                thread::spawn(move || {
+                    let mut website: Website = Website::new(&query);
+                    website.configuration.delay = 0;
+                    black_box(website.crawl());
+                })
                 })
                 .collect();
 
@@ -153,12 +152,8 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
                         black_box(
                             Command::new("wget")
                                 .args([
-                                    "-4",
-                                    "--recursive",
-                                    "--no-parent",
-                                    "--ignore-tags=img,link,script",
                                     "--spider",
-                                    "-q",
+                                    "-r",
                                     &query,
                                 ])
                                 .output()

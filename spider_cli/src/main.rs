@@ -1,6 +1,6 @@
-extern crate spider;
 extern crate env_logger;
 extern crate serde_json;
+extern crate spider;
 
 pub mod options;
 
@@ -22,10 +22,12 @@ fn main() {
     }
 
     let mut website: Website = Website::new(&cli.domain);
-    
+
     let delay = cli.delay.unwrap_or(website.configuration.delay);
     let concurrency = cli.concurrency.unwrap_or(website.configuration.concurrency);
-    let user_agent = cli.user_agent.unwrap_or(website.configuration.user_agent.to_string());
+    let user_agent = cli
+        .user_agent
+        .unwrap_or(website.configuration.user_agent.to_string());
     let blacklist_url = cli.blacklist_url.unwrap_or_default();
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
@@ -53,12 +55,16 @@ fn main() {
 
             if *output_links {
                 let links: Vec<_> = website.get_links().iter().collect();
-                io::stdout().write_all(format!("{:?}", links).as_bytes()).unwrap();
+                io::stdout()
+                    .write_all(format!("{:?}", links).as_bytes())
+                    .unwrap();
             }
-
         }
-        Some(Commands::SCRAPE { output_html, output_links }) => {
-            use serde_json::{json};
+        Some(Commands::SCRAPE {
+            output_html,
+            output_links,
+        }) => {
+            use serde_json::json;
 
             website.scrape();
 
@@ -85,11 +91,10 @@ fn main() {
 
                 page_objects.push(page_json);
             }
-            
+
             let j = serde_json::to_string_pretty(&page_objects).unwrap();
 
             io::stdout().write_all(j.as_bytes()).unwrap();
-
         }
         None => {}
     }

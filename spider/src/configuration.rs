@@ -17,7 +17,7 @@ pub struct Configuration {
     /// Allow sub-domains.
     pub subdomains: bool,
     /// Allow all tlds for domain.
-    pub tld: bool, 
+    pub tld: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Vec<String>,
     /// User-Agent
@@ -25,9 +25,8 @@ pub struct Configuration {
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
     /// How many request can be run simultaneously.
-    pub concurrency: usize
+    pub concurrency: usize,
 }
-
 
 /// get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
@@ -40,11 +39,7 @@ pub fn get_ua() -> String {
 pub fn get_ua() -> String {
     use std::env;
 
-    format!(
-        "{}/{}",
-        env!("CARGO_PKG_NAME"), 
-        env!("CARGO_PKG_VERSION")
-    )
+    format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
 }
 
 impl Configuration {

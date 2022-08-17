@@ -19,7 +19,7 @@ pub fn crawl_stub() -> String {
         })
 
         c.OnHTML(`a[href^="/"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"]),
-        a[href^="https://rsseau.fr"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`, func(e *colly.HTMLElement) {
+        a[href^="http://localhost:3000"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`, func(e *colly.HTMLElement) {
             e.Request.Visit(e.Attr("href"))
         })
     
@@ -27,7 +27,7 @@ pub fn crawl_stub() -> String {
             fmt.Println("- visiting ", r.URL)
         })
     
-        c.Visit("https://rsseau.fr")
+        c.Visit("http://localhost:3000")
     }
     "#.to_string()
 }
