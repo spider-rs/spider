@@ -24,6 +24,7 @@
 //! ```
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use reqwest::blocking::Client;
 use reqwest::blocking::Response;
 use reqwest::header::USER_AGENT;
