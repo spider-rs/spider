@@ -23,9 +23,7 @@
 //! }
 //! ```
 
-use std::cell::{Cell, RefCell};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use reqwest::blocking::Client;
 use reqwest::blocking::Response;
 use reqwest::header::USER_AGENT;
@@ -56,9 +54,9 @@ pub struct RequestRate {
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct Entry {
     /// Multiple user agents to use
-    useragents: RefCell<Vec<String>>,
+    useragents: Vec<String>,
     /// Rules that should be ignored
-    rulelines: RefCell<Vec<RuleLine>>,
+    rulelines: Vec<RuleLine>,
     /// Time to wait in between crawls
     crawl_delay: Option<Duration>,
     /// The request rate to respect
@@ -69,19 +67,19 @@ struct Entry {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct RobotFileParser {
     /// Entire robots.txt list of urls
-    entries: RefCell<Vec<Entry>>,
+    entries: Vec<Entry>,
     /// Base entry to list
-    default_entry: RefCell<Entry>,
+    default_entry: Entry,
     /// Dis-allow links reguardless of robots.txt
-    disallow_all: Cell<bool>,
+    disallow_all: bool,
     /// Allow links reguardless of robots.txt
-    allow_all: Cell<bool>,
+    allow_all: bool,
     /// Url of the website
     url: Url,
     /// Domain url path
     path: String,
     /// Time last checked robots.txt file
-    last_checked: Cell<i64>,
+    last_checked: i64,
     /// User-agent string
     pub user_agent: String,
 }
@@ -103,8 +101,8 @@ impl Entry {
     /// Base collection to manage robot.txt data
     fn new() -> Entry {
         Entry {
-            useragents: RefCell::new(vec![]),
-            rulelines: RefCell::new(vec![]),
+            useragents: vec![],
+            rulelines: vec![],
             crawl_delay: None,
             req_rate: None,
         }
@@ -113,8 +111,7 @@ impl Entry {
     /// check if this entry applies to the specified agent
     fn applies_to(&self, useragent: &str) -> bool {
         let ua = useragent.split('/').nth(0).unwrap_or("").to_lowercase();
-        let useragents = self.useragents.borrow();
-        for agent in &*useragents {
+        for agent in &self.useragents {
             if agent == "*" {
                 return true;
             }
@@ -129,8 +126,7 @@ impl Entry {
     /// - our agent applies to this entry
     /// - filename is URL decoded
     fn allowance(&self, filename: &str) -> bool {
-        let rulelines = self.rulelines.borrow();
-        for line in &*rulelines {
+        for line in &self.rulelines {
             if line.applies_to(filename) {
                 return line.allowance;
             }
@@ -139,27 +135,23 @@ impl Entry {
     }
 
     /// Add to user agent list
-    fn push_useragent(&self, useragent: &str) {
-        let mut useragents = self.useragents.borrow_mut();
-        useragents.push(useragent.to_lowercase());
+    fn push_useragent(&mut self, useragent: &str) {
+        self.useragents.push(useragent.to_lowercase());
     }
 
     /// Add rule to list
-    fn push_ruleline(&self, ruleline: RuleLine) {
-        let mut rulelines = self.rulelines.borrow_mut();
-        rulelines.push(ruleline);
+    fn push_ruleline(&mut self, ruleline: RuleLine) {
+        self.rulelines.push(ruleline);
     }
 
     /// Determine if user agent exist
     fn has_useragent(&self) -> bool {
-        self.useragents.borrow().iter().any(|a| a == "*")
+        self.useragents.iter().any(|a| a == "*")
     }
 
     /// Is the user-agent list empty?
     fn is_empty(&self) -> bool {
-        let useragents = self.useragents.borrow();
-        let rulelines = self.rulelines.borrow();
-        useragents.is_empty() && rulelines.is_empty()
+        self.useragents.is_empty() && self.rulelines.is_empty()
     }
 
     /// Set the crawl delay for the website
@@ -195,13 +187,13 @@ impl RobotFileParser {
         let parsed_url = Url::parse(url.as_ref()).unwrap();
 
         RobotFileParser {
-            entries: RefCell::new(vec![]),
-            default_entry: RefCell::new(Entry::new()),
-            disallow_all: Cell::new(false),
-            allow_all: Cell::new(false),
-            url: parsed_url.clone(),
+            entries: vec![],
+            default_entry: Entry::new(),
+            disallow_all: false,
+            allow_all: false,
             path: parsed_url.path().to_string(),
-            last_checked: Cell::new(0i64),
+            url: parsed_url,
+            last_checked: 0i64,
             user_agent: String::from("robotparser-rs"),
         }
     }
@@ -211,17 +203,17 @@ impl RobotFileParser {
     /// This is useful for long-running web spiders that need to
     /// check for new robots.txt files periodically.
     pub fn mtime(&self) -> i64 {
-        self.last_checked.get()
+        self.last_checked
     }
 
     /// Sets the time the robots.txt file was last fetched to the
     /// current time.
-    pub fn modified(&self) {
+    pub fn modified(&mut self) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        self.last_checked.set(now);
+        self.last_checked = now;
     }
 
     /// Sets the URL referring to a robots.txt file.
@@ -229,11 +221,11 @@ impl RobotFileParser {
         let parsed_url = Url::parse(url.as_ref()).unwrap();
         self.path = parsed_url.path().to_string();
         self.url = parsed_url;
-        self.last_checked.set(0i64);
+        self.last_checked = 0i64;
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
-    pub fn read(&self, client: &Client) {
+    pub fn read(&mut self, client: &Client) {
         let request = client.get(self.url.as_ref());
         let request = request.header(USER_AGENT, &self.user_agent);
         let mut res = match request.send() {
@@ -245,13 +237,13 @@ impl RobotFileParser {
         let status = res.status();
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                self.disallow_all.set(true);
+                self.disallow_all = true;
             }
             status
                 if status >= StatusCode::BAD_REQUEST
                     && status < StatusCode::INTERNAL_SERVER_ERROR =>
             {
-                self.allow_all.set(true);
+                self.allow_all = true;
             }
             StatusCode::OK => self.from_response(&mut res),
             _ => {}
@@ -259,25 +251,22 @@ impl RobotFileParser {
     }
 
     /// Reads the HTTP response and feeds it to the parser.
-    pub fn from_response(&self, response: &mut Response) {
+    pub fn from_response(&mut self, response: &mut Response) {
         let mut buf = String::new();
         response.read_to_string(&mut buf).unwrap();
         let lines: Vec<&str> = buf.split('\n').collect();
         self.parse(&lines);
     }
 
-    fn _add_entry(&self, entry: Entry) {
+    fn _add_entry(&mut self, entry: Entry) {
         if entry.has_useragent() {
             // the default entry is considered last
-            let mut default_entry = self.default_entry.borrow_mut();
-
-            if default_entry.is_empty() {
+            if self.default_entry.is_empty() {
                 // the first default entry wins
-                *default_entry = entry;
+                self.default_entry = entry;
             }
         } else {
-            let mut entries = self.entries.borrow_mut();
-            entries.push(entry);
+            self.entries.push(entry);
         }
     }
 
@@ -287,7 +276,7 @@ impl RobotFileParser {
     /// We allow that a user-agent: line is not preceded by
     /// one or more blank lines.
     ///
-    pub fn parse<T: AsRef<str>>(&self, lines: &[T]) {
+    pub fn parse<T: AsRef<str>>(&mut self, lines: &[T]) {
         use percent_encoding::percent_decode;
 
         // states:
@@ -396,17 +385,17 @@ impl RobotFileParser {
         let useragent = useragent.as_ref();
         let url = url.as_ref();
 
-        if self.disallow_all.get() {
+        if self.disallow_all {
             return false;
         }
-        if self.allow_all.get() {
+        if self.allow_all {
             return true;
         }
         // Until the robots.txt file has been read or found not
         // to exist, we must assume that no url is allowable.
         // This prevents false positives when a user erronenously
         // calls can_fetch() before calling read().
-        if self.last_checked.get() == 0 {
+        if self.last_checked == 0 {
             return false;
         }
         // search for given user agent matches
@@ -419,16 +408,14 @@ impl RobotFileParser {
             _ => "/",
         };
 
-        let entries = self.entries.borrow();
-
-        for entry in &*entries {
+        for entry in &self.entries {
             if entry.applies_to(useragent) {
                 return entry.allowance(&url_str);
             }
         }
 
         // try the default entry last
-        let default_entry = self.default_entry.borrow();
+        let default_entry = &self.default_entry;
 
         if !default_entry.is_empty() {
             return default_entry.allowance(&url_str);
@@ -441,19 +428,17 @@ impl RobotFileParser {
     pub fn get_crawl_delay<T: AsRef<str>>(&self, useragent: T) -> Option<Duration> {
         let useragent = useragent.as_ref();
 
-        if self.last_checked.get() == 0 {
+        if self.last_checked == 0 {
             return None;
         }
 
-        let entries = self.entries.borrow();
-
-        for entry in &*entries {
+        for entry in &self.entries {
             if entry.applies_to(useragent) {
                 return entry.get_crawl_delay();
             }
         }
 
-        let default_entry = self.default_entry.borrow();
+        let default_entry = &self.default_entry;
 
         if !default_entry.is_empty() {
             return default_entry.get_crawl_delay();
@@ -465,11 +450,10 @@ impl RobotFileParser {
     /// Returns the request rate for this user agent as a `RequestRate`, or None if not request rate is defined
     pub fn get_req_rate<T: AsRef<str>>(&self, useragent: T) -> Option<RequestRate> {
         let useragent = useragent.as_ref();
-        if self.last_checked.get() == 0 {
+        if self.last_checked == 0 {
             return None;
         }
-        let entries = self.entries.borrow();
-        for entry in &*entries {
+        for entry in &self.entries {
             if entry.applies_to(useragent) {
                 return entry.get_req_rate();
             }
