@@ -1,18 +1,18 @@
 //! `cargo run --example download_to_react`
-extern crate env_logger;
-extern crate spider;
-extern crate htr;
 extern crate convert_case;
+extern crate env_logger;
+extern crate htr;
+extern crate spider;
 
 use spider::utils::log;
 use spider::website::Website;
 
+use convert_case::{Case, Casing};
 use env_logger::Env;
+use htr::convert_to_react;
+use std::env;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::env;
-use convert_case::{Case, Casing};
-use htr::convert_to_react;
 
 fn main() {
     let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or("./target".to_string());
@@ -58,7 +58,7 @@ fn main() {
             .truncate(true)
             .open(&format!("{}/downloads/{}.tsx", target_dir, download_file))
             .expect("Unable to open file");
-    
+
         let download_file = download_file.to_case(Case::Camel);
         let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
 

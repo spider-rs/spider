@@ -1,6 +1,6 @@
-use reqwest::blocking::{Client};
+use log::{info, log_enabled, Level};
+use reqwest::blocking::Client;
 use reqwest::StatusCode;
-use log::{log_enabled, info, Level};
 
 /// Perform a network request to a resource extracting all content as text.
 pub fn fetch_page_html(url: &str, client: &Client) -> String {
@@ -11,7 +11,7 @@ pub fn fetch_page_html(url: &str, client: &Client) -> String {
             Ok(text) => body = text,
             Err(_) => {
                 log("- error fetching {}", &url);
-            },
+            }
         },
         Ok(_) => (),
         Err(_) => {
