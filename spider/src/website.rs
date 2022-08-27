@@ -176,7 +176,7 @@ impl Website {
         self.crawl_concurrent(&client);
     }
 
-    /// Start to scrape website with async parallelization
+    /// Start to scrape/download website with async parallelization
     pub fn scrape(&mut self) {
         let client = self.setup();
 
@@ -208,19 +208,17 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-
+                
                 self.links_visited.insert(link.into());
 
-                let link = link.clone();
                 let tx = tx.clone();
-                let cx = client.clone();
 
-                pool.spawn(move || {
+                pool.install(move || {
                     if delay_enabled {
                         tokio_sleep(&Duration::from_millis(delay));
                     }
-                    let link_result = on_link_find_callback(link);
-                    let page = Page::new(&link_result, &cx);
+                    let link_result = on_link_find_callback(link.into());
+                    let page = Page::new(&link_result, &client);
                     let links = page.links(subdomains, tld);
 
                     tx.send(links).unwrap();
@@ -262,9 +260,8 @@ impl Website {
                 }
 
                 let link = link.clone();
-                let cx = client.clone();
                 let link_result = on_link_find_callback(link);
-                let page = Page::new(&link_result, &cx);
+                let page = Page::new(&link_result, &client);
                 let links = page.links(subdomains, tld);
 
                 new_links.extend(links);
@@ -293,16 +290,14 @@ impl Website {
 
                 self.links_visited.insert(link.into());
 
-                let link = link.clone();
                 let tx = tx.clone();
-                let cx = client.clone();
 
-                pool.spawn(move || {
+                pool.install(move || {
                     if delay_enabled {
                         tokio_sleep(&Duration::from_millis(delay));
                     }
-                    let link_result = on_link_find_callback(link);
-                    let page = Page::new(&link_result, &cx);
+                    let link_result = on_link_find_callback(link.to_string());
+                    let page = Page::new(&link_result, &client);
 
                     tx.send(page).unwrap();
                 });
