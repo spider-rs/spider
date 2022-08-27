@@ -1,6 +1,4 @@
 target
 **/*.rs.bk
-Cargo.lock
-!spider_cli/Cargo.lock
 .env
 .DS_Store
