@@ -8,8 +8,10 @@ use spider::website::Website;
 use env_logger::Env;
 use std::fs::OpenOptions;
 use std::io::Write;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // view the target dist for the downloads
     std::fs::create_dir_all("./target/downloads").unwrap_or_default();
 
@@ -25,7 +27,7 @@ fn main() {
     website.configuration.respect_robots_txt = true;
     website.configuration.delay = 0;
 
-    website.scrape();
+    website.scrape().await;
 
     for page in website.get_pages() {
         let download_file = page.get_url().clone();

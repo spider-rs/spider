@@ -8,8 +8,10 @@ use clap::Parser;
 use options::{Cli, Commands};
 use spider::website::Website;
 use std::io::{self, Write};
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     if cli.verbose {
@@ -24,7 +26,6 @@ fn main() {
     let mut website: Website = Website::new(&cli.domain);
 
     let delay = cli.delay.unwrap_or(website.configuration.delay);
-    let concurrency = cli.concurrency.unwrap_or(website.configuration.concurrency);
     let user_agent = cli
         .user_agent
         .unwrap_or(website.configuration.user_agent.to_string());
@@ -32,7 +33,6 @@ fn main() {
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
     website.configuration.delay = delay;
-    website.configuration.concurrency = concurrency;
     website.configuration.subdomains = cli.subdomains;
     website.configuration.tld = cli.tld;
 
@@ -48,9 +48,9 @@ fn main() {
     match &cli.command {
         Some(Commands::CRAWL { sync, output_links }) => {
             if *sync {
-                website.crawl_sync();
+                website.crawl_sync().await;
             } else {
-                website.crawl();
+                website.crawl().await;
             }
 
             if *output_links {
@@ -66,7 +66,7 @@ fn main() {
         }) => {
             use serde_json::json;
 
-            website.scrape();
+            website.scrape().await;
 
             let mut page_objects: Vec<_> = vec![];
 

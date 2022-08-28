@@ -26,7 +26,7 @@ runs with 10 samples:
 
 |                                          | `libraries`               |
 | :--------------------------------------- | :------------------------ |
-| **`Rust[spider]: crawl 10 samples`**     | `1.5528 s` (✅ **1.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `0.8941 s` (✅ **1.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `2.9417 s` (✅ **1.00x**) |
 | **`Node.js[crawler]: crawl 10 samples`** | `2.9992 s` (✅ **1.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `12.019 s` (✅ **1.00x**) |

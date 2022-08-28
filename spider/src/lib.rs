@@ -29,11 +29,9 @@
 
 extern crate hashbrown;
 extern crate log;
-extern crate num_cpus;
-extern crate rayon;
 extern crate reqwest;
 extern crate scraper;
-extern crate tokio;
+pub extern crate tokio;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
 extern crate url;

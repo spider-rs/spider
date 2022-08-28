@@ -13,8 +13,10 @@ use htr::convert_to_react;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::Write;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or("./target".to_string());
 
     // view the target dist for the downloads
@@ -32,7 +34,7 @@ fn main() {
     website.configuration.respect_robots_txt = true;
     website.configuration.delay = 0;
 
-    website.scrape();
+    website.scrape().await;
 
     for page in website.get_pages() {
         let download_file = page.get_url().clone();
