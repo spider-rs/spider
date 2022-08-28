@@ -26,9 +26,6 @@ pub struct Cli {
     /// Polite crawling delay in milli seconds
     #[clap(short = 'D', long)]
     pub delay: Option<u64>,
-    /// How many request can be run simultaneously
-    #[clap(short, long)]
-    pub concurrency: Option<usize>,
     /// Comma seperated string list of pages to not crawl or regex with feature enabled
     #[clap(short, long)]
     pub blacklist_url: Option<String>,

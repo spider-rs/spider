@@ -4,8 +4,10 @@ extern crate spider;
 
 use env_logger::Env;
 use spider::website::Website;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let env = Env::default()
         .filter_or("RUST_LOG", "info")
         .write_style_or("RUST_LOG_STYLE", "always");
@@ -17,7 +19,7 @@ fn main() {
     website.configuration.delay = 15; // Defaults to 250 ms
     website.configuration.user_agent = "SpiderBot".into(); // Defaults to spider/x.y.z, where x.y.z is the library version
 
-    website.scrape();
+    website.scrape().await;
 
     for page in website.get_pages() {
         println!("{}", page.get_html());
