@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.11.9"
+version = "1.12.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
@@ -15,11 +15,9 @@ edition = "2018"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = { version = "0.11.11", features = ["blocking", "brotli", "native-tls-alpn"] }
+reqwest = { version = "0.11.11", features = ["brotli", "native-tls-alpn"] }
 scraper = "0.13"
 url = "2.2.2"
-rayon = "1.5.3"
-num_cpus = "1.13.1"
 tokio = { version = "^1.20.1", features = [ "rt-multi-thread", "net", "macros", "time" ] }
 hashbrown = { version = "0.12.3" }
 log = "0.4.16"

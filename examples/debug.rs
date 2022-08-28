@@ -5,8 +5,10 @@ extern crate spider;
 
 use env_logger::Env;
 use spider::website::Website;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // enable with RUST_LOG env_logger crate
     let env = Env::default()
         .filter_or("RUST_LOG", "info")
@@ -16,5 +18,5 @@ fn main() {
 
     let mut website: Website = Website::new("https://rsseau.fr");
 
-    website.crawl();
+    website.crawl().await;
 }

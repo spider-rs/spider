@@ -14,7 +14,7 @@
 //! ```rust,ignore
 //! extern crate spider;
 //!
-//! use spider::packages::robotparser::RobotFileParser;;
+//! use spider::packages::robotparser::RobotFileParser;
 //!
 //! fn main() {
 //!     let parser = RobotFileParser::new("http://www.python.org/robots.txt");
@@ -23,12 +23,11 @@
 //! }
 //! ```
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use reqwest::blocking::Client;
-use reqwest::blocking::Response;
+use reqwest::Client;
+use reqwest::Response;
 use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
-use std::io::Read;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 /// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
@@ -225,10 +224,10 @@ impl RobotFileParser {
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
-    pub fn read(&mut self, client: &Client) {
+    pub async fn read(&mut self, client: &Client) {
         let request = client.get(self.url.as_ref());
         let request = request.header(USER_AGENT, &self.user_agent);
-        let mut res = match request.send() {
+        let res = match request.send().await {
             Ok(res) => res,
             Err(_) => {
                 return;
@@ -245,15 +244,14 @@ impl RobotFileParser {
             {
                 self.allow_all = true;
             }
-            StatusCode::OK => self.from_response(&mut res),
+            StatusCode::OK => self.from_response(res).await,
             _ => {}
         }
     }
 
     /// Reads the HTTP response and feeds it to the parser.
-    pub fn from_response(&mut self, response: &mut Response) {
-        let mut buf = String::new();
-        response.read_to_string(&mut buf).unwrap();
+    pub async fn from_response(&mut self, response: Response) {
+        let buf = response.text().await.unwrap();
         let lines: Vec<&str> = buf.split('\n').collect();
         self.parse(&lines);
     }

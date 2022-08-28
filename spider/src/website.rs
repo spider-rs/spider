@@ -4,13 +4,12 @@ use crate::packages::robotparser::RobotFileParser;
 use crate::page::Page;
 use crate::utils::log;
 use hashbrown::HashSet;
-use rayon::ThreadPool;
-use rayon::ThreadPoolBuilder;
-use reqwest::blocking::Client;
+use std::time::Duration;
+
+use reqwest::Client;
 use reqwest::header;
 use reqwest::header::CONNECTION;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Duration;
+use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::time::sleep;
 
 /// Represents a website to crawl and gather all links.
@@ -112,7 +111,7 @@ impl Website {
     }
 
     /// configure the robots parser on initial crawl attempt and run
-    pub fn configure_robots_parser(&mut self, client: &Client) {
+    pub async fn configure_robots_parser(&mut self, client: &Client) {
         if self.configuration.respect_robots_txt {
             let mut robot_file_parser =
                 RobotFileParser::new(&format!("{}/robots.txt", &self.domain));
@@ -121,7 +120,7 @@ impl Website {
             // get the latest robots
             if robot_file_parser.mtime() == 0 {
                 // println!("{:?}", &robot_file_parser);
-                robot_file_parser.read(client);
+                robot_file_parser.read(client).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
                     .unwrap_or(self.get_delay())
@@ -149,50 +148,41 @@ impl Website {
             .user_agent(&self.configuration.user_agent)
             .brotli(true)
             .build()
-            .expect("Failed building client.")
-    }
-
-    /// configure rayon thread pool
-    fn create_thread_pool(&mut self) -> ThreadPool {
-        ThreadPoolBuilder::new()
-            .num_threads(self.configuration.concurrency)
-            .build()
-            .expect("Failed building thread pool.")
+            .unwrap()
     }
 
     /// setup config for crawl
-    pub fn setup(&mut self) -> Client {
+    pub async fn setup(&mut self) -> Client {
         self.configure_agent();
         let client = self.configure_http_client();
-        self.configure_robots_parser(&client);
+        self.configure_robots_parser(&client).await;
 
         client
     }
 
     /// Start to crawl website with async parallelization
-    pub fn crawl(&mut self) {
-        let client = self.setup();
+    pub async fn crawl(&mut self) {
+        let client = self.setup().await;
 
-        self.crawl_concurrent(&client);
+        self.crawl_concurrent(&client).await;
     }
 
     /// Start to scrape/download website with async parallelization
-    pub fn scrape(&mut self) {
-        let client = self.setup();
+    pub async fn scrape(&mut self) {
+        let client = self.setup().await;
 
-        self.scrape_concurrent(&client);
+        self.scrape_concurrent(&client).await;
     }
 
     /// Start to crawl website in sync
-    pub fn crawl_sync(&mut self) {
-        let client = self.setup();
+    pub async fn crawl_sync(&mut self) {
+        let client = self.setup().await;
 
-        self.crawl_sequential(&client);
+        self.crawl_sequential(&client).await;
     }
 
     /// Start to crawl website concurrently
-    fn crawl_concurrent(&mut self, client: &Client) {
-        let pool = self.create_thread_pool();
+    async fn crawl_concurrent(&mut self, client: &Client) {
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
         let tld = self.configuration.tld;
@@ -201,7 +191,7 @@ impl Website {
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, rx): (Sender<Message>, Receiver<Message>) = channel();
+            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(100);
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
@@ -211,18 +201,24 @@ impl Website {
                 self.links_visited.insert(link.into());
 
                 let tx = tx.clone();
+                let client = client.clone();
+                let link = link.clone();
 
-                pool.scope(move |s| {
-                    s.spawn(move |_| {
-                        if delay_enabled {
-                            tokio_sleep(&Duration::from_millis(delay));
-                        }
-                        let link_result = on_link_find_callback(link.into());
-                        let page = Page::new(&link_result, &client);
-                        let links = page.links(subdomains, tld);
-    
-                        tx.send(links).unwrap();
-                    });
+                tokio::spawn(async move {
+                    if delay_enabled {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    let link_result = on_link_find_callback(link);
+                    let page = Page::new(&link_result, &client).await;
+                    let links = page.links(subdomains, tld);
+
+                    drop(client);
+                    drop(link_result);
+
+                    if let Err(_) = tx.send(links).await {
+                        log("receiver dropped", "");
+                        return;
+                    }
                 });
             }
 
@@ -230,16 +226,16 @@ impl Website {
 
             let mut new_links: HashSet<String> = HashSet::new();
 
-            rx.into_iter().for_each(|links| {
-                new_links.extend(links);
-            });
+            while let Some(msg) = rx.recv().await {
+                new_links.extend(msg);
+            }
 
             self.links = &new_links - &self.links_visited;
         }
     }
 
     /// Start to crawl website sequential
-    fn crawl_sequential(&mut self, client: &Client) {
+    async fn crawl_sequential(&mut self, client: &Client) {
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
         let tld = self.configuration.tld;
@@ -257,12 +253,12 @@ impl Website {
                 log("fetch", link);
                 self.links_visited.insert(link.into());
                 if delay_enabled {
-                    tokio_sleep(&Duration::from_millis(delay));
+                    sleep(Duration::from_millis(delay)).await;
                 }
 
                 let link = link.clone();
                 let link_result = on_link_find_callback(link);
-                let page = Page::new(&link_result, &client);
+                let page = Page::new(&link_result, &client).await;
                 let links = page.links(subdomains, tld);
 
                 new_links.extend(links);
@@ -273,15 +269,14 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html
-    fn scrape_concurrent(&mut self, client: &Client) {
-        let pool = self.create_thread_pool();
+    async fn scrape_concurrent(&mut self, client: &Client) {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, rx): (Sender<Page>, Receiver<Page>) = channel();
+            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(100);
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
@@ -292,17 +287,23 @@ impl Website {
                 self.links_visited.insert(link.into());
 
                 let tx = tx.clone();
+                let client = client.clone();
+                let link = link.clone();
 
-                pool.scope(move |s| {
-                    s.spawn(move |_| {
-                        if delay_enabled {
-                            tokio_sleep(&Duration::from_millis(delay));
-                        }
-                        let link_result = on_link_find_callback(link.to_string());
-                        let page = Page::new(&link_result, &client);
-    
-                        tx.send(page).unwrap();
-                    });
+                tokio::spawn(async move {
+                    if delay_enabled {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    let link_result = on_link_find_callback(link);
+                    let page = Page::new(&link_result, &client).await;
+
+                    drop(client);
+                    drop(link_result);
+
+                    if let Err(_) = tx.send(page).await {
+                        log("receiver dropped", "");
+                        return;
+                    }
                 });
             }
 
@@ -310,27 +311,21 @@ impl Website {
 
             let mut new_links: HashSet<String> = HashSet::new();
 
-            rx.into_iter().for_each(|page| {
-                let links = page.links(self.configuration.subdomains, self.configuration.tld);
+            while let Some(msg) = rx.recv().await {
+                let links = msg.links(self.configuration.subdomains, self.configuration.tld);
                 new_links.extend(links);
-                self.pages.push(page);
-            });
+                self.pages.push(msg);
+            }
 
             self.links = &new_links - &self.links_visited;
         }
     }
 }
 
-// blocking sleep keeping thread alive
-#[tokio::main]
-async fn tokio_sleep(delay: &Duration) {
-    sleep(*delay).await;
-}
-
-#[test]
-fn crawl() {
+#[tokio::test]
+async fn crawl() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.crawl();
+    website.crawl().await;
     assert!(
         website
             .links_visited
@@ -340,10 +335,10 @@ fn crawl() {
     );
 }
 
-#[test]
-fn scrape() {
+#[tokio::test]
+async fn scrape() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.scrape();
+    website.scrape().await;
     assert!(
         website
             .links_visited
@@ -355,11 +350,11 @@ fn scrape() {
     assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
 }
 
-#[test]
-fn crawl_subsequential() {
+#[tokio::test]
+async fn crawl_subsequential() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.delay = 250;
-    website.crawl_sync();
+    website.crawl_sync().await;
     assert!(
         website
             .links_visited
@@ -369,25 +364,25 @@ fn crawl_subsequential() {
     );
 }
 
-#[test]
-fn crawl_invalid() {
+#[tokio::test]
+async fn crawl_invalid() {
     let url = "https://w.com";
     let mut website: Website = Website::new(url);
-    website.crawl();
+    website.crawl().await;
     let mut uniq = HashSet::new();
     uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
 
-#[test]
-fn crawl_link_callback() {
+#[tokio::test]
+async fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.on_link_find_callback = |s| {
         log("callback link target: {}", &s);
         s
     };
-    website.crawl();
+    website.crawl().await;
     assert!(
         website
             .links_visited
@@ -397,14 +392,14 @@ fn crawl_link_callback() {
     );
 }
 
-#[test]
-fn not_crawl_blacklist() {
+#[tokio::test]
+async fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website
         .configuration
         .blacklist_url
         .push("https://choosealicense.com/licenses/".to_string());
-    website.crawl();
+    website.crawl().await;
     assert!(
         !website
             .links_visited
@@ -414,15 +409,15 @@ fn not_crawl_blacklist() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[cfg(feature = "regex")]
-fn not_crawl_blacklist_regex() {
+async fn not_crawl_blacklist_regex() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website
         .configuration
         .blacklist_url
         .push("/choosealicense.com/".to_string());
-    website.crawl();
+    website.crawl().await;
     assert_eq!(website.links_visited.len(), 0);
 }
 
@@ -435,14 +430,14 @@ fn randomize_website_agent() {
     assert_eq!(website.configuration.user_agent.is_empty(), false);
 }
 
-#[test]
-fn test_respect_robots_txt() {
+#[tokio::test]
+async fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = "*".into();
 
-    let client = website.setup();
-    website.configure_robots_parser(&client);
+    let client = website.setup().await;
+    website.configure_robots_parser(&client).await;
 
     assert_eq!(website.configuration.delay, 250);
 
@@ -453,8 +448,8 @@ fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = "bingbot".into();
 
-    let client_second = website_second.setup();
-    website_second.configure_robots_parser(&client_second);
+    let client_second = website_second.setup().await;
+    website_second.configure_robots_parser(&client_second).await;
 
     assert_eq!(
         website_second.configuration.user_agent,
@@ -469,18 +464,18 @@ fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    let client_third = website_third.setup();
+    let client_third = website_third.setup().await;
 
-    website_third.configure_robots_parser(&client_third);
+    website_third.configure_robots_parser(&client_third).await;
 
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }
 
-#[test]
-fn test_crawl_subdomains() {
+#[tokio::test]
+async fn test_crawl_subdomains() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.subdomains = true;
-    website.crawl();
+    website.crawl().await;
     assert!(
         website
             .links_visited
@@ -490,11 +485,11 @@ fn test_crawl_subdomains() {
     );
 }
 
-#[test]
-fn test_crawl_tld() {
+#[tokio::test]
+async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.subdomains = true;
-    website.crawl();
+    website.crawl().await;
     assert!(
         website
             .links_visited
@@ -504,8 +499,8 @@ fn test_crawl_tld() {
     );
 }
 
-#[test]
-fn test_link_duplicates() {
+#[tokio::test]
+async fn test_link_duplicates() {
     fn has_unique_elements<T>(iter: T) -> bool
     where
         T: IntoIterator,
@@ -516,7 +511,7 @@ fn test_link_duplicates() {
     }
 
     let mut website: Website = Website::new("http://0.0.0.0:8000");
-    website.crawl();
+    website.crawl().await;
 
     assert!(has_unique_elements(&website.links_visited));
 }

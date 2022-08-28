@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.11.9"
+spider = "1.12.0"
 ```
 
 And then the code:
@@ -25,10 +25,12 @@ And then the code:
 extern crate spider;
 
 use spider::website::Website;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.crawl();
+    website.crawl().await;
 
     for page in website.get_pages() {
         println!("- {}", page.get_url());
@@ -45,11 +47,10 @@ website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".
 website.configuration.respect_robots_txt = true;
 website.configuration.subdomains = true;
 website.configuration.delay = 2000; // Defaults to 250 ms
-website.configuration.concurrency = 10; // Defaults to number of cpus available * 4
 website.configuration.user_agent = "myapp/version".to_string(); // Defaults to spider/x.y.z, where x.y.z is the library version
 website.on_link_find_callback = |s| { println!("link target: {}", s); s }; // Callback to run on each link find
 
-website.crawl();
+website.crawl().await;
 ```
 
 ## Regex Blacklisting
@@ -58,18 +59,20 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.11.9", features = ["regex"] }
+spider = { version = "1.12.0", features = ["regex"] }
 ```
 
 ```rust,no_run
 extern crate spider;
 
 use spider::website::Website;
+use spider::tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.blacklist_url.push("/licenses/".to_string());
-    website.crawl();
+    website.crawl().await;
 
     for page in website.get_pages() {
         println!("- {}", page.get_url());
@@ -83,5 +86,5 @@ Currently we have two optional feature flags. Regex blacklisting and randomizing
 
 ```toml
 [dependencies]
-spider = { version = "1.11.9", features = ["regex", "ua_generator"] }
+spider = { version = "1.12.0", features = ["regex", "ua_generator"] }
 ```

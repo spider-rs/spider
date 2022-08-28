@@ -1,13 +1,13 @@
 use log::{info, log_enabled, Level};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use reqwest::StatusCode;
 
 /// Perform a network request to a resource extracting all content as text.
-pub fn fetch_page_html(url: &str, client: &Client) -> String {
+pub async fn fetch_page_html(url: &str, client: &Client) -> String {
     let mut body = String::new();
 
-    match client.get(url).send() {
-        Ok(res) if res.status() == StatusCode::OK => match res.text() {
+    match client.get(url).send().await {
+        Ok(res) if res.status() == StatusCode::OK => match res.text().await {
             Ok(text) => body = text,
             Err(_) => {
                 log("- error fetching {}", &url);
