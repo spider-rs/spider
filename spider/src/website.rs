@@ -11,6 +11,7 @@ use reqwest::header;
 use reqwest::header::CONNECTION;
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::time::sleep;
+use rayon::prelude::*;
 
 /// Represents a website to crawl and gather all links.
 /// ```rust
@@ -191,7 +192,7 @@ impl Website {
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(100);
+            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(50);
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
@@ -217,7 +218,6 @@ impl Website {
 
                     if let Err(_) = tx.send(links).await {
                         log("receiver dropped", "");
-                        return;
                     }
                 });
             }
@@ -227,7 +227,7 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
-                new_links.extend(msg);
+                new_links.par_extend(msg);
             }
 
             self.links = &new_links - &self.links_visited;
@@ -261,7 +261,7 @@ impl Website {
                 let page = Page::new(&link_result, &client).await;
                 let links = page.links(subdomains, tld);
 
-                new_links.extend(links);
+                new_links.par_extend(links);
             }
 
             self.links = &new_links - &self.links_visited;
@@ -276,7 +276,7 @@ impl Website {
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(100);
+            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(50);
 
             for link in self.links.iter() {
                 if !self.is_allowed(link) {
@@ -313,7 +313,7 @@ impl Website {
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(self.configuration.subdomains, self.configuration.tld);
-                new_links.extend(links);
+                new_links.par_extend(links);
                 self.pages.push(msg);
             }
 
