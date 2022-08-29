@@ -9,9 +9,7 @@ The fastest web crawler and indexer.
 
 ## Getting Started
 
-View the [spider](/spider/README.md) or [CLI](./spider_cli/README.md) directory to get started.
-
-Use version prior to `1.12.0` for blocking threaded implementation.
+View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory to get started.
 
 ## Benchmarks
 

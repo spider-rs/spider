@@ -29,6 +29,7 @@
 
 extern crate hashbrown;
 extern crate log;
+extern crate rayon;
 extern crate reqwest;
 extern crate scraper;
 pub extern crate tokio;
