@@ -4,8 +4,8 @@ extern crate env_logger;
 extern crate spider;
 
 use env_logger::Env;
-use spider::website::Website;
 use spider::tokio;
+use spider::website::Website;
 
 #[tokio::main]
 async fn main() {

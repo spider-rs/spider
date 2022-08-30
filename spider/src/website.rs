@@ -6,12 +6,12 @@ use crate::utils::log;
 use hashbrown::HashSet;
 use std::time::Duration;
 
-use reqwest::Client;
+use rayon::prelude::*;
 use reqwest::header;
 use reqwest::header::CONNECTION;
-use tokio::sync::mpsc::{channel, Sender, Receiver};
+use reqwest::Client;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::sleep;
-use rayon::prelude::*;
 
 /// Represents a website to crawl and gather all links.
 /// ```rust

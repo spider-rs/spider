@@ -37,6 +37,16 @@ pub extern crate tokio;
 extern crate ua_generator;
 extern crate url;
 
+// performance reasons jemalloc memory backend for dedicated work and large crawls
+#[cfg(all(
+    not(windows),
+    not(target_os = "android"),
+    not(target_env = "musl"),
+    feature = "jemalloc"
+))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 /// Configuration structure for `Website`.
 pub mod configuration;
 /// Internal packages customized.

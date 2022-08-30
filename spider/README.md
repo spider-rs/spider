@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.12.2"
+spider = "1.13.0"
 ```
 
 And then the code:
@@ -59,7 +59,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.12.2", features = ["regex"] }
+spider = { version = "1.13.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -82,11 +82,20 @@ async fn main() {
 
 ## Features
 
-Currently we have two optional feature flags. Regex blacklisting and randomizing User-Agents.
+Currently we have three optional feature flags. Regex blacklisting and randomizing User-Agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.12.2", features = ["regex", "ua_generator"] }
+spider = { version = "1.13.0", features = ["regex", "ua_generator"] }
+```
+
+[Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
+
+This changes the global allocator of the program so test accordingly to measure impact.
+
+```toml
+[dependencies]
+spider = { version = "1.13.0", features = ["jemalloc"] }
 ```
 
 ## Blocking

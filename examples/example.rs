@@ -1,8 +1,8 @@
 //! `cargo run --example example`
 extern crate spider;
 
-use spider::website::Website;
 use spider::tokio;
+use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
