@@ -51,9 +51,9 @@ impl Website {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: None,
-            links: HashSet::from([format!("{}/", domain)]),
+            links: HashSet::from([format!("{}/", &domain)]),
             on_link_find_callback: |s| s,
-            domain: domain.to_owned(),
+            domain: domain.into(),
         }
     }
 
@@ -95,7 +95,7 @@ impl Website {
             self.pages.clone()
         } else {
             self.links_visited
-                .iter()
+                .par_iter()
                 .map(|l| Page::build(l, ""))
                 .collect()
         }
