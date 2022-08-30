@@ -6,9 +6,9 @@ use spider::utils::log;
 use spider::website::Website;
 
 use env_logger::Env;
+use spider::tokio;
 use std::fs::OpenOptions;
 use std::io::Write;
-use spider::tokio;
 
 #[tokio::main]
 async fn main() {

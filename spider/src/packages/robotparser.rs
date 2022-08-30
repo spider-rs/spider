@@ -23,9 +23,9 @@
 //! }
 //! ```
 
+use reqwest::header::USER_AGENT;
 use reqwest::Client;
 use reqwest::Response;
-use reqwest::header::USER_AGENT;
 use reqwest::StatusCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;

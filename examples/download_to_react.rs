@@ -10,10 +10,10 @@ use spider::website::Website;
 use convert_case::{Case, Casing};
 use env_logger::Env;
 use htr::convert_to_react;
+use spider::tokio;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::Write;
-use spider::tokio;
 
 #[tokio::main]
 async fn main() {
