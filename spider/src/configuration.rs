@@ -21,7 +21,7 @@ pub struct Configuration {
     /// User-Agent
     pub user_agent: String,
     /// Polite crawling delay in milli seconds.
-    pub delay: u64
+    pub delay: u64,
 }
 
 /// get the user agent from the top agent list randomly.

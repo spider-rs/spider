@@ -6,9 +6,9 @@ pub mod options;
 
 use clap::Parser;
 use options::{Cli, Commands};
+use spider::tokio;
 use spider::website::Website;
 use std::io::{self, Write};
-use spider::tokio;
 
 #[tokio::main]
 async fn main() {

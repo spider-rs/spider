@@ -27,7 +27,7 @@ jobs:
       - name: Install Benchmark Dependencies
         run: |
           # install the local cli latest
-          cd ./spider_cli && cargo install  --path . && cd ../
+          cd ./spider_cli && cargo install --features jemalloc --path . && cd ../
           cd benches && cargo build
       - name: Run Benchmarks
         run: cargo bench

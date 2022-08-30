@@ -6,12 +6,12 @@ use crate::utils::log;
 use hashbrown::HashSet;
 use std::time::Duration;
 
-use reqwest::Client;
+use rayon::prelude::*;
 use reqwest::header;
 use reqwest::header::CONNECTION;
-use tokio::sync::mpsc::{channel, Sender, Receiver};
+use reqwest::Client;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::sleep;
-use rayon::prelude::*;
 
 /// Represents a website to crawl and gather all links.
 /// ```rust
@@ -51,9 +51,9 @@ impl Website {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: None,
-            links: HashSet::from([format!("{}/", domain)]),
+            links: HashSet::from([format!("{}/", &domain)]),
             on_link_find_callback: |s| s,
-            domain: domain.to_owned(),
+            domain: domain.into(),
         }
     }
 
@@ -95,7 +95,7 @@ impl Website {
             self.pages.clone()
         } else {
             self.links_visited
-                .iter()
+                .par_iter()
                 .map(|l| Page::build(l, ""))
                 .collect()
         }
