@@ -75,8 +75,6 @@ pub struct RobotFileParser {
     allow_all: bool,
     /// Url of the website
     url: Url,
-    /// Domain url path
-    path: String,
     /// Time last checked robots.txt file
     last_checked: i64,
     /// User-agent string
@@ -183,15 +181,12 @@ impl Default for Entry {
 impl RobotFileParser {
     /// Establish a new robotparser for a website domain
     pub fn new<T: AsRef<str>>(url: T) -> RobotFileParser {
-        let parsed_url = Url::parse(url.as_ref()).unwrap();
-
         RobotFileParser {
             entries: vec![],
             default_entry: Entry::new(),
             disallow_all: false,
             allow_all: false,
-            path: parsed_url.path().to_string(),
-            url: parsed_url,
+            url: Url::parse(url.as_ref()).unwrap(),
             last_checked: 0i64,
             user_agent: String::from("robotparser-rs"),
         }
@@ -218,7 +213,6 @@ impl RobotFileParser {
     /// Sets the URL referring to a robots.txt file.
     pub fn set_url<T: AsRef<str>>(&mut self, url: T) {
         let parsed_url = Url::parse(url.as_ref()).unwrap();
-        self.path = parsed_url.path().to_string();
         self.url = parsed_url;
         self.last_checked = 0i64;
     }
