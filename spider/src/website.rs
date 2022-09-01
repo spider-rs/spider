@@ -27,8 +27,6 @@ use tokio::time::sleep;
 pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
-    /// this is a start URL given when instanciate with `new`.
-    pub domain: String,
     /// contains all non-visited URL.
     links: HashSet<String>,
     /// contains all visited URL.
@@ -53,7 +51,6 @@ impl Website {
             robot_file_parser: None,
             links: HashSet::from([format!("{}/", &domain)]),
             on_link_find_callback: |s| s,
-            domain: domain.into(),
         }
     }
 
@@ -111,16 +108,27 @@ impl Website {
         Duration::from_millis(self.configuration.delay)
     }
 
-    /// configure the robots parser on initial crawl attempt and run
+    /// configure the robots parser on initial crawl attempt and run.
     pub async fn configure_robots_parser(&mut self, client: &Client) {
         if self.configuration.respect_robots_txt {
-            let mut robot_file_parser =
-                RobotFileParser::new(&format!("{}/robots.txt", &self.domain));
-            robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
+            let mut robot_file_parser: RobotFileParser = match &self.robot_file_parser {
+                Some(parser) => parser.to_owned(),
+                _ => {
+                    let mut domain = String::from("");
+                    // the first link upon initial config is always the domain
+                    for links in self.links.iter() {
+                        domain = links.clone();
+                    }
+                    let mut robot_file_parser =
+                        RobotFileParser::new(&format!("{}robots.txt", &domain));
+                    robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
 
-            // get the latest robots
-            if robot_file_parser.mtime() == 0 {
-                // println!("{:?}", &robot_file_parser);
+                    robot_file_parser
+                }
+            };
+
+            // get the latest robots todo determine time elaspe
+            if robot_file_parser.mtime() == 0 || robot_file_parser.mtime() >= 4000 {
                 robot_file_parser.read(client).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
@@ -168,18 +176,18 @@ impl Website {
         self.crawl_concurrent(&client).await;
     }
 
-    /// Start to scrape/download website with async parallelization
-    pub async fn scrape(&mut self) {
-        let client = self.setup().await;
-
-        self.scrape_concurrent(&client).await;
-    }
-
     /// Start to crawl website in sync
     pub async fn crawl_sync(&mut self) {
         let client = self.setup().await;
 
         self.crawl_sequential(&client).await;
+    }
+
+    /// Start to scrape/download website with async parallelization
+    pub async fn scrape(&mut self) {
+        let client = self.setup().await;
+
+        self.scrape_concurrent(&client).await;
     }
 
     /// Start to crawl website concurrently
