@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.13.7"
+version = "1.13.8"
 dependencies = [
  "hashbrown",
  "log",
@@ -1692,13 +1692,14 @@ dependencies = [
  "scraper",
  "tikv-jemallocator",
  "tokio",
+ "tokio-stream",
  "ua_generator",
  "url",
 ]
 
 [[package]]
 name = "spider_cli"
-version = "1.13.7"
+version = "1.13.8"
 dependencies = [
  "clap 3.2.20",
  "env_logger",
@@ -1710,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.13.7"
+version = "1.13.8"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -1923,6 +1924,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
 dependencies = [
  "native-tls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df54d54117d6fdc4e4fea40fe1e4e566b3505700e148a6827e59b34b0d2600d9"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
  "tokio",
 ]
 

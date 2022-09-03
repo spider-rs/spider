@@ -11,7 +11,9 @@ use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::oneshot;
 use tokio::time::sleep;
+use tokio_stream::StreamExt;
 
 /// Represents a website to crawl and gather all links.
 /// ```rust
@@ -201,22 +203,21 @@ impl Website {
         let mut domain = String::from("");
 
         // crawl while links exists
-        while !self.links.is_empty() {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(50);
+        while let Some(link) = &mut tokio_stream::iter(&self.links).next().await {
+            if domain.is_empty() {
+                domain = link.clone();
+            }
+            if self.is_allowed(&link) {
+                let (tx, rx): (
+                    tokio::sync::oneshot::Sender<Message>,
+                    tokio::sync::oneshot::Receiver<Message>,
+                ) = oneshot::channel();
+                log("fetch", &link);
+                self.links_visited.insert(link.to_string());
 
-            for link in self.links.iter() {
-                if !self.is_allowed(link) {
-                    continue;
-                }
-                log("fetch", link);
-                if domain.is_empty() {
-                    domain = link.clone();
-                }
-                self.links_visited.insert(link.into());
-
-                let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
+                self.links.remove(&link.clone());
 
                 tokio::spawn(async move {
                     if delay_enabled {
@@ -230,21 +231,19 @@ impl Website {
                     drop(link_result);
                     drop(page);
 
-                    if let Err(_) = tx.send(links).await {
-                        log("receiver dropped", "");
-                    }
+                    tx.send(links).unwrap();
                 });
+
+                match rx.await {
+                    Ok(msg) => {
+                        self.links.par_extend(&msg - &self.links_visited);
+                    }
+                    Err(_) => log("sender dropped", ""),
+                }
+            } else {
+                let l = link.clone();
+                self.links.remove(&l);
             }
-
-            drop(tx);
-
-            let mut new_links: HashSet<String> = HashSet::new();
-
-            while let Some(msg) = rx.recv().await {
-                new_links.par_extend(msg);
-            }
-
-            self.links = &new_links - &self.links_visited;
         }
 
         self.links.insert(domain);
@@ -265,7 +264,7 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             for link in self.links.iter() {
-                if !self.is_allowed(link) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
                 log("fetch", link);
@@ -304,7 +303,7 @@ impl Website {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(50);
 
             for link in self.links.iter() {
-                if !self.is_allowed(link) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
                 log("fetch", link);
