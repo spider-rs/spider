@@ -198,6 +198,8 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
+        let mut domain = String::from("");
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(50);
@@ -207,6 +209,9 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
+                if domain.is_empty() {
+                    domain = link.clone();
+                }
                 self.links_visited.insert(link.into());
 
                 let tx = tx.clone();
@@ -223,6 +228,7 @@ impl Website {
 
                     drop(client);
                     drop(link_result);
+                    drop(page);
 
                     if let Err(_) = tx.send(links).await {
                         log("receiver dropped", "");
@@ -240,6 +246,8 @@ impl Website {
 
             self.links = &new_links - &self.links_visited;
         }
+
+        self.links.insert(domain);
     }
 
     /// Start to crawl website sequential
@@ -250,6 +258,8 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
+        let mut domain = String::from("");
+
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
@@ -259,6 +269,9 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
+                if domain.is_empty() {
+                    domain = link.clone();
+                }
                 self.links_visited.insert(link.into());
                 if delay_enabled {
                     sleep(Duration::from_millis(delay)).await;
@@ -274,6 +287,8 @@ impl Website {
 
             self.links = &new_links - &self.links_visited;
         }
+
+        self.links.insert(domain);
     }
 
     /// Start to scape website concurrently and store html
@@ -281,6 +296,8 @@ impl Website {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
+
+        let mut domain = String::from("");
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -291,7 +308,9 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-
+                if domain.is_empty() {
+                    domain = link.clone();
+                }
                 self.links_visited.insert(link.into());
 
                 let tx = tx.clone();
@@ -327,6 +346,8 @@ impl Website {
 
             self.links = &new_links - &self.links_visited;
         }
+
+        self.links.insert(domain);
     }
 }
 
@@ -340,6 +361,14 @@ async fn crawl() {
             .contains(&"https://choosealicense.com/licenses/".to_string()),
         "{:?}",
         website.links_visited
+    );
+    // resets base link for crawling
+    assert!(
+        website
+            .links
+            .contains(&"https://choosealicense.com/".to_string()),
+        "{:?}",
+        website.links
     );
 }
 
