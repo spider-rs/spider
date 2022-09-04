@@ -198,7 +198,7 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut domain = String::from("");
+        let mut start_url = String::new(); // base crawl index
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -209,8 +209,8 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-                if domain.is_empty() {
-                    domain = link.clone();
+                if start_url.is_empty() {
+                    start_url = link.clone();
                 }
                 self.links_visited.insert(link.into());
 
@@ -247,7 +247,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
         }
 
-        self.links.insert(domain);
+        self.links.insert(start_url);
     }
 
     /// Start to crawl website sequential
@@ -258,7 +258,7 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut domain = String::from("");
+        let mut start_url = String::new(); // base crawl index
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -269,8 +269,8 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-                if domain.is_empty() {
-                    domain = link.clone();
+                if start_url.is_empty() {
+                    start_url = link.clone();
                 }
                 self.links_visited.insert(link.into());
                 if delay_enabled {
@@ -288,7 +288,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
         }
 
-        self.links.insert(domain);
+        self.links.insert(start_url);
     }
 
     /// Start to scape website concurrently and store html
@@ -297,7 +297,7 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut domain = String::from("");
+        let mut start_url = String::new(); // base crawl index
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -308,8 +308,8 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-                if domain.is_empty() {
-                    domain = link.clone();
+                if start_url.is_empty() {
+                    start_url = link.clone();
                 }
                 self.links_visited.insert(link.into());
 
@@ -347,7 +347,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
         }
 
-        self.links.insert(domain);
+        self.links.insert(start_url);
     }
 }
 

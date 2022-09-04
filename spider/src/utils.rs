@@ -4,22 +4,21 @@ use reqwest::StatusCode;
 
 /// Perform a network request to a resource extracting all content as text.
 pub async fn fetch_page_html(url: &str, client: &Client) -> String {
-    let mut body = String::new();
-
     match client.get(url).send().await {
         Ok(res) if res.status() == StatusCode::OK => match res.text().await {
-            Ok(text) => body = text,
+            Ok(text) => text,
             Err(_) => {
                 log("- error fetching {}", &url);
+
+                String::new()
             }
         },
-        Ok(_) => (),
+        Ok(_) => String::new(),
         Err(_) => {
             log("- error parsing html text {}", &url);
+            String::new()
         }
     }
-
-    body
 }
 
 /// log to console if configuration verbose.
