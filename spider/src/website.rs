@@ -11,7 +11,9 @@ use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task;
 use tokio::time::sleep;
+use tokio_stream::StreamExt;
 
 /// Represents a website to crawl and gather all links.
 /// ```rust
@@ -203,8 +205,9 @@ impl Website {
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(50);
+            let mut stream = tokio_stream::iter(&self.links);
 
-            for link in self.links.iter() {
+            while let Some(link) = stream.next().await {
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -218,20 +221,18 @@ impl Website {
                 let client = client.clone();
                 let link = link.clone();
 
-                tokio::spawn(async move {
-                    if delay_enabled {
-                        sleep(Duration::from_millis(delay)).await;
-                    }
-                    let link_result = on_link_find_callback(link);
-                    let page = Page::new(&link_result, &client).await;
-                    let links = page.links(subdomains, tld);
+                task::spawn(async move {
+                    {
+                        if delay_enabled {
+                            sleep(Duration::from_millis(delay)).await;
+                        }
+                        let link_result = on_link_find_callback(link);
+                        let page = Page::new(&link_result, &client).await;
+                        let links = page.links(subdomains, tld);
 
-                    drop(client);
-                    drop(link_result);
-                    drop(page);
-
-                    if let Err(_) = tx.send(links).await {
-                        log("receiver dropped", "");
+                        if let Err(_) = tx.send(links).await {
+                            log("receiver dropped", "");
+                        }
                     }
                 });
             }
@@ -245,6 +246,7 @@ impl Website {
             }
 
             self.links = &new_links - &self.links_visited;
+            task::yield_now().await;
         }
 
         self.links.insert(start_url);
@@ -302,8 +304,9 @@ impl Website {
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(50);
+            let mut stream = tokio_stream::iter(&self.links);
 
-            for link in self.links.iter() {
+            while let Some(link) = stream.next().await {
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -317,19 +320,17 @@ impl Website {
                 let client = client.clone();
                 let link = link.clone();
 
-                tokio::spawn(async move {
-                    if delay_enabled {
-                        sleep(Duration::from_millis(delay)).await;
-                    }
-                    let link_result = on_link_find_callback(link);
-                    let page = Page::new(&link_result, &client).await;
+                task::spawn(async move {
+                    {
+                        if delay_enabled {
+                            sleep(Duration::from_millis(delay)).await;
+                        }
+                        let link_result = on_link_find_callback(link);
+                        let page = Page::new(&link_result, &client).await;
 
-                    drop(client);
-                    drop(link_result);
-
-                    if let Err(_) = tx.send(page).await {
-                        log("receiver dropped", "");
-                        return;
+                        if let Err(_) = tx.send(page).await {
+                            log("receiver dropped", "");
+                        }
                     }
                 });
             }
@@ -345,6 +346,7 @@ impl Website {
             }
 
             self.links = &new_links - &self.links_visited;
+            task::yield_now().await;
         }
 
         self.links.insert(start_url);

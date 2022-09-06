@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.13.9"
+version = "1.14.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
@@ -20,6 +20,7 @@ scraper = "0.13"
 url = "2.2.2"
 rayon = "1.5.3"
 tokio = { version = "^1.21.0", features = [ "rt-multi-thread", "net", "macros", "time" ] }
+tokio-stream = "0.1.9"
 hashbrown = { version = "0.12.3", features = [ "rayon" ] }
 log = "0.4.16"
 percent-encoding = "2.1.0"
