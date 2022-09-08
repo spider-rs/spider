@@ -30,7 +30,7 @@ runs with 10 samples:
 
 |                                          | `libraries`               |
 | :--------------------------------------- | :------------------------ |
-| **`Rust[spider]: crawl 10 samples`**     | `0.4613 s` (✅ **1.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `0.0351 s` (✅ **1.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `2.9417 s` (✅ **1.00x**) |
 | **`Node.js[crawler]: crawl 10 samples`** | `2.9992 s` (✅ **1.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `12.019 s` (✅ **1.00x**) |
@@ -41,7 +41,7 @@ runs with 10 samples:
 
 |                                          | `libraries`                |
 | :--------------------------------------- | :------------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `0.4956 s` (✅ **10.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `0.0511 s` (✅ **10.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `3.4310 s` (✅ **10.00x**) |
 | **`Node.js[crawler]: crawl 10 samples`** | `22.174 s` (✅ **10.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `20.952 s` (✅ **10.00x**) |
