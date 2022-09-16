@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Multithreaded web crawler/indexer written in Rust main repo.
+Multithreaded web crawler/indexer using [isolates](https://research.cs.wisc.edu/areas/os/Seminar/schedules/papers/Deconstructing_Process_Isolation_final.pdf) and IPC channels for communication.
 
 ## Dependencies
 
@@ -101,5 +101,4 @@ spider = { version = "1.14.2", features = ["jemalloc"] }
 
 ## Blocking
 
-If you need a blocking sync imp use a version prior to `v1.12.0`
-.
+If you need a blocking sync imp use a version prior to `v1.12.0`.
