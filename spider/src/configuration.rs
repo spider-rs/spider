@@ -6,7 +6,6 @@
 /// website.configuration.respect_robots_txt = true;
 /// website.configuration.subdomains = true;
 /// website.configuration.tld = true;
-/// website.crawl();
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct Configuration {

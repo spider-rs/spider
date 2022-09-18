@@ -1,7 +1,7 @@
 #![warn(missing_docs)]
 
 //! Website crawling library that rapidly crawls all pages to
-//! gather links in parallel
+//! gather links via isolated contexts.
 //!
 //! Spider is multi-threaded crawler that can be configured
 //! to scrape web pages. It has the ability to gather
