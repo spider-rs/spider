@@ -22,21 +22,38 @@ const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([h
 /// CSS query selector for all common static MIME types.
 const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
 
+/// build absolute page selectors
+fn build_absolute_selectors(url: &str) -> String {
+    string_concat::string_concat!("a[href^=", r#"""#, url, r#"""#, "]", MEDIA_IGNORE_SELECTOR)
+}
+
+/// get the host name for url without tld
+fn domain_name(domain: &Url) -> String {
+    let b = domain.host_str().unwrap_or("").to_string();
+    let mut b = b.split(".").collect::<Vec<&str>>();
+    if b.len() >= 2 {
+        b.pop(); // remove the tld
+    }
+    let b = b[b.len() - 1];
+
+    b.to_string()
+}
+
+/// Instanciate a new page without scraping it (used for testing purposes).
+pub fn build(url: &str, html: &str) -> Page {
+    Page {
+        url: url.into(),
+        html: html.into(),
+        base: Url::parse(&url).expect("Invalid page URL"),
+    }
+}
+
 impl Page {
     /// Instantiate a new page and start to scrape it.
     pub async fn new(url: &str, client: &Client) -> Self {
         let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
 
-        Page::build(url, &html)
-    }
-
-    /// Instanciate a new page without scraping it (used for testing purposes).
-    pub fn build(url: &str, html: &str) -> Self {
-        Self {
-            url: url.to_string(),
-            html: html.to_string(),
-            base: Url::parse(&url).expect("Invalid page URL"),
-        }
+        build(url, &html)
     }
 
     /// URL getter for page.
@@ -59,57 +76,90 @@ impl Page {
         self.html.clear();
     }
 
-    /// get the host name for url without tld
-    fn domain_name(&self, domain: &Url) -> String {
-        let b = domain.host_str().unwrap_or("").to_string();
-        let mut b = b.split(".").collect::<Vec<&str>>();
-        if b.len() >= 2 {
-            b.pop(); // remove the tld
-        }
-        let b = b[b.len() - 1];
-
-        b.to_string()
-    }
-
     /// html selector for valid web pages for domain.
     pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
         if tld || subdomains {
-            let dname = self.domain_name(&self.base);
+            let dname = domain_name(&self.base);
             let scheme = self.base.scheme();
             // . extension
             let tlds = if tld {
-                format!(r#"a[href^="{scheme}://{dname}"]{},"#, MEDIA_IGNORE_SELECTOR)
+                string_concat::string_concat!(
+                    "a[href^=",
+                    r#"""#,
+                    scheme,
+                    "://",
+                    dname,
+                    r#"""#,
+                    "]",
+                    MEDIA_IGNORE_SELECTOR,
+                    ","
+                )
             // match everything that follows the base.
             } else {
                 "".to_string()
             };
+
+            let absolute_selector = build_absolute_selectors(url);
             // absolute urls with subdomains
             let absolute_selector = &if subdomains {
-                format!(
-                    r#"a[href^="{url}"]{},{tlds}a[href^="{scheme}"][href*=".{dname}."]{}"#,
-                    MEDIA_IGNORE_SELECTOR, MEDIA_IGNORE_SELECTOR,
+                string_concat::string_concat!(
+                    absolute_selector,
+                    MEDIA_IGNORE_SELECTOR,
+                    ",",
+                    tlds,
+                    "a[href^=",
+                    r#"""#,
+                    scheme,
+                    r#"""#,
+                    "]",
+                    "[href*=",
+                    r#"""#,
+                    ".",
+                    dname,
+                    ".",
+                    r#"""#,
+                    "]",
+                    MEDIA_IGNORE_SELECTOR
                 )
             } else {
-                format!(r#"a[href^="{url}"]{}"#, MEDIA_IGNORE_SELECTOR,)
+                absolute_selector
             };
-            let static_html_selector = &format!(
-                r#"{} {}, {absolute_selector} {}"#,
-                MEDIA_SELECTOR_RELATIVE, MEDIA_SELECTOR_STATIC, MEDIA_SELECTOR_STATIC
-            );
-            Selector::parse(&format!(
-                "{tlds}{},{absolute_selector},{static_html_selector}",
-                MEDIA_SELECTOR_RELATIVE
+
+            // static html group parse
+            Selector::parse(&string_concat::string_concat!(
+                tlds,
+                MEDIA_SELECTOR_RELATIVE,
+                ",",
+                absolute_selector,
+                ",",
+                MEDIA_SELECTOR_RELATIVE,
+                " ",
+                MEDIA_SELECTOR_STATIC,
+                ", ",
+                absolute_selector,
+                " ",
+                MEDIA_SELECTOR_STATIC
             ))
             .unwrap()
         } else {
-            let absolute_selector = format!(r#"a[href^="{url}"]{}"#, MEDIA_IGNORE_SELECTOR,);
-            let static_html_selector = &format!(
-                r#"{} {}, {absolute_selector} {}"#,
-                MEDIA_SELECTOR_RELATIVE, MEDIA_SELECTOR_STATIC, MEDIA_SELECTOR_STATIC
+            let absolute_selector = build_absolute_selectors(url);
+            let static_html_selector = string_concat::string_concat!(
+                MEDIA_SELECTOR_RELATIVE,
+                " ",
+                MEDIA_SELECTOR_STATIC,
+                ",",
+                " ",
+                absolute_selector,
+                " ",
+                MEDIA_SELECTOR_STATIC
             );
-            Selector::parse(&format!(
-                "{},{absolute_selector},{static_html_selector}",
-                MEDIA_SELECTOR_RELATIVE
+
+            Selector::parse(&string_concat::string_concat!(
+                MEDIA_SELECTOR_RELATIVE,
+                ",",
+                absolute_selector,
+                ",",
+                static_html_selector
             ))
             .unwrap()
         }
@@ -122,14 +172,14 @@ impl Page {
         let anchors = html.select(&selector);
 
         if subdomains {
-            let base_domain = self.domain_name(&self.base);
+            let base_domain = domain_name(&self.base);
 
             anchors
                 .filter_map(|a| {
                     let abs = self
                         .abs_path(a.value().attr("href").unwrap_or_default())
                         .to_string();
-                    let url_domain = self.domain_name(&Url::parse(&abs).unwrap());
+                    let url_domain = domain_name(&Url::parse(&abs).unwrap());
 
                     if base_domain == url_domain {
                         Some(abs)

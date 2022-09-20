@@ -36,6 +36,8 @@ pub extern crate tokio;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
 extern crate url;
+#[macro_use]
+extern crate string_concat;
 
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
