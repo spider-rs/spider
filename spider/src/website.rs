@@ -1,7 +1,7 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::RobotFileParser;
-use crate::page::Page;
+use crate::page::{build, Page};
 use crate::utils::log;
 use hashbrown::HashSet;
 use std::time::Duration;
@@ -51,7 +51,7 @@ impl Website {
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: None,
-            links: HashSet::from([format!("{}/", &domain)]),
+            links: HashSet::from([string_concat::string_concat!(domain, "/")]),
             on_link_find_callback: |s| s,
         }
     }
@@ -95,7 +95,7 @@ impl Website {
         } else {
             self.links_visited
                 .par_iter()
-                .map(|l| Page::build(l, ""))
+                .map(|l| build(l, ""))
                 .collect()
         }
     }
@@ -121,8 +121,9 @@ impl Website {
                     for links in self.links.iter() {
                         domain = links.clone();
                     }
-                    let mut robot_file_parser =
-                        RobotFileParser::new(&format!("{}robots.txt", &domain));
+
+                    domain.push_str("robots.txt");
+                    let mut robot_file_parser = RobotFileParser::new(&domain);
                     robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
 
                     robot_file_parser
@@ -158,6 +159,7 @@ impl Website {
             .default_headers(headers)
             .user_agent(&self.configuration.user_agent)
             .brotli(true)
+            .gzip(true)
             .build()
             .unwrap()
     }
@@ -527,7 +529,7 @@ async fn test_crawl_subdomains() {
 #[tokio::test]
 async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.subdomains = true;
+    website.configuration.tld = true;
     website.crawl().await;
     assert!(
         website

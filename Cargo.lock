@@ -50,6 +50,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "345fd392ab01f746c717b1357165b76f0b67a60192007b234058c9045fdcf695"
 dependencies = [
  "brotli",
+ "flate2",
  "futures-core",
  "memchr",
  "pin-project-lite",
@@ -1681,7 +1682,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.14.4"
+version = "1.2.0"
 dependencies = [
  "hashbrown",
  "log",
@@ -1690,6 +1691,7 @@ dependencies = [
  "regex",
  "reqwest",
  "scraper",
+ "string_concat",
  "tikv-jemallocator",
  "tokio",
  "tokio-stream",
@@ -1699,7 +1701,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.14.4"
+version = "1.2.0"
 dependencies = [
  "clap 3.2.20",
  "env_logger",
@@ -1711,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.14.4"
+version = "1.2.0"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -1756,6 +1758,12 @@ dependencies = [
  "proc-macro2",
  "quote",
 ]
+
+[[package]]
+name = "string_concat"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c3ee6129eec20fed59acf2e9cfb3ffd20d0bbe39fe334c22af0edc56dfe752"
 
 [[package]]
 name = "strsim"
