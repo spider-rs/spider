@@ -5,7 +5,8 @@ publish = false
 edition = "2021"
 
 [dependencies]
-criterion = { version = "0.3.6", features = ["html_reports"] }
+criterion = { version = "0.3.6", features = ["html_reports", "async_tokio"] }
+spider = { path = "../spider" }
 
 [[bench]]
 name = "crawl"

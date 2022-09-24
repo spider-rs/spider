@@ -2,6 +2,7 @@ pub mod go_crolly;
 pub mod node_crawler;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use spider::website::Website;
 use std::process::Command;
 use std::thread;
 
@@ -13,16 +14,20 @@ pub fn bench_speed(c: &mut Criterion) {
     let sample_title = format!("crawl {} samples", sample_count);
 
     group.sample_size(sample_count);
+
+    let rt = spider::tokio::runtime::Runtime::new().unwrap();
+
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
-        b.iter(|| {
-            black_box(
-                Command::new("spider")
-                    .args(["--delay", "0", "--domain", &query, "crawl"])
-                    .output()
-                    .expect("rust command failed to start"),
-            )
-        })
+        let mut website = Website::new(&query);
+        website.configuration.delay = 0;
+        website.configuration.respect_robots_txt = false;
+
+        b.to_async(&rt)
+            .iter(|| black_box(async_crawl_single(&website)))
     });
+
+    drop(rt);
+
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
         b.iter(|| {
             black_box(
@@ -71,29 +76,20 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
     let sample_title = format!("crawl concurrent {} samples", sample_count);
     let concurrency_count: Vec<_> = (0..10).collect();
 
+    let rt = spider::tokio::runtime::Runtime::new().unwrap();
+
     group.sample_size(sample_count);
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
-        b.iter(|| {
-            let threads: Vec<_> = concurrency_count
-                .clone()
-                .into_iter()
-                .map(|_| {
-                    thread::spawn(move || {
-                        black_box(
-                            Command::new("spider")
-                                .args(["--delay", "0", "--domain", &query, "crawl"])
-                                .output()
-                                .expect("rust command failed to start"),
-                        );
-                    })
-                })
-                .collect();
+        let mut website = Website::new(&query);
+        website.configuration.delay = 0;
+        website.configuration.respect_robots_txt = false;
 
-            for handle in threads {
-                handle.join().unwrap()
-            }
-        })
+        let c = concurrency_count.clone();
+        b.to_async(&rt)
+            .iter(|| black_box(async_crawl_multi(&website, &c)))
     });
+
+    drop(rt);
 
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
         b.iter(|| {
@@ -171,6 +167,30 @@ pub fn bench_speed_concurrent_x10(c: &mut Criterion) {
         })
     });
     group.finish();
+}
+
+/// crawl threaded internal test
+async fn async_crawl_multi(website: &Website, concurrency_count: &Vec<u32>) {
+    let threads: Vec<_> = concurrency_count
+        .clone()
+        .into_iter()
+        .map(|_| {
+            let mut website = website.clone();
+            spider::tokio::task::spawn(async move {
+                website.crawl().await;
+            })
+        })
+        .collect();
+
+    for handle in threads {
+        handle.await.unwrap();
+    }
+}
+
+/// crawl threaded internal test single
+async fn async_crawl_single(website: &Website) {
+    let mut website = website.clone();
+    website.crawl().await;
 }
 
 criterion_group!(benches, bench_speed, bench_speed_concurrent_x10);
