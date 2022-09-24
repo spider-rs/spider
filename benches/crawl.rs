@@ -4,7 +4,6 @@ pub mod node_crawler;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use spider::website::Website;
 use std::process::Command;
-use std::thread;
 
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
@@ -74,5 +73,5 @@ async fn async_crawl_single(website: &Website) {
     website.crawl().await;
 }
 
-criterion_group!(benches, bench_speed, bench_speed_concurrent_x10);
+criterion_group!(benches, bench_speed);
 criterion_main!(benches);

@@ -85,6 +85,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "spider",
 ]
 
 [[package]]
@@ -266,6 +267,7 @@ dependencies = [
  "clap 2.34.0",
  "criterion-plot",
  "csv",
+ "futures",
  "itertools",
  "lazy_static",
  "num-traits",
@@ -278,6 +280,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -526,12 +529,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f21eda599937fba36daeb58a22e8f5cee2d14c4a17b5b7739c7c8e5e3b8230c"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30bdd20c28fadd505d0fd6712cdfcb0d4b5648baf45faef7f852afb2399bb050"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -539,6 +557,12 @@ name = "futures-core"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e5aa3de05362c3fb88de6531e6296e85cde7739cccad4b9dfeeb7f6ebce56bf"
+
+[[package]]
+name = "futures-io"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbf4d2a7a308fd4578637c0b17c7e1c7ba127b8f6ba00b29f717e9655d85eb68"
 
 [[package]]
 name = "futures-sink"
@@ -559,6 +583,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44fb6cb1be61cc1d2e43b262516aafcf63b241cffdb1d3fa115f91d9c7b09c90"
 dependencies = [
  "futures-core",
+ "futures-sink",
  "futures-task",
  "pin-project-lite",
  "pin-utils",
@@ -1682,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.2.0"
+version = "1.16.0"
 dependencies = [
  "hashbrown",
  "log",
@@ -1701,7 +1726,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.2.0"
+version = "1.16.0"
 dependencies = [
  "clap 3.2.20",
  "env_logger",
@@ -1713,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.2.0"
+version = "1.16.0"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
