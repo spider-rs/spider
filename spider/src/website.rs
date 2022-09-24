@@ -229,8 +229,10 @@ impl Website {
                             sleep(Duration::from_millis(delay)).await;
                         }
                         let link_result = on_link_find_callback(link);
+                        task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
                         let links = page.links(subdomains, tld);
+                        task::yield_now().await;
 
                         if let Err(_) = tx.send(links).await {
                             log("receiver dropped", "");
@@ -245,6 +247,7 @@ impl Website {
 
             while let Some(msg) = rx.recv().await {
                 new_links.par_extend(msg);
+                task::yield_now().await;
             }
 
             self.links = &new_links - &self.links_visited;
@@ -287,6 +290,7 @@ impl Website {
                 let links = page.links(subdomains, tld);
 
                 new_links.par_extend(links);
+                task::yield_now().await;
             }
 
             self.links = &new_links - &self.links_visited;
@@ -345,6 +349,7 @@ impl Website {
                 let links = msg.links(self.configuration.subdomains, self.configuration.tld);
                 new_links.par_extend(links);
                 self.pages.push(msg);
+                task::yield_now().await;
             }
 
             self.links = &new_links - &self.links_visited;
