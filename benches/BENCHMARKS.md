@@ -28,23 +28,12 @@ benchmarks close to a real world scenario without being impacted by drastic late
 
 runs with 10 samples:
 
-|                                          | `libraries`               |
-| :--------------------------------------- | :------------------------ |
-| **`Rust[spider]: crawl 10 samples`**     | `0.0351 s` (✅ **1.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `2.9417 s` (✅ **1.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `2.9992 s` (✅ **1.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `12.019 s` (✅ **1.00x**) |
-
-### crawl-speed-concurrentx10
-
-10 concurrent runs with 10 samples:
-
-|                                          | `libraries`                |
-| :--------------------------------------- | :------------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `0.0511 s` (✅ **10.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `3.4310 s` (✅ **10.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `22.174 s` (✅ **10.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `20.952 s` (✅ **10.00x**) |
+|                                          | `libraries`           |
+| :--------------------------------------- | :-------------------- |
+| **`Rust[spider]: crawl 10 samples`**     | `1 s` (✅ **1.00x**)  |
+| **`Go[crolly]: crawl 10 samples`**       | `24 s` (✅ **1.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `38 s` (✅ **1.00x**) |
+| **`C[wget]: crawl 10 samples`**          | `80 s` (✅ **1.00x**) |
 
 The concurrent benchmarks are averaged across 10 individual runs for 10 concurrent crawls with 10 sample counts.
 

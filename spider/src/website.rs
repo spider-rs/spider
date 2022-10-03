@@ -6,7 +6,6 @@ use crate::utils::log;
 use hashbrown::HashSet;
 use std::time::Duration;
 
-use rayon::prelude::*;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
@@ -62,13 +61,10 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)  
     pub fn is_allowed(&self, link: &String) -> bool {
-        if self.links_visited.contains(link) {
-            return false;
-        }
-        if contains(&self.configuration.blacklist_url, link) {
-            return false;
-        }
-        if self.configuration.respect_robots_txt && !self.is_allowed_robots(link) {
+        if self.links_visited.contains(link)
+            || contains(&self.configuration.blacklist_url, link)
+            || self.configuration.respect_robots_txt && !self.is_allowed_robots(link)
+        {
             return false;
         }
 
@@ -93,10 +89,7 @@ impl Website {
         if !self.pages.is_empty() {
             self.pages.clone()
         } else {
-            self.links_visited
-                .par_iter()
-                .map(|l| build(l, ""))
-                .collect()
+            self.links_visited.iter().map(|l| build(l, "")).collect()
         }
     }
 
@@ -203,10 +196,10 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
 
         let mut start_url = String::new(); // base crawl index
-
+        let channel_buffer = self.configuration.channel_buffer as usize;
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(50);
+            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
             let mut stream = tokio_stream::iter(&self.links);
 
             while let Some(link) = stream.next().await {
@@ -246,7 +239,7 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
-                new_links.par_extend(msg);
+                new_links.extend(msg);
                 task::yield_now().await;
             }
 
@@ -272,13 +265,13 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             for link in self.links.iter() {
+                if start_url.is_empty() {
+                    start_url = link.clone();
+                }
                 if !self.is_allowed(link) {
                     continue;
                 }
                 log("fetch", link);
-                if start_url.is_empty() {
-                    start_url = link.clone();
-                }
                 self.links_visited.insert(link.into());
                 if delay_enabled {
                     sleep(Duration::from_millis(delay)).await;
@@ -289,7 +282,7 @@ impl Website {
                 let page = Page::new(&link_result, &client).await;
                 let links = page.links(subdomains, tld);
 
-                new_links.par_extend(links);
+                new_links.extend(links);
                 task::yield_now().await;
             }
 
@@ -306,20 +299,21 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
 
         let mut start_url = String::new(); // base crawl index
+        let channel_buffer = self.configuration.channel_buffer as usize;
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(50);
+            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
             let mut stream = tokio_stream::iter(&self.links);
 
             while let Some(link) = stream.next().await {
+                if start_url.is_empty() {
+                    start_url = link.clone();
+                }
                 if !self.is_allowed(link) {
                     continue;
                 }
                 log("fetch", link);
-                if start_url.is_empty() {
-                    start_url = link.clone();
-                }
                 self.links_visited.insert(link.into());
 
                 let tx = tx.clone();
@@ -347,7 +341,7 @@ impl Website {
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(self.configuration.subdomains, self.configuration.tld);
-                new_links.par_extend(links);
+                new_links.extend(links);
                 self.pages.push(msg);
                 task::yield_now().await;
             }

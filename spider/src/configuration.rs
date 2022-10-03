@@ -21,6 +21,8 @@ pub struct Configuration {
     pub user_agent: String,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
+    /// Crawl channel buffer tuned to callback.
+    pub channel_buffer: i32
 }
 
 /// get the user agent from the top agent list randomly.
@@ -42,6 +44,7 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 250,
+            channel_buffer: 50,
             ..Default::default()
         }
     }

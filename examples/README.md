@@ -1,8 +1,8 @@
 # examples
 
-1. Simple parallel crawl [Basic](./basic.rs).
+1. Simple parallel crawl [Basic](./example.rs).
 
-- `cargo run --example basic`
+- `cargo run --example example`
 
 1. Enable log output [Debug](./debug.rs).
 
