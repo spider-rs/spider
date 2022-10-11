@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.16.3"
+spider = "1.16.4"
 ```
 
 And then the code:
@@ -29,12 +29,18 @@ use spider::tokio;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let url = "https://choosealicense.com";
+    let mut website: Website = Website::new(&url);
     website.crawl().await;
 
     for page in website.get_pages() {
         println!("- {}", page.get_url());
     }
+
+    // optional: reset the crawl base or another domain for a new crawl
+    website.reset(&url);
+    // re-crawl the domain
+    website.crawl().await;
 }
 ```
 
@@ -61,7 +67,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.16.3", features = ["regex"] }
+spider = { version = "1.16.4", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -88,7 +94,7 @@ Currently we have three optional feature flags. Regex blacklisting and randomizi
 
 ```toml
 [dependencies]
-spider = { version = "1.16.3", features = ["regex", "ua_generator"] }
+spider = { version = "1.16.4", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -97,7 +103,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.16.3", features = ["jemalloc"] }
+spider = { version = "1.16.4", features = ["jemalloc"] }
 ```
 
 ## Blocking

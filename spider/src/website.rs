@@ -55,6 +55,11 @@ impl Website {
         }
     }
 
+    /// crawl reset domain
+    pub fn reset(&mut self, domain: &str) {
+        self.links = HashSet::from([string_concat::string_concat!(domain, "/")]);
+    }
+
     /// return `true` if URL:
     ///
     /// - is not already crawled
@@ -195,8 +200,8 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut start_url = String::new(); // base crawl index
         let channel_buffer = self.configuration.channel_buffer as usize;
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
@@ -206,15 +211,12 @@ impl Website {
                 if !self.is_allowed(link) {
                     continue;
                 }
-                log("fetch", link);
-                if start_url.is_empty() {
-                    start_url = link.clone();
-                }
                 self.links_visited.insert(link.into());
-
+                log("fetch", link);
                 let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
+                task::yield_now().await;
 
                 task::spawn(async move {
                     {
@@ -246,8 +248,6 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             task::yield_now().await;
         }
-
-        self.links.insert(start_url);
     }
 
     /// Start to crawl website sequential
@@ -258,16 +258,11 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut start_url = String::new(); // base crawl index
-
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
 
             for link in self.links.iter() {
-                if start_url.is_empty() {
-                    start_url = link.clone();
-                }
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -288,8 +283,6 @@ impl Website {
 
             self.links = &new_links - &self.links_visited;
         }
-
-        self.links.insert(start_url);
     }
 
     /// Start to scape website concurrently and store html
@@ -298,7 +291,6 @@ impl Website {
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
-        let mut start_url = String::new(); // base crawl index
         let channel_buffer = self.configuration.channel_buffer as usize;
 
         // crawl while links exists
@@ -307,9 +299,6 @@ impl Website {
             let mut stream = tokio_stream::iter(&self.links);
 
             while let Some(link) = stream.next().await {
-                if start_url.is_empty() {
-                    start_url = link.clone();
-                }
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -350,13 +339,13 @@ impl Website {
             task::yield_now().await;
         }
 
-        self.links.insert(start_url);
     }
 }
 
 #[tokio::test]
 async fn crawl() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let url = "https://choosealicense.com";
+    let mut website: Website = Website::new(&url);
     website.crawl().await;
     assert!(
         website
@@ -365,7 +354,9 @@ async fn crawl() {
         "{:?}",
         website.links_visited
     );
+    
     // resets base link for crawling
+    website.reset(&url);
     assert!(
         website
             .links
