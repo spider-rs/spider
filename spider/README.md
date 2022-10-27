@@ -37,8 +37,8 @@ async fn main() {
         println!("- {}", page.get_url());
     }
 
-    // optional: reset the crawl base or another domain for a new crawl
-    website.reset(&url);
+    // optional: reset the crawl base
+    website.reset();
     // re-crawl the domain
     website.crawl().await;
 }
@@ -109,3 +109,45 @@ spider = { version = "1.17.0", features = ["jemalloc"] }
 ## Blocking
 
 If you need a blocking sync imp use a version prior to `v1.12.0`.
+
+## Pause, Resume, and Shutdown
+
+If you are performing large workloads you may need to control the crawler using the following:
+
+```rust
+#[tokio::main]
+#[ignore]
+async fn main() {
+    use spider::utils::{pause, resume};
+    let url = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&url);
+
+    tokio::spawn(async move {
+        pause(url).await;
+        sleep(Duration::from_millis(5000)).await;
+        resume(url).await;
+    });
+
+    website.crawl().await;
+}
+```
+
+### Shutdown crawls
+
+```rust
+#[tokio::main]
+#[ignore]
+async fn main() {
+    use spider::utils::{shutdown};
+    let url = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&url);
+
+    tokio::spawn(async move {
+        // really long crawl force shutdown ( 30 is a long time for most websites )
+        sleep(Duration::from_secs(30)).await;
+        shutdown(url).await;
+    });
+
+    website.crawl().await;
+}
+```
