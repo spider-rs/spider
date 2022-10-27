@@ -37,7 +37,8 @@ extern crate ua_generator;
 extern crate url;
 #[macro_use]
 extern crate string_concat;
-
+#[macro_use]
+extern crate lazy_static;
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
     not(windows),

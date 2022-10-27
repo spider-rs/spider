@@ -2,8 +2,10 @@ use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::RobotFileParser;
 use crate::page::{build, Page};
-use crate::utils::log;
+use crate::utils::{log, Handler, CONTROLLER};
 use hashbrown::HashSet;
+use std::sync::atomic::{AtomicI8, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header;
@@ -38,6 +40,8 @@ pub struct Website {
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
     robot_file_parser: Option<RobotFileParser>,
+    /// the base root domain of the crawl
+    domain: String,
 }
 
 type Message = HashSet<String>;
@@ -45,19 +49,26 @@ type Message = HashSet<String>;
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
+        let domain = if domain.ends_with("/") {
+            domain.into()
+        } else {
+            string_concat!(domain, "/")
+        };
+
         Self {
             configuration: Configuration::new(),
             links_visited: HashSet::new(),
             pages: Vec::new(),
             robot_file_parser: None,
-            links: HashSet::from([string_concat::string_concat!(domain, "/")]),
+            links: HashSet::from([domain.clone()]),
             on_link_find_callback: |s| s,
+            domain,
         }
     }
 
     /// crawl reset domain
-    pub fn reset(&mut self, domain: &str) {
-        self.links = HashSet::from([string_concat::string_concat!(domain, "/")]);
+    pub fn reset(&mut self) {
+        self.links = HashSet::from([self.domain.clone()]);
     }
 
     /// return `true` if URL:
@@ -114,14 +125,8 @@ impl Website {
             let mut robot_file_parser: RobotFileParser = match &self.robot_file_parser {
                 Some(parser) => parser.to_owned(),
                 _ => {
-                    let mut domain = String::from("");
-                    // the first link upon initial config is always the domain
-                    for links in self.links.iter() {
-                        domain = links.clone();
-                    }
-
-                    domain.push_str("robots.txt");
-                    let mut robot_file_parser = RobotFileParser::new(&domain);
+                    let mut robot_file_parser =
+                        RobotFileParser::new(&string_concat!(self.domain, "robots.txt"));
                     robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
 
                     robot_file_parser
@@ -162,38 +167,75 @@ impl Website {
             .unwrap()
     }
 
+    /// setup atomic controller
+    async fn configure_handler(&self) -> Arc<AtomicI8> {
+        let paused = Arc::new(AtomicI8::new(0));
+        let handle = paused.clone();
+        let domain = self.domain.clone();
+
+        tokio::spawn(async move {
+            let mut l = CONTROLLER.lock().await.1.to_owned();
+
+            while l.changed().await.is_ok() {
+                let n = &*l.borrow();
+                let (name, rest) = n;
+
+                let url = if name.ends_with("/") {
+                    name.into()
+                } else {
+                    string_concat!(name.clone(), "/")
+                };
+
+                if domain == url {
+                    if rest == &Handler::Resume {
+                        paused.store(0, Ordering::Relaxed);
+                    }
+                    if rest == &Handler::Pause {
+                        paused.store(1, Ordering::Relaxed);
+                    }
+                    if rest == &Handler::Shutdown {
+                        paused.store(2, Ordering::Relaxed);
+                    }
+                }
+            }
+        });
+
+        handle
+    }
+
     /// setup config for crawl
-    pub async fn setup(&mut self) -> Client {
+    pub async fn setup(&mut self) -> (Client, Arc<AtomicI8>) {
         self.configure_agent();
         let client = self.configure_http_client();
         self.configure_robots_parser(&client).await;
+        let handle = self.configure_handler().await;
 
-        client
+        (client, handle)
     }
 
     /// Start to crawl website with async parallelization
     pub async fn crawl(&mut self) {
-        let client = self.setup().await;
+        let (client, handle) = self.setup().await;
 
-        self.crawl_concurrent(&client).await;
+        self.crawl_concurrent(&client, handle).await;
     }
 
     /// Start to crawl website in sync
     pub async fn crawl_sync(&mut self) {
-        let client = self.setup().await;
+        let (client, handle) = self.setup().await;
 
-        self.crawl_sequential(&client).await;
+        self.crawl_sequential(&client, handle).await;
     }
 
     /// Start to scrape/download website with async parallelization
     pub async fn scrape(&mut self) {
-        let client = self.setup().await;
+        let (client, handle) = self.setup().await;
 
-        self.scrape_concurrent(&client).await;
+        self.scrape_concurrent(&client, handle).await;
     }
 
     /// Start to crawl website concurrently
-    async fn crawl_concurrent(&mut self, client: &Client) {
+    async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
         let tld = self.configuration.tld;
@@ -202,12 +244,21 @@ impl Website {
 
         let channel_buffer = self.configuration.channel_buffer as usize;
 
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
+
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
             let mut stream = tokio_stream::iter(&self.links);
 
             while let Some(link) = stream.next().await {
+                while handle.load(Ordering::Relaxed) == 1 {
+                    interval.tick().await;
+                }
+                if handle.load(Ordering::Relaxed) == 2 {
+                    self.links.clear();
+                    break;
+                }
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -251,18 +302,27 @@ impl Website {
     }
 
     /// Start to crawl website sequential
-    async fn crawl_sequential(&mut self, client: &Client) {
+    async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let delay = self.configuration.delay;
         let subdomains = self.configuration.subdomains;
         let tld = self.configuration.tld;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
+
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
 
             for link in self.links.iter() {
+                while handle.load(Ordering::Relaxed) == 1 {
+                    interval.tick().await;
+                }
+                if handle.load(Ordering::Relaxed) == 2 {
+                    self.links.clear();
+                    break;
+                }
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -286,12 +346,14 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html
-    async fn scrape_concurrent(&mut self, client: &Client) {
+    async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
         let channel_buffer = self.configuration.channel_buffer as usize;
+
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -299,6 +361,13 @@ impl Website {
             let mut stream = tokio_stream::iter(&self.links);
 
             while let Some(link) = stream.next().await {
+                while handle.load(Ordering::Relaxed) == 1 {
+                    interval.tick().await;
+                }
+                if handle.load(Ordering::Relaxed) == 2 {
+                    self.links.clear();
+                    break;
+                }
                 if !self.is_allowed(link) {
                     continue;
                 }
@@ -338,7 +407,6 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             task::yield_now().await;
         }
-
     }
 }
 
@@ -354,9 +422,9 @@ async fn crawl() {
         "{:?}",
         website.links_visited
     );
-    
-    // resets base link for crawling
-    website.reset(&url);
+
+    // resets base link for re-crawling
+    website.reset();
     assert!(
         website
             .links
@@ -467,7 +535,7 @@ async fn test_respect_robots_txt() {
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = "*".into();
 
-    let client = website.setup().await;
+    let (client, _) = website.setup().await;
     website.configure_robots_parser(&client).await;
 
     assert_eq!(website.configuration.delay, 250);
@@ -479,7 +547,7 @@ async fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = "bingbot".into();
 
-    let client_second = website_second.setup().await;
+    let (client_second, _) = website_second.setup().await;
     website_second.configure_robots_parser(&client_second).await;
 
     assert_eq!(
@@ -495,7 +563,7 @@ async fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    let client_third = website_third.setup().await;
+    let (client_third, _) = website_third.setup().await;
 
     website_third.configure_robots_parser(&client_third).await;
 
@@ -545,4 +613,54 @@ async fn test_link_duplicates() {
     website.crawl().await;
 
     assert!(has_unique_elements(&website.links_visited));
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_crawl_pause_resume() {
+    use crate::utils::{pause, resume};
+
+    let url = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&url);
+
+    let start = tokio::time::Instant::now();
+
+    tokio::spawn(async move {
+        pause(url).await;
+        // static website test pause/resume - scan will never take longer than 5secs for target website choosealicense
+        sleep(Duration::from_millis(5000)).await;
+        resume(url).await;
+    });
+
+    website.crawl().await;
+
+    let duration = start.elapsed();
+
+    assert!(duration.as_secs() > 5, "{:?}", duration);
+
+    assert!(
+        website
+            .links_visited
+            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_crawl_shutdown() {
+    use crate::utils::shutdown;
+
+    // use target blog to prevent shutdown of prior crawler
+    let url = "https://rsseau.fr/";
+    let mut website: Website = Website::new(&url);
+
+    tokio::spawn(async move {
+        shutdown(url).await;
+    });
+
+    website.crawl().await;
+
+    assert_eq!(website.links_visited.len(), 1);
 }
