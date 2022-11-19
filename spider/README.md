@@ -36,11 +36,6 @@ async fn main() {
     for page in website.get_pages() {
         println!("- {}", page.get_url());
     }
-
-    // optional: reset the crawl base
-    website.reset();
-    // re-crawl the domain
-    website.crawl().await;
 }
 ```
 
