@@ -85,7 +85,7 @@ async fn main() {
 
 ## Features
 
-Currently we have three optional feature flags. Regex blacklisting and randomizing User-Agents.
+Currently we have three optional feature flags. Regex blacklisting, jemaloc backend, and randomizing User-Agents.
 
 ```toml
 [dependencies]
