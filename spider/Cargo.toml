@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.17.1"
+version = "1.17.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/madeindjs/spider"
