@@ -1,21 +1,29 @@
-# examples
+# Examples
 
-1. Simple parallel crawl [Basic](./example.rs).
+First `git clone https://github.com/spider-rs/spider.git` and `cd spider`.
+
+## Basic
+
+Simple concurrent crawl [Simple](./example.rs).
 
 - `cargo run --example example`
 
-1. Enable log output [Debug](./debug.rs).
+Live handle index example [Callback](./callback.rs).
+
+- `cargo run --example callback`
+
+Enable log output [Debug](./debug.rs).
 
 - `cargo run --example debug`
 
-1. Scrape the webpage with and gather html [Scrape](./scrape.rs).
+Scrape the webpage with and gather html [Scrape](./scrape.rs).
 
 - `cargo run --example scrape`
 
-1. Scrape and download the html file to fs [Download Html](./download.rs). \*Note: Only HTML is downloaded.
+Scrape and download the html file to fs [Download HTML](./download.rs). \*Note: Only HTML is downloaded.
 
 - `cargo run --example download`
 
-1. Scrape and download html to react components and store to fs [Download to React Component](./download.rs).
+Scrape and download html to react components and store to fs [Download to React Component](./download.rs).
 
 - `cargo run --example download_to_react`
