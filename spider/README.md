@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.17.3"
+spider = "1.17.5"
 ```
 
 And then the code:
@@ -62,7 +62,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.17.3", features = ["regex"] }
+spider = { version = "1.17.5", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -89,7 +89,7 @@ Currently we have three optional feature flags. Regex blacklisting, jemaloc back
 
 ```toml
 [dependencies]
-spider = { version = "1.17.3", features = ["regex", "ua_generator"] }
+spider = { version = "1.17.5", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -98,7 +98,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.17.3", features = ["jemalloc"] }
+spider = { version = "1.17.5", features = ["jemalloc"] }
 ```
 
 ## Blocking

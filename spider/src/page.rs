@@ -24,7 +24,24 @@ const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".a
 
 /// build absolute page selectors
 fn build_absolute_selectors(url: &str) -> String {
-    string_concat::string_concat!("a[href^=", r#"""#, url, r#"""#, "]", MEDIA_IGNORE_SELECTOR)
+    // handle unsecure and secure transports
+    string_concat::string_concat!(
+        "a[href^=",
+        r#"""#,
+        if url.starts_with("https") {
+            url.replacen("https://", "http://", 1)
+        } else {
+            url.replacen("http://", "https://", 1)
+        },
+        r#"""#,
+        "],",
+        "a[href^=",
+        r#"""#,
+        url,
+        r#"""#,
+        "]",
+        MEDIA_IGNORE_SELECTOR
+    )
 }
 
 /// get the host name for url without tld
