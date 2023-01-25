@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.17.5"
+version = "1.17.6"
 dependencies = [
  "hashbrown",
  "lazy_static",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.17.5"
+version = "1.17.6"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
