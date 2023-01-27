@@ -28,7 +28,7 @@ async fn main() {
     let delay = cli.delay.unwrap_or(website.configuration.delay);
     let user_agent = cli
         .user_agent
-        .unwrap_or(website.configuration.user_agent.to_string());
+        .unwrap_or_else(|| website.configuration.user_agent.to_string());
     let blacklist_url = cli.blacklist_url.unwrap_or_default();
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
