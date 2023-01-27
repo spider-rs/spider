@@ -37,7 +37,7 @@ async fn main() {
     website.configuration.tld = cli.tld;
 
     if !blacklist_url.is_empty() {
-        let blacklist_url: Vec<String> = blacklist_url.split(",").map(|l| l.to_string()).collect();
+        let blacklist_url: Vec<String> = blacklist_url.split(',').map(|l| l.to_string()).collect();
         website.configuration.blacklist_url.extend(blacklist_url);
     }
 
