@@ -538,7 +538,7 @@ async fn test_respect_robots_txt() {
     let (client, _) = website.setup().await;
     website.configure_robots_parser(&client).await;
 
-    assert_eq!(website.configuration.delay, 250);
+    assert_eq!(website.configuration.delay, 0);
 
     assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
 

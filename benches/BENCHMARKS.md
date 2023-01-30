@@ -41,3 +41,18 @@ In order for us to get better metrics we need to test the concurrency and simult
 Currently even with a small website this package still runs faster than the top OSS crawlers to date.
 
 _Note_: Nodejs concurrency heavily impacts each additional run.
+
+
+### Hyperfine
+
+Apple M1 Max (64gb)
+
+179 pages 0.243s with latency (Jan 29, 2023).
+
+Test url: `https://rsseau.fr`.
+
+```
+Benchmark 1: spider --domain https://rsseau.fr crawl
+  Time (mean ± σ):      4.311 s ±  0.263 s    [User: 0.354 s, System: 0.139 s]
+  Range (min … max):    4.102 s …  4.951 s    10 runs
+```
