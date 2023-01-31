@@ -402,7 +402,7 @@ impl RobotFileParser {
 
         for entry in &self.entries {
             if entry.applies_to(useragent) {
-                return entry.allowance(&url_str);
+                return entry.allowance(url_str);
             }
         }
 
@@ -410,7 +410,7 @@ impl RobotFileParser {
         let default_entry = &self.default_entry;
 
         if !default_entry.is_empty() {
-            return default_entry.allowance(&url_str);
+            return default_entry.allowance(url_str);
         }
         // agent not found ==> access granted
         true

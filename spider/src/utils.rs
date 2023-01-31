@@ -14,14 +14,14 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> String {
         Ok(res) if res.status() == StatusCode::OK => match res.text().await {
             Ok(text) => text,
             Err(_) => {
-                log("- error fetching {}", &url);
+                log("- error fetching {}", url);
 
                 String::new()
             }
         },
         Ok(_) => String::new(),
         Err(_) => {
-            log("- error parsing html text {}", &url);
+            log("- error parsing html text {}", url);
             String::new()
         }
     }

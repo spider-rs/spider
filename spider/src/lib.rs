@@ -82,6 +82,6 @@ pub mod black_list {
 pub mod black_list {
     /// check if link exist in blacklists.
     pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
-        blacklist_url.contains(&link)
+        blacklist_url.contains(link)
     }
 }
