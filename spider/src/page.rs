@@ -47,7 +47,7 @@ fn build_absolute_selectors(url: &str) -> String {
 /// get the host name for url without tld
 fn domain_name(domain: &Url) -> String {
     let b = domain.host_str().unwrap_or("").to_string();
-    let mut b = b.split(".").collect::<Vec<&str>>();
+    let mut b = b.split('.').collect::<Vec<&str>>();
     if b.len() >= 2 {
         b.pop(); // remove the tld
     }
@@ -61,14 +61,14 @@ pub fn build(url: &str, html: &str) -> Page {
     Page {
         url: url.into(),
         html: html.into(),
-        base: Url::parse(&url).expect("Invalid page URL"),
+        base: Url::parse(url).expect("Invalid page URL"),
     }
 }
 
 impl Page {
     /// Instantiate a new page and start to scrape it.
     pub async fn new(url: &str, client: &Client) -> Self {
-        let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
+        let html = fetch_page_html(url, client).await; // TODO: remove heavy cpu / network from new
 
         build(url, &html)
     }
@@ -220,7 +220,7 @@ impl Page {
         let mut joined = self
             .base
             .join(href)
-            .unwrap_or(Url::parse(&self.url.to_string()).expect("Invalid page URL"));
+            .unwrap_or_else(|_| Url::parse(&self.url.to_string()).expect("Invalid page URL"));
 
         joined.set_fragment(None);
 
@@ -236,7 +236,7 @@ async fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(&link_result, &client).await;
+    let page: Page = Page::new(link_result, &client).await;
     let links = page.links(false, false);
 
     assert!(
@@ -254,7 +254,7 @@ async fn test_abs_path() {
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(&link_result, &client).await;
+    let page: Page = Page::new(link_result, &client).await;
 
     assert_eq!(
         page.abs_path("/page"),
