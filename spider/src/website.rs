@@ -49,7 +49,7 @@ type Message = HashSet<String>;
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
-        let domain = if domain.ends_with("/") {
+        let domain = if domain.ends_with('/') {
             domain.into()
         } else {
             string_concat!(domain, "/")
@@ -126,7 +126,7 @@ impl Website {
                 Some(parser) => parser.to_owned(),
                 _ => {
                     let mut robot_file_parser =
-                        RobotFileParser::new(&string_concat!(self.domain, "robots.txt"));
+                        RobotFileParser::new(string_concat!(self.domain, "robots.txt"));
                     robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
 
                     robot_file_parser
@@ -138,7 +138,7 @@ impl Website {
                 robot_file_parser.read(client).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
-                    .unwrap_or(self.get_delay())
+                    .unwrap_or_else(|| self.get_delay())
                     .as_millis() as u64;
             }
 
@@ -180,7 +180,7 @@ impl Website {
                 let n = &*l.borrow();
                 let (name, rest) = n;
 
-                let url = if name.ends_with("/") {
+                let url = if name.ends_with('/') {
                     name.into()
                 } else {
                     string_concat!(name.clone(), "/")
@@ -280,7 +280,7 @@ impl Website {
                         let links = page.links(subdomains, tld);
                         task::yield_now().await;
 
-                        if let Err(_) = tx.send(links).await {
+                        if (tx.send(links).await).is_err() {
                             log("receiver dropped", "");
                         }
                     }
@@ -334,7 +334,7 @@ impl Website {
 
                 let link = link.clone();
                 let link_result = on_link_find_callback(link);
-                let page = Page::new(&link_result, &client).await;
+                let page = Page::new(&link_result, client).await;
                 let links = page.links(subdomains, tld);
 
                 new_links.extend(links);
@@ -386,7 +386,7 @@ impl Website {
                         let link_result = on_link_find_callback(link);
                         let page = Page::new(&link_result, &client).await;
 
-                        if let Err(_) = tx.send(page).await {
+                        if (tx.send(page).await).is_err() {
                             log("receiver dropped", "");
                         }
                     }
@@ -413,7 +413,7 @@ impl Website {
 #[tokio::test]
 async fn crawl() {
     let url = "https://choosealicense.com";
-    let mut website: Website = Website::new(&url);
+    let mut website: Website = Website::new(url);
     website.crawl().await;
     assert!(
         website
@@ -446,7 +446,7 @@ async fn scrape() {
         website.links_visited
     );
 
-    assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
+    assert!(!website.get_pages()[0].get_html().is_empty());
 }
 
 #[tokio::test]
@@ -469,7 +469,7 @@ async fn crawl_invalid() {
     let mut website: Website = Website::new(url);
     website.crawl().await;
     let mut uniq = HashSet::new();
-    uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
+    uniq.insert(format!("{}/", url)); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -526,7 +526,7 @@ fn randomize_website_agent() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configure_agent();
 
-    assert_eq!(website.configuration.user_agent.is_empty(), false);
+    assert!(!website.configuration.user_agent.is_empty());
 }
 
 #[tokio::test]
@@ -621,7 +621,7 @@ async fn test_crawl_pause_resume() {
     use crate::utils::{pause, resume};
 
     let url = "https://choosealicense.com/";
-    let mut website: Website = Website::new(&url);
+    let mut website: Website = Website::new(url);
 
     let start = tokio::time::Instant::now();
 
@@ -654,7 +654,7 @@ async fn test_crawl_shutdown() {
 
     // use target blog to prevent shutdown of prior crawler
     let url = "https://rsseau.fr/";
-    let mut website: Website = Website::new(&url);
+    let mut website: Website = Website::new(url);
 
     tokio::spawn(async move {
         shutdown(url).await;
