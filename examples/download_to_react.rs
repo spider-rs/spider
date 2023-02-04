@@ -17,7 +17,7 @@ use std::io::Write;
 
 #[tokio::main]
 async fn main() {
-    let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or("./target".to_string());
+    let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "./target".to_string());
 
     // view the target dist for the downloads
     std::fs::create_dir_all(format!("{}/downloads", target_dir)).unwrap_or_default();
