@@ -107,7 +107,7 @@ impl Entry {
 
     /// check if this entry applies to the specified agent
     fn applies_to(&self, useragent: &str) -> bool {
-        let ua = useragent.split('/').nth(0).unwrap_or("").to_lowercase();
+        let ua = useragent.split('/').nth(0).unwrap_or_default().to_lowercase();
         for agent in &self.useragents {
             if agent == "*" {
                 return true;
@@ -307,7 +307,7 @@ impl RobotFileParser {
             if parts.len() == 2 {
                 let part0 = parts[0].trim().to_lowercase();
                 let part1 = String::from_utf8(percent_decode(parts[1].trim().as_bytes()).collect())
-                    .unwrap_or("".to_string());
+                    .unwrap_or_default();
                 match part0 {
                     ref x if x.to_lowercase() == "user-agent" => {
                         if state == 2 {
@@ -393,7 +393,7 @@ impl RobotFileParser {
         // search for given user agent matches
         // the first match counts
         let decoded_url = String::from_utf8(percent_decode(url.trim().as_bytes()).collect())
-            .unwrap_or("".to_string());
+            .unwrap_or_default();
 
         let url_str = match decoded_url {
             ref u if !u.is_empty() => u,
