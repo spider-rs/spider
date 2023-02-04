@@ -6,8 +6,10 @@ pub mod options;
 
 use clap::Parser;
 use options::{Cli, Commands};
+use spider::page::Page;
 use spider::tokio;
 use spider::website::Website;
+use std::sync::Arc;
 use std::io::{self, Write};
 
 #[tokio::main]
@@ -25,7 +27,7 @@ async fn main() {
 
     let mut website: Website = Website::new(&cli.domain);
 
-    let delay = cli.delay.unwrap_or(website.configuration.delay);
+    let delay = cli.delay.unwrap_or_else(|| website.configuration.delay);
     let user_agent = cli
         .user_agent
         .unwrap_or_else(|| website.configuration.user_agent.to_string());
@@ -70,12 +72,15 @@ async fn main() {
 
             let mut page_objects: Vec<_> = vec![];
 
+            let selectors = Arc::new(Page::get_page_selectors(&cli.domain, cli.subdomains, cli.tld));
+
             for page in website.get_pages() {
                 let mut links: Vec<String> = vec![];
                 let mut html: &String = &String::new();
 
                 if *output_links {
-                    let page_links = page.links(cli.subdomains, cli.tld);
+                    let selectors = selectors.clone();
+                    let page_links = page.links(&*selectors, cli.subdomains, cli.tld);
                     links.extend(page_links);
                 }
 

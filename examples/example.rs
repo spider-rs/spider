@@ -13,7 +13,8 @@ async fn main() {
         .push("https://rsseau.fr/resume".to_string());
     website.configuration.respect_robots_txt = true;
     website.configuration.subdomains = false;
-    website.configuration.delay = 15; // Defaults to 250 ms
+    website.configuration.tld = false;
+    website.configuration.delay = 0; // Defaults to 0 ms
     website.configuration.user_agent = "SpiderBot".into(); // Defaults to spider/x.y.z, where x.y.z is the library version
     website.crawl().await;
 
