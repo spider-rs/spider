@@ -7,8 +7,6 @@ use url::Url;
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
 pub struct Page {
-    /// URL of this page.
-    url: String,
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
     html: String,
     /// Base absolute url for page.
@@ -45,21 +43,25 @@ fn build_absolute_selectors(url: &str) -> String {
 }
 
 /// get the host name for url without tld
-fn domain_name(domain: &Url) -> String {
-    let b = domain.host_str().unwrap_or("").to_string();
+pub fn domain_name(domain: &Url) -> String {
+    let b = domain.host_str().unwrap_or_default().to_string();
     let mut b = b.split(".").collect::<Vec<&str>>();
-    if b.len() >= 2 {
-        b.pop(); // remove the tld
-    }
-    let b = b[b.len() - 1];
 
-    b.to_string()
+    if b.len() > 2 {
+        b[1]
+    } else if b.len() == 2 {
+        b[0]
+    } else {
+        b.pop(); // remove the tld
+
+        b[b.len() - 1]
+    }
+    .to_string()
 }
 
 /// Instanciate a new page without scraping it (used for testing purposes).
 pub fn build(url: &str, html: &str) -> Page {
     Page {
-        url: url.into(),
         html: html.into(),
         base: Url::parse(&url).expect("Invalid page URL"),
     }
@@ -74,8 +76,8 @@ impl Page {
     }
 
     /// URL getter for page.
-    pub fn get_url(&self) -> &String {
-        &self.url
+    pub fn get_url(&self) -> String {
+        self.base.to_string()
     }
 
     /// Html getter for page.
@@ -94,10 +96,11 @@ impl Page {
     }
 
     /// html selector for valid web pages for domain.
-    pub fn get_page_selectors(&self, url: &str, subdomains: bool, tld: bool) -> Selector {
+    pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Selector {
         if tld || subdomains {
-            let dname = domain_name(&self.base);
-            let scheme = self.base.scheme();
+            let base = Url::parse(&url).expect("Invalid page URL");
+            let dname = domain_name(&base);
+            let scheme = base.scheme();
             // . extension
             let tlds = if tld {
                 string_concat::string_concat!(
@@ -123,7 +126,6 @@ impl Page {
                     absolute_selector,
                     MEDIA_IGNORE_SELECTOR,
                     ",",
-                    tlds,
                     "a[href^=",
                     r#"""#,
                     scheme,
@@ -183,8 +185,7 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, subdomains: bool, tld: bool) -> HashSet<String> {
-        let selector = self.get_page_selectors(&self.url, subdomains, tld);
+    pub fn links(&self, selector: Selector, subdomains: bool, _tld: bool) -> HashSet<String> {
         let html = self.parse_html();
         let anchors = html.select(&selector);
 
@@ -193,13 +194,11 @@ impl Page {
 
             anchors
                 .filter_map(|a| {
-                    let abs = self
-                        .abs_path(a.value().attr("href").unwrap_or_default())
-                        .to_string();
-                    let url_domain = domain_name(&Url::parse(&abs).unwrap());
+                    let abs = self.abs_path(a.value().attr("href").unwrap_or_default());
 
-                    if base_domain == url_domain {
-                        Some(abs)
+                    // todo: add tld handling
+                    if base_domain == domain_name(&abs) {
+                        Some(abs.to_string())
                     } else {
                         None
                     }
@@ -208,7 +207,7 @@ impl Page {
         } else {
             anchors
                 .map(|a| {
-                    self.abs_path(a.value().attr("href").unwrap_or(""))
+                    self.abs_path(a.value().attr("href").unwrap_or_default())
                         .to_string()
                 })
                 .collect()
@@ -217,14 +216,13 @@ impl Page {
 
     /// Convert a URL to its absolute path without any fragments or params.
     fn abs_path(&self, href: &str) -> Url {
-        let mut joined = self
-            .base
-            .join(href)
-            .unwrap_or(Url::parse(&self.url.to_string()).expect("Invalid page URL"));
-
-        joined.set_fragment(None);
-
-        joined
+        match self.base.join(href) {
+            Ok(mut joined) => {
+                joined.set_fragment(None);
+                joined
+            }
+            Err(_) => Url::parse(&self.get_url()).expect("Invalid page URL"),
+        }
     }
 }
 
@@ -237,12 +235,13 @@ async fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
-    let links = page.links(false, false);
+    let selectors: Selector = Page::get_page_selectors(&link_result, false, false);
+    let links = page.links(selectors, false, false);
 
     assert!(
         links.contains(&"https://choosealicense.com/about/".to_string()),
         "Could not find {}. Theses URLs was found {:?}",
-        page.url,
+        page.get_url(),
         &links
     );
 }
