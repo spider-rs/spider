@@ -4,6 +4,7 @@ use crate::packages::robotparser::RobotFileParser;
 use crate::page::{build, Page};
 use crate::utils::{log, Handler, CONTROLLER};
 use hashbrown::HashSet;
+use scraper::Selector;
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -138,7 +139,7 @@ impl Website {
                 robot_file_parser.read(client).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
-                    .unwrap_or(self.get_delay())
+                    .unwrap_or_else(|| self.get_delay())
                     .as_millis() as u64;
             }
 
@@ -241,10 +242,11 @@ impl Website {
         let tld = self.configuration.tld;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-
         let channel_buffer = self.configuration.channel_buffer as usize;
-
         let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+        let selector: Arc<Selector> =
+            Arc::new(Page::get_page_selectors(&self.domain, subdomains, tld));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -267,6 +269,8 @@ impl Website {
                 let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
+                let selector = selector.clone();
+
                 task::yield_now().await;
 
                 task::spawn(async move {
@@ -277,7 +281,7 @@ impl Website {
                         let link_result = on_link_find_callback(link);
                         task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
-                        let links = page.links(subdomains, tld);
+                        let links = page.links(&*selector, subdomains, tld);
                         task::yield_now().await;
 
                         if let Err(_) = tx.send(links).await {
@@ -311,6 +315,9 @@ impl Website {
 
         let mut interval = tokio::time::interval(Duration::from_millis(10));
 
+        let selector: Arc<Selector> =
+            Arc::new(Page::get_page_selectors(&self.domain, subdomains, tld));
+
         // crawl while links exists
         while !self.links.is_empty() {
             let mut new_links: HashSet<String> = HashSet::new();
@@ -335,7 +342,7 @@ impl Website {
                 let link = link.clone();
                 let link_result = on_link_find_callback(link);
                 let page = Page::new(&link_result, &client).await;
-                let links = page.links(subdomains, tld);
+                let links = page.links(&*selector, subdomains, tld);
 
                 new_links.extend(links);
                 task::yield_now().await;
@@ -350,10 +357,13 @@ impl Website {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-
         let channel_buffer = self.configuration.channel_buffer as usize;
-
         let mut interval = tokio::time::interval(Duration::from_millis(10));
+        let selectors: Arc<Selector> = Arc::new(Page::get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        ));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -398,7 +408,11 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
-                let links = msg.links(self.configuration.subdomains, self.configuration.tld);
+                let links = msg.links(
+                    &*selectors,
+                    self.configuration.subdomains,
+                    self.configuration.tld,
+                );
                 new_links.extend(links);
                 self.pages.push(msg);
                 task::yield_now().await;
