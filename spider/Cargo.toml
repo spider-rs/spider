@@ -1,9 +1,9 @@
 [package]
 name = "spider"
-version = "1.18.9"
+version = "1.18.10"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
-repository = "https://github.com/madeindjs/spider"
+repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider"]
 categories = ["web-programming", "command-line-utilities"]

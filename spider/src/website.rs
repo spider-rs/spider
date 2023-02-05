@@ -243,13 +243,13 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-
+        let throttle = Duration::from_millis(delay);
         let selector: Arc<Selector> = Arc::new(get_page_selectors(&self.domain, subdomains, tld));
 
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&self.links).throttle(Duration::from_millis(delay));
+            let stream = tokio_stream::iter(&self.links).throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -356,11 +356,12 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
+        let throttle = Duration::from_millis(delay);
 
         // crawl while links exists
         while !self.links.is_empty() {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&self.links).throttle(Duration::from_millis(delay));
+            let stream = tokio_stream::iter(&self.links).throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
