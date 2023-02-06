@@ -45,7 +45,7 @@ fn build_absolute_selectors(url: &str) -> String {
 /// get the host name for url without tld
 pub fn domain_name(domain: &Url) -> &str {
     let b = domain.host_str().unwrap_or_default();
-    let b = b.split(".").collect::<Vec<&str>>();
+    let b = b.split('.').collect::<Vec<&str>>();
 
     if b.len() > 2 {
         b[1]

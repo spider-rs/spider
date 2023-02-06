@@ -50,7 +50,7 @@ type Message = HashSet<String>;
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
-        let domain = if domain.ends_with("/") {
+        let domain = if domain.ends_with('/') {
             domain.into()
         } else {
             string_concat!(domain, "/")
@@ -181,7 +181,7 @@ impl Website {
                 let n = &*l.borrow();
                 let (name, rest) = n;
 
-                let url = if name.ends_with("/") {
+                let url = if name.ends_with('/') {
                     name.into()
                 } else {
                     string_concat!(name.clone(), "/")
