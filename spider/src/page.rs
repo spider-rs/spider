@@ -42,9 +42,10 @@ fn build_absolute_selectors(url: &str) -> String {
     )
 }
 
-/// get the host name for url without tld
+/// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
     let b = domain.host_str().unwrap_or_default();
+
     let b = b.split('.').collect::<Vec<&str>>();
 
     if b.len() > 2 {
@@ -57,7 +58,7 @@ pub fn domain_name(domain: &Url) -> &str {
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Selector {
+pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, String) {
     if tld || subdomains {
         let base = Url::parse(&url).expect("Invalid page URL");
         let dname = domain_name(&base);
@@ -106,21 +107,24 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Selector {
         };
 
         // static html group parse
-        Selector::parse(&string_concat::string_concat!(
-            tlds,
-            MEDIA_SELECTOR_RELATIVE,
-            ",",
-            absolute_selector,
-            ",",
-            MEDIA_SELECTOR_RELATIVE,
-            " ",
-            MEDIA_SELECTOR_STATIC,
-            ", ",
-            absolute_selector,
-            " ",
-            MEDIA_SELECTOR_STATIC
-        ))
-        .unwrap()
+        (
+            Selector::parse(&string_concat::string_concat!(
+                tlds,
+                MEDIA_SELECTOR_RELATIVE,
+                ",",
+                absolute_selector,
+                ",",
+                MEDIA_SELECTOR_RELATIVE,
+                " ",
+                MEDIA_SELECTOR_STATIC,
+                ", ",
+                absolute_selector,
+                " ",
+                MEDIA_SELECTOR_STATIC
+            ))
+            .unwrap(),
+            dname.to_string(),
+        )
     } else {
         let absolute_selector = build_absolute_selectors(url);
         let static_html_selector = string_concat::string_concat!(
@@ -134,14 +138,17 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Selector {
             MEDIA_SELECTOR_STATIC
         );
 
-        Selector::parse(&string_concat::string_concat!(
-            MEDIA_SELECTOR_RELATIVE,
-            ",",
-            absolute_selector,
-            ",",
-            static_html_selector
-        ))
-        .unwrap()
+        (
+            Selector::parse(&string_concat::string_concat!(
+                MEDIA_SELECTOR_RELATIVE,
+                ",",
+                absolute_selector,
+                ",",
+                static_html_selector
+            ))
+            .unwrap(),
+            String::from(""),
+        )
     }
 }
 
@@ -182,12 +189,12 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, selector: &Selector, subdomains: bool, _tld: bool) -> HashSet<String> {
+    pub fn links(&self, selectors: &(Selector, String)) -> HashSet<String> {
         let html = self.parse_html();
-        let anchors = html.select(&selector);
+        let anchors = html.select(&selectors.0);
+        let base_domain = &selectors.1;
 
-        if subdomains {
-            let base_domain = domain_name(&self.base);
+        if !base_domain.is_empty() {
 
             anchors
                 .filter_map(|a| {
@@ -204,7 +211,8 @@ impl Page {
             anchors
                 .map(|a| {
                     self.abs_path(a.value().attr("href").unwrap_or_default())
-                        .to_string().to_lowercase()
+                        .to_string()
+                        .to_lowercase()
                 })
                 .collect()
         }
@@ -231,8 +239,7 @@ async fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
-    let selectors: Selector = get_page_selectors(&link_result, false, false);
-    let links = page.links(&selectors, false, false);
+    let links = page.links(&get_page_selectors(&link_result, false, false));
 
     assert!(
         links.contains(&"https://choosealicense.com/about/".to_string()),

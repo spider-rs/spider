@@ -244,7 +244,7 @@ impl Website {
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let throttle = Duration::from_millis(delay);
-        let selector: Arc<Selector> = Arc::new(get_page_selectors(&self.domain, subdomains, tld));
+        let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(&self.domain, subdomains, tld));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -277,7 +277,7 @@ impl Website {
                         let link_result = on_link_find_callback(link);
                         task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
-                        let links = page.links(&*selector, subdomains, tld);
+                        let links = page.links(&*selector);
                         task::yield_now().await;
 
                         if let Err(_) = tx.send(links).await {
@@ -304,14 +304,12 @@ impl Website {
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let delay = self.configuration.delay;
-        let subdomains = self.configuration.subdomains;
-        let tld = self.configuration.tld;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
 
         let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-        let selector = get_page_selectors(&self.domain, subdomains, tld);
+        let selectors = get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld);
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -336,7 +334,7 @@ impl Website {
                 let link = link.clone();
                 let link_result = on_link_find_callback(link);
                 let page = Page::new(&link_result, &client).await;
-                let links = page.links(&selector, subdomains, tld);
+                let links = page.links(&selectors);
                 new_links.extend(links);
                 task::yield_now().await;
             }
@@ -351,11 +349,7 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors: Arc<Selector> = Arc::new(get_page_selectors(
-            &self.domain,
-            self.configuration.subdomains,
-            self.configuration.tld,
-        ));
+        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld));
         let throttle = Duration::from_millis(delay);
 
         // crawl while links exists
@@ -400,9 +394,7 @@ impl Website {
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(
-                    &*selectors,
-                    self.configuration.subdomains,
-                    self.configuration.tld,
+                    &*selectors
                 );
                 new_links.extend(links);
                 self.pages.push(msg);

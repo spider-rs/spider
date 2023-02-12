@@ -6,7 +6,7 @@ pub mod options;
 
 use clap::Parser;
 use options::{Cli, Commands};
-use spider::page::{get_page_selectors};
+use spider::page::get_page_selectors;
 use spider::tokio;
 use spider::website::Website;
 use std::io::{self, Write};
@@ -72,18 +72,14 @@ async fn main() {
 
             let mut page_objects: Vec<_> = vec![];
 
-            let selectors = Arc::new(get_page_selectors(
-                &cli.domain,
-                cli.subdomains,
-                cli.tld,
-            ));
+            let selectors = Arc::new(get_page_selectors(&cli.domain, cli.subdomains, cli.tld));
 
             for page in website.get_pages() {
                 let mut links: Vec<String> = vec![];
                 let mut html: &String = &String::new();
 
                 if *output_links {
-                    let page_links = page.links(&*selectors, cli.subdomains, cli.tld);
+                    let page_links = page.links(&*selectors);
                     links.extend(page_links);
                 }
 
