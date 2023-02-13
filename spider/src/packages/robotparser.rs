@@ -15,10 +15,12 @@
 //! extern crate spider;
 //!
 //! use spider::packages::robotparser::RobotFileParser;
+//! use reqwest::blocking::Client;
 //!
 //! fn main() {
-//!     let parser = RobotFileParser::new("http://www.python.org/robots.txt");
-//!     parser.read();
+//!     let parser = RobotFileParser::new();
+//!     let client = Client::new();
+//!     parser.read(&client, &"http://www.python.org/robots.txt");
 //!     assert!(parser.can_fetch("*", "http://www.python.org/robots.txt"));
 //! }
 //! ```
