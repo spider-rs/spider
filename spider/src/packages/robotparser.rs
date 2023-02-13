@@ -28,7 +28,6 @@ use reqwest::Client;
 use reqwest::Response;
 use reqwest::StatusCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use url::Url;
 
 /// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
 /// (allowance==False) followed by a path."""
@@ -73,8 +72,6 @@ pub struct RobotFileParser {
     disallow_all: bool,
     /// Allow links reguardless of robots.txt
     allow_all: bool,
-    /// Url of the website
-    url: Url,
     /// Time last checked robots.txt file
     last_checked: i64,
     /// User-agent string
@@ -184,13 +181,12 @@ impl Default for Entry {
 
 impl RobotFileParser {
     /// Establish a new robotparser for a website domain
-    pub fn new<T: AsRef<str>>(url: T) -> RobotFileParser {
+    pub fn new() -> RobotFileParser {
         RobotFileParser {
             entries: vec![],
             default_entry: Entry::new(),
             disallow_all: false,
             allow_all: false,
-            url: Url::parse(url.as_ref()).unwrap(),
             last_checked: 0i64,
             user_agent: String::from("robotparser-rs"),
         }
@@ -214,16 +210,9 @@ impl RobotFileParser {
         self.last_checked = now;
     }
 
-    /// Sets the URL referring to a robots.txt file.
-    pub fn set_url<T: AsRef<str>>(&mut self, url: T) {
-        let parsed_url = Url::parse(url.as_ref()).unwrap();
-        self.url = parsed_url;
-        self.last_checked = 0i64;
-    }
-
     /// Reads the robots.txt URL and feeds it to the parser.
-    pub async fn read(&mut self, client: &Client) {
-        let request = client.get(self.url.as_ref());
+    pub async fn read(&mut self, client: &Client, url: &str) {
+        let request = client.get(&string_concat!(url, "robots.txt"));
         let request = request.header(USER_AGENT, &self.user_agent);
         let res = match request.send().await {
             Ok(res) => res,

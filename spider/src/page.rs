@@ -195,7 +195,6 @@ impl Page {
         let base_domain = &selectors.1;
 
         if !base_domain.is_empty() {
-
             anchors
                 .filter_map(|a| {
                     let abs = self.abs_path(a.value().attr("href").unwrap_or_default());

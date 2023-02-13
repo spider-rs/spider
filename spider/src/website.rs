@@ -126,8 +126,7 @@ impl Website {
             let mut robot_file_parser: RobotFileParser = match &self.robot_file_parser {
                 Some(parser) => parser.to_owned(),
                 _ => {
-                    let mut robot_file_parser =
-                        RobotFileParser::new(&string_concat!(self.domain, "robots.txt"));
+                    let mut robot_file_parser = RobotFileParser::new();
                     robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
 
                     robot_file_parser
@@ -136,7 +135,7 @@ impl Website {
 
             // get the latest robots todo determine time elaspe
             if robot_file_parser.mtime() == 0 || robot_file_parser.mtime() >= 4000 {
-                robot_file_parser.read(client).await;
+                robot_file_parser.read(client, &self.domain).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
@@ -244,7 +243,8 @@ impl Website {
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let throttle = Duration::from_millis(delay);
-        let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(&self.domain, subdomains, tld));
+        let selector: Arc<(Selector, String)> =
+            Arc::new(get_page_selectors(&self.domain, subdomains, tld));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -309,7 +309,11 @@ impl Website {
 
         let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-        let selectors = get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld);
+        let selectors = get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        );
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -349,7 +353,11 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld));
+        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        ));
         let throttle = Duration::from_millis(delay);
 
         // crawl while links exists
@@ -393,9 +401,7 @@ impl Website {
             let mut new_links: HashSet<String> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
-                let links = msg.links(
-                    &*selectors
-                );
+                let links = msg.links(&*selectors);
                 new_links.extend(links);
                 self.pages.push(msg);
                 task::yield_now().await;
