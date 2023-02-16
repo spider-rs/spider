@@ -36,7 +36,7 @@ pub struct Website {
     /// contains all visited URL.
     links_visited: HashSet<String>,
     /// contains page visited
-    pages: Vec<Page>,
+    pages: Option<Vec<Page>>,
     /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
@@ -59,7 +59,7 @@ impl Website {
         Self {
             configuration: Configuration::new(),
             links_visited: HashSet::new(),
-            pages: Vec::new(),
+            pages: None,
             robot_file_parser: None,
             links: HashSet::from([domain.clone()]),
             on_link_find_callback: |s| s,
@@ -103,10 +103,10 @@ impl Website {
 
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
-        if !self.pages.is_empty() {
-            self.pages.clone()
+        if !self.pages.is_none() {
+            self.pages.as_ref().unwrap().clone()
         } else {
-            self.links_visited.iter().map(|l| build(l, "")).collect()
+            self.links_visited.iter().map(|l| build(l, "")).collect::<Vec<Page>>()
         }
     }
 
@@ -237,14 +237,12 @@ impl Website {
     /// Start to crawl website concurrently
     async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let delay = self.configuration.delay;
-        let subdomains = self.configuration.subdomains;
-        let tld = self.configuration.tld;
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let throttle = Duration::from_millis(delay);
         let selector: Arc<(Selector, String)> =
-            Arc::new(get_page_selectors(&self.domain, subdomains, tld));
+            Arc::new(get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -349,6 +347,7 @@ impl Website {
 
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
+        self.pages = Some(Vec::new());
         let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
@@ -403,7 +402,7 @@ impl Website {
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(&*selectors);
                 new_links.extend(links);
-                self.pages.push(msg);
+                self.pages.as_mut().unwrap().push(msg);
                 task::yield_now().await;
             }
 
