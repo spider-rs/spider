@@ -213,7 +213,7 @@ impl Website {
         (client, handle)
     }
 
-    /// Start to crawl website with async parallelization
+    /// Start to crawl website with async conccurency
     pub async fn crawl(&mut self) {
         let (client, handle) = self.setup().await;
 
@@ -227,7 +227,7 @@ impl Website {
         self.crawl_sequential(&client, handle).await;
     }
 
-    /// Start to scrape/download website with async parallelization
+    /// Start to scrape/download website with async conccurency
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
 
