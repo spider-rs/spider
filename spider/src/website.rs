@@ -12,10 +12,49 @@ use std::time::Duration;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
+use std::hash::{Hash, Hasher};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
+
+/// case-insensitive string handling
+#[derive(Debug, Clone)]
+pub struct CaseInsensitiveString(String);
+
+impl PartialEq for CaseInsensitiveString {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq_ignore_ascii_case(&other.0)
+    }
+}
+
+impl Eq for CaseInsensitiveString {}
+
+impl Hash for CaseInsensitiveString {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for c in self.0.as_bytes() {
+            c.to_ascii_lowercase().hash(state)
+        }
+    }
+}
+
+impl From<&str> for CaseInsensitiveString {
+    fn from(s: &str) -> Self {
+        CaseInsensitiveString { 0: s.into() }
+    }
+}
+
+impl From<String> for CaseInsensitiveString {
+    fn from(s: String) -> Self {
+        CaseInsensitiveString { 0: s }
+    }
+}
+
+impl AsRef<str> for CaseInsensitiveString {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Represents a website to crawl and gather all links.
 /// ```rust
@@ -32,9 +71,9 @@ pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
     /// contains all non-visited URL.
-    links: HashSet<String>,
+    links: HashSet<CaseInsensitiveString>,
     /// contains all visited URL.
-    links_visited: HashSet<String>,
+    links_visited: HashSet<CaseInsensitiveString>,
     /// contains page visited
     pages: Option<Vec<Page>>,
     /// callback when a link is found.
@@ -45,7 +84,7 @@ pub struct Website {
     domain: String,
 }
 
-type Message = HashSet<String>;
+type Message = HashSet<CaseInsensitiveString>;
 
 impl Website {
     /// Initialize Website object with a start link to crawl.
@@ -61,7 +100,7 @@ impl Website {
             links_visited: HashSet::new(),
             pages: None,
             robot_file_parser: None,
-            links: HashSet::from([domain.clone()]),
+            links: HashSet::from([domain.clone().into()]),
             on_link_find_callback: |s| s,
             domain,
         }
@@ -69,7 +108,7 @@ impl Website {
 
     /// crawl reset domain
     pub fn reset(&mut self) {
-        self.links = HashSet::from([self.domain.clone()]);
+        self.links = HashSet::from([self.domain.clone().into()]);
     }
 
     /// return `true` if URL:
@@ -77,10 +116,10 @@ impl Website {
     /// - is not already crawled
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)  
-    pub fn is_allowed(&self, link: &String) -> bool {
-        if self.links_visited.contains(link)
-            || contains(&self.configuration.blacklist_url, link)
-            || self.configuration.respect_robots_txt && !self.is_allowed_robots(link)
+    pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
+        if self.links_visited.contains(&link)
+            || contains(&self.configuration.blacklist_url, &link.0)
+            || self.configuration.respect_robots_txt && !self.is_allowed_robots(&link.0)
         {
             return false;
         }
@@ -95,7 +134,7 @@ impl Website {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self.robot_file_parser.as_ref().unwrap(); // unwrap will always return
 
-            robot_file_parser.can_fetch("*", link)
+            robot_file_parser.can_fetch("*", &link)
         } else {
             true
         }
@@ -106,12 +145,15 @@ impl Website {
         if !self.pages.is_none() {
             self.pages.as_ref().unwrap().clone()
         } else {
-            self.links_visited.iter().map(|l| build(l, "")).collect::<Vec<Page>>()
+            self.links_visited
+                .iter()
+                .map(|l| build(&l.0, Default::default()))
+                .collect::<Vec<Page>>()
         }
     }
 
     /// links visited getter
-    pub fn get_links(&self) -> &HashSet<String> {
+    pub fn get_links(&self) -> &HashSet<CaseInsensitiveString> {
         &self.links_visited
     }
 
@@ -241,8 +283,11 @@ impl Website {
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let throttle = Duration::from_millis(delay);
-        let selector: Arc<(Selector, String)> =
-            Arc::new(get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld));
+        let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        ));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -258,10 +303,10 @@ impl Website {
                     self.links.clear();
                     break;
                 }
-                if !self.is_allowed(link) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
                 log("fetch", link);
                 let tx = tx.clone();
                 let client = client.clone();
@@ -272,7 +317,7 @@ impl Website {
 
                 task::spawn(async move {
                     {
-                        let link_result = on_link_find_callback(link);
+                        let link_result = on_link_find_callback(link.0);
                         task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
                         let links = page.links(&*selector);
@@ -282,12 +327,13 @@ impl Website {
                             log("receiver dropped", "");
                         }
                     }
+                    task::yield_now().await;
                 });
             }
 
             drop(tx);
 
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
                 new_links.extend(msg);
@@ -315,7 +361,7 @@ impl Website {
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
             for link in self.links.iter() {
                 while handle.load(Ordering::Relaxed) == 1 {
@@ -325,16 +371,16 @@ impl Website {
                     self.links.clear();
                     break;
                 }
-                if !self.is_allowed(link) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
                 log("fetch", link);
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
                 if delay_enabled {
                     sleep(Duration::from_millis(delay)).await;
                 }
                 let link = link.clone();
-                let link_result = on_link_find_callback(link);
+                let link_result = on_link_find_callback(link.0);
                 let page = Page::new(&link_result, &client).await;
                 let links = page.links(&selectors);
                 new_links.extend(links);
@@ -373,11 +419,11 @@ impl Website {
                     self.links.clear();
                     break;
                 }
-                if !self.is_allowed(link) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
                 log("fetch", link);
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
 
                 let tx = tx.clone();
                 let client = client.clone();
@@ -385,19 +431,20 @@ impl Website {
 
                 task::spawn(async move {
                     {
-                        let link_result = on_link_find_callback(link);
+                        let link_result = on_link_find_callback(link.0);
                         let page = Page::new(&link_result, &client).await;
 
                         if let Err(_) = tx.send(page).await {
                             log("receiver dropped", "");
                         }
                     }
+                    task::yield_now().await;
                 });
             }
 
             drop(tx);
 
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(&*selectors);
@@ -420,7 +467,7 @@ async fn crawl() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -430,7 +477,7 @@ async fn crawl() {
     assert!(
         website
             .links
-            .contains(&"https://choosealicense.com/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/".into()),
         "{:?}",
         website.links
     );
@@ -443,7 +490,7 @@ async fn scrape() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -459,7 +506,7 @@ async fn crawl_subsequential() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -470,8 +517,8 @@ async fn crawl_invalid() {
     let url = "https://w.com";
     let mut website: Website = Website::new(url);
     website.crawl().await;
-    let mut uniq = HashSet::new();
-    uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
+    let mut uniq: HashSet<CaseInsensitiveString> = HashSet::new();
+    uniq.insert(format!("{}/", url.to_string()).into()); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -487,7 +534,7 @@ async fn crawl_link_callback() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -504,7 +551,7 @@ async fn not_crawl_blacklist() {
     assert!(
         !website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -542,7 +589,7 @@ async fn test_respect_robots_txt() {
 
     assert_eq!(website.configuration.delay, 0);
 
-    assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
+    assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".into()));
 
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");
@@ -580,7 +627,7 @@ async fn test_crawl_subdomains() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -594,7 +641,7 @@ async fn test_crawl_tld() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -643,7 +690,7 @@ async fn test_crawl_pause_resume() {
     assert!(
         website
             .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
