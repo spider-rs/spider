@@ -8,6 +8,7 @@ use scraper::Selector;
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use unicase::Ascii;
 
 use reqwest::header;
 use reqwest::header::CONNECTION;
@@ -32,20 +33,20 @@ pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
     /// contains all non-visited URL.
-    links: HashSet<String>,
+    links: HashSet<Ascii<String>>,
     /// contains all visited URL.
-    links_visited: HashSet<String>,
+    links_visited: HashSet<Ascii<String>>,
     /// contains page visited
     pages: Option<Vec<Page>>,
     /// callback when a link is found.
-    pub on_link_find_callback: fn(String) -> String,
+    pub on_link_find_callback: fn(Ascii<String>) -> Ascii<String>,
     /// Robot.txt parser holder.
     robot_file_parser: Option<RobotFileParser>,
     /// the base root domain of the crawl
     domain: String,
 }
 
-type Message = HashSet<String>;
+type Message = HashSet<Ascii<String>>;
 
 impl Website {
     /// Initialize Website object with a start link to crawl.
@@ -61,7 +62,7 @@ impl Website {
             links_visited: HashSet::new(),
             pages: None,
             robot_file_parser: None,
-            links: HashSet::from([domain.clone()]),
+            links: HashSet::from([Ascii::new(domain.clone())]),
             on_link_find_callback: |s| s,
             domain,
         }
@@ -69,7 +70,7 @@ impl Website {
 
     /// crawl reset domain
     pub fn reset(&mut self) {
-        self.links = HashSet::from([self.domain.clone()]);
+        self.links = HashSet::from([Ascii::new(self.domain.clone())]);
     }
 
     /// return `true` if URL:
@@ -77,7 +78,7 @@ impl Website {
     /// - is not already crawled
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)  
-    pub fn is_allowed(&self, link: &String) -> bool {
+    pub fn is_allowed(&self, link: &Ascii<String>) -> bool {
         if self.links_visited.contains(link)
             || contains(&self.configuration.blacklist_url, link)
             || self.configuration.respect_robots_txt && !self.is_allowed_robots(link)
@@ -106,12 +107,15 @@ impl Website {
         if !self.pages.is_none() {
             self.pages.as_ref().unwrap().clone()
         } else {
-            self.links_visited.iter().map(|l| build(l, "")).collect::<Vec<Page>>()
+            self.links_visited
+                .iter()
+                .map(|l| build(l, String::from("")))
+                .collect::<Vec<Page>>()
         }
     }
 
     /// links visited getter
-    pub fn get_links(&self) -> &HashSet<String> {
+    pub fn get_links(&self) -> &HashSet<Ascii<String>> {
         &self.links_visited
     }
 
@@ -241,8 +245,11 @@ impl Website {
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let throttle = Duration::from_millis(delay);
-        let selector: Arc<(Selector, String)> =
-            Arc::new(get_page_selectors(&self.domain, self.configuration.subdomains, self.configuration.tld));
+        let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        ));
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -261,7 +268,7 @@ impl Website {
                 if !self.is_allowed(link) {
                     continue;
                 }
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
                 log("fetch", link);
                 let tx = tx.clone();
                 let client = client.clone();
@@ -287,7 +294,7 @@ impl Website {
 
             drop(tx);
 
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<Ascii<String>> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
                 new_links.extend(msg);
@@ -315,7 +322,7 @@ impl Website {
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<Ascii<String>> = HashSet::new();
 
             for link in self.links.iter() {
                 while handle.load(Ordering::Relaxed) == 1 {
@@ -329,7 +336,7 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
                 if delay_enabled {
                     sleep(Duration::from_millis(delay)).await;
                 }
@@ -377,7 +384,7 @@ impl Website {
                     continue;
                 }
                 log("fetch", link);
-                self.links_visited.insert(link.into());
+                self.links_visited.insert(link.clone());
 
                 let tx = tx.clone();
                 let client = client.clone();
@@ -397,7 +404,7 @@ impl Website {
 
             drop(tx);
 
-            let mut new_links: HashSet<String> = HashSet::new();
+            let mut new_links: HashSet<Ascii<String>> = HashSet::new();
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(&*selectors);
@@ -416,21 +423,23 @@ impl Website {
 async fn crawl() {
     let url = "https://choosealicense.com";
     let mut website: Website = Website::new(&url);
+
     website.crawl().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
 
     // resets base link for re-crawling
     website.reset();
+
     assert!(
         website
             .links
-            .contains(&"https://choosealicense.com/".to_string()),
+            .contains(&Ascii::new("https://choosealicense.com/".to_string())),
         "{:?}",
         website.links
     );
@@ -441,9 +450,9 @@ async fn scrape() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.scrape().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -457,9 +466,9 @@ async fn crawl_subsequential() {
     website.configuration.delay = 250;
     website.crawl_sync().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -471,7 +480,7 @@ async fn crawl_invalid() {
     let mut website: Website = Website::new(url);
     website.crawl().await;
     let mut uniq = HashSet::new();
-    uniq.insert(format!("{}/", url.to_string())); // TODO: remove trailing slash mutate
+    uniq.insert(Ascii::new(format!("{}/", url.to_string()))); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -485,9 +494,9 @@ async fn crawl_link_callback() {
     };
     website.crawl().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -502,9 +511,9 @@ async fn not_crawl_blacklist() {
         .push("https://choosealicense.com/licenses/".to_string());
     website.crawl().await;
     assert!(
-        !website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        !website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -542,7 +551,7 @@ async fn test_respect_robots_txt() {
 
     assert_eq!(website.configuration.delay, 0);
 
-    assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".to_string()));
+    assert!(!website.is_allowed(&Ascii::new("https://stackoverflow.com/posts/".to_string())));
 
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");
@@ -578,9 +587,9 @@ async fn test_crawl_subdomains() {
     website.configuration.subdomains = true;
     website.crawl().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -592,9 +601,9 @@ async fn test_crawl_tld() {
     website.configuration.tld = true;
     website.crawl().await;
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );
@@ -641,9 +650,9 @@ async fn test_crawl_pause_resume() {
     assert!(duration.as_secs() > 5, "{:?}", duration);
 
     assert!(
-        website
-            .links_visited
-            .contains(&"https://choosealicense.com/licenses/".to_string()),
+        website.links_visited.contains(&Ascii::new(
+            "https://choosealicense.com/licenses/".to_string()
+        )),
         "{:?}",
         website.links_visited
     );

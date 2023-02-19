@@ -80,7 +80,10 @@ async fn main() {
 
                 if *output_links {
                     let page_links = page.links(&*selectors);
-                    links.extend(page_links);
+
+                    for link in page_links {
+                        links.push(link.to_string());
+                    }
                 }
 
                 if *output_html {

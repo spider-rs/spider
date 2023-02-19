@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.18.18"
+version = "1.19.0"
 dependencies = [
  "hashbrown",
  "lazy_static",
@@ -1697,12 +1697,13 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "ua_generator",
+ "unicase",
  "url",
 ]
 
 [[package]]
 name = "spider_cli"
-version = "1.18.18"
+version = "1.19.0"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1714,7 +1715,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.18.18"
+version = "1.19.0"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -2000,6 +2001,15 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+]
+
+[[package]]
+name = "unicase"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50f37be617794602aabbeee0be4f259dc1778fabe05e2d67ee8f79326d5cb4f6"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]

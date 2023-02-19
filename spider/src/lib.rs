@@ -34,6 +34,7 @@ extern crate scraper;
 pub extern crate tokio;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
+pub extern crate unicase;
 pub extern crate url;
 #[macro_use]
 extern crate string_concat;

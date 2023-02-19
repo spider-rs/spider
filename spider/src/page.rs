@@ -2,6 +2,7 @@ use crate::utils::fetch_page_html;
 use hashbrown::HashSet;
 use reqwest::Client;
 use scraper::{Html, Selector};
+use unicase::Ascii;
 use url::Url;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -152,10 +153,10 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
     }
 }
 
-/// Instanciate a new page without scraping it (used for testing purposes).
-pub fn build(url: &str, html: &str) -> Page {
+/// Instantiate a new page without scraping it (used for testing purposes).
+pub fn build(url: &str, html: String) -> Page {
     Page {
-        html: html.into(),
+        html,
         base: Url::parse(&url).expect("Invalid page URL"),
     }
 }
@@ -165,7 +166,7 @@ impl Page {
     pub async fn new(url: &str, client: &Client) -> Self {
         let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
 
-        build(url, &html)
+        build(url, html)
     }
 
     /// URL getter for page.
@@ -184,7 +185,7 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, selectors: &(Selector, String)) -> HashSet<String> {
+    pub fn links(&self, selectors: &(Selector, String)) -> HashSet<Ascii<String>> {
         let html = Html::parse_document(&self.html);
         let anchors = html.select(&selectors.0);
         let base_domain = &selectors.1;
@@ -195,7 +196,7 @@ impl Page {
                     let abs = self.abs_path(a.value().attr("href").unwrap_or_default());
 
                     if base_domain == domain_name(&abs) {
-                        Some(abs.as_str().to_lowercase())
+                        Some(Ascii::new(abs.as_str().into()))
                     } else {
                         None
                     }
@@ -204,9 +205,11 @@ impl Page {
         } else {
             anchors
                 .map(|a| {
-                    self.abs_path(a.value().attr("href").unwrap_or_default())
-                        .as_str()
-                        .to_lowercase()
+                    Ascii::new(
+                        self.abs_path(a.value().attr("href").unwrap_or_default())
+                            .as_str()
+                            .into(),
+                    )
                 })
                 .collect()
         }
@@ -234,9 +237,10 @@ async fn parse_links() {
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
     let links = page.links(&get_page_selectors(&link_result, false, false));
+    let case = Ascii::new("https://choosealicense.com/about/".to_string());
 
     assert!(
-        links.contains(&"https://choosealicense.com/about/".to_string()),
+        links.contains(&case),
         "Could not find {}. Theses URLs was found {:?}",
         page.get_url(),
         &links
