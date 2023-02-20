@@ -23,6 +23,7 @@ use tokio_stream::StreamExt;
 pub struct CaseInsensitiveString(String);
 
 impl PartialEq for CaseInsensitiveString {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.0.eq_ignore_ascii_case(&other.0)
     }
@@ -31,6 +32,7 @@ impl PartialEq for CaseInsensitiveString {
 impl Eq for CaseInsensitiveString {}
 
 impl Hash for CaseInsensitiveString {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         for c in self.0.as_bytes() {
             c.to_ascii_lowercase().hash(state)
@@ -39,18 +41,21 @@ impl Hash for CaseInsensitiveString {
 }
 
 impl From<&str> for CaseInsensitiveString {
+    #[inline]
     fn from(s: &str) -> Self {
         CaseInsensitiveString { 0: s.into() }
     }
 }
 
 impl From<String> for CaseInsensitiveString {
+    #[inline]
     fn from(s: String) -> Self {
         CaseInsensitiveString { 0: s }
     }
 }
 
 impl AsRef<str> for CaseInsensitiveString {
+    #[inline]
     fn as_ref(&self) -> &str {
         &self.0
     }
@@ -115,7 +120,8 @@ impl Website {
     ///
     /// - is not already crawled
     /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
         if self.links_visited.contains(&link)
             || contains(&self.configuration.blacklist_url, &link.0)
@@ -129,7 +135,8 @@ impl Website {
 
     /// return `true` if URL:
     ///
-    /// - is not forbidden in robot.txt file (if parameter is defined)  
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
     pub fn is_allowed_robots(&self, link: &String) -> bool {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self.robot_file_parser.as_ref().unwrap(); // unwrap will always return
@@ -307,7 +314,7 @@ impl Website {
                     continue;
                 }
                 self.links_visited.insert(link.clone());
-                log("fetch", link);
+                log("fetch", &link);
                 let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
@@ -383,6 +390,7 @@ impl Website {
                 let link_result = on_link_find_callback(link.0);
                 let page = Page::new(&link_result, &client).await;
                 let links = page.links(&selectors);
+                task::yield_now().await;
                 new_links.extend(links);
                 task::yield_now().await;
             }
@@ -422,7 +430,7 @@ impl Website {
                 if !self.is_allowed(&link) {
                     continue;
                 }
-                log("fetch", link);
+                log("fetch", &link);
                 self.links_visited.insert(link.clone());
 
                 let tx = tx.clone();
@@ -448,7 +456,9 @@ impl Website {
 
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(&*selectors);
+                task::yield_now().await;
                 new_links.extend(links);
+                task::yield_now().await;
                 self.pages.as_mut().unwrap().push(msg);
                 task::yield_now().await;
             }

@@ -44,9 +44,9 @@ fn build_absolute_selectors(url: &str) -> String {
 }
 
 /// get the clean domain name
+#[inline]
 pub fn domain_name(domain: &Url) -> &str {
     let b = domain.host_str().unwrap_or_default();
-
     let b = b.split('.').collect::<Vec<&str>>();
 
     if b.len() > 2 {
@@ -153,7 +153,8 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
     }
 }
 
-/// Instanciate a new page without scraping it (used for testing purposes).
+/// Instantiate a new page without scraping it (used for testing purposes).
+#[inline]
 pub fn build(url: &str, html: String) -> Page {
     Page {
         html,
@@ -163,6 +164,7 @@ pub fn build(url: &str, html: String) -> Page {
 
 impl Page {
     /// Instantiate a new page and gather the html.
+    #[inline]
     pub async fn new(url: &str, client: &Client) -> Self {
         let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
 
@@ -214,6 +216,7 @@ impl Page {
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
+    #[inline]
     fn abs_path(&self, href: &str) -> Url {
         match self.base.join(href) {
             Ok(mut joined) => {
