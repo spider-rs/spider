@@ -122,7 +122,7 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
-        if self.links_visited.contains(&link)
+        if self.links_visited.contains(link)
             || contains(&self.configuration.blacklist_url, &link.0)
             || self.configuration.respect_robots_txt && !self.is_allowed_robots(&link.0)
         {
