@@ -295,6 +295,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
+        let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -340,14 +341,17 @@ impl Website {
 
             drop(tx);
 
-            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-
             while let Some(msg) = rx.recv().await {
                 new_links.extend(msg);
                 task::yield_now().await;
             }
 
             self.links = &new_links - &self.links_visited;
+            task::yield_now().await;
+            new_links.clear();
+            if new_links.capacity() > channel_buffer {
+                new_links.shrink_to_fit()
+            }
             task::yield_now().await;
         }
     }
@@ -357,19 +361,17 @@ impl Website {
         let delay = self.configuration.delay;
         let delay_enabled = delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
-
+        let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-
         let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
         );
+        let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
         while !self.links.is_empty() {
-            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-
             for link in self.links.iter() {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
@@ -396,6 +398,11 @@ impl Website {
             }
 
             self.links = &new_links - &self.links_visited;
+            new_links.clear();
+            if new_links.capacity() > channel_buffer {
+                new_links.shrink_to_fit()
+            }
+            task::yield_now().await;
         }
     }
 
@@ -412,6 +419,7 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
+        let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
         while !self.links.is_empty() {
@@ -452,8 +460,6 @@ impl Website {
 
             drop(tx);
 
-            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-
             while let Some(msg) = rx.recv().await {
                 let links = msg.links(&*selectors);
                 task::yield_now().await;
@@ -464,6 +470,10 @@ impl Website {
             }
 
             self.links = &new_links - &self.links_visited;
+            new_links.clear();
+            if new_links.capacity() > channel_buffer {
+                new_links.shrink_to_fit()
+            }
             task::yield_now().await;
         }
     }

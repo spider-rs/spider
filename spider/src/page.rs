@@ -154,7 +154,6 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
 }
 
 /// Instantiate a new page without scraping it (used for testing purposes).
-#[inline]
 pub fn build(url: &str, html: String) -> Page {
     Page {
         html,
@@ -164,7 +163,6 @@ pub fn build(url: &str, html: String) -> Page {
 
 impl Page {
     /// Instantiate a new page and gather the html.
-    #[inline]
     pub async fn new(url: &str, client: &Client) -> Self {
         let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
 
