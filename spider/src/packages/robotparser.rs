@@ -366,11 +366,10 @@ impl RobotFileParser {
     }
 
     /// Using the parsed robots.txt decide if useragent can fetch url
-    pub fn can_fetch<T: AsRef<str>>(&self, useragent: T, url: T) -> bool {
+    pub fn can_fetch<T: AsRef<str>>(&self, useragent: T, url: &str) -> bool {
         use percent_encoding::percent_decode;
 
         let useragent = useragent.as_ref();
-        let url = url.as_ref();
 
         if self.disallow_all {
             return false;
