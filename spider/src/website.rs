@@ -48,7 +48,6 @@ impl From<&str> for CaseInsensitiveString {
 }
 
 impl From<String> for CaseInsensitiveString {
-    #[inline]
     fn from(s: String) -> Self {
         CaseInsensitiveString { 0: s }
     }
