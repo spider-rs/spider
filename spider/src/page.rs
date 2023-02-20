@@ -46,7 +46,6 @@ fn build_absolute_selectors(url: &str) -> String {
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
     let b = domain.host_str().unwrap_or_default();
-
     let b = b.split('.').collect::<Vec<&str>>();
 
     if b.len() > 2 {
@@ -153,7 +152,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
     }
 }
 
-/// Instanciate a new page without scraping it (used for testing purposes).
+/// Instantiate a new page without scraping it (used for testing purposes).
 pub fn build(url: &str, html: String) -> Page {
     Page {
         html,
