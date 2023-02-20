@@ -298,7 +298,7 @@ impl Website {
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
-        while !self.links.is_empty() {
+        loop {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
             let stream = tokio_stream::iter(&self.links).throttle(throttle);
             tokio::pin!(stream);
@@ -353,6 +353,9 @@ impl Website {
                 new_links.shrink_to_fit()
             }
             task::yield_now().await;
+            if self.links.is_empty() {
+                break;
+            }
         }
     }
 
@@ -371,7 +374,7 @@ impl Website {
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
-        while !self.links.is_empty() {
+        loop {
             for link in self.links.iter() {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
@@ -403,6 +406,9 @@ impl Website {
                 new_links.shrink_to_fit()
             }
             task::yield_now().await;
+            if self.links.is_empty() {
+                break;
+            }
         }
     }
 
@@ -422,7 +428,7 @@ impl Website {
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
         // crawl while links exists
-        while !self.links.is_empty() {
+        loop {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
             let stream = tokio_stream::iter(&self.links).throttle(throttle);
             tokio::pin!(stream);
@@ -475,6 +481,9 @@ impl Website {
                 new_links.shrink_to_fit()
             }
             task::yield_now().await;
+            if self.links.is_empty() {
+                break;
+            }
         }
     }
 }
