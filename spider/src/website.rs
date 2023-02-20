@@ -167,7 +167,7 @@ impl Website {
     }
 
     /// configure the robots parser on initial crawl attempt and run.
-    pub async fn configure_robots_parser(&mut self, client: &Client) {
+    pub async fn configure_robots_parser(&mut self, client: Client) -> Client {
         if self.configuration.respect_robots_txt {
             let mut robot_file_parser: RobotFileParser = match &self.robot_file_parser {
                 Some(parser) => parser.to_owned(),
@@ -181,7 +181,7 @@ impl Website {
 
             // get the latest robots todo determine time elaspe
             if robot_file_parser.mtime() == 0 || robot_file_parser.mtime() >= 4000 {
-                robot_file_parser.read(client, &self.domain).await;
+                robot_file_parser.read(&client, &self.domain).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
@@ -190,6 +190,8 @@ impl Website {
 
             self.robot_file_parser = Some(robot_file_parser);
         }
+
+        client
     }
 
     /// configure the user agent for the request
@@ -214,7 +216,7 @@ impl Website {
     }
 
     /// setup atomic controller
-    async fn configure_handler(&self) -> Arc<AtomicI8> {
+    fn configure_handler(&self) -> Arc<AtomicI8> {
         let paused = Arc::new(AtomicI8::new(0));
         let handle = paused.clone();
         let domain = self.domain.clone();
@@ -253,10 +255,11 @@ impl Website {
     pub async fn setup(&mut self) -> (Client, Arc<AtomicI8>) {
         self.configure_agent();
         let client = self.configure_http_client();
-        self.configure_robots_parser(&client).await;
-        let handle = self.configure_handler().await;
 
-        (client, handle)
+        (
+            self.configure_robots_parser(client).await,
+            self.configure_handler(),
+        )
     }
 
     /// Start to crawl website with async conccurency
@@ -602,7 +605,7 @@ async fn test_respect_robots_txt() {
     website.configuration.user_agent = "*".into();
 
     let (client, _) = website.setup().await;
-    website.configure_robots_parser(&client).await;
+    website.configure_robots_parser(client).await;
 
     assert_eq!(website.configuration.delay, 0);
 
@@ -614,7 +617,7 @@ async fn test_respect_robots_txt() {
     website_second.configuration.user_agent = "bingbot".into();
 
     let (client_second, _) = website_second.setup().await;
-    website_second.configure_robots_parser(&client_second).await;
+    website_second.configure_robots_parser(client_second).await;
 
     assert_eq!(
         website_second.configuration.user_agent,
@@ -631,7 +634,7 @@ async fn test_respect_robots_txt() {
     website_third.configuration.respect_robots_txt = true;
     let (client_third, _) = website_third.setup().await;
 
-    website_third.configure_robots_parser(&client_third).await;
+    website_third.configure_robots_parser(client_third).await;
 
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }
