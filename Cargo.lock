@@ -697,9 +697,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75f43d41e26995c17e71ee126451dd3941010b0514a81a9d11f3b341debc2399"
+checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
 dependencies = [
  "bytes",
  "fnv",
@@ -1664,9 +1664,9 @@ checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 
 [[package]]
 name = "slab"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4614a76b2a8be0058caa9dbbaf66d988527d86d003c11a94fbd335d7661edcef"
+checksum = "6528351c9bc8ab22353f9d776db39a20288e8d6c37ef8cfe3317cf875eecfc2d"
 dependencies = [
  "autocfg",
 ]
@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.5"
+version = "1.19.6"
 dependencies = [
  "hashbrown 0.13.2",
  "lazy_static",
@@ -1708,7 +1708,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.5"
+version = "1.19.6"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.5"
+version = "1.19.6"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -1913,6 +1913,7 @@ dependencies = [
  "memchr",
  "mio",
  "num_cpus",
+ "parking_lot",
  "pin-project-lite",
  "socket2",
  "tokio-macros",
@@ -1942,9 +1943,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d660770404473ccd7bc9f8b28494a811bc18542b915c0855c51e8f419d5223ce"
+checksum = "8fb52b74f05dbf495a8fba459fdc331812b96aa086d9eb78101fa0d4569c3313"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -2000,7 +2001,7 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 [[package]]
 name = "ua_generator"
 version = "0.3.5"
-source = "git+https://github.com/a11ywatch/ua_generator.git#8b1d1f381c8ebeb7457360ea01117e5f8d3e6338"
+source = "git+https://github.com/a11ywatch/ua_generator.git#ca7ff285c9d57a8c6fd3913a48c28edbc9d040bb"
 dependencies = [
  "fastrand",
  "serde",
