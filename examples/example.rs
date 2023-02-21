@@ -10,7 +10,7 @@ async fn main() {
     website
         .configuration
         .blacklist_url
-        .push("https://rsseau.fr/resume".to_string());
+        .push("https://rsseau.fr/resume".into());
     website.configuration.respect_robots_txt = true;
     website.configuration.subdomains = false;
     website.configuration.delay = 15; // Defaults to 250 ms

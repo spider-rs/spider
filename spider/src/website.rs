@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
@@ -20,7 +21,7 @@ use tokio_stream::StreamExt;
 
 /// case-insensitive string handling
 #[derive(Debug, Clone)]
-pub struct CaseInsensitiveString(String);
+pub struct CaseInsensitiveString(Bytes);
 
 impl PartialEq for CaseInsensitiveString {
     #[inline]
@@ -34,29 +35,39 @@ impl Eq for CaseInsensitiveString {}
 impl Hash for CaseInsensitiveString {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for c in self.0.as_bytes() {
-            c.to_ascii_lowercase().hash(state)
-        }
+        self.0.to_ascii_lowercase().hash(state)
     }
 }
 
 impl From<&str> for CaseInsensitiveString {
     #[inline]
     fn from(s: &str) -> Self {
-        CaseInsensitiveString { 0: s.into() }
+        let b: Bytes = s.to_owned().into();
+
+        CaseInsensitiveString { 0: b }
     }
 }
 
 impl From<String> for CaseInsensitiveString {
     fn from(s: String) -> Self {
-        CaseInsensitiveString { 0: s }
+        CaseInsensitiveString { 0: s.into() }
     }
 }
 
 impl AsRef<str> for CaseInsensitiveString {
     #[inline]
     fn as_ref(&self) -> &str {
-        &self.0
+        unsafe {
+            std::str::from_utf8_unchecked(&self.0)
+        }
+    }
+}
+
+impl CaseInsensitiveString {
+    /// convert to string creates a new value in memory
+    #[inline]
+    fn as_str(&self) -> String {
+        self.0.escape_ascii().to_string()
     }
 }
 
@@ -122,8 +133,9 @@ impl Website {
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
         if self.links_visited.contains(link)
-            || contains(&self.configuration.blacklist_url, &link.0)
-            || self.configuration.respect_robots_txt && !self.is_allowed_robots(&link.0)
+            || contains(&self.configuration.blacklist_url, &link)
+            || self.configuration.respect_robots_txt
+                && !self.is_allowed_robots(&link.as_ref())
         {
             return false;
         }
@@ -134,7 +146,7 @@ impl Website {
     /// return `true` if URL:
     ///
     /// - is not forbidden in robot.txt file (if parameter is defined)
-    pub fn is_allowed_robots(&self, link: &String) -> bool {
+    pub fn is_allowed_robots(&self, link: &str) -> bool {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self.robot_file_parser.as_ref().unwrap(); // unwrap will always return
 
@@ -151,7 +163,7 @@ impl Website {
         } else {
             self.links_visited
                 .iter()
-                .map(|l| build(&l.0, Default::default()))
+                .map(|l| build(&l.as_str(), Default::default()))
                 .collect::<Vec<Page>>()
         }
     }
@@ -325,7 +337,7 @@ impl Website {
 
                 task::spawn(async move {
                     {
-                        let link_result = on_link_find_callback(link.0);
+                        let link_result = on_link_find_callback(link.as_str());
                         task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
                         let links = page.links(&*selector);
@@ -350,7 +362,7 @@ impl Website {
             task::yield_now().await;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
@@ -392,7 +404,7 @@ impl Website {
                     sleep(Duration::from_millis(delay)).await;
                 }
                 let link = link.clone();
-                let link_result = on_link_find_callback(link.0);
+                let link_result = on_link_find_callback(link.as_str());
                 let page = Page::new(&link_result, &client).await;
                 let links = page.links(&selectors);
                 task::yield_now().await;
@@ -403,7 +415,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
@@ -453,7 +465,7 @@ impl Website {
 
                 task::spawn(async move {
                     {
-                        let link_result = on_link_find_callback(link.0);
+                        let link_result = on_link_find_callback(link.as_str());
                         let page = Page::new(&link_result, &client).await;
 
                         if let Err(_) = tx.send(page).await {
@@ -478,7 +490,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
@@ -575,7 +587,7 @@ async fn not_crawl_blacklist() {
     website
         .configuration
         .blacklist_url
-        .push("https://choosealicense.com/licenses/".to_string());
+        .push("https://choosealicense.com/licenses/".into());
     website.crawl().await;
     assert!(
         !website
@@ -593,7 +605,7 @@ async fn not_crawl_blacklist_regex() {
     website
         .configuration
         .blacklist_url
-        .push("/choosealicense.com/".to_string());
+        .push("/choosealicense.com/".into());
     website.crawl().await;
     assert_eq!(website.links_visited.len(), 0);
 }

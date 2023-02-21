@@ -63,12 +63,19 @@ pub mod website;
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
 pub mod black_list {
+    use crate::website::CaseInsensitiveString;
     use regex::Regex;
+
     /// check if link exist in blacklists with regex.
-    pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
+    pub fn contains(
+        blacklist_url: &Vec<CaseInsensitiveString>,
+        link: &CaseInsensitiveString,
+    ) -> bool {
+        let slink = link.as_ref();
+
         for pattern in blacklist_url {
-            let re = Regex::new(pattern).unwrap();
-            if re.is_match(link) {
+            let re = Regex::new(pattern.as_ref()).unwrap();
+            if re.is_match(slink) {
                 return true;
             }
         }
@@ -80,8 +87,13 @@ pub mod black_list {
 #[cfg(not(feature = "regex"))]
 /// Black list checking url exist.
 pub mod black_list {
+    use crate::website::CaseInsensitiveString;
+
     /// check if link exist in blacklists.
-    pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
+    pub fn contains(
+        blacklist_url: &Vec<CaseInsensitiveString>,
+        link: &CaseInsensitiveString,
+    ) -> bool {
         blacklist_url.contains(&link)
     }
 }

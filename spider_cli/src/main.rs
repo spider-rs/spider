@@ -8,7 +8,7 @@ use clap::Parser;
 use options::{Cli, Commands};
 use spider::page::get_page_selectors;
 use spider::tokio;
-use spider::website::Website;
+use spider::website::{CaseInsensitiveString, Website};
 use std::io::{self, Write};
 use std::sync::Arc;
 
@@ -39,7 +39,8 @@ async fn main() {
     website.configuration.tld = cli.tld;
 
     if !blacklist_url.is_empty() {
-        let blacklist_url: Vec<String> = blacklist_url.split(',').map(|l| l.to_string()).collect();
+        let blacklist_url: Vec<CaseInsensitiveString> =
+            blacklist_url.split(',').map(|l| l.into()).collect();
         website.configuration.blacklist_url.extend(blacklist_url);
     }
 

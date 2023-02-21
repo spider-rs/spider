@@ -1689,8 +1689,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.6"
+version = "1.19.8"
 dependencies = [
+ "bytes",
  "hashbrown 0.13.2",
  "lazy_static",
  "log",
@@ -1699,6 +1700,7 @@ dependencies = [
  "reqwest",
  "scraper",
  "string_concat",
+ "tendril",
  "tikv-jemallocator",
  "tokio",
  "tokio-stream",
@@ -1708,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.6"
+version = "1.19.8"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1720,7 +1722,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.6"
+version = "1.19.8"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
