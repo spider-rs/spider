@@ -350,7 +350,7 @@ impl Website {
             task::yield_now().await;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
@@ -403,7 +403,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
@@ -478,7 +478,7 @@ impl Website {
             self.links = &new_links - &self.links_visited;
             new_links.clear();
             if new_links.capacity() > channel_buffer {
-                new_links.shrink_to_fit()
+                new_links.shrink_to_fit();
             }
             task::yield_now().await;
             if self.links.is_empty() {
