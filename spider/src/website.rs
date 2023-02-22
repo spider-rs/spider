@@ -74,8 +74,6 @@ impl AsRef<str> for CaseInsensitiveString {
 pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
-    /// contains all non-visited URL.
-    links: HashSet<CaseInsensitiveString>,
     /// contains all visited URL.
     links_visited: HashSet<CaseInsensitiveString>,
     /// contains page visited
@@ -104,15 +102,9 @@ impl Website {
             links_visited: HashSet::new(),
             pages: None,
             robot_file_parser: None,
-            links: HashSet::from([domain.clone().into()]),
             on_link_find_callback: |s| s,
             domain,
         }
-    }
-
-    /// crawl reset domain
-    pub fn reset(&mut self) {
-        self.links = HashSet::from([self.domain.clone().into()]);
     }
 
     /// return `true` if URL:
@@ -134,7 +126,7 @@ impl Website {
     /// return `true` if URL:
     ///
     /// - is not forbidden in robot.txt file (if parameter is defined)
-    pub fn is_allowed_robots(&self, link: &String) -> bool {
+    pub fn is_allowed_robots(&self, link: &str) -> bool {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self.robot_file_parser.as_ref().unwrap(); // unwrap will always return
 
@@ -296,11 +288,12 @@ impl Website {
             self.configuration.tld,
         ));
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&self.links).throttle(throttle);
+            let stream = tokio_stream::iter(&links).throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -308,7 +301,7 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
-                    self.links.clear();
+                    links.clear();
                     break;
                 }
                 if !self.is_allowed(&link) {
@@ -328,10 +321,10 @@ impl Website {
                         let link_result = on_link_find_callback(link.0);
                         task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
-                        let links = page.links(&*selector);
+                        let page_links = page.links(&*selector);
                         task::yield_now().await;
 
-                        if let Err(_) = tx.send(links).await {
+                        if let Err(_) = tx.send(page_links).await {
                             log("receiver dropped", "");
                         }
                     }
@@ -346,14 +339,17 @@ impl Website {
                 task::yield_now().await;
             }
 
-            self.links = &new_links - &self.links_visited;
+            links.clone_from(&(&new_links - &self.links_visited));
+
             task::yield_now().await;
             new_links.clear();
+
             if new_links.capacity() > channel_buffer {
                 new_links.shrink_to_fit();
             }
+
             task::yield_now().await;
-            if self.links.is_empty() {
+            if links.is_empty() {
                 break;
             }
         }
@@ -372,15 +368,16 @@ impl Website {
             self.configuration.tld,
         );
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
-            for link in self.links.iter() {
+            for link in links.iter() {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
-                    self.links.clear();
+                    links.clear();
                     break;
                 }
                 if !self.is_allowed(&link) {
@@ -394,19 +391,19 @@ impl Website {
                 let link = link.clone();
                 let link_result = on_link_find_callback(link.0);
                 let page = Page::new(&link_result, &client).await;
-                let links = page.links(&selectors);
+                let page_links = page.links(&selectors);
                 task::yield_now().await;
-                new_links.extend(links);
+                new_links.extend(page_links);
                 task::yield_now().await;
             }
 
-            self.links = &new_links - &self.links_visited;
+            links.clone_from(&(&new_links - &self.links_visited));
             new_links.clear();
             if new_links.capacity() > channel_buffer {
                 new_links.shrink_to_fit();
             }
             task::yield_now().await;
-            if self.links.is_empty() {
+            if links.is_empty() {
                 break;
             }
         }
@@ -426,11 +423,12 @@ impl Website {
         ));
         let throttle = Duration::from_millis(delay);
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&self.links).throttle(throttle);
+            let stream = tokio_stream::iter(&links).throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -438,7 +436,7 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
-                    self.links.clear();
+                    links.clear();
                     break;
                 }
                 if !self.is_allowed(&link) {
@@ -467,21 +465,21 @@ impl Website {
             drop(tx);
 
             while let Some(msg) = rx.recv().await {
-                let links = msg.links(&*selectors);
+                let page_links = msg.links(&*selectors);
                 task::yield_now().await;
-                new_links.extend(links);
+                new_links.extend(page_links);
                 task::yield_now().await;
                 self.pages.as_mut().unwrap().push(msg);
                 task::yield_now().await;
             }
 
-            self.links = &new_links - &self.links_visited;
+            links.clone_from(&(&new_links - &self.links_visited));
             new_links.clear();
             if new_links.capacity() > channel_buffer {
                 new_links.shrink_to_fit();
             }
             task::yield_now().await;
-            if self.links.is_empty() {
+            if links.is_empty() {
                 break;
             }
         }
@@ -499,16 +497,6 @@ async fn crawl() {
             .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
-    );
-
-    // resets base link for re-crawling
-    website.reset();
-    assert!(
-        website
-            .links
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/".into()),
-        "{:?}",
-        website.links
     );
 }
 
