@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.9"
+version = "1.19.10"
 dependencies = [
  "hashbrown 0.13.2",
  "lazy_static",
@@ -1708,7 +1708,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.9"
+version = "1.19.10"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.9"
+version = "1.19.10"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -1780,9 +1780,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.107"
+version = "1.0.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f4064b5b16e03ae50984a5a8ed5d4f8803e6bc1fd170a3cda91a1be4b18e3f5"
+checksum = "d56e159d99e6c2b93995d171050271edb50ecc5288fbc7cc17de8fdce4e58c14"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -44,7 +44,7 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
-            channel_buffer: 50,
+            channel_buffer: 100,
             ..Default::default()
         }
     }
