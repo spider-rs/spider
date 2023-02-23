@@ -75,7 +75,7 @@ pub struct RobotFileParser {
     /// Allow links reguardless of robots.txt
     allow_all: bool,
     /// Time last checked robots.txt file
-    last_checked: i64
+    last_checked: i64,
 }
 
 impl RuleLine {
@@ -187,8 +187,9 @@ impl RobotFileParser {
             default_entry: Entry::new(),
             disallow_all: false,
             allow_all: false,
-            last_checked: 0i64
-        }.into()
+            last_checked: 0i64,
+        }
+        .into()
     }
 
     /// Returns the time the robots.txt file was last fetched.

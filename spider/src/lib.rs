@@ -32,6 +32,7 @@ extern crate log;
 extern crate reqwest;
 extern crate scraper;
 pub extern crate tokio;
+
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
 pub extern crate url;
