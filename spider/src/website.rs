@@ -4,15 +4,14 @@ use crate::packages::robotparser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::{log, Handler, CONTROLLER};
 use hashbrown::HashSet;
-use scraper::Selector;
-use std::sync::atomic::{AtomicI8, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
+use scraper::Selector;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicI8, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time::sleep;
@@ -83,7 +82,7 @@ pub struct Website {
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
-    domain: String,
+    domain: Box<String>,
 }
 
 type Message = HashSet<CaseInsensitiveString>;
@@ -103,7 +102,7 @@ impl Website {
             pages: None,
             robot_file_parser: None,
             on_link_find_callback: |s| s,
-            domain,
+            domain: domain.into(),
         }
     }
 
@@ -117,10 +116,23 @@ impl Website {
             return false;
         }
 
+        if !self.is_allowed_default(&link.0) {
+            return false;
+        }
+
+        true
+    }
+
+
+    /// return `true` if URL:
+    ///
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    pub fn is_allowed_default(&self, link: &String) -> bool {
         if !self.configuration.blacklist_url.is_none() {
             match &self.configuration.blacklist_url {
                 Some(v) => {
-                    if contains(v, &link.0) {
+                    if contains(v, &link) {
                         return false;
                     }
                 }
@@ -128,7 +140,7 @@ impl Website {
             };
         }
 
-        if !self.is_allowed_robots(&link.0) {
+        if !self.is_allowed_robots(&link) {
             return false;
         }
 
@@ -173,10 +185,14 @@ impl Website {
     /// configure the robots parser on initial crawl attempt and run.
     pub async fn configure_robots_parser(&mut self, client: Client) -> Client {
         if self.configuration.respect_robots_txt {
-            let robot_file_parser = self.robot_file_parser.get_or_insert_with(|| RobotFileParser::new());
+            let robot_file_parser = self
+                .robot_file_parser
+                .get_or_insert_with(|| RobotFileParser::new());
 
             if robot_file_parser.mtime() <= 4000 {
-                robot_file_parser.read(&client, &self.domain, &self.configuration.user_agent).await;
+                robot_file_parser
+                    .read(&client, &self.domain, &self.configuration.user_agent)
+                    .await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&self.configuration.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
@@ -227,7 +243,7 @@ impl Website {
                     string_concat!(name.clone(), "/")
                 };
 
-                if domain == url {
+                if domain.eq_ignore_ascii_case(&url) {
                     if rest == &Handler::Resume {
                         paused.store(0, Ordering::Relaxed);
                     }
@@ -283,13 +299,19 @@ impl Website {
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Duration::from_millis(delay);
-        let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
         ));
-        let mut links: HashSet<CaseInsensitiveString> =
-            HashSet::from([self.domain.to_owned().into()]);
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+            let page = Page::new(&self.domain, &client).await;
+            self.links_visited.insert(page.get_url().into());
+            HashSet::from(page.links(&selectors))
+        } else {
+            HashSet::new()
+        };
+
 
         // crawl while links exists
         loop {
@@ -314,7 +336,7 @@ impl Website {
                 let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
-                let selector = selector.clone();
+                let selector = selectors.clone();
 
                 task::yield_now().await;
 
@@ -364,9 +386,16 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let mut links: HashSet<CaseInsensitiveString> =
-            HashSet::from([self.domain.to_owned().into()]);
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+            let page = Page::new(&self.domain, &client).await;
+            self.links_visited.insert(page.get_url().into());
+            HashSet::from(page.links(&selectors))
+        } else {
+            HashSet::new()
+        };
+
 
         // crawl while links exists
         loop {
@@ -420,8 +449,13 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> =
-            HashSet::from([self.domain.to_owned().into()]);
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+            let page = Page::new(&self.domain, &client).await;
+            self.links_visited.insert(page.get_url().into());
+            HashSet::from(page.links(&selectors))
+        } else {
+            HashSet::new()
+        };
 
         // crawl while links exists
         loop {
@@ -518,7 +552,7 @@ async fn scrape() {
 #[tokio::test]
 async fn crawl_subsequential() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.delay = 250;
+    website.configuration.delay = 50;
     website.crawl_sync().await;
     assert!(
         website
