@@ -75,7 +75,7 @@ pub struct Website {
     /// configuration properties for website.
     pub configuration: Configuration,
     /// contains all visited URL.
-    links_visited: HashSet<CaseInsensitiveString>,
+    links_visited: Box<HashSet<CaseInsensitiveString>>,
     /// contains page visited
     pages: Option<Vec<Page>>,
     /// callback when a link is found.
@@ -99,7 +99,7 @@ impl Website {
 
         Self {
             configuration: Configuration::new(),
-            links_visited: HashSet::new(),
+            links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
             on_link_find_callback: |s| s,
@@ -287,8 +287,9 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
+        let mut links: HashSet<CaseInsensitiveString> =
+            HashSet::from([self.domain.to_owned().into()]);
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
@@ -367,8 +368,9 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
+        let mut links: HashSet<CaseInsensitiveString> =
+            HashSet::from([self.domain.to_owned().into()]);
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
@@ -422,8 +424,9 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
+        let mut links: HashSet<CaseInsensitiveString> =
+            HashSet::from([self.domain.to_owned().into()]);
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::from([self.domain.to_owned().into()]);
 
         // crawl while links exists
         loop {
@@ -474,7 +477,9 @@ impl Website {
             }
 
             links.clone_from(&(&new_links - &self.links_visited));
+
             new_links.clear();
+
             if new_links.capacity() > channel_buffer {
                 new_links.shrink_to_fit();
             }
@@ -534,7 +539,7 @@ async fn crawl_invalid() {
     let url = "https://w.com";
     let mut website: Website = Website::new(url);
     website.crawl().await;
-    let mut uniq: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
     uniq.insert(format!("{}/", url.to_string()).into()); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
@@ -678,7 +683,7 @@ async fn test_link_duplicates() {
     let mut website: Website = Website::new("http://0.0.0.0:8000");
     website.crawl().await;
 
-    assert!(has_unique_elements(&website.links_visited));
+    assert!(has_unique_elements(&*website.links_visited));
 }
 
 #[tokio::test]
