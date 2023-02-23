@@ -40,7 +40,12 @@ async fn main() {
 
     if !blacklist_url.is_empty() {
         let blacklist_url: Vec<String> = blacklist_url.split(',').map(|l| l.to_string()).collect();
-        website.configuration.blacklist_url.extend(blacklist_url);
+        let blacklists = website
+            .configuration
+            .blacklist_url
+            .insert(Default::default());
+
+        blacklists.extend(blacklist_url);
     }
 
     if !user_agent.is_empty() {

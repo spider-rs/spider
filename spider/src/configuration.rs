@@ -2,7 +2,7 @@
 /// ```rust
 /// use spider::website::Website;
 /// let mut website: Website = Website::new("https://choosealicense.com");
-/// website.configuration.blacklist_url.push("https://choosealicense.com/licenses/".to_string());
+/// website.configuration.blacklist_url.insert(Default::default()).push("https://choosealicense.com/licenses/".to_string());
 /// website.configuration.respect_robots_txt = true;
 /// website.configuration.subdomains = true;
 /// website.configuration.tld = true;
@@ -16,7 +16,7 @@ pub struct Configuration {
     /// Allow all tlds for domain.
     pub tld: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
-    pub blacklist_url: Vec<String>,
+    pub blacklist_url: Option<Box<Vec<String>>>,
     /// User-Agent
     pub user_agent: String,
     /// Polite crawling delay in milli seconds.

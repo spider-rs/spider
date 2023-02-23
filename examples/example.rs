@@ -3,7 +3,7 @@ extern crate spider;
 
 use spider::tokio;
 use spider::website::Website;
-use std::time::{Instant};
+use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
@@ -11,6 +11,7 @@ async fn main() {
     website
         .configuration
         .blacklist_url
+        .insert(Default::default())
         .push("https://rsseau.fr/resume".into());
     website.configuration.respect_robots_txt = true;
     website.configuration.subdomains = false;
@@ -27,5 +28,9 @@ async fn main() {
         println!("- {:?}", page.get_url());
     }
 
-    println!("Time elapsed in website.crawl() is: {:?} for total pages: {:?}", duration, pages.len())
+    println!(
+        "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+        duration,
+        pages.len()
+    )
 }

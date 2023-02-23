@@ -77,7 +77,7 @@ pub struct Website {
     /// contains all visited URL.
     links_visited: Box<HashSet<CaseInsensitiveString>>,
     /// contains page visited
-    pages: Option<Vec<Page>>,
+    pages: Option<Box<Vec<Page>>>,
     /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
@@ -113,10 +113,22 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
-        if self.links_visited.contains(link)
-            || contains(&self.configuration.blacklist_url, &link.0)
-            || self.configuration.respect_robots_txt && !self.is_allowed_robots(&link.0)
-        {
+        if self.links_visited.contains(link) {
+            return false;
+        }
+
+        if !self.configuration.blacklist_url.is_none() {
+            match &self.configuration.blacklist_url {
+                Some(v) => {
+                    if contains(v, &link.0) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            };
+        }
+
+        if !self.is_allowed_robots(&link.0) {
             return false;
         }
 
@@ -139,7 +151,7 @@ impl Website {
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
         if !self.pages.is_none() {
-            self.pages.as_ref().unwrap().clone()
+            *self.pages.as_ref().unwrap().clone()
         } else {
             self.links_visited
                 .iter()
@@ -280,7 +292,7 @@ impl Website {
         let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
+        let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Duration::from_millis(delay);
         let selector: Arc<(Selector, String)> = Arc::new(get_page_selectors(
             &self.domain,
@@ -293,7 +305,9 @@ impl Website {
         // crawl while links exists
         loop {
             let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&links).throttle(throttle);
+            let stream =
+                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                    .throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -301,7 +315,6 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
-                    links.clear();
                     break;
                 }
                 if !self.is_allowed(&link) {
@@ -333,8 +346,6 @@ impl Website {
             }
 
             drop(tx);
-
-            links.clear();
 
             task::yield_now().await;
 
@@ -409,7 +420,7 @@ impl Website {
 
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        self.pages = Some(Vec::new());
+        self.pages = Some(Box::new(Vec::new()));
         let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
@@ -426,7 +437,9 @@ impl Website {
         // crawl while links exists
         loop {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
-            let stream = tokio_stream::iter(&links).throttle(throttle);
+            let stream =
+                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                    .throttle(throttle);
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -434,7 +447,6 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
-                    links.clear();
                     break;
                 }
                 if !self.is_allowed(&link) {
@@ -461,8 +473,6 @@ impl Website {
             }
 
             drop(tx);
-
-            links.clear();
 
             task::yield_now().await;
 
@@ -561,10 +571,10 @@ async fn crawl_link_callback() {
 #[tokio::test]
 async fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website
-        .configuration
-        .blacklist_url
-        .push("https://choosealicense.com/licenses/".to_string());
+    website.configuration.blacklist_url = Some(Box::new(Vec::from([String::from(
+        "https://choosealicense.com/licenses/",
+    )])));
+
     website.crawl().await;
     assert!(
         !website
@@ -582,6 +592,7 @@ async fn not_crawl_blacklist_regex() {
     website
         .configuration
         .blacklist_url
+        .insert(Default::default())
         .push("/choosealicense.com/".to_string());
     website.crawl().await;
     assert_eq!(website.links_visited.len(), 0);
