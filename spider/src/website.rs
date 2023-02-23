@@ -81,7 +81,7 @@ pub struct Website {
     /// callback when a link is found.
     pub on_link_find_callback: fn(String) -> String,
     /// Robot.txt parser holder.
-    robot_file_parser: Option<RobotFileParser>,
+    robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
     domain: String,
 }
@@ -173,26 +173,15 @@ impl Website {
     /// configure the robots parser on initial crawl attempt and run.
     pub async fn configure_robots_parser(&mut self, client: Client) -> Client {
         if self.configuration.respect_robots_txt {
-            let mut robot_file_parser: RobotFileParser = match &self.robot_file_parser {
-                Some(parser) => parser.to_owned(),
-                _ => {
-                    let mut robot_file_parser = RobotFileParser::new();
-                    robot_file_parser.user_agent = self.configuration.user_agent.to_owned();
+            let robot_file_parser = self.robot_file_parser.get_or_insert_with(|| RobotFileParser::new());
 
-                    robot_file_parser
-                }
-            };
-
-            // get the latest robots todo determine time elaspe
-            if robot_file_parser.mtime() == 0 || robot_file_parser.mtime() >= 4000 {
-                robot_file_parser.read(&client, &self.domain).await;
+            if robot_file_parser.mtime() <= 4000 {
+                robot_file_parser.read(&client, &self.domain, &self.configuration.user_agent).await;
                 self.configuration.delay = robot_file_parser
-                    .get_crawl_delay(&robot_file_parser.user_agent) // returns the crawl delay in seconds
+                    .get_crawl_delay(&self.configuration.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
                     .as_millis() as u64;
             }
-
-            self.robot_file_parser = Some(robot_file_parser);
         }
 
         client
@@ -628,14 +617,6 @@ async fn test_respect_robots_txt() {
     let (client_second, _) = website_second.setup().await;
     website_second.configure_robots_parser(client_second).await;
 
-    assert_eq!(
-        website_second.configuration.user_agent,
-        website_second
-            .robot_file_parser
-            .as_ref()
-            .unwrap()
-            .user_agent
-    );
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 
     // test crawl delay with wildcard agent [DOES not work when using set agent]

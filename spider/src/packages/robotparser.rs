@@ -75,9 +75,7 @@ pub struct RobotFileParser {
     /// Allow links reguardless of robots.txt
     allow_all: bool,
     /// Time last checked robots.txt file
-    last_checked: i64,
-    /// User-agent string
-    pub user_agent: String,
+    last_checked: i64
 }
 
 impl RuleLine {
@@ -183,15 +181,14 @@ impl Default for Entry {
 
 impl RobotFileParser {
     /// Establish a new robotparser for a website domain
-    pub fn new() -> RobotFileParser {
+    pub fn new() -> Box<RobotFileParser> {
         RobotFileParser {
             entries: vec![],
             default_entry: Entry::new(),
             disallow_all: false,
             allow_all: false,
-            last_checked: 0i64,
-            user_agent: String::from("robotparser-rs"),
-        }
+            last_checked: 0i64
+        }.into()
     }
 
     /// Returns the time the robots.txt file was last fetched.
@@ -213,9 +210,9 @@ impl RobotFileParser {
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
-    pub async fn read(&mut self, client: &Client, url: &str) {
+    pub async fn read(&mut self, client: &Client, url: &str, user_agent: &str) {
         let request = client.get(&string_concat!(url, "robots.txt"));
-        let request = request.header(USER_AGENT, &self.user_agent);
+        let request = request.header(USER_AGENT, user_agent);
         let res = match request.send().await {
             Ok(res) => res,
             Err(_) => {
