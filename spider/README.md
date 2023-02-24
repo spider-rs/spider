@@ -175,7 +175,7 @@ async fn main() {
 
     let mut lock = stdout().lock();
 
-    let separator = "-".repeat(target.len());
+    let separator = "-".repeat(url.len());
 
     for page in website.get_pages() {
         writeln!(
