@@ -3,21 +3,21 @@ use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::{log, Handler, CONTROLLER};
+use compact_str::CompactString;
+use fast_scraper::Selector;
 use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use fast_scraper::Selector;
-use tokio::sync::Semaphore;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Semaphore;
 use tokio::task;
+use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
-use compact_str::CompactString;
 
 /// case-insensitive string handling
 #[derive(Debug, Clone)]
@@ -84,10 +84,8 @@ pub struct Website {
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
-    domain: Box<String>,
+    domain: Box<CompactString>,
 }
-
-type Message = HashSet<CaseInsensitiveString>;
 
 impl Website {
     /// Initialize Website object with a start link to crawl.
@@ -104,7 +102,7 @@ impl Website {
             pages: None,
             robot_file_parser: None,
             on_link_find_callback: |s| s,
-            domain: domain.into(),
+            domain: CompactString::new(domain).into(),
         }
     }
 
@@ -303,7 +301,6 @@ impl Website {
     /// Start to crawl website concurrently
     async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let on_link_find_callback = self.on_link_find_callback;
-        let channel_buffer = Box::pin(self.configuration.channel_buffer as usize);
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
         let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
@@ -311,19 +308,24 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-            let page = Page::new(&self.domain, &client).await;
-            self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
+        let mut links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                let page = Page::new(&self.domain, &client).await;
+                self.links_visited.insert(page.get_url().into());
+                HashSet::from(page.links(&selectors))
+            } else {
+                HashSet::new()
+            };
+
+        let semaphore = Arc::new(Semaphore::new(if self.configuration.channel_buffer > 224 {
+            self.configuration.channel_buffer as usize
         } else {
-            HashSet::new()
-        };
-        
-        let semaphore = Arc::new(Semaphore::new(224));
+            224
+        }));
+        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
 
         // crawl while links exists
         loop {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(*channel_buffer);
             let stream =
                 tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
                     .throttle(*throttle);
@@ -334,15 +336,15 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
+                    set.shutdown().await;
                     break;
                 }
                 if !self.is_allowed(&clink) {
                     continue;
                 }
+                log("fetch", &clink);
                 let link = clink.clone();
                 self.links_visited.insert(clink);
-                log("fetch", &link);
-                let tx = tx.clone();
                 let client = client.clone();
                 let link = link.clone();
                 let selector = selectors.clone();
@@ -350,24 +352,18 @@ impl Website {
 
                 task::yield_now().await;
 
-                task::spawn(async move {
-                    {
-                        let permit = semaphore.acquire().await.unwrap();
-                        let link_result = on_link_find_callback(link.0);
-                        let page = Page::new(&link_result, &client).await;
-                        let page_links = page.links(&*selector);
-                        task::yield_now().await;
-                        drop(permit);
+                set.spawn(async move {
+                    let permit = semaphore.acquire().await.unwrap();
+                    let link_result = on_link_find_callback(link.0);
+                    let page = Page::new(&link_result, &client).await;
+                    let page_links = page.links(&*selector);
+                    drop(permit);
 
-                        if let Err(_) = tx.send(page_links).await {
-                            log("receiver dropped", "");
-                        }
-                    }
-                    task::yield_now().await;
+                    page_links
                 });
-            }
 
-            drop(tx);
+                task::yield_now().await;
+            }
 
             task::yield_now().await;
 
@@ -375,7 +371,8 @@ impl Website {
                 links.shrink_to_fit();
             }
 
-            while let Some(msg) = rx.recv().await {
+            while let Some(res) = set.join_next().await {
+                let msg = res.unwrap();
                 links.extend(&msg - &self.links_visited);
                 task::yield_now().await;
             }
@@ -399,13 +396,14 @@ impl Website {
         );
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-            let page = Page::new(&self.domain, &client).await;
-            self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
-        } else {
-            HashSet::new()
-        };
+        let mut links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                let page = Page::new(&self.domain, &client).await;
+                self.links_visited.insert(page.get_url().into());
+                HashSet::from(page.links(&selectors))
+            } else {
+                HashSet::new()
+            };
 
         // crawl while links exists
         loop {
@@ -451,7 +449,6 @@ impl Website {
         self.pages = Some(Box::new(Vec::new()));
         let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
-        let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
             &self.domain,
@@ -459,17 +456,19 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-            let page = Page::new(&self.domain, &client).await;
-            self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
-        } else {
-            HashSet::new()
-        };
+        let mut links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                let page = Page::new(&self.domain, &client).await;
+                self.links_visited.insert(page.get_url().into());
+                HashSet::from(page.links(&selectors))
+            } else {
+                HashSet::new()
+            };
+
+        let mut set: JoinSet<Page> = JoinSet::new();
 
         // crawl while links exists
         loop {
-            let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
             let stream =
                 tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
                     .throttle(throttle);
@@ -480,6 +479,7 @@ impl Website {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
+                    set.shutdown().await;
                     break;
                 }
                 if !self.is_allowed(&clink) {
@@ -489,23 +489,15 @@ impl Website {
                 log("fetch", &link);
                 self.links_visited.insert(clink);
 
-                let tx = tx.clone();
                 let client = client.clone();
 
-                task::spawn(async move {
-                    {
-                        let link_result = on_link_find_callback(link.0);
-                        let page = Page::new(&link_result, &client).await;
+                set.spawn(async move {
+                    let link_result = on_link_find_callback(link.0);
+                    let page = Page::new(&link_result, &client).await;
 
-                        if let Err(_) = tx.send(page).await {
-                            log("receiver dropped", "");
-                        }
-                    }
-                    task::yield_now().await;
+                    page
                 });
             }
-
-            drop(tx);
 
             task::yield_now().await;
 
@@ -513,7 +505,8 @@ impl Website {
                 links.shrink_to_fit();
             }
 
-            while let Some(msg) = rx.recv().await {
+            while let Some(res) = set.join_next().await {
+                let msg = res.unwrap();
                 let page_links = msg.links(&*selectors);
                 task::yield_now().await;
                 links.extend(&page_links - &self.links_visited);
