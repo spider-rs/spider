@@ -8,6 +8,7 @@ use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
 use scraper::Selector;
+use tokio::sync::Semaphore;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -301,8 +302,8 @@ impl Website {
     /// Start to crawl website concurrently
     async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         let on_link_find_callback = self.on_link_find_callback;
-        let channel_buffer = Box::new(self.configuration.channel_buffer as usize);
-        let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
+        let channel_buffer = Box::pin(self.configuration.channel_buffer as usize);
+        let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
         let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
             &self.domain,
@@ -316,6 +317,8 @@ impl Website {
         } else {
             HashSet::new()
         };
+        
+        let semaphore = Arc::new(Semaphore::new(224));
 
         // crawl while links exists
         loop {
@@ -342,16 +345,18 @@ impl Website {
                 let client = client.clone();
                 let link = link.clone();
                 let selector = selectors.clone();
+                let semaphore = semaphore.clone();
 
                 task::yield_now().await;
 
                 task::spawn(async move {
                     {
+                        let permit = semaphore.acquire().await.unwrap();
                         let link_result = on_link_find_callback(link.0);
-                        task::yield_now().await;
                         let page = Page::new(&link_result, &client).await;
                         let page_links = page.links(&*selector);
                         task::yield_now().await;
+                        drop(permit);
 
                         if let Err(_) = tx.send(page_links).await {
                             log("receiver dropped", "");
