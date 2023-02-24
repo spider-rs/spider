@@ -17,10 +17,11 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
+use compact_str::CompactString;
 
 /// case-insensitive string handling
 #[derive(Debug, Clone)]
-pub struct CaseInsensitiveString(String);
+pub struct CaseInsensitiveString(CompactString);
 
 impl PartialEq for CaseInsensitiveString {
     #[inline]
@@ -49,7 +50,7 @@ impl From<&str> for CaseInsensitiveString {
 
 impl From<String> for CaseInsensitiveString {
     fn from(s: String) -> Self {
-        CaseInsensitiveString { 0: s }
+        CaseInsensitiveString { 0: s.into() }
     }
 }
 
@@ -79,7 +80,7 @@ pub struct Website {
     /// contains page visited
     pages: Option<Box<Vec<Page>>>,
     /// callback when a link is found.
-    pub on_link_find_callback: fn(String) -> String,
+    pub on_link_find_callback: fn(CompactString) -> CompactString,
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
@@ -128,7 +129,7 @@ impl Website {
     ///
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
-    pub fn is_allowed_default(&self, link: &String) -> bool {
+    pub fn is_allowed_default(&self, link: &CompactString) -> bool {
         if !self.configuration.blacklist_url.is_none() {
             match &self.configuration.blacklist_url {
                 Some(v) => {
@@ -310,7 +311,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))
@@ -398,7 +399,7 @@ impl Website {
         );
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))
@@ -458,7 +459,7 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))
@@ -603,7 +604,7 @@ async fn crawl_link_callback() {
 #[tokio::test]
 async fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.blacklist_url = Some(Box::new(Vec::from([String::from(
+    website.configuration.blacklist_url = Some(Box::new(Vec::from([CompactString::from(
         "https://choosealicense.com/licenses/",
     )])));
 
@@ -625,7 +626,7 @@ async fn not_crawl_blacklist_regex() {
         .configuration
         .blacklist_url
         .insert(Default::default())
-        .push("/choosealicense.com/".to_string());
+        .push(CompactString::from("/choosealicense.com/"));
     website.crawl().await;
     assert_eq!(website.links_visited.len(), 0);
 }

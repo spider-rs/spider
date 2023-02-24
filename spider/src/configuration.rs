@@ -1,10 +1,12 @@
 use std::time::Duration;
 
+use compact_str::CompactString;
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
 /// let mut website: Website = Website::new("https://choosealicense.com");
-/// website.configuration.blacklist_url.insert(Default::default()).push("https://choosealicense.com/licenses/".to_string());
+/// website.configuration.blacklist_url.insert(Default::default()).push("https://choosealicense.com/licenses/".to_string().into());
 /// website.configuration.respect_robots_txt = true;
 /// website.configuration.subdomains = true;
 /// website.configuration.tld = true;
@@ -18,7 +20,7 @@ pub struct Configuration {
     /// Allow all tlds for domain.
     pub tld: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
-    pub blacklist_url: Option<Box<Vec<String>>>,
+    pub blacklist_url: Option<Box<Vec<CompactString>>>,
     /// User-Agent
     pub user_agent: String,
     /// Polite crawling delay in milli seconds.

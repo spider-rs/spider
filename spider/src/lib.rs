@@ -35,6 +35,7 @@ extern crate log;
 extern crate reqwest;
 extern crate scraper;
 pub extern crate tokio;
+pub extern crate compact_str;
 
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
@@ -67,9 +68,10 @@ pub mod website;
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
 pub mod black_list {
+    use compact_str::CompactString;
     use regex::Regex;
     /// check if link exist in blacklists with regex.
-    pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
+    pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
         for pattern in blacklist_url {
             let re = Regex::new(pattern).unwrap();
             if re.is_match(link) {
@@ -84,8 +86,10 @@ pub mod black_list {
 #[cfg(not(feature = "regex"))]
 /// Black list checking url exist.
 pub mod black_list {
+    use compact_str::CompactString;
+
     /// check if link exist in blacklists.
-    pub fn contains(blacklist_url: &Vec<String>, link: &String) -> bool {
+    pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
         blacklist_url.contains(&link)
     }
 }
