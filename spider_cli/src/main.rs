@@ -11,6 +11,7 @@ use spider::tokio;
 use spider::website::Website;
 use std::io::{self, Write};
 use std::sync::Arc;
+use spider::compact_str::CompactString;
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +40,7 @@ async fn main() {
     website.configuration.tld = cli.tld;
 
     if !blacklist_url.is_empty() {
-        let blacklist_url: Vec<String> = blacklist_url.split(',').map(|l| l.to_string()).collect();
+        let blacklist_url: Vec<CompactString> = blacklist_url.split(',').map(|l| l.into()).collect();
         let blacklists = website
             .configuration
             .blacklist_url
