@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.19.27
+
+1. perf(crawl): add join handle task management
+
 ## v1.19.26
 
 1. perf(links): add fast pre serialized url anchor link extracting and reduced memory usage

@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "1.19.26"
+version = "1.19.27"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -25,7 +25,7 @@ quote = "1.0.18"
 failure_derive = "0.1.8"
 
 [dependencies.spider]
-version = "1.19.26"
+version = "1.19.27"
 path = "../spider"
 
 [[bin]]
