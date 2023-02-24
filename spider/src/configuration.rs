@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -23,6 +25,8 @@ pub struct Configuration {
     pub delay: u64,
     /// Crawl channel buffer tuned to callback.
     pub channel_buffer: i32,
+    /// Request max timeout per page
+    pub request_timeout: Duration
 }
 
 /// get the user agent from the top agent list randomly.
@@ -44,7 +48,8 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
-            channel_buffer: 100,
+            channel_buffer: 111,
+            request_timeout: Duration::from_millis(15000),
             ..Default::default()
         }
     }

@@ -22,15 +22,15 @@ async fn main() {
     website.crawl().await;
     let duration = start.elapsed();
 
-    let pages = website.get_pages();
+    let links = website.get_links();
 
-    for page in &pages {
-        println!("- {:?}", page.get_url());
+    for link in links {
+        println!("- {:?}", link.as_ref());
     }
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
         duration,
-        pages.len()
+        links.len()
     )
 }
