@@ -72,7 +72,7 @@ impl AsRef<str> for CaseInsensitiveString {
 #[derive(Debug, Clone)]
 pub struct Website {
     /// configuration properties for website.
-    pub configuration: Configuration,
+    pub configuration: Box<Configuration>,
     /// contains all visited URL.
     links_visited: Box<HashSet<CaseInsensitiveString>>,
     /// contains page visited
@@ -97,7 +97,7 @@ impl Website {
         };
 
         Self {
-            configuration: Configuration::new(),
+            configuration: Configuration::new().into(),
             links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
@@ -122,7 +122,6 @@ impl Website {
 
         true
     }
-
 
     /// return `true` if URL:
     ///
@@ -220,6 +219,9 @@ impl Website {
             .user_agent(&self.configuration.user_agent)
             .brotli(true)
             .gzip(true)
+            .tcp_keepalive(Duration::from_millis(500))
+            .pool_idle_timeout(None)
+            .timeout(self.configuration.request_timeout)
             .build()
             .unwrap()
     }
@@ -294,11 +296,10 @@ impl Website {
 
     /// Start to crawl website concurrently
     async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
-        let channel_buffer = self.configuration.channel_buffer as usize;
+        let channel_buffer = Box::new(self.configuration.channel_buffer as usize);
         let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
-        let throttle = Duration::from_millis(delay);
+        let throttle = Box::pin(self.get_delay());
         let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
@@ -312,26 +313,26 @@ impl Website {
             HashSet::new()
         };
 
-
         // crawl while links exists
         loop {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
+            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(*channel_buffer);
             let stream =
                 tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                    .throttle(throttle);
+                    .throttle(*throttle);
             tokio::pin!(stream);
 
-            while let Some(link) = stream.next().await {
+            while let Some(clink) = stream.next().await {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
                     break;
                 }
-                if !self.is_allowed(&link) {
+                if !self.is_allowed(&clink) {
                     continue;
                 }
-                self.links_visited.insert(link.clone());
+                let link = clink.clone();
+                self.links_visited.insert(clink);
                 log("fetch", &link);
                 let tx = tx.clone();
                 let client = client.clone();
@@ -360,7 +361,7 @@ impl Website {
 
             task::yield_now().await;
 
-            if links.capacity() >= 200 {
+            if links.capacity() >= 1500 {
                 links.shrink_to_fit();
             }
 
@@ -377,8 +378,8 @@ impl Website {
 
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        let delay = self.configuration.delay;
-        let delay_enabled = delay > 0;
+        let delay = Box::from(self.configuration.delay);
+        let delay_enabled = self.configuration.delay > 0;
         let on_link_find_callback = self.on_link_find_callback;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         let selectors = get_page_selectors(
@@ -396,7 +397,6 @@ impl Website {
             HashSet::new()
         };
 
-
         // crawl while links exists
         loop {
             for link in links.iter() {
@@ -413,7 +413,7 @@ impl Website {
                 log("fetch", link);
                 self.links_visited.insert(link.clone());
                 if delay_enabled {
-                    sleep(Duration::from_millis(delay)).await;
+                    sleep(Duration::from_millis(*delay)).await;
                 }
                 let link = link.clone();
                 let link_result = on_link_find_callback(link.0);
@@ -426,7 +426,7 @@ impl Website {
 
             links.clone_from(&(&new_links - &self.links_visited));
             new_links.clear();
-            if new_links.capacity() >= 200 {
+            if new_links.capacity() >= 1500 {
                 new_links.shrink_to_fit();
             }
             task::yield_now().await;
@@ -465,22 +465,22 @@ impl Website {
                     .throttle(throttle);
             tokio::pin!(stream);
 
-            while let Some(link) = stream.next().await {
+            while let Some(clink) = stream.next().await {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
                 if handle.load(Ordering::Relaxed) == 2 {
                     break;
                 }
-                if !self.is_allowed(&link) {
+                if !self.is_allowed(&clink) {
                     continue;
                 }
+                let link = clink.clone();
                 log("fetch", &link);
-                self.links_visited.insert(link.clone());
+                self.links_visited.insert(clink);
 
                 let tx = tx.clone();
                 let client = client.clone();
-                let link = link.clone();
 
                 task::spawn(async move {
                     {
@@ -499,7 +499,7 @@ impl Website {
 
             task::yield_now().await;
 
-            if links.capacity() >= 200 {
+            if links.capacity() >= 1500 {
                 links.shrink_to_fit();
             }
 
