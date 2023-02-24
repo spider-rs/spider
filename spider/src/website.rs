@@ -7,7 +7,7 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use scraper::Selector;
+use fast_scraper::Selector;
 use tokio::sync::Semaphore;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};

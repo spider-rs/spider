@@ -33,7 +33,7 @@
 extern crate hashbrown;
 extern crate log;
 extern crate reqwest;
-extern crate scraper;
+extern crate fast_scraper;
 pub extern crate tokio;
 pub extern crate compact_str;
 
