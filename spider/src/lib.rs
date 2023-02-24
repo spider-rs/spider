@@ -22,7 +22,7 @@
 //! [`crawl`]: website/struct.Website.html#method.crawl
 //! [`crawl_sync`]: website/struct.Website.html#method.crawl_sync
 //! [`scrape`]: website/struct.Website.html#method.scrape
-//! 
+//!
 //! # Basic usage
 //!
 //! First, you will need to add `spider` to your `Cargo.toml`.

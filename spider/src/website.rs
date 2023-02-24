@@ -135,7 +135,7 @@ impl Website {
                         return false;
                     }
                 }
-                _ => {},
+                _ => {}
             };
         }
 
@@ -305,7 +305,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))
@@ -389,7 +389,7 @@ impl Website {
         );
         let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))
@@ -449,7 +449,7 @@ impl Website {
             self.configuration.tld,
         ));
         let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
             HashSet::from(page.links(&selectors))

@@ -26,7 +26,7 @@ pub struct Configuration {
     /// Crawl channel buffer tuned to callback.
     pub channel_buffer: i32,
     /// Request max timeout per page
-    pub request_timeout: Duration
+    pub request_timeout: Duration,
 }
 
 /// get the user agent from the top agent list randomly.

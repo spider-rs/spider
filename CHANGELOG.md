@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v1.19.21
+
+1. perf(links): add fast pre serialized url anchor link extracting and reduced memory usage
+1. perf(links): fix case sensitivity handling
+1. perf(crawl): reduce memory usage on link gathering
+1. chore(crawl): remove `Website.reset` method and improve crawl handling resource usage ( `reset` not needed now  )
+1. chore(crawl): add heap usage of links visited
+1. perf(crawl): massive scans capability to utilize more cpu
+1. feat(timeout): add `configuration.request_timeout` duration
+1. build(tokio): remove unused `net` feature
+1. chore(docs): add missing scrape section
+
 ## v1.10.7
 
 - perf(req): enable brotli

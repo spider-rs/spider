@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.19.20"
+spider = "1.19.21"
 ```
 
 And then the code:
@@ -33,8 +33,8 @@ async fn main() {
     let mut website: Website = Website::new(&url);
     website.crawl().await;
 
-    for page in website.get_pages() {
-        println!("- {}", page.get_url());
+    for link in website.get_links() {
+        println!("- {:?}", link.as_ref());
     }
 }
 ```
@@ -62,7 +62,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.19.20", features = ["regex"] }
+spider = { version = "1.19.21", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -77,8 +77,8 @@ async fn main() {
     website.configuration.blacklist_url.push("/licenses/".to_string());
     website.crawl().await;
 
-    for page in website.get_pages() {
-        println!("- {}", page.get_url());
+    for link in website.get_links() {
+        println!("- {:?}", link.as_ref());
     }
 }
 ```
@@ -89,7 +89,7 @@ Currently we have three optional feature flags. Regex blacklisting, jemaloc back
 
 ```toml
 [dependencies]
-spider = { version = "1.19.20", features = ["regex", "ua_generator"] }
+spider = { version = "1.19.21", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -98,7 +98,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.19.20", features = ["jemalloc"] }
+spider = { version = "1.19.21", features = ["jemalloc"] }
 ```
 
 ## Blocking
@@ -110,6 +110,11 @@ If you need a blocking sync imp use a version prior to `v1.12.0`.
 If you are performing large workloads you may need to control the crawler using the following:
 
 ```rust
+extern crate spider;
+
+use spider::tokio;
+use spider::website::Website;
+
 #[tokio::main]
 async fn main() {
     use spider::utils::{pause, resume};
@@ -129,6 +134,11 @@ async fn main() {
 ### Shutdown crawls
 
 ```rust
+extern crate spider;
+
+use spider::tokio;
+use spider::website::Website;
+
 #[tokio::main]
 async fn main() {
     use spider::utils::{shutdown};
@@ -142,5 +152,40 @@ async fn main() {
     });
 
     website.crawl().await;
+}
+```
+
+### Scrape/Gather HTML
+
+```rust
+extern crate spider;
+
+use spider::tokio;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    use std::io::{Write, stdout};
+
+    let url = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&url);
+
+    website.scrape().await;
+
+    let mut lock = stdout().lock();
+
+    let separator = "-".repeat(target.len());
+
+    for page in website.get_pages() {
+        writeln!(
+            lock,
+            "{}\n{}\n\n{}\n\n{}",
+            separator,
+            page.get_url(),
+            page.get_html(),
+            separator
+        )
+        .unwrap();
+    }
 }
 ```
