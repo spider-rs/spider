@@ -26,7 +26,7 @@ pub struct Configuration {
     /// Crawl channel buffer tuned to callback.
     pub channel_buffer: i32,
     /// Request max timeout per page
-    pub request_timeout: Duration,
+    pub request_timeout: Option<Duration>,
 }
 
 /// get the user agent from the top agent list randomly.
@@ -49,7 +49,7 @@ impl Configuration {
         Self {
             delay: 0,
             channel_buffer: 111,
-            request_timeout: Duration::from_millis(15000),
+            request_timeout: Some(Duration::from_millis(15000)),
             ..Default::default()
         }
     }

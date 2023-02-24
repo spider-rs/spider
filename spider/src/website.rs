@@ -214,16 +214,20 @@ impl Website {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
-        Client::builder()
+        let client = Client::builder()
             .default_headers(headers)
             .user_agent(&self.configuration.user_agent)
             .brotli(true)
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
-            .pool_idle_timeout(None)
-            .timeout(self.configuration.request_timeout)
-            .build()
-            .unwrap()
+            .pool_idle_timeout(None);
+
+        match self.configuration.request_timeout {
+            Some(t) => client.timeout(t),
+            _ => client,
+        }
+        .build()
+        .unwrap()
     }
 
     /// setup atomic controller

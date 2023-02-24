@@ -8,7 +8,7 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    use std::io::{Write, stdout};
+    use std::io::{stdout, Write};
 
     let env = Env::default()
         .filter_or("RUST_LOG", "info")

@@ -16,7 +16,7 @@ This is a basic blocking example crawling a web page, add spider to your `Cargo.
 
 ```toml
 [dependencies]
-spider = "1.19.21"
+spider = "1.19"
 ```
 
 And then the code:
@@ -49,6 +49,7 @@ website.configuration.respect_robots_txt = true;
 website.configuration.subdomains = true;
 website.configuration.tld = false;
 website.configuration.delay = 0; // Defaults to 0 ms due to concurrency handling
+website.configuration.request_timeout = None; // Defaults to 15000 ms
 website.configuration.channel_buffer = 100; // Defaults to 50 - tune this depending on on_link_find_callback
 website.configuration.user_agent = "myapp/version".to_string(); // Defaults to spider/x.y.z, where x.y.z is the library version
 website.on_link_find_callback = |s| { println!("link target: {}", s); s }; // Callback to run on each link find
@@ -62,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.19.21", features = ["regex"] }
+spider = { version = "1.19.23", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -89,7 +90,7 @@ Currently we have three optional feature flags. Regex blacklisting, jemaloc back
 
 ```toml
 [dependencies]
-spider = { version = "1.19.21", features = ["regex", "ua_generator"] }
+spider = { version = "1.19.23", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -98,7 +99,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.19.21", features = ["jemalloc"] }
+spider = { version = "1.19.23", features = ["jemalloc"] }
 ```
 
 ## Blocking
