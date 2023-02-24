@@ -9,17 +9,20 @@
 //!
 //! # How to use Spider
 //!
-//! There are two ways to use Spider:
+//! There are a couple of ways to use Spider:
 //!
 //! - **Concurrent** is the fastest way to start crawling a web page and
 //!   typically the most efficient.
-//!   - [`crawl`] is used to crawl concurrently :blocking.
+//!   - [`crawl`] is used to crawl concurrently.
 //! - **Sequential** lets you crawl the web pages one after another respecting delay sequences.
-//!   - [`crawl_sync`] is used to crawl in sync :blocking.
+//!   - [`crawl_sync`] is used to crawl in sync.
+//! - **Scrape** Scrape the page and hold onto the HTML raw string to parse.
+//!   - [`scrape`] is used to gather the HTML.
 //!
 //! [`crawl`]: website/struct.Website.html#method.crawl
 //! [`crawl_sync`]: website/struct.Website.html#method.crawl_sync
-//!
+//! [`scrape`]: website/struct.Website.html#method.scrape
+//! 
 //! # Basic usage
 //!
 //! First, you will need to add `spider` to your `Cargo.toml`.
