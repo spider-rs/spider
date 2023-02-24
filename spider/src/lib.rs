@@ -30,12 +30,12 @@
 //! Next, simply add the website url in the struct of website and crawl,
 //! you can also crawl sequentially.
 
+pub extern crate compact_str;
+extern crate fast_scraper;
 extern crate hashbrown;
 extern crate log;
 extern crate reqwest;
-extern crate fast_scraper;
 pub extern crate tokio;
-pub extern crate compact_str;
 
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;

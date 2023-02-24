@@ -1,9 +1,9 @@
 use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
+use fast_scraper::{Html, Selector};
 use hashbrown::HashSet;
 use reqwest::Client;
-use fast_scraper::{Html, Selector};
 use url::Url;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
