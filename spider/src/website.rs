@@ -12,9 +12,11 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{
+    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
+use tokio::sync::Semaphore;
 use tokio::task;
-use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
 /// case-insensitive string handling
@@ -72,7 +74,7 @@ impl AsRef<str> for CaseInsensitiveString {
 #[derive(Debug, Clone)]
 pub struct Website {
     /// configuration properties for website.
-    pub configuration: Configuration,
+    pub configuration: Box<Configuration>,
     /// contains all visited URL.
     links_visited: Box<HashSet<CaseInsensitiveString>>,
     /// contains page visited
@@ -97,7 +99,7 @@ impl Website {
         };
 
         Self {
-            configuration: Configuration::new(),
+            configuration: Configuration::new().into(),
             links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
@@ -123,7 +125,6 @@ impl Website {
         true
     }
 
-
     /// return `true` if URL:
     ///
     /// - is not blacklisted
@@ -136,7 +137,7 @@ impl Website {
                         return false;
                     }
                 }
-                _ => {},
+                _ => {}
             };
         }
 
@@ -220,6 +221,9 @@ impl Website {
             .user_agent(&self.configuration.user_agent)
             .brotli(true)
             .gzip(true)
+            .tcp_keepalive(Duration::from_millis(500))
+            .pool_idle_timeout(None)
+            .timeout(Duration::from_millis(15000))
             .build()
             .unwrap()
     }
@@ -292,154 +296,105 @@ impl Website {
         self.scrape_concurrent(&client, handle).await;
     }
 
-    /// Start to crawl website concurrently
-    async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        let delay = self.configuration.delay;
-        let on_link_find_callback = self.on_link_find_callback;
-        let channel_buffer = self.configuration.channel_buffer as usize;
-        let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
-        let throttle = Duration::from_millis(delay);
-        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
-            &self.domain,
-            self.configuration.subdomains,
-            self.configuration.tld,
-        ));
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
-            let page = Page::new(&self.domain, &client).await;
-            self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
-        } else {
-            HashSet::new()
-        };
-
-
-        // crawl while links exists
-        loop {
-            let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(channel_buffer);
-            let stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                    .throttle(throttle);
-            tokio::pin!(stream);
-
-            while let Some(link) = stream.next().await {
-                while handle.load(Ordering::Relaxed) == 1 {
-                    interval.tick().await;
-                }
-                if handle.load(Ordering::Relaxed) == 2 {
-                    break;
-                }
-                if !self.is_allowed(&link) {
-                    continue;
-                }
-                self.links_visited.insert(link.clone());
-                log("fetch", &link);
-                let tx = tx.clone();
-                let client = client.clone();
-                let link = link.clone();
-                let selector = selectors.clone();
-
-                task::yield_now().await;
-
-                task::spawn(async move {
-                    {
-                        let link_result = on_link_find_callback(link.0);
-                        task::yield_now().await;
-                        let page = Page::new(&link_result, &client).await;
-                        let page_links = page.links(&*selector);
-                        task::yield_now().await;
-
-                        if let Err(_) = tx.send(page_links).await {
-                            log("receiver dropped", "");
-                        }
-                    }
-                    task::yield_now().await;
-                });
-            }
-
-            drop(tx);
-
-            task::yield_now().await;
-
-            if links.capacity() >= 200 {
-                links.shrink_to_fit();
-            }
-
-            while let Some(msg) = rx.recv().await {
-                links.extend(&msg - &self.links_visited);
-                task::yield_now().await;
-            }
-
-            if links.is_empty() {
-                break;
-            }
-        }
-    }
-
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        let delay = self.configuration.delay;
-        let delay_enabled = delay > 0;
-        let on_link_find_callback = self.on_link_find_callback;
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors = get_page_selectors(
-            &self.domain,
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-        let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+        if self.configuration.delay == 0 {
+            self.configuration.delay = 1;
+        }
+        self.crawl_concurrent(client, handle).await;
+    }
 
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+    /// Start to crawl website concurrently
+    async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
+        if self.is_allowed_default(&self.domain) {
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = Box::new(tokio::time::interval(Duration::from_millis(10)));
+            let throttle = Box::pin(self.get_delay());
+            let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+                &self.domain,
+                self.configuration.subdomains,
+                self.configuration.tld,
+            ));
+            let semaphore = Arc::new(Semaphore::new(125));
             let page = Page::new(&self.domain, &client).await;
             self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
-        } else {
-            HashSet::new()
-        };
+            let mut links = HashSet::new();
+            let cu = page.links(&selectors, &links);
 
+            links.extend(cu);
 
-        // crawl while links exists
-        loop {
-            for link in links.iter() {
-                while handle.load(Ordering::Relaxed) == 1 {
-                    interval.tick().await;
+            // crawl while links exists
+            loop {
+                let (tx, mut rx): (UnboundedSender<Message>, UnboundedReceiver<Message>) =
+                    unbounded_channel();
+
+                let c: Arc<HashSet<CaseInsensitiveString>> = Arc::from(self.links_visited.clone());
+                let clinks: HashSet<CaseInsensitiveString> = links.drain().collect();
+
+                let stream = tokio_stream::iter(&clinks).throttle(*throttle);
+
+                tokio::pin!(stream);
+
+                while let Some(link) = stream.next().await {
+                    while handle.load(Ordering::Relaxed) == 1 {
+                        interval.tick().await;
+                    }
+                    if handle.load(Ordering::Relaxed) == 2 {
+                        break;
+                    }
+                    if !self.is_allowed(&link) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    task::yield_now().await;
+                    log("fetch", &link);
+                    let s = semaphore.clone();
+                    let tx = tx.clone();
+                    task::yield_now().await;
+                    let client = client.clone();
+                    let link = link.clone();
+                    let selector = selectors.clone();
+                    let c = c.clone();
+                    task::yield_now().await;
+
+                    task::spawn(async move {
+                        {
+                            let permit = s.acquire().await.unwrap();
+                            let link_result = on_link_find_callback(link.0);
+                            let page = Page::new(&link_result, &client).await;
+                            let page_links = page.links(&selector, &c);
+                            drop(permit);
+
+                            task::yield_now().await;
+
+                            if let Err(_) = tx.send(page_links) {
+                                log("receiver dropped", "");
+                            }
+                        }
+                    });
+
+                    task::yield_now().await;
                 }
-                if handle.load(Ordering::Relaxed) == 2 {
-                    links.clear();
+
+                drop(tx);
+
+                while let Some(msg) = rx.recv().await {
+                    links.extend(&msg - &self.links_visited);
+                    task::yield_now().await;
+                }
+
+                task::yield_now().await;
+
+                if links.is_empty() {
                     break;
                 }
-                if !self.is_allowed(&link) {
-                    continue;
-                }
-                log("fetch", link);
-                self.links_visited.insert(link.clone());
-                if delay_enabled {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                let link = link.clone();
-                let link_result = on_link_find_callback(link.0);
-                let page = Page::new(&link_result, &client).await;
-                let page_links = page.links(&selectors);
-                task::yield_now().await;
-                new_links.extend(page_links);
-                task::yield_now().await;
             }
-
-            links.clone_from(&(&new_links - &self.links_visited));
-            new_links.clear();
-            if new_links.capacity() >= 200 {
-                new_links.shrink_to_fit();
-            }
-            task::yield_now().await;
-            if links.is_empty() {
-                break;
-            }
-        }
+        };
     }
 
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
         self.pages = Some(Box::new(Vec::new()));
-        let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
@@ -448,11 +403,20 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         ));
-        let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) { 
+        let throttle = Duration::from_millis(self.configuration.delay);
+        let mut links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(&self.domain) {
+            let caseinsentive: CaseInsensitiveString = self.domain.as_str().into();
+
+            self.links_visited.insert(caseinsentive);
+
             let page = Page::new(&self.domain, &client).await;
-            self.links_visited.insert(page.get_url().into());
-            HashSet::from(page.links(&selectors))
+
+            let mut links = HashSet::new();
+            let cu = page.links(&selectors, &links);
+
+            links.extend(cu);
+
+            links
         } else {
             HashSet::new()
         };
@@ -460,9 +424,12 @@ impl Website {
         // crawl while links exists
         loop {
             let (tx, mut rx): (Sender<Page>, Receiver<Page>) = channel(channel_buffer);
-            let stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                    .throttle(throttle);
+
+            let clinks: HashSet<CaseInsensitiveString> = links.drain().collect();
+            let c = clinks.clone();
+
+            let stream = tokio_stream::iter(&clinks).throttle(throttle);
+
             tokio::pin!(stream);
 
             while let Some(link) = stream.next().await {
@@ -504,7 +471,7 @@ impl Website {
             }
 
             while let Some(msg) = rx.recv().await {
-                let page_links = msg.links(&*selectors);
+                let page_links = msg.links(&*selectors, &c);
                 task::yield_now().await;
                 links.extend(&page_links - &self.links_visited);
                 task::yield_now().await;
@@ -712,6 +679,7 @@ async fn test_link_duplicates() {
 #[ignore]
 async fn test_crawl_pause_resume() {
     use crate::utils::{pause, resume};
+    use tokio::time::sleep;
 
     let url = "https://choosealicense.com/";
     let mut website: Website = Website::new(&url);

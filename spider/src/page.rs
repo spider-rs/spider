@@ -184,7 +184,11 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, selectors: &(Selector, String)) -> HashSet<CaseInsensitiveString> {
+    pub fn links(
+        &self,
+        selectors: &(Selector, String),
+        clinks: &HashSet<CaseInsensitiveString>,
+    ) -> HashSet<CaseInsensitiveString> {
         let html = Html::parse_document(&self.html);
         let anchors = html.select(&selectors.0);
         let base_domain = &selectors.1;
@@ -195,7 +199,13 @@ impl Page {
                     let abs = self.abs_path(a.value().attr("href").unwrap_or_default());
 
                     if base_domain == domain_name(&abs) {
-                        Some(abs.as_str().into())
+                        let s = abs.as_str().into();
+
+                        if clinks.contains(&s) {
+                            None
+                        } else {
+                            Some(s)
+                        }
                     } else {
                         None
                     }
@@ -203,10 +213,17 @@ impl Page {
                 .collect()
         } else {
             anchors
-                .map(|a| {
-                    self.abs_path(a.value().attr("href").unwrap_or_default())
+                .filter_map(|a| {
+                    let s = self
+                        .abs_path(a.value().attr("href").unwrap_or_default())
                         .as_str()
-                        .into()
+                        .into();
+
+                    if clinks.contains(&s) {
+                        None
+                    } else {
+                        Some(s)
+                    }
                 })
                 .collect()
         }
@@ -233,7 +250,10 @@ async fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
-    let links = page.links(&get_page_selectors(&link_result, false, false));
+    let links = page.links(
+        &get_page_selectors(&link_result, false, false),
+        &HashSet::new().into(),
+    );
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),
