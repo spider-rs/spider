@@ -1,5 +1,6 @@
 use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
+use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
 use fast_scraper::{Html, Selector};
@@ -58,7 +59,7 @@ pub fn domain_name(domain: &Url) -> &str {
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, String) {
+pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, CompactString) {
     if tld || subdomains {
         let base = Url::parse(&url).expect("Invalid page URL");
         let dname = domain_name(&base);
@@ -123,7 +124,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
                 MEDIA_SELECTOR_STATIC
             ))
             .unwrap(),
-            dname.to_string(),
+            dname.into(),
         )
     } else {
         let absolute_selector = build_absolute_selectors(url);
@@ -147,7 +148,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
                 static_html_selector
             ))
             .unwrap(),
-            String::from(""),
+            CompactString::default(),
         )
     }
 }
@@ -184,7 +185,7 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, selectors: &(Selector, String)) -> HashSet<CaseInsensitiveString> {
+    pub fn links(&self, selectors: &(Selector, CompactString)) -> HashSet<CaseInsensitiveString> {
         let html = Html::parse_document(&self.html);
         let anchors = html.select(&selectors.0);
         let base_domain = &selectors.1;
@@ -194,7 +195,7 @@ impl Page {
                 .filter_map(|a| {
                     let abs = self.abs_path(a.value().attr("href").unwrap_or_default());
 
-                    if base_domain == domain_name(&abs) {
+                    if base_domain.as_str() == domain_name(&abs) {
                         Some(abs.as_str().into())
                     } else {
                         None

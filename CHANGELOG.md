@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v1.19.25
+## v1.19.26
 
 1. perf(links): add fast pre serialized url anchor link extracting and reduced memory usage
 1. perf(links): fix case sensitivity handling

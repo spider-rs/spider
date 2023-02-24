@@ -306,7 +306,7 @@ impl Website {
         let channel_buffer = Box::pin(self.configuration.channel_buffer as usize);
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
-        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+        let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
@@ -453,7 +453,7 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
         let channel_buffer = self.configuration.channel_buffer as usize;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors: Arc<(Selector, String)> = Arc::new(get_page_selectors(
+        let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,

@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.25"
+version = "1.19.26"
 dependencies = [
  "compact_str",
  "fast_scraper",
@@ -1737,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.25"
+version = "1.19.26"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1749,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.25"
+version = "1.19.26"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
