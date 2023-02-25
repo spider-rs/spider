@@ -188,13 +188,6 @@ impl Website {
         client
     }
 
-    /// configure the user agent for the request
-    fn configure_agent(&mut self) {
-        if self.configuration.user_agent.is_empty() {
-            self.configuration.user_agent = get_ua();
-        }
-    }
-
     /// configure http client
     fn configure_http_client(&mut self) -> Client {
         let mut headers = header::HeaderMap::new();
@@ -202,14 +195,17 @@ impl Website {
 
         let client = Client::builder()
             .default_headers(headers)
-            .user_agent(&self.configuration.user_agent)
+            .user_agent(match &self.configuration.user_agent {
+                Some(ua) => ua.as_str(),
+                _ => &get_ua(),
+            })
             .brotli(true)
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
-        match self.configuration.request_timeout {
-            Some(t) => client.timeout(t),
+        match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
             _ => client,
         }
         .build()
@@ -254,7 +250,6 @@ impl Website {
 
     /// setup config for crawl
     pub async fn setup(&mut self) -> (Client, Arc<AtomicI8>) {
-        self.configure_agent();
         let client = self.configure_http_client();
 
         (
@@ -623,17 +618,14 @@ async fn not_crawl_blacklist_regex() {
 #[test]
 #[cfg(feature = "ua_generator")]
 fn randomize_website_agent() {
-    let mut website: Website = Website::new("https://choosealicense.com");
-    website.configure_agent();
-
-    assert_eq!(website.configuration.user_agent.is_empty(), false);
+    assert_eq!(get_ua().is_empty(), false);
 }
 
 #[tokio::test]
 async fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
-    website.configuration.user_agent = "*".into();
+    website.configuration.user_agent = Some(Box::new("*".into()));
 
     let (client, _) = website.setup().await;
     website.configure_robots_parser(client).await;
@@ -645,7 +637,7 @@ async fn test_respect_robots_txt() {
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");
     website_second.configuration.respect_robots_txt = true;
-    website_second.configuration.user_agent = "bingbot".into();
+    website_second.configuration.user_agent = Some(Box::new("bingbot".into()));
 
     let (client_second, _) = website_second.setup().await;
     website_second.configure_robots_parser(client_second).await;

@@ -29,9 +29,6 @@ async fn main() {
     let mut website: Website = Website::new(&cli.domain);
 
     let delay = cli.delay.unwrap_or_else(|| website.configuration.delay);
-    let user_agent = cli
-        .user_agent
-        .unwrap_or_else(|| website.configuration.user_agent.to_string());
     let blacklist_url = cli.blacklist_url.unwrap_or_default();
 
     website.configuration.respect_robots_txt = cli.respect_robots_txt;
@@ -50,8 +47,11 @@ async fn main() {
         blacklists.extend(blacklist_url);
     }
 
-    if !user_agent.is_empty() {
-        website.configuration.user_agent = user_agent;
+    match cli.user_agent {
+        Some(user_agent) => {
+            website.configuration.user_agent = Some(Box::new(user_agent.into()));
+        }
+        _ => {}
     }
 
     match &cli.command {

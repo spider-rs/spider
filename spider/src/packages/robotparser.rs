@@ -25,6 +25,7 @@
 //! }
 //! ```
 
+use compact_str::CompactString;
 use reqwest::Client;
 use reqwest::Response;
 use reqwest::StatusCode;
@@ -409,26 +410,35 @@ impl RobotFileParser {
     }
 
     /// Returns the crawl delay for this user agent as a `Duration`, or None if no crawl delay is defined.
-    pub fn get_crawl_delay<T: AsRef<str>>(&self, useragent: T) -> Option<Duration> {
-        let useragent = useragent.as_ref();
-
+    pub fn get_crawl_delay(&self, useragent: &Option<Box<CompactString>>) -> Option<Duration> {
         if self.last_checked == 0 {
-            return None;
-        }
+            None
+        } else {
+            let useragent = useragent.as_ref();
+            let crawl_delay: Option<Duration> = match useragent {
+                Some(ua) => {
+                    for entry in &self.entries {
+                        if entry.applies_to(ua) {
+                            return entry.get_crawl_delay();
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            };
 
-        for entry in &self.entries {
-            if entry.applies_to(useragent) {
-                return entry.get_crawl_delay();
+            if crawl_delay.is_some() {
+                crawl_delay
+            } else {
+                let default_entry = &self.default_entry;
+
+                if !default_entry.is_empty() {
+                    return default_entry.get_crawl_delay();
+                }
+
+                None
             }
         }
-
-        let default_entry = &self.default_entry;
-
-        if !default_entry.is_empty() {
-            return default_entry.get_crawl_delay();
-        }
-
-        None
     }
 
     /// Returns the request rate for this user agent as a `RequestRate`, or None if not request rate is defined

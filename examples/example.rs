@@ -16,7 +16,7 @@ async fn main() {
     website.configuration.respect_robots_txt = true;
     website.configuration.subdomains = false;
     website.configuration.delay = 0; // Defaults to 0 ms
-    website.configuration.user_agent = "SpiderBot".into(); // Defaults to spider/x.y.z, where x.y.z is the library version
+    website.configuration.user_agent = Some(Box::new("SpiderBot".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
 
     let start = Instant::now();
     website.crawl().await;

@@ -19,7 +19,7 @@ async fn main() {
     let mut website: Website = Website::new(target);
     website.configuration.respect_robots_txt = true;
     website.configuration.delay = 15; // Defaults to 250 ms
-    website.configuration.user_agent = "SpiderBot".into(); // Defaults to spider/x.y.z, where x.y.z is the library version
+    website.configuration.user_agent = Some(Box::new("SpiderBot".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
 
     website.scrape().await;
 

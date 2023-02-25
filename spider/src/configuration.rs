@@ -22,27 +22,32 @@ pub struct Configuration {
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Option<Box<Vec<CompactString>>>,
     /// User-Agent
-    pub user_agent: String,
+    pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
     /// Crawl channel buffer tuned to callback.
     pub channel_buffer: i32,
     /// Request max timeout per page
-    pub request_timeout: Option<Duration>,
+    pub request_timeout: Option<Box<Duration>>,
 }
 
 /// get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
-pub fn get_ua() -> String {
-    ua_generator::ua::spoof_ua().into()
+pub fn get_ua() -> &'static str {
+    ua_generator::ua::spoof_ua()
 }
 
 /// get the user agent via cargo package + version.
 #[cfg(not(any(feature = "ua_generator")))]
-pub fn get_ua() -> String {
+pub fn get_ua() -> &'static str {
     use std::env;
 
-    format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+    lazy_static! {
+        static ref AGENT: &'static str =
+            concat!(env!("CARGO_PKG_NAME"), '/', env!("CARGO_PKG_VERSION"));
+    };
+
+    AGENT.as_ref()
 }
 
 impl Configuration {
@@ -51,7 +56,7 @@ impl Configuration {
         Self {
             delay: 0,
             channel_buffer: 111,
-            request_timeout: Some(Duration::from_millis(15000)),
+            request_timeout: Some(Box::new(Duration::from_millis(15000))),
             ..Default::default()
         }
     }
