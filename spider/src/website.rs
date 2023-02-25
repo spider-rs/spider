@@ -297,7 +297,10 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                self.links_visited.insert(page.get_url().into());
+                let link_result = on_link_find_callback(page.get_url().into());
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
                 HashSet::from(page.links(&selectors))
             } else {
                 HashSet::new()
@@ -385,7 +388,10 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                self.links_visited.insert(page.get_url().into());
+                let link_result = on_link_find_callback(page.get_url().into());
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
                 HashSet::from(page.links(&selectors))
             } else {
                 HashSet::new()
@@ -445,7 +451,11 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                self.links_visited.insert(page.get_url().into());
+                let link_result = on_link_find_callback(page.get_url().into());
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
                 HashSet::from(page.links(&selectors))
             } else {
                 HashSet::new()
