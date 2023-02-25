@@ -25,7 +25,6 @@
 //! }
 //! ```
 
-use reqwest::header::USER_AGENT;
 use reqwest::Client;
 use reqwest::Response;
 use reqwest::StatusCode;
@@ -211,9 +210,11 @@ impl RobotFileParser {
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
-    pub async fn read(&mut self, client: &Client, url: &str, user_agent: &str) {
+    pub async fn read(&mut self, client: &Client, url: &str) {
+        self.modified();
+
         let request = client.get(&string_concat!(url, "robots.txt"));
-        let request = request.header(USER_AGENT, user_agent);
+
         let res = match request.send().await {
             Ok(res) => res,
             Err(_) => {
@@ -271,7 +272,6 @@ impl RobotFileParser {
         let mut state = 0;
         let mut entry = Entry::new();
 
-        self.modified();
         for line in lines {
             let mut ln = line.as_ref();
             if ln.is_empty() {

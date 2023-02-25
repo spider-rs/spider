@@ -113,14 +113,10 @@ impl Website {
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
         if self.links_visited.contains(link) {
-            return false;
+            false
+        } else {
+            self.is_allowed_default(&link.0)
         }
-
-        if !self.is_allowed_default(&link.0) {
-            return false;
-        }
-
-        true
     }
 
     /// return `true` if URL:
@@ -130,20 +126,12 @@ impl Website {
     pub fn is_allowed_default(&self, link: &CompactString) -> bool {
         if !self.configuration.blacklist_url.is_none() {
             match &self.configuration.blacklist_url {
-                Some(v) => {
-                    if contains(v, &link) {
-                        return false;
-                    }
-                }
-                _ => {}
-            };
+                Some(v) => !contains(v, &link),
+                _ => true,
+            }
+        } else {
+            self.is_allowed_robots(&link)
         }
-
-        if !self.is_allowed_robots(&link) {
-            return false;
-        }
-
-        true
     }
 
     /// return `true` if URL:
@@ -189,9 +177,7 @@ impl Website {
                 .get_or_insert_with(|| RobotFileParser::new());
 
             if robot_file_parser.mtime() <= 4000 {
-                robot_file_parser
-                    .read(&client, &self.domain, &self.configuration.user_agent)
-                    .await;
+                robot_file_parser.read(&client, &self.domain).await;
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&self.configuration.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
