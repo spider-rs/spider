@@ -252,6 +252,11 @@ impl Website {
     pub async fn setup(&mut self) -> (Client, Arc<AtomicI8>) {
         let client = self.configure_http_client();
 
+        // allow fresh crawls to run fully
+        if !self.links_visited.is_empty() {
+            self.links_visited.clear();
+        }
+
         (
             self.configure_robots_parser(client).await,
             self.configure_handler(),
