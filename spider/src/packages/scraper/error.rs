@@ -1,10 +1,6 @@
 //! Custom error types for diagnostics
 //! Includes re-exported error types from dependencies
 
-mod utils;
-
-use std::{error::Error, fmt::Display};
-
 use cssparser::{BasicParseErrorKind, ParseErrorKind, Token};
 use selectors::parser::SelectorParseErrorKind;
 
@@ -69,51 +65,6 @@ impl<'a> From<SelectorParseErrorKind<'a>> for SelectorErrorKind<'a> {
                 Self::ExpectedIdentityOnPseudoElement(token)
             }
             other => Self::UnexpectedSelectorParseError(other),
-        }
-    }
-}
-
-impl<'a> Display for SelectorErrorKind<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::UnexpectedToken(token) => {
-                    format!("Token {:?} was not expected", utils::render_token(token))
-                }
-                Self::EndOfLine => "Unexpected EOL".to_string(),
-                Self::InvalidAtRule(rule) => format!("Invalid @-rule {:?}", rule),
-                Self::InvalidAtRuleBody => "The body of an @-rule was invalid".to_string(),
-                Self::QualRuleInvalid => "The qualified name was invalid".to_string(),
-                Self::ExpectedColonOnPseudoElement(token) => format!(
-                    "Expected a ':' token for pseudoelement, got {:?} instead",
-                    utils::render_token(token)
-                ),
-                Self::ExpectedIdentityOnPseudoElement(token) => format!(
-                    "Expected identity for pseudoelement, got {:?} instead",
-                    utils::render_token(token)
-                ),
-                Self::UnexpectedSelectorParseError(err) => format!(
-                    "Unexpected error occurred. Please report this to the developer\n{:#?}",
-                    err
-                ),
-            }
-        )
-    }
-}
-
-impl<'a> Error for SelectorErrorKind<'a> {
-    fn description(&self) -> &str {
-        match self {
-            Self::UnexpectedToken(_) => "Token was not expected",
-            Self::EndOfLine => "Unexpected EOL",
-            Self::InvalidAtRule(_) => "Invalid @-rule",
-            Self::InvalidAtRuleBody => "The body of an @-rule was invalid",
-            Self::QualRuleInvalid => "The qualified name was invalid",
-            Self::ExpectedColonOnPseudoElement(_) => "Missing colon character on pseudoelement",
-            Self::ExpectedIdentityOnPseudoElement(_) => "Missing pseudoelement identity",
-            Self::UnexpectedSelectorParseError(_) => "Unexpected error",
         }
     }
 }

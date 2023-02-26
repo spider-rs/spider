@@ -1,12 +1,12 @@
 //! HTML nodes.
 
-use ahash::RandomState;
 use hashbrown::{hash_map::Iter, hash_set, HashMap, HashSet};
 
+use html5ever::tendril::StrTendril;
+use html5ever::{Attribute, LocalName, QualName};
 use std::fmt;
 use std::ops::Deref;
-use html5ever::tendril::{StrTendril};
-use html5ever::{Attribute, LocalName, QualName};
+use tendril::{NonAtomic, Tendril};
 
 use selectors::attr::CaseSensitivity;
 
@@ -140,12 +140,12 @@ pub struct Doctype {
 
 impl Doctype {
     /// Returns the doctype name.
-    pub fn name(&self) -> &str  {
+    pub fn name(&self) -> &str {
         self.name.deref()
     }
 
     /// Returns the doctype public ID.
-    pub fn public_id(&self) -> &str  {
+    pub fn public_id(&self) -> &str {
         self.public_id.deref()
     }
 
@@ -212,7 +212,7 @@ impl fmt::Debug for Text {
 /// A Map of attributes that doesn't preserve the order of the attributes.
 /// Please enable the `deterministic` feature for order-preserving
 /// (de)serialization.
-pub type Attributes = HashMap<QualName, StrTendril, RandomState>;
+pub type Attributes = HashMap<QualName, StrTendril>;
 
 /// An HTML element.
 #[derive(Clone, PartialEq, Eq)]
@@ -232,28 +232,27 @@ pub struct Element {
 
 impl Element {
     #[doc(hidden)]
-    pub fn new(name: QualName, attrs: Vec<Attribute>) -> Self {
-        let id = attrs
-            .iter()
-            .find(|a| a.name.local.deref() == "id")
-            .map(|a| LocalName::from(a.value.deref()));
+    pub fn new(name: QualName, attributes: Vec<Attribute>) -> Self {
+        let mut classes: HashSet<LocalName> = HashSet::new();
+        let mut attrs: HashMap<QualName, Tendril<tendril::fmt::UTF8, NonAtomic>> =
+            HashMap::with_capacity(attributes.len());
+        let mut id: Option<LocalName> = None;
 
-        let classes: HashSet<LocalName> = attrs
-            .iter()
-            .find(|a| a.name.local.deref() == "class")
-            .map_or_else(
-                || HashSet::new(),
-                |a| {
-                    a.value
-                        .deref()
-                        .split_whitespace()
-                        .map(LocalName::from)
-                        .collect()
-                },
-            );
+        for a in attributes {
+            match a.name.local.deref() {
+                "id" => {
+                    id = Some(LocalName::from(a.value.deref()));
+                }
+                "class" => {
+                    classes.extend(a.value.deref().split_whitespace().map(LocalName::from));
+                }
+                _ => (),
+            };
+            attrs.insert(a.name, a.value);
+        }
 
         Element {
-            attrs: attrs.into_iter().map(|a| (a.name, a.value)).collect(),
+            attrs,
             name,
             id,
             classes,
