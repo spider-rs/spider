@@ -493,9 +493,9 @@ dependencies = [
 
 [[package]]
 name = "fast_scraper"
-version = "0.14.3"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45d4734f93f7c4ac6616b1ac3548206c81eb7d155b3bb096b2ef4f5dc3fae225"
+checksum = "4d8f07617f0f5727559701d53674f71812279bb80fbff5484560e29520704b65"
 dependencies = [
  "ahash",
  "cssparser",
@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.35"
+version = "1.19.36"
 dependencies = [
  "compact_str",
  "fast_scraper",
@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.35"
+version = "1.19.36"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1785,7 +1785,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.35"
+version = "1.19.36"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",

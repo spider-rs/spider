@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v1.19.35
+## v1.19.36
 
 1. perf(crawl): add join handle task management
 

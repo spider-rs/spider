@@ -1,7 +1,9 @@
+use crate::fast_scraper::html5ever::tendril::TendrilSink;
 use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
-use fast_scraper::{Html, Selector};
+use fast_scraper::html5ever::driver::{self};
+use fast_scraper::{ElementRef, Html, Selector};
 use hashbrown::HashSet;
 use reqwest::Client;
 use url::Url;
@@ -186,31 +188,45 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     pub fn links(&self, selectors: &(Selector, CompactString)) -> HashSet<CaseInsensitiveString> {
-        let html = Html::parse_document(&self.html);
-        let anchors = html.select(&selectors.0);
+        let parser = driver::parse_document(Html::new_document(), Default::default());
+        let html = Box::pin(parser.one(self.html.as_str()));
+        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
         let base_domain = &selectors.1;
 
-        if !base_domain.is_empty() {
-            anchors
-                .filter_map(|a| {
-                    let abs = self.abs_path(a.value().attr("href").unwrap_or_default());
-
-                    if base_domain.as_str() == domain_name(&abs) {
-                        Some(abs.as_str().into())
-                    } else {
-                        None
+        // if domain base empty add directly into set
+        if base_domain.is_empty() {
+            for node in html.tree.nodes() {
+                if let Some(element) = ElementRef::wrap(node) {
+                    if element.parent().is_some() && selectors.0.matches(&element) {
+                        match element.value().attr("href") {
+                            Some(val) => {
+                                map.insert(self.abs_path(val).as_str().into());
+                            }
+                            None => {}
+                        }
                     }
-                })
-                .collect()
+                }
+            }
         } else {
-            anchors
-                .map(|a| {
-                    self.abs_path(a.value().attr("href").unwrap_or_default())
-                        .as_str()
-                        .into()
-                })
-                .collect()
+            for node in html.tree.nodes() {
+                if let Some(element) = ElementRef::wrap(node) {
+                    if element.parent().is_some() && selectors.0.matches(&element) {
+                        match element.value().attr("href") {
+                            Some(val) => {
+                                let abs = self.abs_path(val);
+
+                                if base_domain.as_str() == domain_name(&abs) {
+                                    map.insert(abs.as_str().into());
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            }
         }
+
+        map
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
