@@ -7,8 +7,8 @@ use ego_tree::NodeRef;
 use html5ever::serialize::{serialize, SerializeOpts, TraversalScope};
 
 use crate::packages::scraper::node::Element;
-use crate::packages::scraper::selector::Selector;
 use crate::packages::scraper::node::Node;
+use crate::packages::scraper::selector::Selector;
 
 /// Wrapper around a reference to an element node.
 ///

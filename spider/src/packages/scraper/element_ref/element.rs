@@ -3,8 +3,8 @@ use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstrain
 use selectors::matching;
 use selectors::{Element, OpaqueElement};
 
-use super::ElementRef;
 use super::super::selector::{CssLocalName, CssString, NonTSPseudoClass, PseudoElement, Simple};
+use super::ElementRef;
 
 /// Note: will never match against non-tree-structure pseudo-classes.
 impl<'a> Element for ElementRef<'a> {

@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.36"
+version = "1.19.38"
 dependencies = [
  "ahash",
  "compact_str",
@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.36"
+version = "1.19.38"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.36"
+version = "1.19.38"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",

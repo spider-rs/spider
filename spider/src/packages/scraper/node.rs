@@ -1,12 +1,11 @@
 //! HTML nodes.
 
 use ahash::RandomState;
-use std::collections::{hash_set, HashSet};
+use hashbrown::{hash_map::Iter, hash_set, HashMap, HashSet};
+
 use std::fmt;
 use std::ops::Deref;
-use tendril::{Atomic, Tendril};
-
-use html5ever::tendril::{SendTendril, StrTendril};
+use html5ever::tendril::{StrTendril};
 use html5ever::{Attribute, LocalName, QualName};
 
 use selectors::attr::CaseSensitivity;
@@ -130,35 +129,29 @@ impl fmt::Debug for Node {
 #[derive(Clone)]
 pub struct Doctype {
     /// The doctype name.
-    pub name: SendTendril<tendril::fmt::UTF8>,
+    pub name: StrTendril,
 
     /// The doctype public ID.
-    pub public_id: SendTendril<tendril::fmt::UTF8>,
+    pub public_id: StrTendril,
 
     /// The doctype system ID.
-    pub system_id: SendTendril<tendril::fmt::UTF8>,
+    pub system_id: StrTendril,
 }
 
 impl Doctype {
     /// Returns the doctype name.
-    pub fn name(&self) -> String {
-        let t: Tendril<tendril::fmt::UTF8, Atomic> = Tendril::from(self.name.clone());
-
-        t.to_string()
+    pub fn name(&self) -> &str  {
+        self.name.deref()
     }
 
     /// Returns the doctype public ID.
-    pub fn public_id(&self) -> String {
-        let t: Tendril<tendril::fmt::UTF8, Atomic> = Tendril::from(self.public_id.clone());
-
-        t.into()
+    pub fn public_id(&self) -> &str  {
+        self.public_id.deref()
     }
 
     /// Returns the doctype system ID.
-    pub fn system_id(&self) -> String {
-        let t: Tendril<tendril::fmt::UTF8, Atomic> = Tendril::from(self.system_id.clone());
-
-        t.into()
+    pub fn system_id(&self) -> &str {
+        self.system_id.deref()
     }
 }
 
@@ -219,7 +212,7 @@ impl fmt::Debug for Text {
 /// A Map of attributes that doesn't preserve the order of the attributes.
 /// Please enable the `deterministic` feature for order-preserving
 /// (de)serialization.
-pub type Attributes = std::collections::HashMap<QualName, StrTendril, RandomState>;
+pub type Attributes = HashMap<QualName, StrTendril, RandomState>;
 
 /// An HTML element.
 #[derive(Clone, PartialEq, Eq)]
@@ -320,7 +313,7 @@ impl<'a> Iterator for Classes<'a> {
 }
 
 /// An iterator over a node's attributes.
-pub type AttributesIter<'a> = std::collections::hash_map::Iter<'a, QualName, StrTendril>;
+pub type AttributesIter<'a> = Iter<'a, QualName, StrTendril>;
 
 /// Iterator over attributes.
 #[allow(missing_debug_implementations)]

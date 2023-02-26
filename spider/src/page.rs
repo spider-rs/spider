@@ -1,10 +1,10 @@
-use html5ever::tendril::TendrilSink;
+use crate::packages::scraper::{ElementRef, Html, Selector};
 use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
-use html5ever::driver::{self};
-use crate::packages::scraper::{ElementRef, Html, Selector};
 use hashbrown::HashSet;
+use html5ever::driver::{self};
+use html5ever::tendril::TendrilSink;
 use reqwest::Client;
 use url::Url;
 

@@ -9,8 +9,8 @@ use html5ever::{LocalName, Namespace};
 use selectors::parser::SelectorParseErrorKind;
 use selectors::{matching, parser};
 
-use crate::packages::scraper::error::SelectorErrorKind;
 use crate::packages::scraper::element_ref::ElementRef;
+use crate::packages::scraper::error::SelectorErrorKind;
 use cssparser::ToCss;
 
 /// Wrapper around CSS selectors.

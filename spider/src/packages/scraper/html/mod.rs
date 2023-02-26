@@ -10,9 +10,9 @@ use html5ever::QualName;
 use html5ever::{driver, serialize};
 use tendril::TendrilSink;
 
-use crate::packages::scraper::selector::Selector;
-use crate::packages::scraper::node::Node;
 use crate::packages::scraper::element_ref::ElementRef;
+use crate::packages::scraper::node::Node;
+use crate::packages::scraper::selector::Selector;
 
 /// An HTML tree.
 ///

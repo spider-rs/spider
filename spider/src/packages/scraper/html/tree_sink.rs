@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use super::Html;
 use super::super::node::{Comment, Doctype, Element, Node, ProcessingInstruction, Text};
+use super::Html;
 use ego_tree::NodeId;
 use html5ever::tendril::StrTendril;
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};

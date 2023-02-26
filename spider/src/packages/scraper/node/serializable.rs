@@ -20,7 +20,7 @@ pub(crate) fn serialize<S: Serializer>(
 
                 match *node.value() {
                     Node::Doctype(ref doctype) => {
-                        serializer.write_doctype(doctype.name().as_str())?;
+                        serializer.write_doctype(doctype.name())?;
                     }
                     Node::Comment(ref comment) => {
                         serializer.write_comment(comment)?;

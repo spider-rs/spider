@@ -1,4 +1,3 @@
-pub mod scraper;
-/// robot parser 
+/// robot parser
 pub mod robotparser;
-
+pub mod scraper;
