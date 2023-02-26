@@ -80,7 +80,7 @@ pub struct Website {
     /// contains page visited
     pages: Option<Box<Vec<Page>>>,
     /// callback when a link is found.
-    pub on_link_find_callback: fn(CompactString) -> CompactString,
+    pub on_link_find_callback: Option<fn(CompactString) -> CompactString>,
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
@@ -101,7 +101,7 @@ impl Website {
             links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
-            on_link_find_callback: |s| s,
+            on_link_find_callback: None,
             domain: CompactString::new(domain).into(),
         }
     }
@@ -292,7 +292,11 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                let link_result = on_link_find_callback(page.get_url().into());
+                let u = page.get_url().into();
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
+                };
 
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
@@ -315,38 +319,46 @@ impl Website {
                     .throttle(*throttle);
             tokio::pin!(stream);
 
-            while let Some(clink) = stream.next().await {
-                while handle.load(Ordering::Relaxed) == 1 {
-                    interval.tick().await;
+            loop {
+                match stream.next().await {
+                    Some(link) => {
+                        while handle.load(Ordering::Relaxed) == 1 {
+                            interval.tick().await;
+                        }
+                        if handle.load(Ordering::Relaxed) == 2 {
+                            set.shutdown().await;
+                            break;
+                        }
+                        if !self.is_allowed(&link) {
+                            continue;
+                        }
+                        log("fetch", &link);
+                        self.links_visited.insert(link.clone());
+                        let client = client.clone();
+                        let selector = selectors.clone();
+                        let semaphore = semaphore.clone();
+
+                        task::yield_now().await;
+
+                        set.spawn(async move {
+                            let permit = semaphore.acquire().await.unwrap();
+                            let link_result = match on_link_find_callback {
+                                Some(cb) => cb(link.0),
+                                _ => link.0,
+                            };
+                            let page = Page::new(&link_result, &client).await;
+                            let page_links = page.links(&*selector);
+                            drop(permit);
+
+                            page_links
+                        });
+
+                        task::yield_now().await;
+                    }
+                    _ => {
+                        break;
+                    }
                 }
-                if handle.load(Ordering::Relaxed) == 2 {
-                    set.shutdown().await;
-                    break;
-                }
-                if !self.is_allowed(&clink) {
-                    continue;
-                }
-                log("fetch", &clink);
-                let link = clink.clone();
-                self.links_visited.insert(clink);
-                let client = client.clone();
-                let link = link.clone();
-                let selector = selectors.clone();
-                let semaphore = semaphore.clone();
-
-                task::yield_now().await;
-
-                set.spawn(async move {
-                    let permit = semaphore.acquire().await.unwrap();
-                    let link_result = on_link_find_callback(link.0);
-                    let page = Page::new(&link_result, &client).await;
-                    let page_links = page.links(&*selector);
-                    drop(permit);
-
-                    page_links
-                });
-
-                task::yield_now().await;
             }
 
             task::yield_now().await;
@@ -383,8 +395,10 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                let link_result = on_link_find_callback(page.get_url().into());
-
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(page.get_url().into()),
+                    _ => page.get_url().into(),
+                };
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
                 HashSet::from(page.links(&selectors))
@@ -405,13 +419,18 @@ impl Website {
                 if !self.is_allowed(&link) {
                     continue;
                 }
-                log("fetch", link);
                 self.links_visited.insert(link.clone());
+                log("fetch", link);
                 if delay_enabled {
                     sleep(Duration::from_millis(*delay)).await;
                 }
                 let link = link.clone();
-                let link_result = on_link_find_callback(link.0);
+
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(link.0),
+                    _ => link.0,
+                };
+
                 let page = Page::new(&link_result, &client).await;
                 let page_links = page.links(&selectors);
                 task::yield_now().await;
@@ -446,7 +465,12 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                 let page = Page::new(&self.domain, &client).await;
-                let link_result = on_link_find_callback(page.get_url().into());
+                let u = page.get_url().into();
+
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
+                };
 
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
@@ -465,7 +489,7 @@ impl Website {
                     .throttle(throttle);
             tokio::pin!(stream);
 
-            while let Some(clink) = stream.next().await {
+            while let Some(link) = stream.next().await {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
@@ -473,17 +497,19 @@ impl Website {
                     set.shutdown().await;
                     break;
                 }
-                if !self.is_allowed(&clink) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
-                let link = clink.clone();
+                self.links_visited.insert(link.clone());
                 log("fetch", &link);
-                self.links_visited.insert(clink);
-
                 let client = client.clone();
 
                 set.spawn(async move {
-                    let link_result = on_link_find_callback(link.0);
+                    let link_result = match on_link_find_callback {
+                        Some(cb) => cb(link.0),
+                        _ => link.0,
+                    };
+
                     let page = Page::new(&link_result, &client).await;
 
                     page
@@ -571,10 +597,10 @@ async fn crawl_invalid() {
 #[tokio::test]
 async fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.on_link_find_callback = |s| {
+    website.on_link_find_callback = Some(|s| {
         log("callback link target: {}", &s);
         s
-    };
+    });
     website.crawl().await;
     assert!(
         website

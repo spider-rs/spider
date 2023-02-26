@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.19.34"
+version = "1.19.35"
 dependencies = [
  "compact_str",
  "fast_scraper",
@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.19.34"
+version = "1.19.35"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -1785,7 +1785,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.19.34"
+version = "1.19.35"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -2065,7 +2065,7 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 [[package]]
 name = "ua_generator"
 version = "0.3.5"
-source = "git+https://github.com/a11ywatch/ua_generator.git#ca7ff285c9d57a8c6fd3913a48c28edbc9d040bb"
+source = "git+https://github.com/a11ywatch/ua_generator.git#bf850521e6ddc6cde784c24b4bd2edeaff6a580c"
 dependencies = [
  "fastrand",
  "serde",
