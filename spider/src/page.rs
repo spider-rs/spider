@@ -1,9 +1,9 @@
-use crate::fast_scraper::html5ever::tendril::TendrilSink;
+use html5ever::tendril::TendrilSink;
 use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
-use fast_scraper::html5ever::driver::{self};
-use fast_scraper::{ElementRef, Html, Selector};
+use html5ever::driver::{self};
+use crate::packages::scraper::{ElementRef, Html, Selector};
 use hashbrown::HashSet;
 use reqwest::Client;
 use url::Url;

@@ -1,10 +1,10 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
-use crate::packages::robotparser::RobotFileParser;
+use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::{log, Handler, CONTROLLER};
+use crate::packages::scraper::Selector;
 use compact_str::CompactString;
-use fast_scraper::Selector;
 use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;

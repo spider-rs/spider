@@ -31,7 +31,6 @@
 //! you can also crawl sequentially.
 
 pub extern crate compact_str;
-extern crate fast_scraper;
 extern crate hashbrown;
 extern crate log;
 extern crate reqwest;
@@ -44,6 +43,10 @@ pub extern crate url;
 extern crate string_concat;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate html5ever;
+#[macro_use]
+extern crate matches;
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
     not(windows),

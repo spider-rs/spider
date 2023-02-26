@@ -492,23 +492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fast_scraper"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d8f07617f0f5727559701d53674f71812279bb80fbff5484560e29520704b65"
-dependencies = [
- "ahash",
- "cssparser",
- "ego-tree",
- "getopts",
- "html5ever",
- "matches",
- "selectors",
- "smallvec",
- "tendril",
-]
-
-[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -635,15 +618,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
-]
-
-[[package]]
-name = "getopts"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
-dependencies = [
- "unicode-width",
 ]
 
 [[package]]
@@ -1755,15 +1729,22 @@ dependencies = [
 name = "spider"
 version = "1.19.36"
 dependencies = [
+ "ahash",
  "compact_str",
- "fast_scraper",
+ "cssparser",
+ "ego-tree",
  "hashbrown 0.13.2",
+ "html5ever",
  "lazy_static",
  "log",
+ "matches",
  "percent-encoding",
  "regex",
  "reqwest",
+ "selectors",
+ "smallvec",
  "string_concat",
+ "tendril",
  "tikv-jemallocator",
  "tokio",
  "tokio-stream",
