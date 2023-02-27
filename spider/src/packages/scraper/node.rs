@@ -2,13 +2,15 @@
 
 use hashbrown::{hash_map::Iter, hash_set, HashMap, HashSet};
 
-use html5ever::tendril::StrTendril;
 use html5ever::{Attribute, LocalName, QualName};
+use selectors::attr::CaseSensitivity;
 use std::fmt;
 use std::ops::Deref;
-use tendril::{NonAtomic, Tendril};
 
-use selectors::attr::CaseSensitivity;
+use html5ever::tendril::{fmt::UTF8, Atomic, Tendril};
+
+/// Atomic StrTendril type
+pub type AtomicStrTendril = Tendril<UTF8, Atomic>;
 
 /// An HTML node.
 // `Element` is usally the most common variant and hence boxing it
@@ -129,13 +131,13 @@ impl fmt::Debug for Node {
 #[derive(Clone)]
 pub struct Doctype {
     /// The doctype name.
-    pub name: StrTendril,
+    pub name: AtomicStrTendril,
 
     /// The doctype public ID.
-    pub public_id: StrTendril,
+    pub public_id: AtomicStrTendril,
 
     /// The doctype system ID.
-    pub system_id: StrTendril,
+    pub system_id: AtomicStrTendril,
 }
 
 impl Doctype {
@@ -171,7 +173,7 @@ impl fmt::Debug for Doctype {
 #[derive(Clone)]
 pub struct Comment {
     /// The comment text.
-    pub comment: StrTendril,
+    pub comment: AtomicStrTendril,
 }
 
 impl Deref for Comment {
@@ -192,7 +194,7 @@ impl fmt::Debug for Comment {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Text {
     /// The text.
-    pub text: StrTendril,
+    pub text: AtomicStrTendril,
 }
 
 impl Deref for Text {
@@ -212,7 +214,7 @@ impl fmt::Debug for Text {
 /// A Map of attributes that doesn't preserve the order of the attributes.
 /// Please enable the `deterministic` feature for order-preserving
 /// (de)serialization.
-pub type Attributes = HashMap<QualName, StrTendril>;
+pub type Attributes = HashMap<QualName, AtomicStrTendril>;
 
 /// An HTML element.
 #[derive(Clone, PartialEq, Eq)]
@@ -234,7 +236,7 @@ impl Element {
     #[doc(hidden)]
     pub fn new(name: QualName, attributes: Vec<Attribute>) -> Self {
         let mut classes: HashSet<LocalName> = HashSet::new();
-        let mut attrs: HashMap<QualName, Tendril<tendril::fmt::UTF8, NonAtomic>> =
+        let mut attrs: HashMap<QualName, AtomicStrTendril> =
             HashMap::with_capacity(attributes.len());
         let mut id: Option<LocalName> = None;
 
@@ -248,7 +250,7 @@ impl Element {
                 }
                 _ => (),
             };
-            attrs.insert(a.name, a.value);
+            attrs.insert(a.name, a.value.into_send().into());
         }
 
         Element {
@@ -312,7 +314,7 @@ impl<'a> Iterator for Classes<'a> {
 }
 
 /// An iterator over a node's attributes.
-pub type AttributesIter<'a> = Iter<'a, QualName, StrTendril>;
+pub type AttributesIter<'a> = Iter<'a, QualName, AtomicStrTendril>;
 
 /// Iterator over attributes.
 #[allow(missing_debug_implementations)]
@@ -343,9 +345,9 @@ impl fmt::Debug for Element {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessingInstruction {
     /// The PI target.
-    pub target: StrTendril,
+    pub target: AtomicStrTendril,
     /// The PI data.
-    pub data: StrTendril,
+    pub data: AtomicStrTendril,
 }
 
 impl Deref for ProcessingInstruction {

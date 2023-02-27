@@ -3,9 +3,8 @@ use crate::utils::fetch_page_html;
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
-use html5ever::driver::{self};
-use html5ever::tendril::TendrilSink;
 use reqwest::Client;
+use tokio_stream::StreamExt;
 use url::Url;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -25,16 +24,18 @@ const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([h
 const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
 
 /// build absolute page selectors
-fn build_absolute_selectors(url: &str) -> String {
+fn build_absolute_selectors(url: &str) -> (String, String) {
+    let off_target = if url.starts_with("https") {
+        url.replacen("https://", "http://", 1)
+    } else {
+        url.replacen("http://", "https://", 1)
+    };
+
     // handle unsecure and secure transports
-    string_concat::string_concat!(
+    let css_base = string_concat::string_concat!(
         "a[href^=",
         r#"""#,
-        if url.starts_with("https") {
-            url.replacen("https://", "http://", 1)
-        } else {
-            url.replacen("http://", "https://", 1)
-        },
+        off_target,
         r#"""#,
         "i ],",
         "a[href^=",
@@ -43,7 +44,9 @@ fn build_absolute_selectors(url: &str) -> String {
         r#"""#,
         "i ]",
         MEDIA_IGNORE_SELECTOR
-    )
+    );
+
+    (css_base, off_target)
 }
 
 /// get the clean domain name
@@ -61,7 +64,11 @@ pub fn domain_name(domain: &Url) -> &str {
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, CompactString) {
+pub fn get_page_selectors(
+    url: &str,
+    subdomains: bool,
+    tld: bool,
+) -> (Selector, CompactString, (String, String)) {
     if tld || subdomains {
         let base = Url::parse(&url).expect("Invalid page URL");
         let dname = domain_name(&base);
@@ -84,7 +91,8 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
             "".to_string()
         };
 
-        let absolute_selector = build_absolute_selectors(url);
+        let (absolute_selector, off_target) = build_absolute_selectors(url);
+
         // absolute urls with subdomains
         let absolute_selector = &if subdomains {
             string_concat::string_concat!(
@@ -111,25 +119,28 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
 
         // static html group parse
         (
-            Selector::parse(&string_concat::string_concat!(
-                tlds,
-                MEDIA_SELECTOR_RELATIVE,
-                ",",
-                absolute_selector,
-                ",",
-                MEDIA_SELECTOR_RELATIVE,
-                " ",
-                MEDIA_SELECTOR_STATIC,
-                ", ",
-                absolute_selector,
-                " ",
-                MEDIA_SELECTOR_STATIC
-            ))
-            .unwrap(),
+            unsafe {
+                Selector::parse(&string_concat::string_concat!(
+                    tlds,
+                    MEDIA_SELECTOR_RELATIVE,
+                    ",",
+                    absolute_selector,
+                    ",",
+                    MEDIA_SELECTOR_RELATIVE,
+                    " ",
+                    MEDIA_SELECTOR_STATIC,
+                    ", ",
+                    absolute_selector,
+                    " ",
+                    MEDIA_SELECTOR_STATIC
+                ))
+                .unwrap_unchecked()
+            },
             dname.into(),
+            (url[0..&url.len() - 1].to_string(), off_target),
         )
     } else {
-        let absolute_selector = build_absolute_selectors(url);
+        let (absolute_selector, off_target) = build_absolute_selectors(url);
         let static_html_selector = string_concat::string_concat!(
             MEDIA_SELECTOR_RELATIVE,
             " ",
@@ -142,15 +153,18 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> (Selector, 
         );
 
         (
-            Selector::parse(&string_concat::string_concat!(
-                MEDIA_SELECTOR_RELATIVE,
-                ",",
-                absolute_selector,
-                ",",
-                static_html_selector
-            ))
-            .unwrap(),
+            unsafe {
+                Selector::parse(&string_concat::string_concat!(
+                    MEDIA_SELECTOR_RELATIVE,
+                    ",",
+                    absolute_selector,
+                    ",",
+                    static_html_selector
+                ))
+                .unwrap_unchecked()
+            },
             CompactString::default(),
+            (url[0..&url.len() - 1].to_string(), off_target),
         )
     }
 }
@@ -186,47 +200,121 @@ impl Page {
         self.html.clear();
     }
 
-    /// Find all href links and return them using CSS selectors.
-    pub fn links(&self, selectors: &(Selector, CompactString)) -> HashSet<CaseInsensitiveString> {
-        let parser = driver::parse_document(Html::new_document(), Default::default());
-        let html = Box::pin(parser.one(self.html.as_str()));
-        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
+    pub async fn links_ego(
+        &self,
+        selectors: &(Selector, CompactString, (String, String)),
+    ) -> HashSet<CaseInsensitiveString> {
         let base_domain = &selectors.1;
+        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+        let html = Html::parse_document(self.html.as_str());
+        tokio::task::yield_now().await;
 
-        // if domain base empty add directly into set
-        if base_domain.is_empty() {
-            for node in html.tree.nodes() {
-                if let Some(element) = ElementRef::wrap(node) {
-                    if element.parent().is_some() && selectors.0.matches(&element) {
-                        match element.value().attr("href") {
-                            Some(val) => {
-                                map.insert(self.abs_path(val).as_str().into());
-                            }
-                            None => {}
-                        }
-                    }
-                }
-            }
-        } else {
-            for node in html.tree.nodes() {
-                if let Some(element) = ElementRef::wrap(node) {
-                    if element.parent().is_some() && selectors.0.matches(&element) {
-                        match element.value().attr("href") {
-                            Some(val) => {
-                                let abs = self.abs_path(val);
+        // extremely fast ego tree handling
+        for node in html.tree.root().traverse() {
+            match node {
+                ego_tree::iter::Edge::Open(node_ref) => {
+                    if let Some(element) = ElementRef::wrap(node_ref) {
+                        if element.parent().is_some() && selectors.0.matches(&element) {
+                            match element.value().attr("href") {
+                                Some(val) => {
+                                    let abs = self.abs_path(val);
 
-                                if base_domain.as_str() == domain_name(&abs) {
-                                    map.insert(abs.as_str().into());
+                                    if base_domain.is_empty()
+                                        || base_domain.as_str() == domain_name(&abs)
+                                    {
+                                        map.insert(abs.as_str().into());
+                                    }
                                 }
+                                None => (),
                             }
-                            None => {}
                         }
                     }
                 }
+                _ => (),
             }
         }
 
         map
+    }
+
+    /// Find all href links and return them using CSS selectors.
+    pub async fn links(
+        &self,
+        selectors: &(Selector, CompactString, (String, String)),
+        streamed: Option<bool>,
+    ) -> HashSet<CaseInsensitiveString> {
+        let base_domain = &selectors.1;
+
+        match streamed {
+            None | Some(false) => self.links_ego(&(selectors)).await,
+            Some(_) => {
+                let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+                let html = Box::new(Html::parse_document(self.html.as_str()));
+                tokio::task::yield_now().await;
+
+                lazy_static! {
+                    /// ignore list of resources
+                    static ref IGNORE_RESOURCES: HashSet<&'static str> = {
+                        let mut m = HashSet::with_capacity(27);
+
+                        m.extend([
+                            "css", "csv", "docx", "gif", "git", "ico", "js", "jsx", "json", "jpg", "jpeg",
+                            "md", "mp3", "mp4", "ogg", "png", "pdf", "txt", "tiff", "svg", "sql", "wave",
+                            "webm", "webp", "xlm", "xlsx", "zip",
+                        ]);
+
+                        m
+                    };
+                };
+
+                let mut stream = tokio_stream::iter(html.tree);
+                let (tmp, _) = &selectors.2; // todo: allow mix match tpt
+
+                while let Some(node) = stream.next().await {
+                    if let Some(element) = node.as_element() {
+                        match element.attr("href") {
+                            Some(href) => {
+                                let mut can_process = match href {
+                                    s if s.starts_with('/') || s.starts_with(tmp) => true,
+                                    _ => false,
+                                };
+
+                                if can_process {
+                                    let hlen = href.len();
+
+                                    if hlen > 4 {
+                                        let hchars = &href[hlen - 5..hlen];
+
+                                        if let Some(position) = hchars.find('.') {
+                                            if position < 4 {
+                                                let word = &hchars[position + 1..hchars.len()];
+
+                                                if IGNORE_RESOURCES.contains(&word) {
+                                                    can_process = false;
+                                                }
+                                            }
+                                        };
+                                    }
+
+                                    if can_process {
+                                        let abs = self.abs_path(href);
+                                        if base_domain.is_empty()
+                                            || base_domain.as_str() == domain_name(&abs)
+                                        {
+                                            map.insert(abs.as_str().into());
+                                        }
+                                    }
+                                };
+                            }
+                            _ => (),
+                        };
+                    }
+                }
+
+                map
+            }
+        }
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
@@ -250,7 +338,9 @@ async fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
-    let links = page.links(&get_page_selectors(&link_result, false, false));
+    let links = page
+        .links(&get_page_selectors(&link_result, false, false), None)
+        .await;
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),

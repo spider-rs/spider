@@ -86,7 +86,7 @@ async fn main() {
                 let mut html: &String = &String::new();
 
                 if *output_links {
-                    let page_links = page.links(&*selectors);
+                    let page_links = page.links(&*selectors, Some(true)).await;
 
                     for link in page_links {
                         links.push(link.as_ref().to_owned());
