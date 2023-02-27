@@ -8,6 +8,7 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
+use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -42,6 +43,12 @@ impl From<&str> for CaseInsensitiveString {
     #[inline]
     fn from(s: &str) -> Self {
         CaseInsensitiveString { 0: s.into() }
+    }
+}
+
+impl Borrow<str> for CaseInsensitiveString {
+    fn borrow(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -341,6 +348,7 @@ impl Website {
                             continue;
                         }
                         log("fetch", &link);
+
                         self.links_visited.insert(link.clone());
                         let client = client.clone();
                         let selector = selectors.clone();

@@ -255,14 +255,18 @@ impl Page {
 
                 lazy_static! {
                     /// ignore list of resources
-                    static ref IGNORE_RESOURCES: HashSet<&'static str> = {
-                        let mut m = HashSet::with_capacity(27);
+                    static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
+                        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(28 * 2);
 
                         m.extend([
                             "css", "csv", "docx", "gif", "git", "ico", "js", "jsx", "json", "jpg", "jpeg",
                             "md", "mp3", "mp4", "ogg", "png", "pdf", "txt", "tiff", "svg", "sql", "wave",
-                            "webm", "webp", "xlm", "xlsx", "zip",
-                        ]);
+                            "webm", "woff2", "webp", "xlm", "xlsx", "zip",
+                            // handle .. prefix for urls ending with an extra ending
+                            ".css", ".csv", ".docx", ".gif", ".git", ".ico", ".js", ".jsx", ".json", ".jpg", ".jpeg",
+                            ".md", ".mp3", ".mp4", ".ogg", ".png", ".pdf", ".txt", ".tiff", ".svg", ".sql", ".wave",
+                            ".webm", "woff2", ".webp", ".xlm", ".xlsx", ".zip",
+                        ].map(|s| s.into()));
 
                         m
                     };
@@ -287,25 +291,24 @@ impl Page {
                                         let hchars = &href[hlen - 5..hlen];
 
                                         if let Some(position) = hchars.find('.') {
-                                            if position < 4 {
-                                                let word = &hchars[position + 1..hchars.len()];
+                                            let word = &hchars[position + 1..hchars.len()];
 
-                                                if IGNORE_RESOURCES.contains(&word) {
-                                                    can_process = false;
-                                                }
+                                            if IGNORE_RESOURCES.contains(word) {
+                                                can_process = false;
                                             }
                                         };
                                     }
 
                                     if can_process {
                                         let abs = self.abs_path(href);
+
                                         if base_domain.is_empty()
                                             || base_domain.as_str() == domain_name(&abs)
                                         {
                                             map.insert(abs.as_str().into());
                                         }
                                     }
-                                };
+                                }
                             }
                             _ => (),
                         };
