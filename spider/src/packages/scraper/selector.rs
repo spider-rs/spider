@@ -1,17 +1,14 @@
 //! CSS selectors.
 
-use std::convert::TryFrom;
-use std::fmt;
-
-use smallvec::SmallVec;
-
-use html5ever::{LocalName, Namespace};
-use selectors::parser::SelectorParseErrorKind;
-use selectors::{matching, parser};
-
 use crate::packages::scraper::element_ref::ElementRef;
 use crate::packages::scraper::error::SelectorErrorKind;
 use cssparser::ToCss;
+use html5ever::{LocalName, Namespace};
+use selectors::parser::SelectorParseErrorKind;
+use selectors::{matching, parser};
+use smallvec::SmallVec;
+use std::convert::TryFrom;
+use std::fmt;
 
 /// Wrapper around CSS selectors.
 ///

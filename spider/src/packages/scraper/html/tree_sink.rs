@@ -1,12 +1,13 @@
-use std::borrow::Cow;
-
-use super::super::node::{Comment, Doctype, Element, Node, ProcessingInstruction, Text};
 use super::Html;
+use crate::packages::scraper::node::{
+    Comment, Doctype, Element, Node, ProcessingInstruction, Text,
+};
 use ego_tree::NodeId;
 use html5ever::tendril::StrTendril;
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
 use html5ever::Attribute;
 use html5ever::{ExpandedName, QualName};
+use std::borrow::Cow;
 
 /// Note: does not support the `<template>` element.
 impl TreeSink for Html {
@@ -75,7 +76,7 @@ impl TreeSink for Html {
     fn create_comment(&mut self, text: StrTendril) -> Self::Handle {
         self.tree
             .orphan(Node::Comment(Comment {
-                comment: text.into(),
+                comment: text.into_send().into(),
             }))
             .id()
     }
@@ -88,9 +89,9 @@ impl TreeSink for Html {
         system_id: StrTendril,
     ) {
         let doctype = Doctype {
-            name: name.into(),
-            public_id: public_id.into(),
-            system_id: system_id.into(),
+            name: name.into_send().into(),
+            public_id: public_id.into_send().into(),
+            system_id: system_id.into_send().into(),
         };
         self.tree.root_mut().append(Node::Doctype(doctype));
     }
@@ -108,19 +109,19 @@ impl TreeSink for Html {
             }
 
             NodeOrText::AppendText(text) => {
+                let text = text.into_send().into();
                 let can_concat = parent
                     .last_child()
-                    .map_or_else(|| false, |mut n| n.value().is_text());
+                    .map_or(false, |mut n| n.value().is_text());
 
                 if can_concat {
                     let mut last_child = parent.last_child().unwrap();
-
                     match *last_child.value() {
                         Node::Text(ref mut t) => t.text.push_tendril(&text),
                         _ => unreachable!(),
                     }
                 } else {
-                    parent.append(Node::Text(Text { text: text.into() }));
+                    parent.append(Node::Text(Text { text }));
                 }
             }
         }
@@ -151,6 +152,7 @@ impl TreeSink for Html {
                 }
 
                 NodeOrText::AppendText(text) => {
+                    let text = text.into_send().into();
                     let can_concat = sibling
                         .prev_sibling()
                         .map_or(false, |mut n| n.value().is_text());
@@ -162,7 +164,7 @@ impl TreeSink for Html {
                             _ => unreachable!(),
                         }
                     } else {
-                        sibling.insert_before(Node::Text(Text { text: text.into() }));
+                        sibling.insert_before(Node::Text(Text { text }));
                     }
                 }
             }
@@ -192,7 +194,10 @@ impl TreeSink for Html {
         };
 
         for attr in attrs {
-            element.attrs.entry(attr.name).or_insert(attr.value);
+            element
+                .attrs
+                .entry(attr.name)
+                .or_insert(attr.value.into_send().into());
         }
     }
 
@@ -211,8 +216,8 @@ impl TreeSink for Html {
     fn create_pi(&mut self, target: StrTendril, data: StrTendril) -> Self::Handle {
         self.tree
             .orphan(Node::ProcessingInstruction(ProcessingInstruction {
-                target,
-                data,
+                target: target.into_send().into(),
+                data: data.into_send().into(),
             }))
             .id()
     }

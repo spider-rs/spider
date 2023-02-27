@@ -1,7 +1,6 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::packages::scraper::Selector;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::{log, Handler, CONTROLLER};
 use compact_str::CompactString;
@@ -35,9 +34,7 @@ impl Eq for CaseInsensitiveString {}
 impl Hash for CaseInsensitiveString {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for c in self.0.as_bytes() {
-            c.to_ascii_lowercase().hash(state)
-        }
+        self.0.to_ascii_lowercase().hash(state)
     }
 }
 
@@ -139,9 +136,12 @@ impl Website {
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed_robots(&self, link: &str) -> bool {
         if self.configuration.respect_robots_txt {
-            let robot_file_parser = self.robot_file_parser.as_ref().unwrap(); // unwrap will always return
-
-            robot_file_parser.can_fetch("*", &link)
+            unsafe {
+                self.robot_file_parser
+                    .as_ref()
+                    .unwrap_unchecked()
+                    .can_fetch("*", &link)
+            } // unwrap will always return
         } else {
             true
         }
@@ -289,7 +289,7 @@ impl Website {
         let on_link_find_callback = self.on_link_find_callback;
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
-        let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
+        let selectors = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
@@ -305,16 +305,19 @@ impl Website {
 
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&selectors))
+                HashSet::from(page.links(&selectors, None).await)
             } else {
                 HashSet::new()
             };
-
-        let semaphore = Arc::new(Semaphore::new(if self.configuration.channel_buffer > 224 {
+        let channel_buffer = if self.configuration.channel_buffer > 224 {
             self.configuration.channel_buffer as usize
         } else {
             224
-        }));
+        };
+
+        let channel_unload_limit = channel_buffer - 3; // todo: use physical cpu cors unused
+
+        let semaphore = Arc::new(Semaphore::new(channel_buffer));
         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
 
         // crawl while links exists
@@ -352,7 +355,13 @@ impl Website {
                                 _ => link.0,
                             };
                             let page = Page::new(&link_result, &client).await;
-                            let page_links = page.links(&*selector);
+                            let page_links = page
+                                .links(
+                                    &*selector,
+                                    Some(semaphore.available_permits() < channel_unload_limit),
+                                )
+                                .await;
+
                             drop(permit);
 
                             page_links
@@ -406,7 +415,7 @@ impl Website {
                 };
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&selectors))
+                HashSet::from(page.links(&selectors, None).await)
             } else {
                 HashSet::new()
             };
@@ -430,14 +439,13 @@ impl Website {
                     sleep(Duration::from_millis(*delay)).await;
                 }
                 let link = link.clone();
-
                 let link_result = match on_link_find_callback {
                     Some(cb) => cb(link.0),
                     _ => link.0,
                 };
 
                 let page = Page::new(&link_result, &client).await;
-                let page_links = page.links(&selectors);
+                let page_links = page.links(&selectors, None).await;
                 task::yield_now().await;
                 new_links.extend(page_links);
                 task::yield_now().await;
@@ -461,7 +469,7 @@ impl Website {
         let delay = self.configuration.delay;
         let on_link_find_callback = self.on_link_find_callback;
         let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors: Arc<(Selector, CompactString)> = Arc::new(get_page_selectors(
+        let selectors = Arc::new(get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
@@ -480,7 +488,7 @@ impl Website {
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
 
-                HashSet::from(page.links(&selectors))
+                HashSet::from(page.links(&selectors, None).await)
             } else {
                 HashSet::new()
             };
@@ -494,7 +502,7 @@ impl Website {
                     .throttle(throttle);
             tokio::pin!(stream);
 
-            while let Some(link) = stream.next().await {
+            while let Some(l) = stream.next().await {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
@@ -502,10 +510,11 @@ impl Website {
                     set.shutdown().await;
                     break;
                 }
-                if !self.is_allowed(&link) {
+                if !self.is_allowed(&l) {
                     continue;
                 }
-                self.links_visited.insert(link.clone());
+                let link = l.clone();
+                self.links_visited.insert(l);
                 log("fetch", &link);
                 let client = client.clone();
 
@@ -529,7 +538,7 @@ impl Website {
 
             while let Some(res) = set.join_next().await {
                 let msg = res.unwrap();
-                let page_links = msg.links(&*selectors);
+                let page_links = msg.links(&*selectors, None).await;
                 task::yield_now().await;
                 links.extend(&page_links - &self.links_visited);
                 task::yield_now().await;
