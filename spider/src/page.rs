@@ -63,12 +63,30 @@ pub fn domain_name(domain: &Url) -> &str {
     }
 }
 
+/// convert to absolute path
+fn convert_abs_path(base: &Url, href: &str) -> Url {
+    match base.join(href) {
+        Ok(mut joined) => {
+            joined.set_fragment(None);
+            joined
+        }
+        Err(_) => base.clone(),
+    }
+}
+
 /// html selector for valid web pages for domain.
 pub fn get_page_selectors(
     url: &str,
     subdomains: bool,
     tld: bool,
 ) -> (Selector, CompactString, (String, String)) {
+    let host = Url::parse(&url).expect("Invalid page URL");
+    let host_name = match convert_abs_path(&host, &"").host_str() {
+        Some(host) => host,
+        _ => "",
+    }
+    .to_ascii_lowercase();
+
     if tld || subdomains {
         let base = Url::parse(&url).expect("Invalid page URL");
         let dname = domain_name(&base);
@@ -137,7 +155,7 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             dname.into(),
-            (url[0..&url.len() - 1].to_string(), off_target),
+            (host_name, off_target),
         )
     } else {
         let (absolute_selector, off_target) = build_absolute_selectors(url);
@@ -164,7 +182,7 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             CompactString::default(),
-            (url[0..&url.len() - 1].to_string(), off_target),
+            (host_name, off_target),
         )
     }
 }
@@ -256,16 +274,16 @@ impl Page {
                 lazy_static! {
                     /// ignore list of resources
                     static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
-                        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(28 * 2);
+                        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(58);
 
                         m.extend([
                             "css", "csv", "docx", "gif", "git", "ico", "js", "jsx", "json", "jpg", "jpeg",
-                            "md", "mp3", "mp4", "ogg", "png", "pdf", "txt", "tiff", "svg", "sql", "wave",
-                            "webm", "woff2", "webp", "xlm", "xlsx", "zip",
+                            "md", "mp3", "mp4", "ogg", "png", "pdf", "txt", "tiff", "srt", "svg", "sql", "wave",
+                            "webm", "woff2", "webp", "xml", "xlsx", "zip",
                             // handle .. prefix for urls ending with an extra ending
                             ".css", ".csv", ".docx", ".gif", ".git", ".ico", ".js", ".jsx", ".json", ".jpg", ".jpeg",
-                            ".md", ".mp3", ".mp4", ".ogg", ".png", ".pdf", ".txt", ".tiff", ".svg", ".sql", ".wave",
-                            ".webm", "woff2", ".webp", ".xlm", ".xlsx", ".zip",
+                            ".md", ".mp3", ".mp4", ".ogg", ".png", ".pdf", ".txt", ".tiff", ".srt", ".svg", ".sql", ".wave",
+                            ".webm", ".woff2", ".webp", ".xml", ".xlsx", ".zip",
                         ].map(|s| s.into()));
 
                         m
@@ -279,17 +297,19 @@ impl Page {
                     if let Some(element) = node.as_element() {
                         match element.attr("href") {
                             Some(href) => {
-                                let mut can_process = match href {
-                                    s if s.starts_with('/') || s.starts_with(tmp) => true,
+                                let abs = self.abs_path(href);
+
+                                let mut can_process = match abs.host_str() {
+                                    Some(host) => host == tmp,
                                     _ => false,
                                 };
 
                                 if can_process {
-                                    let hlen = href.len();
+                                    let h = abs.as_str();
+                                    let hlen = h.len();
 
                                     if hlen > 4 {
-                                        let hchars = &href[hlen - 5..hlen];
-
+                                        let hchars = &h[hlen - 5..hlen];
                                         if let Some(position) = hchars.find('.') {
                                             let word = &hchars[position + 1..hchars.len()];
 
@@ -300,12 +320,10 @@ impl Page {
                                     }
 
                                     if can_process {
-                                        let abs = self.abs_path(href);
-
                                         if base_domain.is_empty()
                                             || base_domain.as_str() == domain_name(&abs)
                                         {
-                                            map.insert(abs.as_str().into());
+                                            map.insert(h.into());
                                         }
                                     }
                                 }
@@ -322,13 +340,7 @@ impl Page {
 
     /// Convert a URL to its absolute path without any fragments or params.
     fn abs_path(&self, href: &str) -> Url {
-        match self.base.join(href) {
-            Ok(mut joined) => {
-                joined.set_fragment(None);
-                joined
-            }
-            Err(_) => self.base.clone(),
-        }
+        convert_abs_path(&self.base, href)
     }
 }
 
