@@ -348,7 +348,6 @@ impl Website {
                             continue;
                         }
                         log("fetch", &link);
-
                         self.links_visited.insert(link.clone());
                         let client = client.clone();
                         let selector = selectors.clone();
