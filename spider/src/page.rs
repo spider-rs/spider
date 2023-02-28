@@ -4,6 +4,7 @@ use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
+use smallvec::SmallVec;
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -39,7 +40,7 @@ lazy_static! {
 }
 
 /// build absolute page selectors
-fn build_absolute_selectors(url: &str) -> (String, String) {
+fn build_absolute_selectors(url: &str) -> String {
     let off_target = if url.starts_with("https") {
         url.replacen("https://", "http://", 1)
     } else {
@@ -47,7 +48,7 @@ fn build_absolute_selectors(url: &str) -> (String, String) {
     };
 
     // handle unsecure and secure transports
-    let css_base = string_concat::string_concat!(
+    string_concat::string_concat!(
         "a[href^=",
         r#"""#,
         off_target,
@@ -59,14 +60,12 @@ fn build_absolute_selectors(url: &str) -> (String, String) {
         r#"""#,
         "i ]",
         MEDIA_IGNORE_SELECTOR
-    );
-
-    (css_base, off_target)
+    )
 }
 
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
-    let b = domain.host_str().unwrap_or_default();
+    let b = unsafe { domain.host_str().unwrap_unchecked() };
     let b = b.split('.').collect::<Vec<&str>>();
 
     if b.len() > 2 {
@@ -94,13 +93,19 @@ pub fn get_page_selectors(
     url: &str,
     subdomains: bool,
     tld: bool,
-) -> (Selector, CompactString, (String, String)) {
+) -> (
+    Selector,
+    CompactString,
+    smallvec::SmallVec<[CompactString; 2]>,
+) {
     let host = Url::parse(&url).expect("Invalid page URL");
-    let host_name = match convert_abs_path(&host, &"").host_str() {
+    let host_name = match convert_abs_path(&host, Default::default()).host_str() {
         Some(host) => host,
-        _ => "",
+        _ => Default::default(),
     }
     .to_ascii_lowercase();
+
+    let scheme = host.scheme();
 
     if tld || subdomains {
         let base = Url::parse(&url).expect("Invalid page URL");
@@ -124,7 +129,7 @@ pub fn get_page_selectors(
             "".to_string()
         };
 
-        let (absolute_selector, off_target) = build_absolute_selectors(url);
+        let absolute_selector = build_absolute_selectors(url);
 
         // absolute urls with subdomains
         let absolute_selector = &if subdomains {
@@ -170,10 +175,10 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             dname.into(),
-            (host_name, off_target),
+            smallvec::SmallVec::from([CompactString::from(host_name), CompactString::from(scheme)]),
         )
     } else {
-        let (absolute_selector, off_target) = build_absolute_selectors(url);
+        let absolute_selector = build_absolute_selectors(url);
         let static_html_selector = string_concat::string_concat!(
             MEDIA_SELECTOR_RELATIVE,
             " ",
@@ -197,7 +202,7 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             CompactString::default(),
-            (host_name, off_target),
+            smallvec::SmallVec::from([CompactString::from(host_name), CompactString::from(scheme)]),
         )
     }
 }
@@ -236,7 +241,7 @@ impl Page {
     /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
     pub async fn links_ego(
         &self,
-        selectors: &(Selector, CompactString, (String, String)),
+        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         let base_domain = &selectors.1;
         let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -289,7 +294,7 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     pub async fn links(
         &self,
-        selectors: &(Selector, CompactString, (String, String)),
+        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
         streamed: Option<bool>,
     ) -> HashSet<CaseInsensitiveString> {
         let base_domain = &selectors.1;
@@ -302,20 +307,28 @@ impl Page {
                 tokio::task::yield_now().await;
 
                 let mut stream = tokio_stream::iter(html.tree);
-                let (tmp, _) = &selectors.2; // todo: allow mix match tpt
+                let parent_frags = &selectors.2; // todo: allow mix match tpt
+                let parent_host = &parent_frags[0];
+                let parent_host_scheme = &parent_frags[1];
 
                 while let Some(node) = stream.next().await {
                     if let Some(element) = node.as_element() {
                         match element.attr("href") {
                             Some(href) => {
-                                let abs = self.abs_path(href);
-
+                                let mut abs = self.abs_path(href);
                                 let mut can_process = match abs.host_str() {
-                                    Some(host) => host == tmp,
+                                    Some(host) => host == parent_host.as_str(),
                                     _ => false,
                                 };
 
                                 if can_process {
+                                    if abs.scheme() != parent_host_scheme.as_str() {
+                                        unsafe {
+                                            abs.set_scheme(parent_host_scheme.as_str())
+                                                .unwrap_err_unchecked();
+                                        }
+                                    }
+
                                     let h = abs.as_str();
                                     let hlen = h.len();
 
@@ -364,9 +377,9 @@ async fn parse_links() {
 
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(&link_result, &client).await;
-    let links = page
-        .links(&get_page_selectors(&link_result, false, false), None)
-        .await;
+    let selector = get_page_selectors(&link_result, false, false);
+
+    let links = page.links(&selector, None).await;
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),
