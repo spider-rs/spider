@@ -24,5 +24,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run Benchmarks
-        run: cargo bench
+      - name: Run Benchmark Compare OSS
+        run: cargo bench --bench crawl
+      - name: Run Benchmark Massive 50k pages plus
+        run: cargo bench --bench crawl_massive

@@ -26,7 +26,7 @@ const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".a
 lazy_static! {
     /// ignore list of resources
     static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(88);
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(92);
 
         m.extend([
             "avi", "css", "csv", "dmg", "doc", "docx", "gz", "gif", "git", "ico", "img", "flv", "js", "jsx", "json", "jpg",
@@ -260,21 +260,20 @@ impl Page {
                                     if base_domain.is_empty()
                                         || base_domain.as_str() == domain_name(&abs)
                                     {
-                                        let h = abs.as_str();
-                                        let hlen = h.len();
-                                        let hchars = &h[hlen - 5..hlen];
+                                        let resource_ext = abs.as_str();
+                                        let resource_ext_size = resource_ext.len();
+                                        let resource = &resource_ext[resource_ext_size - 5..resource_ext_size];
 
-                                        // validte non fragments
-                                        if let Some(position) = hchars.find('.') {
+                                        if let Some(position) = resource.find('.') {
                                             if !IGNORE_RESOURCES.contains(
                                                 &CaseInsensitiveString::from(
-                                                    &hchars[position + 1..hchars.len()],
+                                                    &resource[position + 1..resource.len()],
                                                 ),
                                             ) {
-                                                map.insert(h.into());
+                                                map.insert(resource_ext.into());
                                             }
                                         } else {
-                                            map.insert(h.into());
+                                            map.insert(resource_ext.into());
                                         }
                                     }
                                 }

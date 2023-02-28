@@ -12,3 +12,8 @@ spider = { path = "../spider" }
 name = "crawl"
 path = "crawl.rs"
 harness = false
+
+[[bench]]
+name = "crawl_massive"
+path = "crawl_massive.rs"
+harness = false
