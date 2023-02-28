@@ -24,18 +24,14 @@ const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([h
 const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
 
 lazy_static! {
-    /// ignore list of resources
-    static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(92);
+    /// include only list of resources
+    static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(14);
 
         m.extend([
-            "avi", "css", "csv", "dmg", "doc", "docx", "gz", "gif", "git", "ico", "img", "flv", "js", "jsx", "json", "jpg",
-            "jpeg", "md", "mov", "msi", "mpg", "mp2", "mp3", "mp4", "m4p", "m4v", "ogg", "png", "pptx", "pdf", "txt", "tiff", "srt", "svg", "sql",
-            "tar", "qt", "wave", "webm","wmv", "woff2", "webp", "xml", "xls", "xlsx", "zip",
+            "html", "htm", "asp", "aspx", "php", "jps", "jpsx",
             // handle .. prefix for urls ending with an extra ending
-            ".avi", ".css", ".csv", ".dmg", ".doc", ".docx", ".gz", ".gif", ".git", ".ico", ".img", ".flv", ".js", ".jsx", ".json", ".jpg",
-            ".jpeg", ".md", ".mov", ".msi", ".mpg",".mp2", ".mp3", ".mp4", ".m4p", ".m4v", ".ogg", ".png", ".pptx", ".pdf", ".txt", ".tiff", ".srt", ".svg", ".sql",
-            ".tar", ".qt", ".wave", ".webm", ".wmv", ".woff2", ".webp", ".xml", ".xls", ".xlsx", ".zip",
+            ".html", ".htm", ".asp", ".aspx", ".php", ".jps", ".jpsx",
         ].map(|s| s.into()));
 
         m
@@ -266,7 +262,7 @@ impl Page {
                                             &resource_ext[resource_ext_size - 5..resource_ext_size];
 
                                         if let Some(position) = resource.find('.') {
-                                            if !IGNORE_RESOURCES.contains(
+                                            if ONLY_RESOURCES.contains(
                                                 &CaseInsensitiveString::from(
                                                     &resource[position + 1..resource.len()],
                                                 ),
@@ -328,7 +324,7 @@ impl Page {
                                         if let Some(position) = hchars.find('.') {
                                             let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                            if IGNORE_RESOURCES.contains(
+                                            if !ONLY_RESOURCES.contains(
                                                 &CaseInsensitiveString::from(resource_ext),
                                             ) {
                                                 can_process = false;
