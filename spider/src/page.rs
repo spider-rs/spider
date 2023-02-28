@@ -17,11 +17,30 @@ pub struct Page {
 }
 
 /// CSS query selector to ignore all resources that are not valid web pages.
-const MEDIA_IGNORE_SELECTOR: &str = r#":not([style*="display: none"]):not([style*="visibility: hidden"]):not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
+const MEDIA_IGNORE_SELECTOR: &str = r#":not([style*="display: none"]):not([style*="visibility: hidden"]):not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".doc"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
 /// CSS query selector for all relative links that includes MEDIA_IGNORE_SELECTOR
-const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
+const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".doc"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
 /// CSS query selector for all common static MIME types.
 const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
+
+lazy_static! {
+    /// ignore list of resources
+    static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(88);
+
+        m.extend([
+            "avi", "css", "csv", "dmg", "doc", "docx", "gz", "gif", "git", "ico", "img", "flv", "js", "jsx", "json", "jpg",
+            "jpeg", "md", "mov", "msi", "mpg", "mp2", "mp3", "mp4", "m4p", "m4v", "ogg", "png", "pptx", "pdf", "txt", "tiff", "srt", "svg", "sql",
+            "tar", "qt", "wave", "webm","wmv", "woff2", "webp", "xml", "xls", "xlsx", "zip",
+            // handle .. prefix for urls ending with an extra ending
+            ".avi", ".css", ".csv", ".dmg", ".doc", ".docx", ".gz", ".gif", ".git", ".ico", ".img", ".flv", ".js", ".jsx", ".json", ".jpg",
+            ".jpeg", ".md", ".mov", ".msi", ".mpg",".mp2", ".mp3", ".mp4", ".m4p", ".m4v", ".ogg", ".png", ".pptx", ".pdf", ".txt", ".tiff", ".srt", ".svg", ".sql",
+            ".tar", ".qt", ".wave", ".webm", ".wmv", ".woff2", ".webp", ".xml", ".xls", ".xlsx", ".zip",
+        ].map(|s| s.into()));
+
+        m
+    };
+}
 
 /// build absolute page selectors
 fn build_absolute_selectors(url: &str) -> (String, String) {
@@ -241,7 +260,20 @@ impl Page {
                                     if base_domain.is_empty()
                                         || base_domain.as_str() == domain_name(&abs)
                                     {
-                                        map.insert(abs.as_str().into());
+                                        let h = abs.as_str();
+                                        let hlen = h.len();
+                                        let hchars = &h[hlen - 5..hlen];
+
+                                        // validte non fragments
+                                        if let Some(position) = hchars.find('.') {
+                                            if !IGNORE_RESOURCES
+                                                .contains(&hchars[position + 1..hchars.len()])
+                                            {
+                                                map.insert(h.into());
+                                            }
+                                        } else {
+                                            map.insert(h.into());
+                                        }
                                     }
                                 }
                                 None => (),
@@ -271,25 +303,6 @@ impl Page {
                 let html = Box::new(Html::parse_document(self.html.as_str()));
                 tokio::task::yield_now().await;
 
-                lazy_static! {
-                    /// ignore list of resources
-                    static ref IGNORE_RESOURCES: HashSet<CaseInsensitiveString> = {
-                        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(58);
-
-                        m.extend([
-                            "css", "csv", "docx", "gif", "git", "ico", "js", "jsx", "json", "jpg", "jpeg",
-                            "md", "mp3", "mp4", "ogg", "png", "pdf", "txt", "tiff", "srt", "svg", "sql", "wave",
-                            "webm", "woff2", "webp", "xml", "xlsx", "zip",
-                            // handle .. prefix for urls ending with an extra ending
-                            ".css", ".csv", ".docx", ".gif", ".git", ".ico", ".js", ".jsx", ".json", ".jpg", ".jpeg",
-                            ".md", ".mp3", ".mp4", ".ogg", ".png", ".pdf", ".txt", ".tiff", ".srt", ".svg", ".sql", ".wave",
-                            ".webm", ".woff2", ".webp", ".xml", ".xlsx", ".zip",
-                        ].map(|s| s.into()));
-
-                        m
-                    };
-                };
-
                 let mut stream = tokio_stream::iter(html.tree);
                 let (tmp, _) = &selectors.2; // todo: allow mix match tpt
 
@@ -311,12 +324,12 @@ impl Page {
                                     if hlen > 4 {
                                         let hchars = &h[hlen - 5..hlen];
                                         if let Some(position) = hchars.find('.') {
-                                            let word = &hchars[position + 1..hchars.len()];
-
-                                            if IGNORE_RESOURCES.contains(word) {
+                                            if IGNORE_RESOURCES
+                                                .contains(&hchars[position + 1..hchars.len()])
+                                            {
                                                 can_process = false;
                                             }
-                                        };
+                                        }
                                     }
 
                                     if can_process {
