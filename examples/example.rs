@@ -24,9 +24,9 @@ async fn main() {
 
     let links = website.get_links();
 
-    for link in links {
-        println!("- {:?}", link.as_ref());
-    }
+    // for link in links {
+    //     println!("- {:?}", link.as_ref());
+    // }
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
