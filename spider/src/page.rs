@@ -239,6 +239,7 @@ impl Page {
     }
 
     /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
+    #[inline(always)]
     pub async fn links_ego(
         &self,
         selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
@@ -291,74 +292,82 @@ impl Page {
         map
     }
 
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    pub async fn links_stream(
+        &self,
+        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
+    ) -> HashSet<CaseInsensitiveString> {
+        let base_domain = &selectors.1;
+
+        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+        let html = Box::new(Html::parse_document(self.html.as_str()));
+        tokio::task::yield_now().await;
+
+        let mut stream = tokio_stream::iter(html.tree);
+        let parent_frags = &selectors.2; // todo: allow mix match tpt
+        let parent_host = &parent_frags[0];
+        let parent_host_scheme = &parent_frags[1];
+
+        while let Some(node) = stream.next().await {
+            if let Some(element) = node.as_element() {
+                match element.attr("href") {
+                    Some(href) => {
+                        let mut abs = self.abs_path(href);
+                        let mut can_process = match abs.host_str() {
+                            Some(host) => host == parent_host.as_str(),
+                            _ => false,
+                        };
+
+                        if can_process {
+                            if abs.scheme() != parent_host_scheme.as_str() {
+                                unsafe {
+                                    abs.set_scheme(parent_host_scheme.as_str())
+                                        .unwrap_err_unchecked();
+                                }
+                            }
+
+                            let h = abs.as_str();
+                            let hlen = h.len();
+
+                            if hlen > 4 {
+                                let hchars = &h[hlen - 5..hlen];
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                    if !ONLY_RESOURCES
+                                        .contains(&CaseInsensitiveString::from(resource_ext))
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+                            }
+
+                            if can_process && base_domain.is_empty()
+                                || base_domain.as_str() == domain_name(&abs)
+                            {
+                                map.insert(h.into());
+                            }
+                        }
+                    }
+                    _ => (),
+                };
+            }
+        }
+
+        map
+    }
+
     /// Find all href links and return them using CSS selectors.
+    #[inline(never)]
     pub async fn links(
         &self,
         selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
         streamed: Option<bool>,
     ) -> HashSet<CaseInsensitiveString> {
-        let base_domain = &selectors.1;
-
         match streamed {
             None | Some(false) => self.links_ego(&(selectors)).await,
-            Some(_) => {
-                let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
-                let html = Box::new(Html::parse_document(self.html.as_str()));
-                tokio::task::yield_now().await;
-
-                let mut stream = tokio_stream::iter(html.tree);
-                let parent_frags = &selectors.2; // todo: allow mix match tpt
-                let parent_host = &parent_frags[0];
-                let parent_host_scheme = &parent_frags[1];
-
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        match element.attr("href") {
-                            Some(href) => {
-                                let mut abs = self.abs_path(href);
-                                let mut can_process = match abs.host_str() {
-                                    Some(host) => host == parent_host.as_str(),
-                                    _ => false,
-                                };
-
-                                if can_process {
-                                    if abs.scheme() != parent_host_scheme.as_str() {
-                                        unsafe {
-                                            abs.set_scheme(parent_host_scheme.as_str())
-                                                .unwrap_err_unchecked();
-                                        }
-                                    }
-
-                                    let h = abs.as_str();
-                                    let hlen = h.len();
-
-                                    if hlen > 4 {
-                                        let hchars = &h[hlen - 5..hlen];
-                                        if let Some(position) = hchars.find('.') {
-                                            let resource_ext = &hchars[position + 1..hchars.len()];
-
-                                            if !ONLY_RESOURCES.contains(
-                                                &CaseInsensitiveString::from(resource_ext),
-                                            ) {
-                                                can_process = false;
-                                            }
-                                        }
-                                    }
-
-                                    if can_process && base_domain.is_empty()
-                                        || base_domain.as_str() == domain_name(&abs)
-                                    {
-                                        map.insert(h.into());
-                                    }
-                                }
-                            }
-                            _ => (),
-                        };
-                    }
-                }
-
-                map
-            }
+            Some(_) => self.links_stream(&selectors).await,
         }
     }
 

@@ -31,7 +31,7 @@
 //! you can also crawl sequentially.
 
 pub extern crate compact_str;
-extern crate hashbrown;
+pub extern crate hashbrown;
 extern crate log;
 extern crate reqwest;
 pub extern crate tokio;
