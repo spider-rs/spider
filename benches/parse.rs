@@ -40,7 +40,7 @@ pub fn bench_speed(c: &mut Criterion) {
     let rt = spider::tokio::runtime::Runtime::new().unwrap();
 
     let selectors = spider::page::get_page_selectors(&QUERY, false, false);
-    let page = build(QUERY, HTML.to_string());
+    let page = build(QUERY, Some(HTML.to_string()));
 
     group.bench_function(format!("Parse links ego: {}", sample_title), |b| {
         b.to_async(&rt)

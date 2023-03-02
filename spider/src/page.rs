@@ -12,7 +12,7 @@ use url::Url;
 #[derive(Debug, Clone)]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
-    html: String,
+    html: Option<String>,
     /// Base absolute url for page.
     base: Url,
 }
@@ -78,6 +78,7 @@ pub fn domain_name(domain: &Url) -> &str {
 }
 
 /// convert to absolute path
+#[inline]
 fn convert_abs_path(base: &Url, href: &str) -> Url {
     match base.join(href) {
         Ok(mut joined) => {
@@ -208,9 +209,9 @@ pub fn get_page_selectors(
 }
 
 /// Instantiate a new page without scraping it (used for testing purposes).
-pub fn build(url: &str, html: String) -> Page {
+pub fn build(url: &str, html: Option<String>) -> Page {
     Page {
-        html,
+        html: if html.is_some() { html } else { None },
         base: Url::parse(&url).expect("Invalid page URL"),
     }
 }
@@ -218,9 +219,7 @@ pub fn build(url: &str, html: String) -> Page {
 impl Page {
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client) -> Self {
-        let html = fetch_page_html(&url, &client).await; // TODO: remove heavy cpu / network from new
-
-        build(url, html)
+        build(url, fetch_page_html(&url, &client).await)
     }
 
     /// URL getter for page.
@@ -229,13 +228,8 @@ impl Page {
     }
 
     /// Html getter for page.
-    pub fn get_html(&self) -> &String {
-        &self.html
-    }
-
-    /// Clear the html for the page.
-    pub fn clear_html(&mut self) {
-        self.html.clear();
+    pub fn get_html(&self) -> &str {
+        unsafe { &self.html.as_deref().unwrap_unchecked() }
     }
 
     /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
@@ -246,7 +240,7 @@ impl Page {
     ) -> HashSet<CaseInsensitiveString> {
         let base_domain = &selectors.1;
         let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
-        let html = Html::parse_document(self.html.as_str());
+        let html = Html::parse_document(self.get_html());
         tokio::task::yield_now().await;
 
         // extremely fast ego tree handling
@@ -301,7 +295,7 @@ impl Page {
         let base_domain = &selectors.1;
 
         let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
-        let html = Box::new(Html::parse_document(self.html.as_str()));
+        let html = Box::new(Html::parse_document(self.get_html()));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -366,12 +360,14 @@ impl Page {
         streamed: Option<bool>,
     ) -> HashSet<CaseInsensitiveString> {
         match streamed {
+            _ if { !self.html.is_some() } => Default::default(),
             None | Some(false) => self.links_ego(&(selectors)).await,
             Some(_) => self.links_stream(&selectors).await,
         }
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
+    #[inline]
     fn abs_path(&self, href: &str) -> Url {
         convert_abs_path(&self.base, href)
     }

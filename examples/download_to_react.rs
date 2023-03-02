@@ -64,8 +64,7 @@ async fn main() {
         let download_file = download_file.to_case(Case::Camel);
         let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
 
-        let html = page.get_html();
-        let react_component = convert_to_react(&html, download_file.to_string());
+        let react_component = convert_to_react(&page.get_html().into(), download_file.to_string());
         let react_component = react_component.as_bytes();
 
         file.write_all(react_component).unwrap();

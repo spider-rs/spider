@@ -83,7 +83,6 @@ async fn main() {
 
             for page in website.get_pages() {
                 let mut links: Vec<String> = vec![];
-                let mut html: &String = &String::new();
 
                 if *output_links {
                     let page_links = page.links(&*selectors, Some(true)).await;
@@ -93,14 +92,14 @@ async fn main() {
                     }
                 }
 
-                if *output_html {
-                    html = page.get_html();
-                }
-
                 let page_json = json!({
                     "url": page.get_url(),
                     "links": links,
-                    "html": html,
+                    "html": if *output_html {
+                        page.get_html()
+                    } else {
+                        Default::default()
+                    },
                 });
 
                 page_objects.push(page_json);
