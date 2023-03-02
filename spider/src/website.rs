@@ -8,7 +8,6 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -43,12 +42,6 @@ impl From<&str> for CaseInsensitiveString {
     #[inline]
     fn from(s: &str) -> Self {
         CaseInsensitiveString { 0: s.into() }
-    }
-}
-
-impl Borrow<str> for CaseInsensitiveString {
-    fn borrow(&self) -> &str {
-        self.0.as_str()
     }
 }
 
@@ -115,6 +108,7 @@ impl Website {
     /// - is not already crawled
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
     pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
         if self.links_visited.contains(link) {
             false
@@ -127,6 +121,7 @@ impl Website {
     ///
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
     pub fn is_allowed_default(&self, link: &CompactString) -> bool {
         if !self.configuration.blacklist_url.is_none() {
             match &self.configuration.blacklist_url {
@@ -157,7 +152,7 @@ impl Website {
     /// page getter
     pub fn get_pages(&self) -> Vec<Page> {
         if !self.pages.is_none() {
-            *self.pages.as_ref().unwrap().clone()
+            unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
         } else {
             self.links_visited
                 .iter()
@@ -274,7 +269,7 @@ impl Website {
     pub async fn crawl(&mut self) {
         let (client, handle) = self.setup().await;
 
-        self.crawl_concurrent(&client, handle).await;
+        self.crawl_concurrent(client, handle).await;
     }
 
     /// Start to crawl website in sync
@@ -292,18 +287,31 @@ impl Website {
     }
 
     /// Start to crawl website concurrently
-    async fn crawl_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
+    async fn crawl_concurrent(&mut self, client: Client, handle: Arc<AtomicI8>) {
         let on_link_find_callback = self.on_link_find_callback;
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
-        let selectors = Arc::new(get_page_selectors(
-            &self.domain,
-            self.configuration.subdomains,
-            self.configuration.tld,
+
+        let channel_buffer = if self.configuration.channel_buffer > 224 {
+            self.configuration.channel_buffer as usize
+        } else {
+            224
+        };
+        let channel_unload_limit = channel_buffer - 1;
+
+        let shared = Arc::new((
+            Semaphore::new(channel_buffer),
+            client,
+            get_page_selectors(
+                &self.domain,
+                self.configuration.subdomains,
+                self.configuration.tld,
+            ),
         ));
+
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                let page = Page::new(&self.domain, &client).await;
+                let page = Page::new(&self.domain, &shared.1).await;
                 let u = page.get_url().into();
                 let link_result = match on_link_find_callback {
                     Some(cb) => cb(u),
@@ -312,19 +320,11 @@ impl Website {
 
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&selectors, None).await)
+                HashSet::from(page.links(&shared.2, None).await)
             } else {
                 HashSet::new()
             };
-        let channel_buffer = if self.configuration.channel_buffer > 224 {
-            self.configuration.channel_buffer as usize
-        } else {
-            224
-        };
 
-        let channel_unload_limit = channel_buffer - 3; // todo: use physical cpu cors unused
-
-        let semaphore = Arc::new(Semaphore::new(channel_buffer));
         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
 
         // crawl while links exists
@@ -349,23 +349,21 @@ impl Website {
                         }
                         log("fetch", &link);
                         self.links_visited.insert(link.clone());
-                        let client = client.clone();
-                        let selector = selectors.clone();
-                        let semaphore = semaphore.clone();
+                        let shared = shared.clone();
 
                         task::yield_now().await;
 
                         set.spawn(async move {
-                            let permit = semaphore.acquire().await.unwrap();
+                            let permit = shared.0.acquire().await.unwrap();
                             let link_result = match on_link_find_callback {
                                 Some(cb) => cb(link.0),
                                 _ => link.0,
                             };
-                            let page = Page::new(&link_result, &client).await;
+                            let page = Page::new(&link_result, &shared.1).await;
                             let page_links = page
                                 .links(
-                                    &*selector,
-                                    Some(semaphore.available_permits() < channel_unload_limit),
+                                    &shared.2,
+                                    Some(shared.0.available_permits() < channel_unload_limit),
                                 )
                                 .await;
 

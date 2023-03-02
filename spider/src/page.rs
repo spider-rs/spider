@@ -100,12 +100,12 @@ pub fn get_page_selectors(
     smallvec::SmallVec<[CompactString; 2]>,
 ) {
     let host = Url::parse(&url).expect("Invalid page URL");
-    let host_name = match convert_abs_path(&host, Default::default()).host_str() {
-        Some(host) => host,
-        _ => Default::default(),
-    }
-    .to_ascii_lowercase();
-
+    let host_name = CompactString::from(
+        match convert_abs_path(&host, Default::default()).host_str() {
+            Some(host) => host.to_ascii_lowercase(),
+            _ => Default::default(),
+        },
+    );
     let scheme = host.scheme();
 
     if tld || subdomains {
@@ -176,7 +176,7 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             dname.into(),
-            smallvec::SmallVec::from([CompactString::from(host_name), CompactString::from(scheme)]),
+            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
         )
     } else {
         let absolute_selector = build_absolute_selectors(url);
@@ -203,7 +203,7 @@ pub fn get_page_selectors(
                 .unwrap_unchecked()
             },
             CompactString::default(),
-            smallvec::SmallVec::from([CompactString::from(host_name), CompactString::from(scheme)]),
+            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
         )
     }
 }
