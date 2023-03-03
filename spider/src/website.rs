@@ -58,6 +58,8 @@ impl AsRef<str> for CaseInsensitiveString {
     }
 }
 
+static SEM: Semaphore = Semaphore::const_new(124);
+
 /// Represents a website to crawl and gather all links.
 /// ```rust
 /// use spider::website::Website;
@@ -300,7 +302,6 @@ impl Website {
         let channel_unload_limit = channel_buffer - 1;
 
         let shared = Arc::new((
-            Semaphore::new(channel_buffer),
             client,
             get_page_selectors(
                 &self.domain,
@@ -311,7 +312,7 @@ impl Website {
 
         let mut links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                let page = Page::new(&self.domain, &shared.1).await;
+                let page = Page::new(&self.domain, &shared.0).await;
                 let u = page.get_url().into();
                 let link_result = match on_link_find_callback {
                     Some(cb) => cb(u),
@@ -320,7 +321,7 @@ impl Website {
 
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&shared.2, None).await)
+                HashSet::from(page.links(&shared.1, None).await)
             } else {
                 HashSet::new()
             };
@@ -350,20 +351,19 @@ impl Website {
                         log("fetch", &link);
                         self.links_visited.insert(link.clone());
                         let shared = shared.clone();
-
+                        let permit = SEM.acquire().await.unwrap();
                         task::yield_now().await;
 
                         set.spawn(async move {
-                            let permit = shared.0.acquire().await.unwrap();
                             let link_result = match on_link_find_callback {
                                 Some(cb) => cb(link.0),
                                 _ => link.0,
                             };
-                            let page = Page::new(&link_result, &shared.1).await;
+                            let page = Page::new(&link_result, &shared.0).await;
                             let page_links = page
                                 .links(
-                                    &shared.2,
-                                    Some(shared.0.available_permits() < channel_unload_limit),
+                                    &shared.1,
+                                    Some(SEM.available_permits() < channel_unload_limit),
                                 )
                                 .await;
 
@@ -522,12 +522,15 @@ impl Website {
                 self.links_visited.insert(l);
                 log("fetch", &link);
                 let client = client.clone();
+                let permit = SEM.acquire().await.unwrap();
 
                 set.spawn(async move {
                     let link_result = match on_link_find_callback {
                         Some(cb) => cb(link.0),
                         _ => link.0,
                     };
+
+                    drop(permit);
 
                     let page = Page::new(&link_result, &client).await;
 
