@@ -5,7 +5,7 @@
 //! [crate]: https://crates.io/crates/scraper
 //! [github]: https://github.com/programble/scraper
 //!
-//! Scraper provides an interface to Servo's `html5ever` and `selectors` crates, for browser-grade
+//! Scraper provides an interface to Servo's `fast_html5ever` and `selectors` crates, for browser-grade
 //! parsing and querying. This project tweaks the main repo to fit the needs directly of the crate.
 //!
 //! # Examples

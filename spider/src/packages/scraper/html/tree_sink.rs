@@ -1,12 +1,10 @@
 use super::Html;
-use crate::packages::scraper::node::{
-    Comment, Doctype, Element, Node, ProcessingInstruction, Text,
-};
+use crate::packages::scraper::node::{Doctype, Element, Node, ProcessingInstruction, Text};
 use ego_tree::NodeId;
-use html5ever::tendril::StrTendril;
-use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
-use html5ever::Attribute;
-use html5ever::{ExpandedName, QualName};
+use fast_html5ever::tendril::StrTendril;
+use fast_html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
+use fast_html5ever::Attribute;
+use fast_html5ever::{ExpandedName, QualName};
 use std::borrow::Cow;
 
 /// Note: does not support the `<template>` element.
@@ -19,9 +17,7 @@ impl TreeSink for Html {
     }
 
     // Signal a parse error.
-    fn parse_error(&mut self, msg: Cow<'static, str>) {
-        self.errors.push(msg);
-    }
+    fn parse_error(&mut self, _: Cow<'static, str>) {}
 
     // Set the document's quirks mode.
     fn set_quirks_mode(&mut self, mode: QuirksMode) {
@@ -72,13 +68,9 @@ impl TreeSink for Html {
         node.id()
     }
 
-    // Create a comment node.
-    fn create_comment(&mut self, text: StrTendril) -> Self::Handle {
-        self.tree
-            .orphan(Node::Comment(Comment {
-                comment: text.into_send().into(),
-            }))
-            .id()
+    // Create a comment node. todo: remove from tree sink
+    fn create_comment(&mut self, _: StrTendril) -> NodeId {
+        self.root_element().id()
     }
 
     // Append a DOCTYPE element to the Document node.
@@ -109,10 +101,11 @@ impl TreeSink for Html {
             }
 
             NodeOrText::AppendText(text) => {
-                let text = text.into_send().into();
                 let can_concat = parent
                     .last_child()
                     .map_or(false, |mut n| n.value().is_text());
+
+                let text = text.into_send().into();
 
                 if can_concat {
                     let mut last_child = parent.last_child().unwrap();

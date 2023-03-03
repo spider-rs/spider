@@ -63,11 +63,13 @@ lazy_static! {
         let logical = num_cpus::get();
         let physical = num_cpus::get_physical();
 
-        Semaphore::const_new(if logical > physical {
-            (logical) / (physical) as usize
-        } else {
-            logical
-        } * 10)
+        Semaphore::const_new(
+            if logical > physical {
+                (logical) / (physical) as usize
+            } else {
+                logical
+            } * 10,
+        )
     };
 }
 

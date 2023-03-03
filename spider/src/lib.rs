@@ -44,7 +44,7 @@ extern crate string_concat;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
-extern crate html5ever;
+extern crate fast_html5ever;
 #[macro_use]
 extern crate matches;
 // performance reasons jemalloc memory backend for dedicated work and large crawls

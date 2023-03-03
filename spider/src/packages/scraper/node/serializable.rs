@@ -1,11 +1,11 @@
 use std::io::Error;
 
 use ego_tree::{iter::Edge, NodeRef};
-use html5ever::serialize::{Serializer, TraversalScope};
+use fast_html5ever::serialize::{Serializer, TraversalScope};
 
 use super::Node;
 
-/// Serialize an HTML node using html5ever serializer.
+/// Serialize an HTML node using fast_html5ever serializer.
 pub(crate) fn serialize<S: Serializer>(
     self_node: NodeRef<Node>,
     serializer: &mut S,
@@ -18,7 +18,7 @@ pub(crate) fn serialize<S: Serializer>(
                     continue;
                 }
 
-                match *node.value() {
+                match node.value() {
                     Node::Doctype(ref doctype) => {
                         serializer.write_doctype(doctype.name())?;
                     }
@@ -30,6 +30,7 @@ pub(crate) fn serialize<S: Serializer>(
                     }
                     Node::Element(ref elem) => {
                         let attrs = elem.attrs.iter().map(|(k, v)| (k, &v[..]));
+
                         serializer.start_elem(elem.name.clone(), attrs)?;
                     }
                     _ => (),

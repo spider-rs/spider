@@ -3,7 +3,7 @@
 use crate::packages::scraper::element_ref::ElementRef;
 use crate::packages::scraper::error::SelectorErrorKind;
 use cssparser::ToCss;
-use html5ever::{LocalName, Namespace};
+use fast_html5ever::{LocalName, Namespace};
 use selectors::parser::SelectorParseErrorKind;
 use selectors::{matching, parser};
 use smallvec::SmallVec;

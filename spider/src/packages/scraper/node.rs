@@ -2,12 +2,12 @@
 
 use hashbrown::{hash_map::Iter, hash_set, HashMap, HashSet};
 
-use html5ever::{Attribute, LocalName, QualName};
+use fast_html5ever::{Attribute, LocalName, QualName};
 use selectors::attr::CaseSensitivity;
 use std::fmt;
 use std::ops::Deref;
 
-use html5ever::tendril::{fmt::UTF8, Atomic, Tendril};
+use fast_html5ever::tendril::{fmt::UTF8, Atomic, Tendril};
 
 /// Atomic StrTendril type
 pub type AtomicStrTendril = Tendril<UTF8, Atomic>;
