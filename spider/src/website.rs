@@ -8,6 +8,7 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
+use tokio::runtime::Handle;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -333,6 +334,7 @@ impl Website {
             };
 
         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+        let join_handle = Handle::current();
 
         // crawl while links exists
         loop {
@@ -360,7 +362,7 @@ impl Website {
                         let shared = shared.clone();
                         task::yield_now().await;
 
-                        set.spawn(async move {
+                        set.spawn_on(async move {
                             let link_result = match on_link_find_callback {
                                 Some(cb) => cb(link.0),
                                 _ => link.0,
@@ -369,14 +371,14 @@ impl Website {
                             let page_links = page
                                 .links(
                                     &shared.1,
-                                    Some(!SEM.is_closed()),
+                                    Some(true),
                                 )
                                 .await;
 
                             drop(permit);
 
                             page_links
-                        });
+                        }, &join_handle);
 
                         task::yield_now().await;
                     }
