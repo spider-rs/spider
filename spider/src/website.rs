@@ -64,11 +64,11 @@ lazy_static! {
         let physical = num_cpus::get_physical();
 
         Semaphore::const_new(
-            if logical > physical {
+            (if logical > physical {
                 (logical) / (physical) as usize
             } else {
                 logical
-            } * 10,
+            } * 10).max(50),
         )
     };
 }
@@ -307,13 +307,6 @@ impl Website {
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
 
-        let channel_buffer = if self.configuration.channel_buffer > 224 {
-            self.configuration.channel_buffer as usize
-        } else {
-            224
-        };
-        let channel_unload_limit = channel_buffer - 1;
-
         let shared = Arc::new((
             client,
             get_page_selectors(
@@ -376,7 +369,7 @@ impl Website {
                             let page_links = page
                                 .links(
                                     &shared.1,
-                                    Some(SEM.available_permits() < channel_unload_limit),
+                                    Some(!SEM.is_closed()),
                                 )
                                 .await;
 
@@ -387,9 +380,7 @@ impl Website {
 
                         task::yield_now().await;
                     }
-                    _ => {
-                        break;
-                    }
+                    _ => break
                 }
             }
 
