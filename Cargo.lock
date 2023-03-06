@@ -1513,9 +1513,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "htr"
-version = "0.5.26"
+version = "0.5.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388e09db89af95beeec1ce60764d48d46d4cc1dc381a32a44c84e62f12f084a2"
+checksum = "8b0e5190458ce24b51fd95e34be40d23b8ec15e1d6cef76a8f8f321744efefc8"
 dependencies = [
  "convert_case 0.5.0",
  "lazy_static",
