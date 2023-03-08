@@ -222,13 +222,16 @@ impl Website {
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
-
-        match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
-            _ => client,
+        
+        // should unwrap using native-tls-alpn
+        unsafe {
+            match &self.configuration.request_timeout {
+                Some(t) => client.timeout(**t),
+                _ => client,
+            }
+            .build()
+            .unwrap_unchecked()
         }
-        .build()
-        .unwrap()
     }
 
     /// setup atomic controller
