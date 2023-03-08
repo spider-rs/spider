@@ -222,7 +222,7 @@ impl Website {
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
-        
+
         // should unwrap using native-tls-alpn
         unsafe {
             match &self.configuration.request_timeout {
@@ -308,268 +308,278 @@ impl Website {
 
     /// Start to crawl website concurrently
     async fn crawl_concurrent(&mut self, client: Client, handle: Arc<AtomicI8>) {
-        let on_link_find_callback = self.on_link_find_callback;
-        let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
-        let throttle = Box::pin(self.get_delay());
+        let selectors = get_page_selectors(
+            &self.domain,
+            self.configuration.subdomains,
+            self.configuration.tld,
+        );
 
-        let shared = Arc::new((
-            client,
-            get_page_selectors(
-                &self.domain,
-                self.configuration.subdomains,
-                self.configuration.tld,
-            ),
-        ));
+        // crawl if valid selector
+        if selectors.is_some() {
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
+            let throttle = Box::pin(self.get_delay());
+            let shared = Arc::new((client, unsafe { selectors.unwrap_unchecked() }));
 
-        let mut links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                let page = Page::new(&self.domain, &shared.0).await;
-                let u = page.get_url().into();
-                let link_result = match on_link_find_callback {
-                    Some(cb) => cb(u),
-                    _ => u,
+            let mut links: HashSet<CaseInsensitiveString> =
+                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                    let page = Page::new(&self.domain, &shared.0).await;
+                    let u = page.get_url().into();
+                    let link_result = match on_link_find_callback {
+                        Some(cb) => cb(u),
+                        _ => u,
+                    };
+
+                    self.links_visited
+                        .insert(CaseInsensitiveString { 0: link_result });
+                    HashSet::from(page.links(&shared.1, None).await)
+                } else {
+                    HashSet::new()
                 };
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&shared.1, None).await)
-            } else {
-                HashSet::new()
-            };
+            let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+            let chandle = Handle::current();
 
-        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-        let chandle = Handle::current();
-
-        // crawl while links exists
-        loop {
-            let stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                    .throttle(*throttle);
-            tokio::pin!(stream);
-
+            // crawl while links exists
             loop {
-                match stream.next().await {
-                    Some(link) => {
-                        while handle.load(Ordering::Relaxed) == 1 {
-                            interval.tick().await;
+                let stream =
+                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                        .throttle(*throttle);
+                tokio::pin!(stream);
+
+                loop {
+                    match stream.next().await {
+                        Some(link) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                set.shutdown().await;
+                                break;
+                            }
+                            if !self.is_allowed(&link) {
+                                continue;
+                            }
+                            log("fetch", &link);
+                            self.links_visited.insert(link.clone());
+                            let permit = SEM.acquire().await.unwrap();
+                            let shared = shared.clone();
+                            task::yield_now().await;
+
+                            set.spawn_on(
+                                async move {
+                                    let link_result = match on_link_find_callback {
+                                        Some(cb) => cb(link.0),
+                                        _ => link.0,
+                                    };
+                                    let page = Page::new(&link_result, &shared.0).await;
+                                    let page_links = page.links(&shared.1, Some(true)).await;
+
+                                    drop(permit);
+
+                                    page_links
+                                },
+                                &chandle,
+                            );
+
+                            task::yield_now().await;
                         }
-                        if handle.load(Ordering::Relaxed) == 2 {
-                            set.shutdown().await;
-                            break;
-                        }
-                        if !self.is_allowed(&link) {
-                            continue;
-                        }
-                        log("fetch", &link);
-                        self.links_visited.insert(link.clone());
-                        let permit = SEM.acquire().await.unwrap();
-                        let shared = shared.clone();
-                        task::yield_now().await;
-
-                        set.spawn_on(
-                            async move {
-                                let link_result = match on_link_find_callback {
-                                    Some(cb) => cb(link.0),
-                                    _ => link.0,
-                                };
-                                let page = Page::new(&link_result, &shared.0).await;
-                                let page_links = page.links(&shared.1, Some(true)).await;
-
-                                drop(permit);
-
-                                page_links
-                            },
-                            &chandle,
-                        );
-
-                        task::yield_now().await;
+                        _ => break,
                     }
-                    _ => break,
                 }
-            }
 
-            task::yield_now().await;
+                task::yield_now().await;
 
-            if links.capacity() >= 1500 {
-                links.shrink_to_fit();
-            }
+                if links.capacity() >= 1500 {
+                    links.shrink_to_fit();
+                }
 
-            while let Some(res) = set.join_next().await {
-                match res {
-                    Ok(msg) => {
-                        links.extend(&msg - &self.links_visited);
-                    }
-                    _ => (),
-                };
-            }
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Ok(msg) => {
+                            links.extend(&msg - &self.links_visited);
+                        }
+                        _ => (),
+                    };
+                }
 
-            if links.is_empty() {
-                break;
+                if links.is_empty() {
+                    break;
+                }
             }
         }
     }
 
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        let delay = Box::from(self.configuration.delay);
-        let delay_enabled = self.configuration.delay > 0;
-        let on_link_find_callback = self.on_link_find_callback;
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
         let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-        let mut links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                let page = Page::new(&self.domain, &client).await;
-                let link_result = match on_link_find_callback {
-                    Some(cb) => cb(page.get_url().into()),
-                    _ => page.get_url().into(),
+        if selectors.is_some() {
+            let selectors = unsafe { selectors.unwrap_unchecked() };
+            let delay = Box::from(self.configuration.delay);
+            let delay_enabled = self.configuration.delay > 0;
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+            let mut links: HashSet<CaseInsensitiveString> =
+                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                    let page = Page::new(&self.domain, &client).await;
+                    let link_result = match on_link_find_callback {
+                        Some(cb) => cb(page.get_url().into()),
+                        _ => page.get_url().into(),
+                    };
+                    self.links_visited
+                        .insert(CaseInsensitiveString { 0: link_result });
+                    HashSet::from(page.links(&selectors, None).await)
+                } else {
+                    HashSet::new()
                 };
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
-                HashSet::from(page.links(&selectors, None).await)
-            } else {
-                HashSet::new()
-            };
 
-        // crawl while links exists
-        loop {
-            for link in links.iter() {
-                while handle.load(Ordering::Relaxed) == 1 {
-                    interval.tick().await;
+            // crawl while links exists
+            loop {
+                for link in links.iter() {
+                    while handle.load(Ordering::Relaxed) == 1 {
+                        interval.tick().await;
+                    }
+                    if handle.load(Ordering::Relaxed) == 2 {
+                        links.clear();
+                        break;
+                    }
+                    if !self.is_allowed(&link) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    log("fetch", link);
+                    if delay_enabled {
+                        sleep(Duration::from_millis(*delay)).await;
+                    }
+                    let link = link.clone();
+                    let link_result = match on_link_find_callback {
+                        Some(cb) => cb(link.0),
+                        _ => link.0,
+                    };
+
+                    let page = Page::new(&link_result, &client).await;
+                    let page_links = page.links(&selectors, None).await;
+                    task::yield_now().await;
+                    new_links.extend(page_links);
+                    task::yield_now().await;
                 }
-                if handle.load(Ordering::Relaxed) == 2 {
-                    links.clear();
+
+                links.clone_from(&(&new_links - &self.links_visited));
+                new_links.clear();
+                if new_links.capacity() >= 1500 {
+                    new_links.shrink_to_fit();
+                }
+                task::yield_now().await;
+                if links.is_empty() {
                     break;
                 }
-                if !self.is_allowed(&link) {
-                    continue;
-                }
-                self.links_visited.insert(link.clone());
-                log("fetch", link);
-                if delay_enabled {
-                    sleep(Duration::from_millis(*delay)).await;
-                }
-                let link = link.clone();
-                let link_result = match on_link_find_callback {
-                    Some(cb) => cb(link.0),
-                    _ => link.0,
-                };
-
-                let page = Page::new(&link_result, &client).await;
-                let page_links = page.links(&selectors, None).await;
-                task::yield_now().await;
-                new_links.extend(page_links);
-                task::yield_now().await;
-            }
-
-            links.clone_from(&(&new_links - &self.links_visited));
-            new_links.clear();
-            if new_links.capacity() >= 1500 {
-                new_links.shrink_to_fit();
-            }
-            task::yield_now().await;
-            if links.is_empty() {
-                break;
             }
         }
     }
 
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
-        self.pages = Some(Box::new(Vec::new()));
-        let delay = self.configuration.delay;
-        let on_link_find_callback = self.on_link_find_callback;
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        let selectors = Arc::new(get_page_selectors(
+        let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
             self.configuration.tld,
-        ));
-        let throttle = Duration::from_millis(delay);
-        let mut links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                let page = Page::new(&self.domain, &client).await;
-                let u = page.get_url().into();
+        );
 
-                let link_result = match on_link_find_callback {
-                    Some(cb) => cb(u),
-                    _ => u,
-                };
+        if selectors.is_some() {
+            self.pages = Some(Box::new(Vec::new()));
+            let delay = self.configuration.delay;
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
+            let throttle = Duration::from_millis(delay);
+            let mut links: HashSet<CaseInsensitiveString> =
+                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
+                    let page = Page::new(&self.domain, &client).await;
+                    let u = page.get_url().into();
 
-                HashSet::from(page.links(&selectors, None).await)
-            } else {
-                HashSet::new()
-            };
-
-        let mut set: JoinSet<Page> = JoinSet::new();
-
-        // crawl while links exists
-        loop {
-            let stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                    .throttle(throttle);
-            tokio::pin!(stream);
-
-            while let Some(link) = stream.next().await {
-                while handle.load(Ordering::Relaxed) == 1 {
-                    interval.tick().await;
-                }
-                if handle.load(Ordering::Relaxed) == 2 {
-                    set.shutdown().await;
-                    break;
-                }
-                if !self.is_allowed(&link) {
-                    continue;
-                }
-                self.links_visited.insert(link.clone());
-                log("fetch", &link);
-                let client = client.clone();
-                let permit = SEM.acquire().await.unwrap();
-
-                set.spawn(async move {
                     let link_result = match on_link_find_callback {
-                        Some(cb) => cb(link.0),
-                        _ => link.0,
+                        Some(cb) => cb(u),
+                        _ => u,
                     };
 
-                    drop(permit);
+                    self.links_visited
+                        .insert(CaseInsensitiveString { 0: link_result });
 
-                    let page = Page::new(&link_result, &client).await;
-
-                    page
-                });
-            }
-
-            task::yield_now().await;
-
-            if links.capacity() >= 1500 {
-                links.shrink_to_fit();
-            }
-
-            while let Some(res) = set.join_next().await {
-                match res {
-                    Ok(msg) => {
-                        let page_links = msg.links(&*selectors, None).await;
-                        links.extend(&page_links - &self.links_visited);
-                        task::yield_now().await;
-                        self.pages.as_mut().unwrap().push(msg);
-                        task::yield_now().await;
-                    }
-                    _ => (),
+                    HashSet::from(page.links(&selectors, None).await)
+                } else {
+                    HashSet::new()
                 };
-            }
 
-            task::yield_now().await;
-            if links.is_empty() {
-                break;
+            let mut set: JoinSet<Page> = JoinSet::new();
+
+            // crawl while links exists
+            loop {
+                let stream =
+                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                        .throttle(throttle);
+                tokio::pin!(stream);
+
+                while let Some(link) = stream.next().await {
+                    while handle.load(Ordering::Relaxed) == 1 {
+                        interval.tick().await;
+                    }
+                    if handle.load(Ordering::Relaxed) == 2 {
+                        set.shutdown().await;
+                        break;
+                    }
+                    if !self.is_allowed(&link) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    log("fetch", &link);
+                    let client = client.clone();
+                    let permit = SEM.acquire().await.unwrap();
+
+                    set.spawn(async move {
+                        let link_result = match on_link_find_callback {
+                            Some(cb) => cb(link.0),
+                            _ => link.0,
+                        };
+
+                        drop(permit);
+
+                        let page = Page::new(&link_result, &client).await;
+
+                        page
+                    });
+                }
+
+                task::yield_now().await;
+
+                if links.capacity() >= 1500 {
+                    links.shrink_to_fit();
+                }
+
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Ok(msg) => {
+                            let page_links = msg.links(&*selectors, None).await;
+                            links.extend(&page_links - &self.links_visited);
+                            task::yield_now().await;
+                            self.pages.as_mut().unwrap().push(msg);
+                        }
+                        _ => (),
+                    };
+                }
+
+                task::yield_now().await;
+                if links.is_empty() {
+                    break;
+                }
             }
         }
     }

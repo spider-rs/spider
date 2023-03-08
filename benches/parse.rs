@@ -39,7 +39,9 @@ pub fn bench_speed(c: &mut Criterion) {
 
     let rt = spider::tokio::runtime::Runtime::new().unwrap();
 
-    let selectors = spider::page::get_page_selectors(&QUERY, false, false);
+    let selectors =
+        unsafe { spider::page::get_page_selectors(&QUERY, false, false).unwrap_unchecked() };
+
     let page = build(QUERY, Some(HTML.to_string()));
 
     group.bench_function(format!("Parse links ego: {}", sample_title), |b| {

@@ -79,30 +79,34 @@ async fn main() {
 
             let mut page_objects: Vec<_> = vec![];
 
-            let selectors = Arc::new(get_page_selectors(&cli.domain, cli.subdomains, cli.tld));
+            let selectors = get_page_selectors(&cli.domain, cli.subdomains, cli.tld);
 
-            for page in website.get_pages() {
-                let mut links: Vec<String> = vec![];
-
-                if *output_links {
-                    let page_links = page.links(&*selectors, Some(true)).await;
-
-                    for link in page_links {
-                        links.push(link.as_ref().to_owned());
+            if selectors.is_some() {
+                let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+    
+                for page in website.get_pages() {
+                    let mut links: Vec<String> = vec![];
+    
+                    if *output_links {
+                        let page_links = page.links(&*selectors, Some(true)).await;
+    
+                        for link in page_links {
+                            links.push(link.as_ref().to_owned());
+                        }
                     }
+    
+                    let page_json = json!({
+                        "url": page.get_url(),
+                        "links": links,
+                        "html": if *output_html {
+                            page.get_html()
+                        } else {
+                            Default::default()
+                        },
+                    });
+    
+                    page_objects.push(page_json);
                 }
-
-                let page_json = json!({
-                    "url": page.get_url(),
-                    "links": links,
-                    "html": if *output_html {
-                        page.get_html()
-                    } else {
-                        Default::default()
-                    },
-                });
-
-                page_objects.push(page_json);
             }
 
             let j = serde_json::to_string_pretty(&page_objects).unwrap();

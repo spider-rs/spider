@@ -94,117 +94,121 @@ pub fn get_page_selectors(
     url: &str,
     subdomains: bool,
     tld: bool,
-) -> (
+) -> Option<(
     Selector,
     CompactString,
     smallvec::SmallVec<[CompactString; 2]>,
-) {
-    let host = Url::parse(&url).expect("Invalid page URL");
-    let host_name = CompactString::from(
-        match convert_abs_path(&host, Default::default()).host_str() {
-            Some(host) => host.to_ascii_lowercase(),
-            _ => Default::default(),
-        },
-    );
-    let scheme = host.scheme();
+)> {
+    match Url::parse(&url) {
+        Ok(host) => {
+            let host_name = CompactString::from(
+                match convert_abs_path(&host, Default::default()).host_str() {
+                    Some(host) => host.to_ascii_lowercase(),
+                    _ => Default::default(),
+                },
+            );
+            let scheme = host.scheme();
 
-    if tld || subdomains {
-        let base = Url::parse(&url).expect("Invalid page URL");
-        let dname = domain_name(&base);
-        let scheme = base.scheme();
-        // . extension
-        let tlds = if tld {
-            string_concat::string_concat!(
-                "a[href^=",
-                r#"""#,
-                scheme,
-                "://",
-                dname,
-                r#"""#,
-                "i ]",
-                MEDIA_IGNORE_SELECTOR,
-                ","
-            )
-        // match everything that follows the base.
-        } else {
-            "".to_string()
-        };
+            Some(if tld || subdomains {
+                let base = Url::parse(&url).expect("Invalid page URL");
+                let dname = domain_name(&base);
+                let scheme = base.scheme();
+                // . extension
+                let tlds = if tld {
+                    string_concat::string_concat!(
+                        "a[href^=",
+                        r#"""#,
+                        scheme,
+                        "://",
+                        dname,
+                        r#"""#,
+                        "i ]",
+                        MEDIA_IGNORE_SELECTOR,
+                        ","
+                    )
+                // match everything that follows the base.
+                } else {
+                    "".to_string()
+                };
 
-        let absolute_selector = build_absolute_selectors(url);
+                let absolute_selector = build_absolute_selectors(url);
 
-        // absolute urls with subdomains
-        let absolute_selector = &if subdomains {
-            string_concat::string_concat!(
-                absolute_selector,
-                MEDIA_IGNORE_SELECTOR,
-                ",",
-                "a[href^=",
-                r#"""#,
-                scheme,
-                r#"""#,
-                "]",
-                "[href*=",
-                r#"""#,
-                ".",
-                dname,
-                ".",
-                r#"""#,
-                "i ]",
-                MEDIA_IGNORE_SELECTOR
-            )
-        } else {
-            absolute_selector
-        };
+                // absolute urls with subdomains
+                let absolute_selector = &if subdomains {
+                    string_concat::string_concat!(
+                        absolute_selector,
+                        MEDIA_IGNORE_SELECTOR,
+                        ",",
+                        "a[href^=",
+                        r#"""#,
+                        scheme,
+                        r#"""#,
+                        "]",
+                        "[href*=",
+                        r#"""#,
+                        ".",
+                        dname,
+                        ".",
+                        r#"""#,
+                        "i ]",
+                        MEDIA_IGNORE_SELECTOR
+                    )
+                } else {
+                    absolute_selector
+                };
 
-        // static html group parse
-        (
-            unsafe {
-                Selector::parse(&string_concat::string_concat!(
-                    tlds,
-                    MEDIA_SELECTOR_RELATIVE,
-                    ",",
-                    absolute_selector,
-                    ",",
+                // static html group parse
+                (
+                    unsafe {
+                        Selector::parse(&string_concat::string_concat!(
+                            tlds,
+                            MEDIA_SELECTOR_RELATIVE,
+                            ",",
+                            absolute_selector,
+                            ",",
+                            MEDIA_SELECTOR_RELATIVE,
+                            " ",
+                            MEDIA_SELECTOR_STATIC,
+                            ", ",
+                            absolute_selector,
+                            " ",
+                            MEDIA_SELECTOR_STATIC
+                        ))
+                        .unwrap_unchecked()
+                    },
+                    dname.into(),
+                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+                )
+            } else {
+                let absolute_selector = build_absolute_selectors(url);
+                let static_html_selector = string_concat::string_concat!(
                     MEDIA_SELECTOR_RELATIVE,
                     " ",
                     MEDIA_SELECTOR_STATIC,
-                    ", ",
+                    ",",
+                    " ",
                     absolute_selector,
                     " ",
                     MEDIA_SELECTOR_STATIC
-                ))
-                .unwrap_unchecked()
-            },
-            dname.into(),
-            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-        )
-    } else {
-        let absolute_selector = build_absolute_selectors(url);
-        let static_html_selector = string_concat::string_concat!(
-            MEDIA_SELECTOR_RELATIVE,
-            " ",
-            MEDIA_SELECTOR_STATIC,
-            ",",
-            " ",
-            absolute_selector,
-            " ",
-            MEDIA_SELECTOR_STATIC
-        );
+                );
 
-        (
-            unsafe {
-                Selector::parse(&string_concat::string_concat!(
-                    MEDIA_SELECTOR_RELATIVE,
-                    ",",
-                    absolute_selector,
-                    ",",
-                    static_html_selector
-                ))
-                .unwrap_unchecked()
-            },
-            CompactString::default(),
-            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-        )
+                (
+                    unsafe {
+                        Selector::parse(&string_concat::string_concat!(
+                            MEDIA_SELECTOR_RELATIVE,
+                            ",",
+                            absolute_selector,
+                            ",",
+                            static_html_selector
+                        ))
+                        .unwrap_unchecked()
+                    },
+                    CompactString::default(),
+                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+                )
+            })
+        }
+        _ => None,
     }
 }
 
@@ -384,7 +388,7 @@ async fn parse_links() {
     let page: Page = Page::new(&link_result, &client).await;
     let selector = get_page_selectors(&link_result, false, false);
 
-    let links = page.links(&selector, None).await;
+    let links = page.links(&selector.unwrap(), None).await;
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),
