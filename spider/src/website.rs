@@ -8,11 +8,11 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use tokio::runtime::Handle;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 use tokio::task;
 use tokio::task::JoinSet;
@@ -69,7 +69,8 @@ lazy_static! {
                 (logical) / (physical) as usize
             } else {
                 logical
-            } * 10).max(50),
+            } * 10)
+                .max(50),
         )
     };
 }
@@ -362,27 +363,25 @@ impl Website {
                         let shared = shared.clone();
                         task::yield_now().await;
 
-                        set.spawn_on(async move {
-                            let link_result = match on_link_find_callback {
-                                Some(cb) => cb(link.0),
-                                _ => link.0,
-                            };
-                            let page = Page::new(&link_result, &shared.0).await;
-                            let page_links = page
-                                .links(
-                                    &shared.1,
-                                    Some(true),
-                                )
-                                .await;
+                        set.spawn_on(
+                            async move {
+                                let link_result = match on_link_find_callback {
+                                    Some(cb) => cb(link.0),
+                                    _ => link.0,
+                                };
+                                let page = Page::new(&link_result, &shared.0).await;
+                                let page_links = page.links(&shared.1, Some(true)).await;
 
-                            drop(permit);
+                                drop(permit);
 
-                            page_links
-                        }, &chandle);
+                                page_links
+                            },
+                            &chandle,
+                        );
 
                         task::yield_now().await;
                     }
-                    _ => break
+                    _ => break,
                 }
             }
 
@@ -393,9 +392,12 @@ impl Website {
             }
 
             while let Some(res) = set.join_next().await {
-                let msg = res.unwrap();
-                links.extend(&msg - &self.links_visited);
-                task::yield_now().await;
+                match res {
+                    Ok(msg) => {
+                        links.extend(&msg - &self.links_visited);
+                    }
+                    _ => (),
+                };
             }
 
             if links.is_empty() {
@@ -513,7 +515,7 @@ impl Website {
                     .throttle(throttle);
             tokio::pin!(stream);
 
-            while let Some(l) = stream.next().await {
+            while let Some(link) = stream.next().await {
                 while handle.load(Ordering::Relaxed) == 1 {
                     interval.tick().await;
                 }
@@ -521,11 +523,10 @@ impl Website {
                     set.shutdown().await;
                     break;
                 }
-                if !self.is_allowed(&l) {
+                if !self.is_allowed(&link) {
                     continue;
                 }
-                let link = l.clone();
-                self.links_visited.insert(l);
+                self.links_visited.insert(link.clone());
                 log("fetch", &link);
                 let client = client.clone();
                 let permit = SEM.acquire().await.unwrap();
@@ -551,13 +552,16 @@ impl Website {
             }
 
             while let Some(res) = set.join_next().await {
-                let msg = res.unwrap();
-                let page_links = msg.links(&*selectors, None).await;
-                task::yield_now().await;
-                links.extend(&page_links - &self.links_visited);
-                task::yield_now().await;
-                self.pages.as_mut().unwrap().push(msg);
-                task::yield_now().await;
+                match res {
+                    Ok(msg) => {
+                        let page_links = msg.links(&*selectors, None).await;
+                        links.extend(&page_links - &self.links_visited);
+                        task::yield_now().await;
+                        self.pages.as_mut().unwrap().push(msg);
+                        task::yield_now().await;
+                    }
+                    _ => (),
+                };
             }
 
             task::yield_now().await;
