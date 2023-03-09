@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.22.3"
+version = "1.22.4"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -27,7 +27,7 @@ ua_generator = { git = "https://github.com/a11ywatch/ua_generator.git", version 
 string_concat = "0.0.1"
 lazy_static = "1.4.0"
 compact_str = "0.7.0"
-fast_html5ever = "0.26.0"
+fast_html5ever = "0.26.1"
 selectors = "0.24.0"
 tendril = "0.4.3"
 ahash = "0.8.3"

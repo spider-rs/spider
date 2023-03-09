@@ -69,9 +69,7 @@ impl TreeSink for Html {
     }
 
     // Create a comment node. todo: remove from tree sink
-    fn create_comment(&mut self, _: StrTendril) -> NodeId {
-        self.root_element().id()
-    }
+    fn create_comment(&mut self, _: StrTendril) {}
 
     // Append a DOCTYPE element to the Document node.
     fn append_doctype_to_document(
