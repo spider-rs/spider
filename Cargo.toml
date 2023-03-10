@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "spider",
+    "spider_worker",
     "spider_cli",
     # internal
     "examples",

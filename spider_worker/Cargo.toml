@@ -1,12 +1,12 @@
 [package]
-name = "spider_cli"
+name = "spider_worker"
 version = "1.22.6"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider", "spider_cli"]
-categories = ["web-programming", "command-line-utilities"]
+categories = ["web-programming"]
 license = "MIT"
 documentation = "https://docs.rs/spider"
 include = ["src/*", "LICENSE", "README.md"]
@@ -16,22 +16,9 @@ edition = "2021"
 maintenance = { status = "as-is" }
 
 [dependencies]
-clap = { version = "3.1.9", features = ["derive"] }
-env_logger = "0.9.0"
-serde_json = "1.0.81"
-
-[build-dependencies]
-quote = "1.0.18"
-failure_derive = "0.1.8"
+warp = "0.3.3"
+lazy_static = "1.4.0"
 
 [dependencies.spider]
 version = "1.22.6"
 path = "../spider"
-
-[[bin]]
-name = "spider"
-path = "src/main.rs"
-doc = false
-
-[features]
-jemalloc = ["spider/jemalloc"]

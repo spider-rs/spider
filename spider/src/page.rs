@@ -303,6 +303,7 @@ impl Page {
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
+
         let parent_frags = &selectors.2; // todo: allow mix match tpt
         let parent_host = &parent_frags[0];
         let parent_host_scheme = &parent_frags[1];
@@ -312,6 +313,7 @@ impl Page {
                 match element.attr("href") {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
+
                         let mut can_process = match abs.host_str() {
                             Some(host) => host == parent_host.as_str(),
                             _ => false,
@@ -319,10 +321,7 @@ impl Page {
 
                         if can_process {
                             if abs.scheme() != parent_host_scheme.as_str() {
-                                unsafe {
-                                    abs.set_scheme(parent_host_scheme.as_str())
-                                        .unwrap_err_unchecked();
-                                }
+                                let _ = abs.set_scheme(parent_host_scheme.as_str());
                             }
 
                             let h = abs.as_str();

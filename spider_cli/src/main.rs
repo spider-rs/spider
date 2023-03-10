@@ -83,18 +83,18 @@ async fn main() {
 
             if selectors.is_some() {
                 let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-    
+
                 for page in website.get_pages() {
                     let mut links: Vec<String> = vec![];
-    
+
                     if *output_links {
                         let page_links = page.links(&*selectors, Some(true)).await;
-    
+
                         for link in page_links {
                             links.push(link.as_ref().to_owned());
                         }
                     }
-    
+
                     let page_json = json!({
                         "url": page.get_url(),
                         "links": links,
@@ -104,7 +104,7 @@ async fn main() {
                             Default::default()
                         },
                     });
-    
+
                     page_objects.push(page_json);
                 }
             }

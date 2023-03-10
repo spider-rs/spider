@@ -63,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.22.4", features = ["regex"] }
+spider = { version = "1.22.6", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -86,11 +86,11 @@ async fn main() {
 
 ## Features
 
-Currently we have three optional feature flags. Regex blacklisting, jemaloc backend, and randomizing User-Agents.
+Currently we have three optional feature flags. Regex blacklisting, jemaloc backend, decentralization, and randomizing User-Agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.22.4", features = ["regex", "ua_generator"] }
+spider = { version = "1.22.6", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -99,7 +99,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.22.4", features = ["jemalloc"] }
+spider = { version = "1.22.6", features = ["jemalloc"] }
 ```
 
 ## Blocking
@@ -190,3 +190,13 @@ async fn main() {
     }
 }
 ```
+
+### Decentralized [Experimental]
+
+1. cargo install `spider_worker`.
+1. `spider_worker`.
+1. `SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized`
+
+Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer. 
+The proxy needs to match the transport type for the request to fullfill. A WIP for support to handle
+http and https transparent proxies.

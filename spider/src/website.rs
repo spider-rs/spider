@@ -5,9 +5,9 @@ use crate::page::{build, get_page_selectors, Page};
 use crate::utils::{log, Handler, CONTROLLER};
 use compact_str::CompactString;
 use hashbrown::HashSet;
-use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
+use reqwest::{header, Proxy};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -208,11 +208,11 @@ impl Website {
     }
 
     /// configure http client
-    fn configure_http_client(&mut self) -> Client {
+    pub fn configure_http_client(&mut self) -> Client {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
-        let client = Client::builder()
+        let mut client = Client::builder()
             .default_headers(headers)
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
@@ -222,6 +222,16 @@ impl Website {
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
+
+        if cfg!(all(feature = "decentralized", not(test))) {
+            client = client.proxy(
+                Proxy::all(
+                    std::env::var("SPIDER_WORKER")
+                        .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string()),
+                )
+                .unwrap(),
+            );
+        }
 
         // should unwrap using native-tls-alpn
         unsafe {
@@ -373,6 +383,7 @@ impl Website {
                                         _ => link.0,
                                     };
                                     let page = Page::new(&link_result, &shared.0).await;
+
                                     let page_links = page.links(&shared.1, Some(true)).await;
 
                                     drop(permit);
@@ -381,17 +392,9 @@ impl Website {
                                 },
                                 &chandle,
                             );
-
-                            task::yield_now().await;
                         }
                         _ => break,
                     }
-                }
-
-                task::yield_now().await;
-
-                if links.capacity() >= 1500 {
-                    links.shrink_to_fit();
                 }
 
                 while let Some(res) = set.join_next().await {

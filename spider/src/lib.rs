@@ -33,7 +33,7 @@
 pub extern crate compact_str;
 pub extern crate hashbrown;
 extern crate log;
-extern crate reqwest;
+pub extern crate reqwest;
 pub extern crate tokio;
 
 #[cfg(feature = "ua_generator")]
