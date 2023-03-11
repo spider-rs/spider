@@ -63,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.22.8", features = ["regex"] }
+spider = { version = "1.23.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -90,7 +90,7 @@ Currently we have three optional feature flags. Regex blacklisting, jemaloc back
 
 ```toml
 [dependencies]
-spider = { version = "1.22.8", features = ["regex", "ua_generator"] }
+spider = { version = "1.23.0", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -99,7 +99,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.22.8", features = ["jemalloc"] }
+spider = { version = "1.23.0", features = ["jemalloc"] }
 ```
 
 ## Blocking
@@ -108,7 +108,7 @@ If you need a blocking sync imp use a version prior to `v1.12.0`.
 
 ## Pause, Resume, and Shutdown
 
-If you are performing large workloads you may need to control the crawler using the following:
+If you are performing large workloads you may need to control the crawler by enabling the `control` feature flag:
 
 ```rust
 extern crate spider;

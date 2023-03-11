@@ -38,13 +38,13 @@
 //!     website.crawl().await;
 //!
 //!     let links = website.get_links();
-//! 
+//!
 //!     for link in links {
 //!         println!("- {:?}", link.as_ref());
 //!     }
 //! }
 //! ```
-//! 
+//!
 //! ## Feature flags
 //!
 //! - `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
@@ -52,7 +52,7 @@
 //! - `jemalloc`: Enables the jemalloc memory backend.
 //! - `decentralized`: Enables decentralized processing of IO
 //!         requires the [spider_worker] startup before crawls.
-
+//! - `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
 
 pub extern crate compact_str;
 pub extern crate hashbrown;

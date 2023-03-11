@@ -2,7 +2,7 @@ use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
-use crate::utils::{log, Handler, CONTROLLER};
+use crate::utils::log;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::header::CONNECTION;
@@ -249,7 +249,10 @@ impl Website {
     }
 
     /// setup atomic controller
+    #[cfg(feature = "control")]
     fn configure_handler(&self) -> Arc<AtomicI8> {
+        use crate::utils::{Handler, CONTROLLER};
+
         let paused = Arc::new(AtomicI8::new(0));
         let handle = paused.clone();
         let domain = self.domain.clone();
@@ -285,7 +288,8 @@ impl Website {
     }
 
     /// setup config for crawl
-    pub async fn setup(&mut self) -> (Client, Arc<AtomicI8>) {
+    #[cfg(feature = "control")]
+    pub async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
         let client = self.configure_http_client();
 
         // allow fresh crawls to run fully
@@ -295,8 +299,21 @@ impl Website {
 
         (
             self.configure_robots_parser(client).await,
-            self.configure_handler(),
+            Some(self.configure_handler()),
         )
+    }
+
+    /// setup config for crawl
+    #[cfg(not(feature = "control"))]
+    pub async fn setup<T>(&mut self) -> (Client, Option<T>) {
+        let client = self.configure_http_client();
+
+        // allow fresh crawls to run fully
+        if !self.links_visited.is_empty() {
+            self.links_visited.clear();
+        }
+
+        (self.configure_robots_parser(client).await, None)
     }
 
     /// Start to crawl website with async conccurency
@@ -321,7 +338,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently
-    async fn crawl_concurrent(&mut self, client: Client, handle: Arc<AtomicI8>) {
+    async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
@@ -364,13 +381,19 @@ impl Website {
                 loop {
                     match stream.next().await {
                         Some(link) => {
-                            while handle.load(Ordering::Relaxed) == 1 {
-                                interval.tick().await;
+                            match handle.as_ref() {
+                                Some(handle) => {
+                                    while handle.load(Ordering::Relaxed) == 1 {
+                                        interval.tick().await;
+                                    }
+                                    if handle.load(Ordering::Relaxed) == 2 {
+                                        set.shutdown().await;
+                                        break;
+                                    }
+                                }
+                                None => (),
                             }
-                            if handle.load(Ordering::Relaxed) == 2 {
-                                set.shutdown().await;
-                                break;
-                            }
+
                             if !self.is_allowed(&link) {
                                 continue;
                             }
@@ -418,7 +441,7 @@ impl Website {
     }
 
     /// Start to crawl website sequential
-    async fn crawl_sequential(&mut self, client: &Client, handle: Arc<AtomicI8>) {
+    async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
@@ -451,12 +474,17 @@ impl Website {
             // crawl while links exists
             loop {
                 for link in links.iter() {
-                    while handle.load(Ordering::Relaxed) == 1 {
-                        interval.tick().await;
-                    }
-                    if handle.load(Ordering::Relaxed) == 2 {
-                        links.clear();
-                        break;
+                    match handle.as_ref() {
+                        Some(handle) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                links.clear();
+                                break;
+                            }
+                        }
+                        None => (),
                     }
                     if !self.is_allowed(&link) {
                         continue;
@@ -493,7 +521,7 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html
-    async fn scrape_concurrent(&mut self, client: &Client, handle: Arc<AtomicI8>) {
+    async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
             self.configuration.subdomains,
@@ -536,12 +564,17 @@ impl Website {
                 tokio::pin!(stream);
 
                 while let Some(link) = stream.next().await {
-                    while handle.load(Ordering::Relaxed) == 1 {
-                        interval.tick().await;
-                    }
-                    if handle.load(Ordering::Relaxed) == 2 {
-                        set.shutdown().await;
-                        break;
+                    match handle.as_ref() {
+                        Some(handle) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                set.shutdown().await;
+                                break;
+                            }
+                        }
+                        None => (),
                     }
                     if !self.is_allowed(&link) {
                         continue;
@@ -705,7 +738,8 @@ async fn test_respect_robots_txt() {
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = Some(Box::new("*".into()));
 
-    let (client, _) = website.setup().await;
+    let (client, _): (Client, Option<Arc<AtomicI8>>) = website.setup().await;
+
     website.configure_robots_parser(client).await;
 
     assert_eq!(website.configuration.delay, 0);
@@ -717,7 +751,7 @@ async fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = Some(Box::new("bingbot".into()));
 
-    let (client_second, _) = website_second.setup().await;
+    let (client_second, _): (Client, Option<Arc<AtomicI8>>) = website_second.setup().await;
     website_second.configure_robots_parser(client_second).await;
 
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
@@ -725,7 +759,7 @@ async fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    let (client_third, _) = website_third.setup().await;
+    let (client_third, _): (Client, Option<Arc<AtomicI8>>) = website_third.setup().await;
 
     website_third.configure_robots_parser(client_third).await;
 
@@ -777,6 +811,7 @@ async fn test_link_duplicates() {
     assert!(has_unique_elements(&*website.links_visited));
 }
 
+#[cfg(feature = "control")]
 #[tokio::test]
 #[ignore]
 async fn test_crawl_pause_resume() {
@@ -809,6 +844,7 @@ async fn test_crawl_pause_resume() {
     );
 }
 
+#[cfg(feature = "control")]
 #[tokio::test]
 #[ignore]
 async fn test_crawl_shutdown() {
