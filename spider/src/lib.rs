@@ -23,12 +23,36 @@
 //! [`crawl_sync`]: website/struct.Website.html#method.crawl_sync
 //! [`scrape`]: website/struct.Website.html#method.scrape
 //!
-//! # Basic usage
+//! # Examples
 //!
-//! First, you will need to add `spider` to your `Cargo.toml`.
+//! A simple crawl to index a website:
 //!
-//! Next, simply add the website url in the struct of website and crawl,
-//! you can also crawl sequentially.
+//! ```no_run
+//! use spider::tokio;
+//! use spider::website::Website;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let mut website: Website = Website::new("https://rsseau.fr");
+//!
+//!     website.crawl().await;
+//!
+//!     let links = website.get_links();
+//! 
+//!     for link in links {
+//!         println!("- {:?}", link.as_ref());
+//!     }
+//! }
+//! ```
+//! 
+//! ## Feature flags
+//!
+//! - `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
+//! - `regex`: Enables blacklisting paths with regx
+//! - `jemalloc`: Enables the jemalloc memory backend.
+//! - `decentralized`: Enables decentralized processing of IO
+//!         requires the [spider_worker] startup before crawls.
+
 
 pub extern crate compact_str;
 pub extern crate hashbrown;

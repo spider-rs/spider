@@ -224,11 +224,15 @@ impl Website {
             .pool_idle_timeout(None);
 
         if cfg!(all(feature = "decentralized", not(test))) {
+            let worker_url = std::env::var("SPIDER_WORKER")
+                .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string());
+
             client = client.proxy(
-                Proxy::all(
-                    std::env::var("SPIDER_WORKER")
-                        .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string()),
-                )
+                if worker_url.starts_with("https") {
+                    Proxy::all(worker_url)
+                } else {
+                    Proxy::http(worker_url)
+                }
                 .unwrap(),
             );
         }
