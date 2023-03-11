@@ -1,7 +1,12 @@
 use std::convert::Infallible;
 
-use spider::{tokio, utils::fetch_page_html, website::Website};
-use warp::{path::FullPath, Filter};
+use spider::{
+    hashbrown::HashSet,
+    page::{get_raw_selectors, Page},
+    tokio,
+    website::Website,
+};
+use warp::{hyper::body::Bytes, path::FullPath, Filter};
 
 #[macro_use]
 extern crate lazy_static;
@@ -16,24 +21,44 @@ lazy_static! {
     };
 }
 
+/// convert the data into vec bytes
+fn serialize(set: HashSet<Bytes>) -> Vec<u8> {
+    let cap = set.len();
+    let cap = cap * 2;
+
+    set.into_iter().fold(Vec::with_capacity(cap), |mut acc, v| {
+        acc.extend_from_slice(&v);
+        acc.extend_from_slice(" ".as_bytes());
+
+        acc
+    })
+}
+
 // forward request to get resources
 async fn forward(path: FullPath, host: String) -> Result<impl warp::Reply, Infallible> {
-    let data = fetch_page_html(
-        &format!(
-            "{}://{}{}",
-            if host.ends_with("443") {
-                "https"
-            } else {
-                "http"
-            },
-            host,
-            path.as_str()
-        ),
-        &CLIENT,
-    )
-    .await;
+    let url = &format!(
+        "{}://{}{}",
+        if host.ends_with("443") {
+            "https"
+        } else {
+            "http"
+        },
+        host,
+        path.as_str()
+    );
 
-    Ok(data.unwrap_or_default())
+    let page = Page::new(&url, &CLIENT).await;
+
+    if !page.get_html().is_empty() {
+        let selectors = get_raw_selectors(url, false, false).unwrap();
+        let links = page
+            .links_stream::<Bytes>(&(&selectors.0, &selectors.1))
+            .await;
+
+        Ok(serialize(links))
+    } else {
+        Ok(Default::default())
+    }
 }
 
 #[tokio::main]

@@ -1,7 +1,8 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{build, get_page_selectors, Page};
+use crate::page::{get_page_selectors, Page};
+
 use crate::utils::log;
 use compact_str::CompactString;
 use hashbrown::HashSet;
@@ -16,7 +17,6 @@ use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 use tokio::task;
 use tokio::task::JoinSet;
-use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
 /// case-insensitive string handling
@@ -167,14 +167,26 @@ impl Website {
     }
 
     /// page getter
+    #[cfg(not(feature = "decentralized"))]
     pub fn get_pages(&self) -> Vec<Page> {
         if !self.pages.is_none() {
             unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
         } else {
             self.links_visited
                 .iter()
-                .map(|l| build(&l.0, Default::default()))
+                .map(|l| crate::page::build(&l.0, Default::default()))
                 .collect::<Vec<Page>>()
+        }
+    }
+
+    /// page getter
+    #[cfg(feature = "decentralized")]
+    pub fn get_pages(&self) -> Vec<Page> {
+        if !self.pages.is_none() {
+            unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
+        } else {
+            // not used for scrapping atm
+            Default::default()
         }
     }
 
@@ -227,14 +239,7 @@ impl Website {
             let worker_url = std::env::var("SPIDER_WORKER")
                 .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string());
 
-            client = client.proxy(
-                if worker_url.starts_with("https") {
-                    Proxy::all(worker_url)
-                } else {
-                    Proxy::http(worker_url)
-                }
-                .unwrap(),
-            );
+            client = client.proxy(Proxy::all(worker_url).unwrap());
         }
 
         // should unwrap using native-tls-alpn
@@ -331,13 +336,21 @@ impl Website {
     }
 
     /// Start to scrape/download website with async conccurency
+    #[cfg(not(feature = "decentralized"))]
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
 
         self.scrape_concurrent(&client, handle).await;
     }
 
+    /// Start to scrape/download website with async conccurency
+    #[cfg(feature = "decentralized")]
+    pub async fn scrape(&mut self) {
+        unimplemented!()
+    }
+
     /// Start to crawl website concurrently
+    #[cfg(not(feature = "decentralized"))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
@@ -355,7 +368,9 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> =
                 if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
                     let page = Page::new(&self.domain, &shared.0).await;
+
                     let u = page.get_url().into();
+
                     let link_result = match on_link_find_callback {
                         Some(cb) => cb(u),
                         _ => u,
@@ -363,6 +378,7 @@ impl Website {
 
                     self.links_visited
                         .insert(CaseInsensitiveString { 0: link_result });
+
                     HashSet::from(page.links(&shared.1, None).await)
                 } else {
                     HashSet::new()
@@ -410,7 +426,6 @@ impl Website {
                                         _ => link.0,
                                     };
                                     let page = Page::new(&link_result, &shared.0).await;
-
                                     let page_links = page.links(&shared.1, Some(true)).await;
 
                                     drop(permit);
@@ -437,6 +452,129 @@ impl Website {
                     break;
                 }
             }
+        }
+    }
+
+    /// Start to crawl website concurrently
+    #[cfg(feature = "decentralized")]
+    async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
+        match url::Url::parse(&self.domain) {
+            Ok(domain) => {
+                let domain = domain.as_str();
+                let on_link_find_callback = self.on_link_find_callback;
+                let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
+                let throttle = Box::pin(self.get_delay());
+
+                // http worker verify
+                let http_worker = cfg!(feature = "decentralized")
+                    && std::env::var("SPIDER_WORKER")
+                        .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
+                        .starts_with("http:");
+
+                let mut links: HashSet<CaseInsensitiveString> = {
+                    let domain = CompactString::new(domain);
+
+                    if self.is_allowed_default(&domain) {
+                        let domain = if http_worker && domain.starts_with("https:") {
+                            domain.replacen("https", "http", 1)
+                        } else {
+                            domain.to_string()
+                        };
+
+                        let page = Page::new(&domain, &client).await;
+
+                        let link_result = match on_link_find_callback {
+                            Some(cb) => cb(domain.into()),
+                            _ => domain.into(),
+                        };
+
+                        self.links_visited
+                            .insert(CaseInsensitiveString { 0: link_result });
+
+                        HashSet::from(page.links)
+                    } else {
+                        HashSet::new()
+                    }
+                };
+
+                let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                let chandle = Handle::current();
+
+                // crawl while links exists
+                loop {
+                    let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                        links.drain().collect(),
+                    )
+                    .throttle(*throttle);
+                    tokio::pin!(stream);
+
+                    loop {
+                        match stream.next().await {
+                            Some(link) => {
+                                match handle.as_ref() {
+                                    Some(handle) => {
+                                        while handle.load(Ordering::Relaxed) == 1 {
+                                            interval.tick().await;
+                                        }
+                                        if handle.load(Ordering::Relaxed) == 2 {
+                                            set.shutdown().await;
+                                            break;
+                                        }
+                                    }
+                                    None => (),
+                                }
+
+                                if !self.is_allowed(&link) {
+                                    continue;
+                                }
+                                log("fetch", &link);
+                                self.links_visited.insert(link.clone());
+                                let permit = SEM.acquire().await.unwrap();
+                                let client = client.clone();
+                                task::yield_now().await;
+
+                                set.spawn_on(
+                                    async move {
+                                        let link_results =
+                                            if http_worker && link.0.starts_with("https") {
+                                                link.0.replacen("https", "http", 1).into()
+                                            } else {
+                                                link.0
+                                            };
+
+                                        let link_results = match on_link_find_callback {
+                                            Some(cb) => cb(link_results),
+                                            _ => link_results,
+                                        };
+
+                                        let page = Page::new(&link_results, &client).await;
+
+                                        drop(permit);
+
+                                        page.links
+                                    },
+                                    &chandle,
+                                );
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    while let Some(res) = set.join_next().await {
+                        match res {
+                            Ok(msg) => {
+                                links.extend(&msg - &self.links_visited);
+                            }
+                            _ => (),
+                        };
+                    }
+
+                    if links.is_empty() {
+                        break;
+                    }
+                }
+            }
+            _ => (),
         }
     }
 
@@ -486,14 +624,19 @@ impl Website {
                         }
                         None => (),
                     }
+
                     if !self.is_allowed(&link) {
                         continue;
                     }
-                    self.links_visited.insert(link.clone());
-                    log("fetch", link);
+
+                    log("fetch", &link);
+
                     if delay_enabled {
-                        sleep(Duration::from_millis(*delay)).await;
+                        tokio::time::sleep(Duration::from_millis(*delay)).await;
                     }
+
+                    self.links_visited.insert(link.clone());
+
                     let link = link.clone();
                     let link_result = match on_link_find_callback {
                         Some(cb) => cb(link.0),
@@ -502,7 +645,7 @@ impl Website {
 
                     let page = Page::new(&link_result, &client).await;
                     let page_links = page.links(&selectors, None).await;
-                    task::yield_now().await;
+
                     new_links.extend(page_links);
                     task::yield_now().await;
                 }
@@ -521,6 +664,7 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html
+    #[cfg(not(feature = "decentralized"))]
     async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
@@ -625,6 +769,7 @@ impl Website {
     }
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn crawl() {
     let url = "https://choosealicense.com";
@@ -639,6 +784,7 @@ async fn crawl() {
     );
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn scrape() {
     let mut website: Website = Website::new("https://choosealicense.com");
@@ -654,6 +800,7 @@ async fn scrape() {
     assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn crawl_subsequential() {
     let mut website: Website = Website::new("https://choosealicense.com");
@@ -669,6 +816,7 @@ async fn crawl_subsequential() {
 }
 
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn crawl_invalid() {
     let url = "https://w.com";
     let mut website: Website = Website::new(url);
@@ -680,6 +828,19 @@ async fn crawl_invalid() {
 }
 
 #[tokio::test]
+#[cfg(feature = "decentralized")]
+async fn crawl_invalid() {
+    let url = "https://w.com";
+    let mut website: Website = Website::new(url);
+    website.crawl().await;
+    let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
+    uniq.insert(format!("{}/", url.to_string().replace("https:", "http:")).into()); // TODO: remove trailing slash mutate
+
+    assert_eq!(website.links_visited, uniq); // only the target url should exist
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.on_link_find_callback = Some(|s| {
@@ -687,6 +848,7 @@ async fn crawl_link_callback() {
         s
     });
     website.crawl().await;
+
     assert!(
         website
             .links_visited
@@ -766,6 +928,7 @@ async fn test_respect_robots_txt() {
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn test_crawl_subdomains() {
     let mut website: Website = Website::new("https://choosealicense.com");
@@ -780,6 +943,7 @@ async fn test_crawl_subdomains() {
     );
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
@@ -825,7 +989,7 @@ async fn test_crawl_pause_resume() {
     tokio::spawn(async move {
         pause(url).await;
         // static website test pause/resume - scan will never take longer than 5secs for target website choosealicense
-        sleep(Duration::from_millis(5000)).await;
+        tokio::time::sleep(Duration::from_millis(5000)).await;
         resume(url).await;
     });
 

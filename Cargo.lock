@@ -3191,6 +3191,7 @@ name = "spider"
 version = "1.23.0"
 dependencies = [
  "ahash",
+ "bytes",
  "compact_str",
  "cssparser",
  "ego-tree",

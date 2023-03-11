@@ -200,3 +200,5 @@ async fn main() {
 Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer. 
 The proxy needs to match the transport type for the request to fullfill. A WIP for support to handle
 http and https transparent proxies.
+
+Currently TLD and subdomains crawling is not supported when the feature is enabled.

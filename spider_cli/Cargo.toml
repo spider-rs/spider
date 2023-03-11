@@ -11,6 +11,7 @@ license = "MIT"
 documentation = "https://docs.rs/spider"
 include = ["src/*", "LICENSE", "README.md"]
 edition = "2021"
+resolver = "2"
 
 [badges]
 maintenance = { status = "as-is" }

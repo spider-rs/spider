@@ -26,6 +26,25 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
     }
 }
 
+/// Perform a network request to a resource extracting all content as text.
+#[cfg(feature = "decentralized")]
+pub async fn fetch_page(url: &str, client: &Client) -> Option<bytes::Bytes> {
+    match client.get(url).send().await {
+        Ok(res) if res.status() == StatusCode::OK => match res.bytes().await {
+            Ok(text) => Some(text),
+            Err(_) => {
+                log("- error fetching {}", &url);
+                None
+            }
+        },
+        Ok(_) => None,
+        Err(_) => {
+            log("- error parsing html bytes {}", &url);
+            None
+        }
+    }
+}
+
 /// log to console if configuration verbose.
 pub fn log(message: &'static str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {
