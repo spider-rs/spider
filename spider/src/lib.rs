@@ -64,7 +64,7 @@ pub extern crate tokio;
 extern crate ua_generator;
 pub extern crate url;
 #[macro_use]
-extern crate string_concat;
+pub extern crate string_concat;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]

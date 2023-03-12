@@ -37,13 +37,15 @@ async fn forward(
     host: String,
     referer: Option<String>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let url = &format!(
-        "{}://{}{}",
+    use spider::string_concat::{string_concat, string_concat_impl};
+
+    let url = &string_concat!(
         if host.ends_with("443") {
             "https"
         } else {
             "http"
         },
+        "://",
         host,
         path.as_str()
     );
