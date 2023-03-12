@@ -1,14 +1,14 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{get_page_selectors, Page};
+use crate::page::{build, get_page_selectors, Page};
 
 use crate::utils::log;
 use compact_str::CompactString;
 use hashbrown::HashSet;
+use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use reqwest::{header, Proxy};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -167,7 +167,6 @@ impl Website {
     }
 
     /// page getter
-    #[cfg(not(feature = "decentralized"))]
     pub fn get_pages(&self) -> Vec<Page> {
         if !self.pages.is_none() {
             unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
@@ -176,17 +175,6 @@ impl Website {
                 .iter()
                 .map(|l| crate::page::build(&l.0, Default::default()))
                 .collect::<Vec<Page>>()
-        }
-    }
-
-    /// page getter
-    #[cfg(feature = "decentralized")]
-    pub fn get_pages(&self) -> Vec<Page> {
-        if !self.pages.is_none() {
-            unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
-        } else {
-            // not used for scrapping atm
-            Default::default()
         }
     }
 
@@ -220,12 +208,40 @@ impl Website {
     }
 
     /// configure http client
-    pub fn configure_http_client(&mut self) -> Client {
+    #[cfg(not(feature = "decentralized"))]
+    pub fn configure_http_client(&mut self, _: bool) -> Client {
+        let mut headers = header::HeaderMap::new();
+        headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
+
+        let client = Client::builder()
+            .user_agent(match &self.configuration.user_agent {
+                Some(ua) => ua.as_str(),
+                _ => &get_ua(),
+            })
+            .default_headers(headers)
+            .brotli(true)
+            .gzip(true)
+            .tcp_keepalive(Duration::from_millis(500))
+            .pool_idle_timeout(None);
+
+        // should unwrap using native-tls-alpn
+        unsafe {
+            match &self.configuration.request_timeout {
+                Some(t) => client.timeout(**t),
+                _ => client,
+            }
+            .build()
+            .unwrap_unchecked()
+        }
+    }
+
+    /// configure http client
+    #[cfg(feature = "decentralized")]
+    pub fn configure_http_client(&mut self, scraping: bool) -> Client {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
         let mut client = Client::builder()
-            .default_headers(headers)
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
@@ -235,12 +251,29 @@ impl Website {
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
-        if cfg!(all(feature = "decentralized", not(test))) {
-            let worker_url = std::env::var("SPIDER_WORKER")
-                .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string());
+        let worker_url = if scraping {
+            std::env::var("SPIDER_WORKER_SCRAPER")
+                .unwrap_or_else(|_| "http://127.0.0.1:3031".to_string())
+        } else {
+            std::env::var("SPIDER_WORKER").unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
+        };
 
-            client = client.proxy(Proxy::all(worker_url).unwrap());
+        let referer = if self.configuration.tld && self.configuration.subdomains {
+            2
+        } else if self.configuration.tld {
+            2
+        } else if self.configuration.subdomains {
+            1
+        } else {
+            0
+        };
+
+        if referer > 0 {
+            // use expected http headers for providers that drop invalid headers
+            headers.insert(reqwest::header::REFERER, header::HeaderValue::from(referer));
         }
+
+        client = client.proxy(reqwest::Proxy::all(worker_url).unwrap());
 
         // should unwrap using native-tls-alpn
         unsafe {
@@ -248,6 +281,7 @@ impl Website {
                 Some(t) => client.timeout(**t),
                 _ => client,
             }
+            .default_headers(headers)
             .build()
             .unwrap_unchecked()
         }
@@ -294,8 +328,8 @@ impl Website {
 
     /// setup config for crawl
     #[cfg(feature = "control")]
-    pub async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
-        let client = self.configure_http_client();
+    pub async fn setup(&mut self, scraping: bool) -> (Client, Option<Arc<AtomicI8>>) {
+        let client = self.configure_http_client(scraping);
 
         // allow fresh crawls to run fully
         if !self.links_visited.is_empty() {
@@ -310,8 +344,8 @@ impl Website {
 
     /// setup config for crawl
     #[cfg(not(feature = "control"))]
-    pub async fn setup<T>(&mut self) -> (Client, Option<T>) {
-        let client = self.configure_http_client();
+    pub async fn setup<T>(&mut self, scraping: bool) -> (Client, Option<T>) {
+        let client = self.configure_http_client(scraping);
 
         // allow fresh crawls to run fully
         if !self.links_visited.is_empty() {
@@ -323,30 +357,23 @@ impl Website {
 
     /// Start to crawl website with async conccurency
     pub async fn crawl(&mut self) {
-        let (client, handle) = self.setup().await;
+        let (client, handle) = self.setup(false).await;
 
         self.crawl_concurrent(client, handle).await;
     }
 
     /// Start to crawl website in sync
     pub async fn crawl_sync(&mut self) {
-        let (client, handle) = self.setup().await;
+        let (client, handle) = self.setup(false).await;
 
         self.crawl_sequential(&client, handle).await;
     }
 
     /// Start to scrape/download website with async conccurency
-    #[cfg(not(feature = "decentralized"))]
     pub async fn scrape(&mut self) {
-        let (client, handle) = self.setup().await;
+        let (client, handle) = self.setup(true).await;
 
         self.scrape_concurrent(&client, handle).await;
-    }
-
-    /// Start to scrape/download website with async conccurency
-    #[cfg(feature = "decentralized")]
-    pub async fn scrape(&mut self) {
-        unimplemented!()
     }
 
     /// Start to crawl website concurrently
@@ -466,16 +493,15 @@ impl Website {
                 let throttle = Box::pin(self.get_delay());
 
                 // http worker verify
-                let http_worker = cfg!(feature = "decentralized")
-                    && std::env::var("SPIDER_WORKER")
-                        .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
-                        .starts_with("http:");
+                let http_worker = std::env::var("SPIDER_WORKER")
+                    .unwrap_or_else(|_| "http:".to_string())
+                    .starts_with("http:");
 
                 let mut links: HashSet<CaseInsensitiveString> = {
                     let domain = CompactString::new(domain);
 
                     if self.is_allowed_default(&domain) {
-                        let domain = if http_worker && domain.starts_with("https:") {
+                        let domain = if http_worker && domain.starts_with("https") {
                             domain.replacen("https", "http", 1)
                         } else {
                             domain.to_string()
@@ -624,19 +650,14 @@ impl Website {
                         }
                         None => (),
                     }
-
                     if !self.is_allowed(&link) {
                         continue;
                     }
-
-                    log("fetch", &link);
-
+                    self.links_visited.insert(link.clone());
+                    log("fetch", link);
                     if delay_enabled {
                         tokio::time::sleep(Duration::from_millis(*delay)).await;
                     }
-
-                    self.links_visited.insert(link.clone());
-
                     let link = link.clone();
                     let link_result = match on_link_find_callback {
                         Some(cb) => cb(link.0),
@@ -645,7 +666,7 @@ impl Website {
 
                     let page = Page::new(&link_result, &client).await;
                     let page_links = page.links(&selectors, None).await;
-
+                    task::yield_now().await;
                     new_links.extend(page_links);
                     task::yield_now().await;
                 }
@@ -664,7 +685,6 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html
-    #[cfg(not(feature = "decentralized"))]
     async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain,
@@ -698,7 +718,7 @@ impl Website {
                     HashSet::new()
                 };
 
-            let mut set: JoinSet<Page> = JoinSet::new();
+            let mut set: JoinSet<(CompactString, Option<String>)> = JoinSet::new();
 
             // crawl while links exists
             loop {
@@ -736,9 +756,9 @@ impl Website {
 
                         drop(permit);
 
-                        let page = Page::new(&link_result, &client).await;
+                        let page = crate::utils::fetch_page_html(&link_result, &client).await;
 
-                        page
+                        (link_result, page)
                     });
                 }
 
@@ -751,10 +771,13 @@ impl Website {
                 while let Some(res) = set.join_next().await {
                     match res {
                         Ok(msg) => {
-                            let page_links = msg.links(&*selectors, None).await;
-                            links.extend(&page_links - &self.links_visited);
-                            task::yield_now().await;
-                            self.pages.as_mut().unwrap().push(msg);
+                            if msg.1.is_some() {
+                                let page = build(&msg.0, msg.1);
+                                let page_links = page.links(&*selectors, None).await;
+                                links.extend(&page_links - &self.links_visited);
+                                task::yield_now().await;
+                                self.pages.as_mut().unwrap().push(page);
+                            }
                         }
                         _ => (),
                     };
@@ -798,21 +821,6 @@ async fn scrape() {
     );
 
     assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
-}
-
-#[cfg(not(feature = "decentralized"))]
-#[tokio::test]
-async fn crawl_subsequential() {
-    let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.delay = 50;
-    website.crawl_sync().await;
-    assert!(
-        website
-            .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
-        "{:?}",
-        website.links_visited
-    );
 }
 
 #[tokio::test]
@@ -895,12 +903,13 @@ fn randomize_website_agent() {
 }
 
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn test_respect_robots_txt() {
     let mut website: Website = Website::new("https://stackoverflow.com");
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = Some(Box::new("*".into()));
 
-    let (client, _): (Client, Option<Arc<AtomicI8>>) = website.setup().await;
+    let (client, _): (Client, Option<Arc<AtomicI8>>) = website.setup(false).await;
 
     website.configure_robots_parser(client).await;
 
@@ -913,7 +922,7 @@ async fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = Some(Box::new("bingbot".into()));
 
-    let (client_second, _): (Client, Option<Arc<AtomicI8>>) = website_second.setup().await;
+    let (client_second, _): (Client, Option<Arc<AtomicI8>>) = website_second.setup(false).await;
     website_second.configure_robots_parser(client_second).await;
 
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
@@ -921,7 +930,7 @@ async fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    let (client_third, _): (Client, Option<Arc<AtomicI8>>) = website_third.setup().await;
+    let (client_third, _): (Client, Option<Arc<AtomicI8>>) = website_third.setup(false).await;
 
     website_third.configure_robots_parser(client_third).await;
 

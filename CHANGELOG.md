@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.24.0
+
+1. feat(decentralization): add workload split
+
 ## v1.19.36
 
 1. perf(crawl): add join handle task management

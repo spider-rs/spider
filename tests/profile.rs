@@ -39,8 +39,14 @@ impl eframe::App for SpiderApp {
             });
 
             rt.block_on(async {
-                puffin::profile_scope!("Sync");
-                website.crawl_sync().await;
+                puffin::profile_scope!("Concurrent 10 tasks");
+
+                for _ in 0..10 {
+                    let mut website = website.clone();
+                    rt.spawn(async move { website.crawl().await })
+                        .await
+                        .unwrap();
+                }
             });
         }
 

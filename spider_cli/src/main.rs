@@ -55,12 +55,11 @@ async fn main() {
     }
 
     match &cli.command {
-        Some(Commands::CRAWL { sync, output_links }) => {
-            if *sync {
-                website.crawl_sync().await;
-            } else {
-                website.crawl().await;
-            }
+        Some(Commands::CRAWL {
+            sync: _,
+            output_links,
+        }) => {
+            website.crawl().await;
 
             if *output_links {
                 let links: Vec<_> = website.get_links().iter().collect();

@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-Multithreaded web crawler/indexer using [isolates](https://research.cs.wisc.edu/areas/os/Seminar/schedules/papers/Deconstructing_Process_Isolation_final.pdf) and IPC channels for communication.
+Multithreaded async crawler/indexer using [isolates](https://research.cs.wisc.edu/areas/os/Seminar/schedules/papers/Deconstructing_Process_Isolation_final.pdf) and IPC channels for communication with the ability to run decentralized.
 
 ## Dependencies
 
@@ -12,11 +12,11 @@ On Linux
 
 ## Example
 
-This is a basic blocking example crawling a web page, add spider to your `Cargo.toml`:
+This is a basic async example crawling a web page, add spider to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-spider = "1.19"
+spider = "1.24.0"
 ```
 
 And then the code:
@@ -63,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.23.0", features = ["regex"] }
+spider = { version = "1.24.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -86,11 +86,11 @@ async fn main() {
 
 ## Features
 
-Currently we have three optional feature flags. Regex blacklisting, jemaloc backend, decentralization, and randomizing User-Agents.
+We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, and randomizing User-Agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.23.0", features = ["regex", "ua_generator"] }
+spider = { version = "1.24.0", features = ["regex", "ua_generator"] }
 ```
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
@@ -99,7 +99,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.23.0", features = ["jemalloc"] }
+spider = { version = "1.24.0", features = ["jemalloc"] }
 ```
 
 ## Blocking
@@ -133,6 +133,8 @@ async fn main() {
 ```
 
 ### Shutdown crawls
+
+Enable the `control` feature flag:
 
 ```rust
 extern crate spider;
@@ -191,14 +193,12 @@ async fn main() {
 }
 ```
 
-### Decentralized [Experimental]
+### Decentralization
 
 1. cargo install `spider_worker`.
 1. `spider_worker`.
 1. `SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized`
 
-Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer. 
-The proxy needs to match the transport type for the request to fullfill. A WIP for support to handle
-http and https transparent proxies.
-
-Currently TLD and subdomains crawling is not supported when the feature is enabled.
+Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer.
+The proxy needs to match the transport type for the request to fullfill correctly.
+If the `scrape` feature flag is use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
