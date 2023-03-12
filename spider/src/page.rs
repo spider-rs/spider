@@ -2,7 +2,7 @@
 use crate::packages::scraper::Selector;
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::{Html, Selector};
-use crate::website::CaseInsensitiveString;
+use crate::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;

@@ -9,7 +9,6 @@ use hashbrown::HashSet;
 use reqwest::header;
 use reqwest::header::CONNECTION;
 use reqwest::Client;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,46 +17,7 @@ use tokio::sync::Semaphore;
 use tokio::task;
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
-
-/// case-insensitive string handling
-#[derive(Debug, Clone)]
-pub struct CaseInsensitiveString(CompactString);
-
-impl PartialEq for CaseInsensitiveString {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq_ignore_ascii_case(&other.0)
-    }
-}
-
-impl Eq for CaseInsensitiveString {}
-
-impl Hash for CaseInsensitiveString {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_ascii_lowercase().hash(state)
-    }
-}
-
-impl From<&str> for CaseInsensitiveString {
-    #[inline]
-    fn from(s: &str) -> Self {
-        CaseInsensitiveString { 0: s.into() }
-    }
-}
-
-impl From<String> for CaseInsensitiveString {
-    fn from(s: String) -> Self {
-        CaseInsensitiveString { 0: s.into() }
-    }
-}
-
-impl AsRef<str> for CaseInsensitiveString {
-    #[inline]
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+use crate::CaseInsensitiveString;
 
 lazy_static! {
     static ref SEM: Semaphore = {

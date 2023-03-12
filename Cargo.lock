@@ -670,6 +670,7 @@ dependencies = [
  "cfg-if",
  "itoa",
  "ryu",
+ "serde",
  "static_assertions",
 ]
 
@@ -1237,6 +1238,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "flexbuffers"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15d14128f06405808ce75bfebe11e9b0f9da18719ede6d7bdb1702d6bfe0f7e8"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "num_enum",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1531,6 +1545,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash",
+ "serde",
 ]
 
 [[package]]
@@ -3011,9 +3026,9 @@ checksum = "58bc9567378fc7690d6b2addae4e60ac2eeea07becb2c64b9f218b53865cba2a"
 
 [[package]]
 name = "serde"
-version = "1.0.154"
+version = "1.0.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cdd151213925e7f1ab45a9bbfb129316bd00799784b174b7cc7bcd16961c49e"
+checksum = "71f2b4817415c6d4210bfe1c7bfcf4801b2d904cb4d0e1a8fdb651013c9e86b8"
 dependencies = [
  "serde_derive",
 ]
@@ -3042,9 +3057,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.154"
+version = "1.0.155"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fc80d722935453bcafdc2c9a73cd6fac4dc1938f0346035d84bf99fa9e33217"
+checksum = "d071a94a3fac4aff69d023a7f411e33f40f3483f8c5190b1953822b6b76d7630"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3188,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "ahash",
  "bytes",
@@ -3205,6 +3220,7 @@ dependencies = [
  "regex",
  "reqwest",
  "selectors",
+ "serde",
  "smallvec",
  "string_concat",
  "tendril",
@@ -3217,7 +3233,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -3229,10 +3245,11 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
+ "flexbuffers",
  "htr",
  "spider",
 ]
@@ -3249,7 +3266,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.24.2"
+version = "1.25.0"
 dependencies = [
  "lazy_static",
  "spider",
