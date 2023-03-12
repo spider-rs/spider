@@ -36,39 +36,45 @@ async fn main() {
 
     website.scrape().await;
 
-    for page in website.get_pages() {
-        let download_file = page.get_url().clone();
-        let download_file = download_file.replace(website_name, "");
-        let download_file = download_file.replace(".", "-");
-        let download_file = download_file.replace("/", "-");
+    match website.get_pages() {
+        Some(pages) => {
+            for page in pages.iter() {
+                let download_file = page.get_url().clone();
+                let download_file = download_file.replace(website_name, "");
+                let download_file = download_file.replace(".", "-");
+                let download_file = download_file.replace("/", "-");
 
-        let download_file = if download_file.starts_with("-") {
-            &download_file[1..]
-        } else {
-            &download_file
-        };
+                let download_file = if download_file.starts_with("-") {
+                    &download_file[1..]
+                } else {
+                    &download_file
+                };
 
-        let download_file = if download_file.is_empty() {
-            "index"
-        } else {
-            &download_file
-        };
+                let download_file = if download_file.is_empty() {
+                    "index"
+                } else {
+                    &download_file
+                };
 
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&format!("{}/downloads/{}.tsx", target_dir, download_file))
-            .expect("Unable to open file");
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&format!("{}/downloads/{}.tsx", target_dir, download_file))
+                    .expect("Unable to open file");
 
-        let download_file = download_file.to_case(Case::Camel);
-        let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
+                let download_file = download_file.to_case(Case::Camel);
+                let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
 
-        let react_component = convert_to_react(&page.get_html().into(), download_file.to_string());
-        let react_component = react_component.as_bytes();
+                let react_component =
+                    convert_to_react(&page.get_html().into(), download_file.to_string());
+                let react_component = react_component.as_bytes();
 
-        file.write_all(react_component).unwrap();
+                file.write_all(react_component).unwrap();
 
-        log("downloaded", download_file)
-    }
+                log("downloaded", download_file);
+            }
+        }
+        _ => (),
+    };
 }

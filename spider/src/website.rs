@@ -167,15 +167,8 @@ impl Website {
     }
 
     /// page getter
-    pub fn get_pages(&self) -> Vec<Page> {
-        if !self.pages.is_none() {
-            unsafe { *self.pages.as_ref().unwrap_unchecked().clone() }
-        } else {
-            self.links_visited
-                .iter()
-                .map(|l| crate::page::build(&l.0, Default::default()))
-                .collect::<Vec<Page>>()
-        }
+    pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
+        self.pages.as_ref()
     }
 
     /// links visited getter
@@ -820,7 +813,7 @@ async fn scrape() {
         website.links_visited
     );
 
-    assert_eq!(website.get_pages()[0].get_html().is_empty(), false);
+    assert_eq!(website.get_pages().unwrap()[0].get_html().is_empty(), false);
 }
 
 #[tokio::test]

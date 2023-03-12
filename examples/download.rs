@@ -29,7 +29,7 @@ async fn main() {
 
     website.scrape().await;
 
-    for page in website.get_pages() {
+    for page in website.get_pages().unwrap().iter() {
         let download_file = page.get_url().clone();
         let download_file = download_file.replace(website_name, "");
         let download_file = download_file.replace(".", "-");
