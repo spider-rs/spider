@@ -1,20 +1,34 @@
-use crate::packages::scraper::{ElementRef, Html, Selector};
-use crate::utils::fetch_page_html;
+#[cfg(feature = "decentralized")]
+use crate::packages::scraper::Selector;
+#[cfg(not(feature = "decentralized"))]
+use crate::packages::scraper::{Html, Selector};
 use crate::website::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
 use smallvec::SmallVec;
+#[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
+#[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
     html: Option<String>,
     /// Base absolute url for page.
     base: Url,
+}
+
+/// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
+#[cfg(feature = "decentralized")]
+#[derive(Debug, Clone)]
+pub struct Page {
+    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
+    html: Option<String>,
+    /// The current links for the page.
+    pub links: HashSet<CaseInsensitiveString>,
 }
 
 /// CSS query selector to ignore all resources that are not valid web pages.
@@ -65,15 +79,19 @@ fn build_absolute_selectors(url: &str) -> String {
 
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
-    let b = unsafe { domain.host_str().unwrap_unchecked() };
-    let b = b.split('.').collect::<Vec<&str>>();
+    match domain.host_str() {
+        Some(b) => {
+            let b = b.split('.').collect::<Vec<&str>>();
 
-    if b.len() > 2 {
-        b[1]
-    } else if b.len() == 2 {
-        b[0]
-    } else {
-        b[b.len() - 2]
+            if b.len() > 2 {
+                b[1]
+            } else if b.len() == 2 {
+                b[0]
+            } else {
+                b[b.len() - 2]
+            }
+        }
+        _ => "",
     }
 }
 
@@ -94,11 +112,7 @@ pub fn get_page_selectors(
     url: &str,
     subdomains: bool,
     tld: bool,
-) -> Option<(
-    Selector,
-    CompactString,
-    smallvec::SmallVec<[CompactString; 2]>,
-)> {
+) -> Option<(Selector, CompactString, SmallVec<[CompactString; 2]>)> {
     match Url::parse(&url) {
         Ok(host) => {
             let host_name = CompactString::from(
@@ -157,25 +171,27 @@ pub fn get_page_selectors(
                     absolute_selector
                 };
 
+                let selectors = unsafe {
+                    Selector::parse(&string_concat::string_concat!(
+                        tlds,
+                        MEDIA_SELECTOR_RELATIVE,
+                        ",",
+                        absolute_selector,
+                        ",",
+                        MEDIA_SELECTOR_RELATIVE,
+                        " ",
+                        MEDIA_SELECTOR_STATIC,
+                        ", ",
+                        absolute_selector,
+                        " ",
+                        MEDIA_SELECTOR_STATIC
+                    ))
+                    .unwrap_unchecked()
+                };
+
                 // static html group parse
                 (
-                    unsafe {
-                        Selector::parse(&string_concat::string_concat!(
-                            tlds,
-                            MEDIA_SELECTOR_RELATIVE,
-                            ",",
-                            absolute_selector,
-                            ",",
-                            MEDIA_SELECTOR_RELATIVE,
-                            " ",
-                            MEDIA_SELECTOR_STATIC,
-                            ", ",
-                            absolute_selector,
-                            " ",
-                            MEDIA_SELECTOR_STATIC
-                        ))
-                        .unwrap_unchecked()
-                    },
+                    selectors,
                     dname.into(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
                 )
@@ -192,17 +208,56 @@ pub fn get_page_selectors(
                     MEDIA_SELECTOR_STATIC
                 );
 
+                let selectors = unsafe {
+                    Selector::parse(&string_concat::string_concat!(
+                        MEDIA_SELECTOR_RELATIVE,
+                        ",",
+                        absolute_selector,
+                        ",",
+                        static_html_selector
+                    ))
+                    .unwrap_unchecked()
+                };
+
                 (
-                    unsafe {
-                        Selector::parse(&string_concat::string_concat!(
-                            MEDIA_SELECTOR_RELATIVE,
-                            ",",
-                            absolute_selector,
-                            ",",
-                            static_html_selector
-                        ))
-                        .unwrap_unchecked()
-                    },
+                    selectors,
+                    CompactString::default(),
+                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+                )
+            })
+        }
+        _ => None,
+    }
+}
+
+/// html raw selector for valid web pages for domain.
+pub fn get_raw_selectors(
+    url: &str,
+    subdomains: bool,
+    tld: bool,
+) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
+    match Url::parse(&url) {
+        Ok(host) => {
+            let host_name = CompactString::from(
+                match convert_abs_path(&host, Default::default()).host_str() {
+                    Some(host) => host.to_ascii_lowercase(),
+                    _ => Default::default(),
+                },
+            );
+            let scheme = host.scheme();
+
+            Some(if tld || subdomains {
+                let base = Url::parse(&url).expect("Invalid page URL");
+                let dname = domain_name(&base);
+                let scheme = base.scheme();
+
+                // static html group parse
+                (
+                    dname.into(),
+                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+                )
+            } else {
+                (
                     CompactString::default(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
                 )
@@ -213,6 +268,7 @@ pub fn get_page_selectors(
 }
 
 /// Instantiate a new page without scraping it (used for testing purposes).
+#[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, html: Option<String>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
@@ -220,23 +276,70 @@ pub fn build(url: &str, html: Option<String>) -> Page {
     }
 }
 
+/// Instantiate a new page without scraping it (used for testing purposes).
+#[cfg(feature = "decentralized")]
+pub fn build(_: &str, html: Option<String>) -> Page {
+    Page {
+        html: if html.is_some() { html } else { None },
+        links: Default::default(),
+    }
+}
+
 impl Page {
     /// Instantiate a new page and gather the html.
+    #[cfg(not(feature = "decentralized"))]
     pub async fn new(url: &str, client: &Client) -> Self {
-        build(url, fetch_page_html(&url, &client).await)
+        build(url, crate::utils::fetch_page_html(&url, &client).await)
+    }
+
+    /// Instantiate a new page and gather the links.
+    #[cfg(feature = "decentralized")]
+    pub async fn new(url: &str, client: &Client) -> Self {
+        let links = match crate::utils::fetch_page(&url, &client).await {
+            Some(b) => {
+                // todo: iterate over bytes and match at whitespace instead
+                match std::str::from_utf8(&b) {
+                    Ok(v) => v,
+                    _ => "",
+                }
+                .split(" ")
+                .filter_map(|item| {
+                    if !item.is_empty() {
+                        Some(CaseInsensitiveString::from(item))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<HashSet<CaseInsensitiveString>>()
+            }
+            _ => Default::default(),
+        };
+
+        Page { html: None, links }
     }
 
     /// URL getter for page.
+    #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {
         self.base.as_str()
     }
 
+    #[cfg(feature = "decentralized")]
+    /// URL getter for page.
+    pub fn get_url(&self) -> &str {
+        ""
+    }
+
     /// Html getter for page.
     pub fn get_html(&self) -> &str {
-        unsafe { &self.html.as_deref().unwrap_unchecked() }
+        match self.html.as_deref() {
+            Some(html) => html,
+            _ => "",
+        }
     }
 
     /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
+    #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
     pub async fn links_ego(
         &self,
@@ -251,7 +354,7 @@ impl Page {
         for node in html.tree.root().traverse() {
             match node {
                 ego_tree::iter::Edge::Open(node_ref) => {
-                    if let Some(element) = ElementRef::wrap(node_ref) {
+                    if let Some(element) = crate::packages::scraper::ElementRef::wrap(node_ref) {
                         if element.parent().is_some() && selectors.0.matches(&element) {
                             match element.value().attr("href") {
                                 Some(val) => {
@@ -292,19 +395,19 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    pub async fn links_stream(
+    #[cfg(not(feature = "decentralized"))]
+    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
-    ) -> HashSet<CaseInsensitiveString> {
-        let base_domain = &selectors.1;
-
-        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
         let html = Box::new(Html::parse_document(self.get_html()));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
+        let mut map = HashSet::new();
 
-        let parent_frags = &selectors.2; // todo: allow mix match tpt
+        let base_domain = &selectors.0;
+        let parent_frags = &selectors.1; // todo: allow mix match tpt
         let parent_host = &parent_frags[0];
         let parent_host_scheme = &parent_frags[1];
 
@@ -343,7 +446,7 @@ impl Page {
                             if can_process && base_domain.is_empty()
                                 || base_domain.as_str() == domain_name(&abs)
                             {
-                                map.insert(h.into());
+                                map.insert(h.to_string().into());
                             }
                         }
                     }
@@ -355,7 +458,18 @@ impl Page {
         map
     }
 
+    #[inline(always)]
+    #[cfg(feature = "decentralized")]
+    /// Find the links as a stream using string resource validation
+    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        _: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        Default::default()
+    }
+
     /// Find all href links and return them using CSS selectors.
+    #[cfg(not(feature = "decentralized"))]
     #[inline(never)]
     pub async fn links(
         &self,
@@ -365,17 +479,37 @@ impl Page {
         match streamed {
             _ if { !self.html.is_some() } => Default::default(),
             None | Some(false) => self.links_ego(&(selectors)).await,
-            Some(_) => self.links_stream(&selectors).await,
+            Some(_) => {
+                self.links_stream::<CaseInsensitiveString>(&(&selectors.1, &selectors.2))
+                    .await
+            }
         }
+    }
+
+    /// Find all href links and return them using CSS selectors.
+    #[cfg(feature = "decentralized")]
+    #[inline(never)]
+    pub async fn links(
+        &self,
+        _: &(
+            Selector,
+            CompactString,
+            smallvec::SmallVec<[CompactString; 2]>,
+        ),
+        __: Option<bool>,
+    ) -> HashSet<CaseInsensitiveString> {
+        self.links.to_owned()
     }
 
     /// Convert a URL to its absolute path without any fragments or params.
     #[inline]
+    #[cfg(not(feature = "decentralized"))]
     fn abs_path(&self, href: &str) -> Url {
         convert_abs_path(&self.base, href)
     }
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn parse_links() {
     let client = Client::builder()
@@ -397,6 +531,7 @@ async fn parse_links() {
     );
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
 async fn test_abs_path() {
     let client = Client::builder()

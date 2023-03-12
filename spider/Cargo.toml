@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.23.0"
+version = "1.24.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -36,6 +36,7 @@ cssparser = "0.29.6"
 smallvec = "1.10.0"
 ego-tree = "0.6.2"
 num_cpus = "1.15.0"
+bytes = { version = "1.4.0", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -45,5 +46,6 @@ default = ["ua_generator"]
 regex = ["dep:regex"]
 ua_generator = ["dep:ua_generator"]
 jemalloc = ["tikv-jemallocator"]
-decentralized = []
+decentralized = ["dep:bytes"]
 control = []
+sequential = []

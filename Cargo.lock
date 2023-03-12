@@ -3188,9 +3188,10 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "ahash",
+ "bytes",
  "compact_str",
  "cssparser",
  "ego-tree",
@@ -3216,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -3228,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -3248,7 +3249,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "lazy_static",
  "spider",

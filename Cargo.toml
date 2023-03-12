@@ -8,3 +8,4 @@ members = [
     "benches",
     "tests",
 ]
+resolver = "2"

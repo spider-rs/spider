@@ -10,9 +10,20 @@ This project depends on the [spider](../spider/) crate.
 
 ## Usage
 
+The worker starts on port 3030 by default. 
+
 `cargo run`
 
-## WIP
+## Feature Flags
 
-1. ~~request handling io load~~
-2. parse links per domain
+1. `scrape` - When the html is needed run the instance with the flag. Requires spider feature flag matching on the client to start. This also starts the instance on port 3031 instead.
+1. `all` - Start the basic worker to gather links and scraper together.
+
+## Ports
+
+By default the instance runs on port `3030`.
+The scraper runs on port `3031` when enabled.
+
+## Todo
+
+1. Allow port configuration.
