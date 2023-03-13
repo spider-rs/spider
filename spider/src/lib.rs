@@ -50,9 +50,10 @@
 //! - `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
 //! - `regex`: Enables blacklisting paths with regx
 //! - `jemalloc`: Enables the jemalloc memory backend.
-//! - `decentralized`: Enables decentralized processing of IO
+//! - `decentralized`: Enables decentralized processing of IO,
 //!         requires the [spider_worker] startup before crawls.
 //! - `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
+//! - `full_resources`: Enables gathering all content that relates to the domain.
 
 use compact_str::CompactString;
 
@@ -89,6 +90,8 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 /// Configuration structure for `Website`.
 pub mod configuration;
+/// Optional features to use.
+mod features;
 /// Internal packages customized.
 pub mod packages;
 /// A page scraped.
@@ -97,8 +100,6 @@ pub mod page;
 pub mod utils;
 /// A website to crawl.
 pub mod website;
-/// Optional features to use.
-mod features;
 
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.

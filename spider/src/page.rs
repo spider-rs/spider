@@ -338,61 +338,6 @@ impl Page {
         }
     }
 
-    /// Find all link hrefs using the ego tree extremely imp useful when concurrency is low
-    #[cfg(not(feature = "decentralized"))]
-    #[inline(always)]
-    pub async fn links_ego(
-        &self,
-        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
-    ) -> HashSet<CaseInsensitiveString> {
-        let base_domain = &selectors.1;
-        let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
-        let html = Html::parse_document(self.get_html());
-        tokio::task::yield_now().await;
-
-        // extremely fast ego tree handling
-        for node in html.tree.root().traverse() {
-            match node {
-                ego_tree::iter::Edge::Open(node_ref) => {
-                    if let Some(element) = crate::packages::scraper::ElementRef::wrap(node_ref) {
-                        if element.parent().is_some() && selectors.0.matches(&element) {
-                            match element.value().attr("href") {
-                                Some(val) => {
-                                    let abs = self.abs_path(val);
-
-                                    if base_domain.is_empty()
-                                        || base_domain.as_str() == domain_name(&abs)
-                                    {
-                                        let resource_ext = abs.as_str();
-                                        let resource_ext_size = resource_ext.len();
-                                        let resource =
-                                            &resource_ext[resource_ext_size - 5..resource_ext_size];
-
-                                        if let Some(position) = resource.find('.') {
-                                            if ONLY_RESOURCES.contains(
-                                                &CaseInsensitiveString::from(
-                                                    &resource[position + 1..resource.len()],
-                                                ),
-                                            ) {
-                                                map.insert(resource_ext.into());
-                                            }
-                                        } else {
-                                            map.insert(resource_ext.into());
-                                        }
-                                    }
-                                }
-                                None => (),
-                            }
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-
-        map
-    }
-
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(not(feature = "decentralized"))]
@@ -458,6 +403,58 @@ impl Page {
         map
     }
 
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
+    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        let html = Box::new(Html::parse_document(self.get_html()));
+        tokio::task::yield_now().await;
+
+        let mut stream = tokio_stream::iter(html.tree);
+        let mut map = HashSet::new();
+
+        let base_domain = &selectors.0;
+        let parent_frags = &selectors.1; // todo: allow mix match tpt
+        let parent_host = &parent_frags[0];
+        let parent_host_scheme = &parent_frags[1];
+
+        while let Some(node) = stream.next().await {
+            if let Some(element) = node.as_element() {
+                match element.attr("href") {
+                    Some(href) => {
+                        let mut abs = self.abs_path(href);
+
+                        let mut can_process = match abs.host_str() {
+                            Some(host) => host == parent_host.as_str(),
+                            _ => false,
+                        };
+
+                        if can_process {
+                            if abs.scheme() != parent_host_scheme.as_str() {
+                                let _ = abs.set_scheme(parent_host_scheme.as_str());
+                            }
+
+                            let h = abs.as_str();
+                            let hlen = h.len();
+
+                            if can_process && base_domain.is_empty()
+                                || base_domain.as_str() == domain_name(&abs)
+                            {
+                                map.insert(h.to_string().into());
+                            }
+                        }
+                    }
+                    _ => (),
+                };
+            }
+        }
+
+        map
+    }
+
     #[inline(always)]
     #[cfg(feature = "decentralized")]
     /// Find the links as a stream using string resource validation
@@ -474,12 +471,10 @@ impl Page {
     pub async fn links(
         &self,
         selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
-        streamed: Option<bool>,
     ) -> HashSet<CaseInsensitiveString> {
-        match streamed {
-            _ if { !self.html.is_some() } => Default::default(),
-            None | Some(false) => self.links_ego(&(selectors)).await,
-            Some(_) => {
+        match self.html.is_some() {
+            false => Default::default(),
+            true => {
                 self.links_stream::<CaseInsensitiveString>(&(&selectors.1, &selectors.2))
                     .await
             }
@@ -496,7 +491,6 @@ impl Page {
             CompactString,
             smallvec::SmallVec<[CompactString; 2]>,
         ),
-        __: Option<bool>,
     ) -> HashSet<CaseInsensitiveString> {
         self.links.to_owned()
     }
@@ -521,7 +515,7 @@ async fn parse_links() {
     let page: Page = Page::new(&link_result, &client).await;
     let selector = get_page_selectors(&link_result, false, false);
 
-    let links = page.links(&selector.unwrap(), None).await;
+    let links = page.links(&selector.unwrap()).await;
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),

@@ -4,6 +4,7 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 
 use crate::utils::log;
+use crate::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::header;
@@ -17,7 +18,6 @@ use tokio::sync::Semaphore;
 use tokio::task;
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
-use crate::CaseInsensitiveString;
 
 lazy_static! {
     static ref SEM: Semaphore = {
@@ -359,7 +359,7 @@ impl Website {
                     self.links_visited
                         .insert(CaseInsensitiveString { 0: link_result });
 
-                    HashSet::from(page.links(&shared.1, None).await)
+                    HashSet::from(page.links(&shared.1).await)
                 } else {
                     HashSet::new()
                 };
@@ -406,7 +406,7 @@ impl Website {
                                         _ => link.0,
                                     };
                                     let page = Page::new(&link_result, &shared.0).await;
-                                    let page_links = page.links(&shared.1, Some(true)).await;
+                                    let page_links = page.links(&shared.1).await;
 
                                     drop(permit);
 
@@ -583,7 +583,7 @@ impl Website {
                     };
                     self.links_visited
                         .insert(CaseInsensitiveString { 0: link_result });
-                    HashSet::from(page.links(&selectors, None).await)
+                    HashSet::from(page.links(&selectors).await)
                 } else {
                     HashSet::new()
                 };
@@ -618,7 +618,7 @@ impl Website {
                     };
 
                     let page = Page::new(&link_result, &client).await;
-                    let page_links = page.links(&selectors, None).await;
+                    let page_links = page.links(&selectors).await;
                     task::yield_now().await;
                     new_links.extend(page_links);
                     task::yield_now().await;
@@ -666,7 +666,7 @@ impl Website {
                     self.links_visited
                         .insert(CaseInsensitiveString { 0: link_result });
 
-                    HashSet::from(page.links(&selectors, None).await)
+                    HashSet::from(page.links(&selectors).await)
                 } else {
                     HashSet::new()
                 };
@@ -726,7 +726,7 @@ impl Website {
                         Ok(msg) => {
                             if msg.1.is_some() {
                                 let page = build(&msg.0, msg.1);
-                                let page_links = page.links(&*selectors, None).await;
+                                let page_links = page.links(&*selectors).await;
                                 links.extend(&page_links - &self.links_visited);
                                 task::yield_now().await;
                                 self.pages.as_mut().unwrap().push(page);

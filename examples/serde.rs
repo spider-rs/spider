@@ -1,10 +1,10 @@
 //! `cargo run --example serde --features serde`
-extern crate spider;
 extern crate flexbuffers;
+extern crate spider;
 
+use spider::serde::ser::Serialize;
 use spider::tokio;
 use spider::website::Website;
-use spider::serde::ser::Serialize;
 
 #[tokio::main]
 async fn main() {
@@ -18,8 +18,5 @@ async fn main() {
 
     links.serialize(&mut s).unwrap();
 
-    println!(
-        "{:?}",
-        s
-    )
+    println!("{:?}", s)
 }

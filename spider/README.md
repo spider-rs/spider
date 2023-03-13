@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.25.0"
+spider = "1.26.0"
 ```
 
 And then the code:
@@ -63,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.25.0", features = ["regex"] }
+spider = { version = "1.26.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -86,12 +86,19 @@ async fn main() {
 
 ## Features
 
-We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, and randomizing User-Agents.
+We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, gathering full assets, and randomizing User-Agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.25.0", features = ["regex", "ua_generator"] }
+spider = { version = "1.26.0", features = ["regex", "ua_generator"] }
 ```
+
+1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
+1. `regex`: Enables blacklisting paths with regx
+1. `jemalloc`: Enables the jemalloc memory backend.
+1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
+1. `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
+1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 
 [Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
 
@@ -99,7 +106,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.25.0", features = ["jemalloc"] }
+spider = { version = "1.26.0", features = ["jemalloc"] }
 ```
 
 ## Blocking

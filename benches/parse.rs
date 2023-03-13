@@ -32,7 +32,7 @@ const QUERY: &'static str = "https://figma.com";
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
     let mut group = c.benchmark_group("crawl-parse/libraries");
-    let sample_count = 200;
+    let sample_count = 500;
     let sample_title = format!("parse html {} samples", sample_count);
 
     group.sample_size(sample_count);
@@ -44,14 +44,8 @@ pub fn bench_speed(c: &mut Criterion) {
 
     let page = build(QUERY, Some(HTML.to_string()));
 
-    group.bench_function(format!("Parse links ego: {}", sample_title), |b| {
-        b.to_async(&rt)
-            .iter(|| black_box(page.links_ego(&selectors)))
-    });
-
     group.bench_function(format!("Parse links stream: {}", sample_title), |b| {
-        b.to_async(&rt)
-            .iter(|| black_box(page.links(&selectors, None)))
+        b.to_async(&rt).iter(|| black_box(page.links(&selectors)))
     });
 
     group.bench_function(
@@ -69,6 +63,7 @@ fn select_fragment(selector: &Selector) -> HashSet<CaseInsensitiveString> {
     let items = html.select(&selector);
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
 
+    // logic is a lot simpler than the crate usage
     for item in items {
         match item.value().attr("href") {
             Some(href) => {

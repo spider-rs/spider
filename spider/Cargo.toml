@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.25.0"
+version = "1.26.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -51,3 +51,4 @@ decentralized = ["dep:bytes"]
 control = []
 sequential = []
 serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
+full_resources = []

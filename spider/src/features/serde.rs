@@ -1,11 +1,6 @@
 use std::fmt;
 
-use serde::de::{
-    Deserializer,
-    Error,
-    Unexpected,
-    Visitor,
-};
+use serde::de::{Deserializer, Error, Unexpected, Visitor};
 
 use crate::CaseInsensitiveString;
 

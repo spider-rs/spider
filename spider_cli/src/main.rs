@@ -89,7 +89,7 @@ async fn main() {
                             let mut links: Vec<String> = vec![];
 
                             if *output_links {
-                                let page_links = page.links(&*selectors, Some(true)).await;
+                                let page_links = page.links(&*selectors).await;
 
                                 for link in page_links {
                                     links.push(link.as_ref().to_owned());
