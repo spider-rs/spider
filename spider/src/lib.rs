@@ -54,6 +54,7 @@
 //!         requires the [spider_worker] startup before crawls.
 //! - `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
 //! - `full_resources`: Enables gathering all content that relates to the domain.
+//! - `serde`: Enables serde serialization support.
 
 use compact_str::CompactString;
 
@@ -65,6 +66,11 @@ pub extern crate tokio;
 
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
+
+#[cfg(feature = "flexbuffers")]
+pub extern crate bytes;
+#[cfg(feature = "flexbuffers")]
+pub extern crate flexbuffers;
 
 #[cfg(feature = "serde")]
 pub extern crate serde;
