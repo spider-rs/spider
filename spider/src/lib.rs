@@ -66,6 +66,11 @@ pub extern crate tokio;
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
 
+#[cfg(feature = "flexbuffers")]
+pub extern crate bytes;
+#[cfg(feature = "flexbuffers")]
+pub extern crate flexbuffers;
+
 #[cfg(feature = "serde")]
 pub extern crate serde;
 
