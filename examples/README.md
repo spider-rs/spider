@@ -27,3 +27,7 @@ Scrape and download the html file to fs [Download HTML](./download.rs). \*Note: 
 Scrape and download html to react components and store to fs [Download to React Component](./download.rs).
 
 - `cargo run --example download_to_react`
+
+Crawl the page and output the links via [Serde](./serde.rs).
+
+- `cargo run --example serde --features serde`

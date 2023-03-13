@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.26.0"
+spider = "1.26.2"
 ```
 
 And then the code:
@@ -63,7 +63,7 @@ There is an optional "regex" crate that can be enabled:
 
 ```toml
 [dependencies]
-spider = { version = "1.26.0", features = ["regex"] }
+spider = { version = "1.26.2", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -90,7 +90,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, de
 
 ```toml
 [dependencies]
-spider = { version = "1.26.0", features = ["regex", "ua_generator"] }
+spider = { version = "1.26.2", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
@@ -106,7 +106,7 @@ This changes the global allocator of the program so test accordingly to measure 
 
 ```toml
 [dependencies]
-spider = { version = "1.26.0", features = ["jemalloc"] }
+spider = { version = "1.26.2", features = ["jemalloc"] }
 ```
 
 ## Blocking

@@ -28,5 +28,3 @@ jobs:
         run: cargo bench --bench crawl
       - name: Run Benchmark Massive 30k pages plus
         run: cargo bench --bench crawl_massive
-      - name: Run Benchmark HTML parse
-        run: cargo bench --bench parse
