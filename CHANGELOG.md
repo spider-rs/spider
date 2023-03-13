@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 1.26.0
+## 1.26.1
 
 1. feat(decentralization): add workload split
 
