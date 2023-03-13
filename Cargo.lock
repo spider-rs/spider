@@ -524,6 +524,9 @@ name = "bytes"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89b2fd2a0dcf38d7971e2194b6b6eebab45ae01067456a7fd93d5547a61b70be"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "calloop"
@@ -2635,9 +2638,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
-version = "1.0.24"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50686e0021c4136d1d453b2dfe059902278681512a34d4248435dc34b6b5c8ec"
+checksum = "4424af4bf778aae2051a77b60283332f386554255d722233d09fbfc7e30da2fc"
 dependencies = [
  "proc-macro2",
 ]
@@ -3203,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "ahash",
  "bytes",
@@ -3211,6 +3214,7 @@ dependencies = [
  "cssparser",
  "ego-tree",
  "fast_html5ever",
+ "flexbuffers",
  "hashbrown 0.13.2",
  "lazy_static",
  "log",
@@ -3233,7 +3237,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -3245,7 +3249,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -3266,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.26.2"
+version = "1.26.3"
 dependencies = [
  "lazy_static",
  "spider",
@@ -3614,9 +3618,9 @@ checksum = "3ab8ed2edee10b50132aed5f331333428b011c99402b5a534154ed15746f9622"
 
 [[package]]
 name = "toml_edit"
-version = "0.19.5"
+version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7082a95d48029677a28f181e5f6422d0c8339ad8396a39d3f33d62a90c1f6c30"
+checksum = "08de71aa0d6e348f070457f85af8bd566e2bc452156a423ddf22861b3a953fae"
 dependencies = [
  "indexmap",
  "toml_datetime",

@@ -16,20 +16,6 @@ lazy_static! {
     };
 }
 
-/// convert the data into vec bytes
-#[cfg(not(feature = "scrape"))]
-fn serialize(set: spider::hashbrown::HashSet<warp::hyper::body::Bytes>) -> Vec<u8> {
-    let cap = set.len();
-    let cap = cap * 2;
-
-    set.into_iter().fold(Vec::with_capacity(cap), |mut acc, v| {
-        acc.extend_from_slice(&v);
-        acc.extend_from_slice(" ".as_bytes());
-
-        acc
-    })
-}
-
 /// forward request to get resources
 #[cfg(not(feature = "scrape"))]
 async fn forward(
@@ -37,7 +23,11 @@ async fn forward(
     host: String,
     referer: Option<String>,
 ) -> Result<impl warp::Reply, Infallible> {
-    use spider::string_concat::{string_concat, string_concat_impl};
+    use spider::{
+        flexbuffers,
+        serde::Serialize,
+        string_concat::{string_concat, string_concat_impl},
+    };
 
     let url = &string_concat!(
         if host.ends_with("443") {
@@ -58,11 +48,18 @@ async fn forward(
             _ => (false, false),
         };
         let selectors = spider::page::get_raw_selectors(url, subdomains, tld).unwrap();
+
         let links = page
-            .links_stream::<warp::hyper::body::Bytes>(&(&selectors.0, &selectors.1))
+            .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
             .await;
 
-        Ok(serialize(links))
+        let mut s = flexbuffers::FlexbufferSerializer::new();
+
+        match links.serialize(&mut s) {
+            _ => (),
+        };
+
+        Ok(s.take_buffer())
     } else {
         Ok(Default::default())
     }

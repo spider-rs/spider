@@ -1,7 +1,5 @@
-#[cfg(feature = "decentralized")]
-use crate::packages::scraper::Selector;
 #[cfg(not(feature = "decentralized"))]
-use crate::packages::scraper::{Html};
+use crate::packages::scraper::Html;
 use crate::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
@@ -103,7 +101,6 @@ pub fn get_page_selectors(
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
                 )
             } else {
-
                 (
                     CompactString::default(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
@@ -179,22 +176,17 @@ impl Page {
     /// Instantiate a new page and gather the links.
     #[cfg(feature = "decentralized")]
     pub async fn new(url: &str, client: &Client) -> Self {
+        use crate::serde::Deserialize;
         let links = match crate::utils::fetch_page(&url, &client).await {
             Some(b) => {
-                // todo: iterate over bytes and match at whitespace instead
-                match std::str::from_utf8(&b) {
-                    Ok(v) => v,
-                    _ => "",
+                use bytes::Buf;
+                match flexbuffers::Reader::get_root(b.chunk()) {
+                    Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
+                        Ok(link) => link,
+                        _ => Default::default(),
+                    },
+                    _ => Default::default(),
                 }
-                .split(" ")
-                .filter_map(|item| {
-                    if !item.is_empty() {
-                        Some(CaseInsensitiveString::from(item))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<HashSet<CaseInsensitiveString>>()
             }
             _ => Default::default(),
         };
@@ -370,10 +362,7 @@ impl Page {
     #[inline(never)]
     pub async fn links(
         &self,
-        _: &(
-            CompactString,
-            smallvec::SmallVec<[CompactString; 2]>,
-        ),
+        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         self.links.to_owned()
     }
