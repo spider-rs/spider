@@ -17,8 +17,3 @@ harness = false
 name = "crawl_massive"
 path = "crawl_massive.rs"
 harness = false
-
-[[bench]]
-name = "parse"
-path = "parse.rs"
-harness = false

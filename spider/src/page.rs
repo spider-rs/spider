@@ -1,7 +1,7 @@
 #[cfg(feature = "decentralized")]
 use crate::packages::scraper::Selector;
 #[cfg(not(feature = "decentralized"))]
-use crate::packages::scraper::{Html, Selector};
+use crate::packages::scraper::{Html};
 use crate::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
@@ -31,13 +31,6 @@ pub struct Page {
     pub links: HashSet<CaseInsensitiveString>,
 }
 
-/// CSS query selector to ignore all resources that are not valid web pages.
-const MEDIA_IGNORE_SELECTOR: &str = r#":not([style*="display: none"]):not([style*="visibility: hidden"]):not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".doc"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
-/// CSS query selector for all relative links that includes MEDIA_IGNORE_SELECTOR
-const MEDIA_SELECTOR_RELATIVE: &str = r#"a[href^="/"]:not([href$=".ico"]):not([href$=".png"]):not([href$=".jpg"]):not([href$=".jpeg"]):not([href$=".svg"]):not([href$=".xlsx"]):not([href$=".img"]):not([href$=".webp"]):not([href$=".gif"]):not([href$=".pdf"]):not([href$=".tiff"]):not([href$=".mov"]):not([href$=".wav"]):not([href$=".mp3"]):not([href$=".mp4"]):not([href$=".ogg"]):not([href$=".webm"]):not([href$=".sql"]):not([href$=".zip"]):not([href$=".doc"]):not([href$=".docx"]):not([href$=".git"]):not([href$=".json"]):not([href$=".xml"]):not([href$=".css"]):not([href$=".md"]):not([href$=".txt"]):not([href$=".js"]):not([href$=".jsx"]):not([href$=".csv"])"#;
-/// CSS query selector for all common static MIME types.
-const MEDIA_SELECTOR_STATIC: &str = r#"[href$=".html"] [href$=".htm"] [href$=".asp"] [href$=".aspx"] [href$=".php"] [href$=".jps"] [href$=".jpsx"]"#;
-
 lazy_static! {
     /// include only list of resources
     static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
@@ -51,30 +44,6 @@ lazy_static! {
 
         m
     };
-}
-
-/// build absolute page selectors
-fn build_absolute_selectors(url: &str) -> String {
-    let off_target = if url.starts_with("https") {
-        url.replacen("https://", "http://", 1)
-    } else {
-        url.replacen("http://", "https://", 1)
-    };
-
-    // handle unsecure and secure transports
-    string_concat::string_concat!(
-        "a[href^=",
-        r#"""#,
-        off_target,
-        r#"""#,
-        "i ],",
-        "a[href^=",
-        r#"""#,
-        url,
-        r#"""#,
-        "i ]",
-        MEDIA_IGNORE_SELECTOR
-    )
 }
 
 /// get the clean domain name
@@ -112,7 +81,7 @@ pub fn get_page_selectors(
     url: &str,
     subdomains: bool,
     tld: bool,
-) -> Option<(Selector, CompactString, SmallVec<[CompactString; 2]>)> {
+) -> Option<(CompactString, SmallVec<[CompactString; 2]>)> {
     match Url::parse(&url) {
         Ok(host) => {
             let host_name = CompactString::from(
@@ -127,100 +96,15 @@ pub fn get_page_selectors(
                 let base = Url::parse(&url).expect("Invalid page URL");
                 let dname = domain_name(&base);
                 let scheme = base.scheme();
-                // . extension
-                let tlds = if tld {
-                    string_concat::string_concat!(
-                        "a[href^=",
-                        r#"""#,
-                        scheme,
-                        "://",
-                        dname,
-                        r#"""#,
-                        "i ]",
-                        MEDIA_IGNORE_SELECTOR,
-                        ","
-                    )
-                // match everything that follows the base.
-                } else {
-                    "".to_string()
-                };
-
-                let absolute_selector = build_absolute_selectors(url);
-
-                // absolute urls with subdomains
-                let absolute_selector = &if subdomains {
-                    string_concat::string_concat!(
-                        absolute_selector,
-                        MEDIA_IGNORE_SELECTOR,
-                        ",",
-                        "a[href^=",
-                        r#"""#,
-                        scheme,
-                        r#"""#,
-                        "]",
-                        "[href*=",
-                        r#"""#,
-                        ".",
-                        dname,
-                        ".",
-                        r#"""#,
-                        "i ]",
-                        MEDIA_IGNORE_SELECTOR
-                    )
-                } else {
-                    absolute_selector
-                };
-
-                let selectors = unsafe {
-                    Selector::parse(&string_concat::string_concat!(
-                        tlds,
-                        MEDIA_SELECTOR_RELATIVE,
-                        ",",
-                        absolute_selector,
-                        ",",
-                        MEDIA_SELECTOR_RELATIVE,
-                        " ",
-                        MEDIA_SELECTOR_STATIC,
-                        ", ",
-                        absolute_selector,
-                        " ",
-                        MEDIA_SELECTOR_STATIC
-                    ))
-                    .unwrap_unchecked()
-                };
 
                 // static html group parse
                 (
-                    selectors,
                     dname.into(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
                 )
             } else {
-                let absolute_selector = build_absolute_selectors(url);
-                let static_html_selector = string_concat::string_concat!(
-                    MEDIA_SELECTOR_RELATIVE,
-                    " ",
-                    MEDIA_SELECTOR_STATIC,
-                    ",",
-                    " ",
-                    absolute_selector,
-                    " ",
-                    MEDIA_SELECTOR_STATIC
-                );
-
-                let selectors = unsafe {
-                    Selector::parse(&string_concat::string_concat!(
-                        MEDIA_SELECTOR_RELATIVE,
-                        ",",
-                        absolute_selector,
-                        ",",
-                        static_html_selector
-                    ))
-                    .unwrap_unchecked()
-                };
 
                 (
-                    selectors,
                     CompactString::default(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
                 )
@@ -470,12 +354,12 @@ impl Page {
     #[inline(never)]
     pub async fn links(
         &self,
-        selectors: &(Selector, CompactString, SmallVec<[CompactString; 2]>),
+        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                self.links_stream::<CaseInsensitiveString>(&(&selectors.1, &selectors.2))
+                self.links_stream::<CaseInsensitiveString>(&(&selectors.0, &selectors.1))
                     .await
             }
         }
@@ -487,7 +371,6 @@ impl Page {
     pub async fn links(
         &self,
         _: &(
-            Selector,
             CompactString,
             smallvec::SmallVec<[CompactString; 2]>,
         ),
