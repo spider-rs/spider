@@ -57,9 +57,26 @@ website.on_link_find_callback = Some(|s| { println!("link target: {}", s); s });
 website.crawl().await;
 ```
 
-## Regex Blacklisting
+## Features
 
-There is an optional "regex" crate that can be enabled:
+We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, serde, gathering full assets, and randomizing user agents.
+
+```toml
+[dependencies]
+spider = { version = "1.26.3", features = ["regex", "ua_generator"] }
+```
+
+1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
+1. `regex`: Enables blacklisting paths with regx
+1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
+1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
+1. `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
+1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
+1. `serde`: Enables serde serialization support.
+
+### Regex Blacklisting
+
+Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
@@ -84,39 +101,14 @@ async fn main() {
 }
 ```
 
-## Features
-
-We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, serde, gathering full assets, and randomizing User-Agents.
-
-```toml
-[dependencies]
-spider = { version = "1.26.3", features = ["regex", "ua_generator"] }
-```
-
-1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
-1. `regex`: Enables blacklisting paths with regx
-1. `jemalloc`: Enables the jemalloc memory backend.
-1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
-1. `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
-1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
-1. `serde`: Enables serde serialization support.
-
-[Jemalloc](https://github.com/jemalloc/jemalloc) performs better for concurrency and allows memory to release easier.
-
-This changes the global allocator of the program so test accordingly to measure impact.
-
-```toml
-[dependencies]
-spider = { version = "1.26.3", features = ["jemalloc"] }
-```
-
-## Blocking
-
-If you need a blocking sync imp use a version prior to `v1.12.0`.
-
-## Pause, Resume, and Shutdown
+### Pause, Resume, and Shutdown
 
 If you are performing large workloads you may need to control the crawler by enabling the `control` feature flag:
+
+```toml
+[dependencies]
+spider = { version = "1.26.3", features = ["control"] }
+```
 
 ```rust
 extern crate spider;
@@ -126,7 +118,7 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    use spider::utils::{pause, resume};
+    use spider::utils::{pause, resume, shutdown};
     let url = "https://choosealicense.com/";
     let mut website: Website = Website::new(&url);
 
@@ -134,31 +126,8 @@ async fn main() {
         pause(url).await;
         sleep(Duration::from_millis(5000)).await;
         resume(url).await;
-    });
-
-    website.crawl().await;
-}
-```
-
-### Shutdown crawls
-
-Enable the `control` feature flag:
-
-```rust
-extern crate spider;
-
-use spider::tokio;
-use spider::website::Website;
-
-#[tokio::main]
-async fn main() {
-    use spider::utils::{shutdown};
-    let url = "https://choosealicense.com/";
-    let mut website: Website = Website::new(&url);
-
-    tokio::spawn(async move {
-        // really long crawl force shutdown ( 30 is a long time for most websites )
-        sleep(Duration::from_secs(30)).await;
+        // perform shutdown if crawl takes longer than 15s
+        sleep(Duration::from_millis(15000)).await;
         shutdown(url).await;
     });
 
@@ -203,6 +172,11 @@ async fn main() {
 
 ### Decentralization
 
+```toml
+[dependencies]
+spider = { version = "1.26.3", features = ["decentralized"] }
+```
+
 1. cargo install `spider_worker`.
 1. `spider_worker`.
 1. `SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized`
@@ -210,3 +184,16 @@ async fn main() {
 Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer.
 The proxy needs to match the transport type for the request to fullfill correctly.
 If the `scrape` feature flag is use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
+
+### Sequential
+
+Perform crawls sequential without any concurrency.
+
+```toml
+[dependencies]
+spider = { version = "1.26.3", features = ["sequential"] }
+```
+
+### Blocking
+
+If you need a blocking sync implementation use a version prior to `v1.12.0`.
