@@ -111,43 +111,6 @@ pub fn get_page_selectors(
     }
 }
 
-/// html raw selector for valid web pages for domain.
-pub fn get_raw_selectors(
-    url: &str,
-    subdomains: bool,
-    tld: bool,
-) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
-    match Url::parse(&url) {
-        Ok(host) => {
-            let host_name = CompactString::from(
-                match convert_abs_path(&host, Default::default()).host_str() {
-                    Some(host) => host.to_ascii_lowercase(),
-                    _ => Default::default(),
-                },
-            );
-            let scheme = host.scheme();
-
-            Some(if tld || subdomains {
-                let base = Url::parse(&url).expect("Invalid page URL");
-                let dname = domain_name(&base);
-                let scheme = base.scheme();
-
-                // static html group parse
-                (
-                    dname.into(),
-                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-                )
-            } else {
-                (
-                    CompactString::default(),
-                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-                )
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, html: Option<String>) -> Page {

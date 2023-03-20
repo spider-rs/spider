@@ -42,27 +42,31 @@ async fn forward(
 
     let page = spider::page::Page::new(&url, &CLIENT).await;
 
-    if !page.get_html().is_empty() {
+    Ok(if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {
             Some(r) => (r == "3" || r == "1", r == "3" || r == "2"),
             _ => (false, false),
         };
-        let selectors = spider::page::get_raw_selectors(url, subdomains, tld).unwrap();
 
-        let links = page
-            .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
-            .await;
+        match spider::page::get_page_selectors(url, subdomains, tld) {
+            Some(selectors) => {
+                let links = page
+                    .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
+                    .await;
 
-        let mut s = flexbuffers::FlexbufferSerializer::new();
+                let mut s = flexbuffers::FlexbufferSerializer::new();
 
-        match links.serialize(&mut s) {
-            _ => (),
-        };
+                match links.serialize(&mut s) {
+                    _ => (),
+                };
 
-        Ok(s.take_buffer())
+                s.take_buffer()
+            }
+            _ => Default::default(),
+        }
     } else {
-        Ok(Default::default())
-    }
+        Default::default()
+    })
 }
 
 /// forward request to get links resources
