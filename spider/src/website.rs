@@ -1,5 +1,5 @@
 use crate::black_list::contains;
-use crate::configuration::{get_ua, Configuration};
+use crate::configuration::{get_blacklist, get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 
@@ -86,11 +86,16 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     #[inline]
-    pub fn is_allowed(&self, link: &CaseInsensitiveString) -> bool {
+    #[cfg(feature = "regex")]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<Vec<regex::Regex>>,
+    ) -> bool {
         if self.links_visited.contains(link) {
             false
         } else {
-            self.is_allowed_default(&link.0)
+            self.is_allowed_default(&link.0, blacklist_url)
         }
     }
 
@@ -99,9 +104,51 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     #[inline]
-    pub fn is_allowed_default(&self, link: &CompactString) -> bool {
-        if !self.configuration.blacklist_url.is_none() {
-            match &self.configuration.blacklist_url {
+    #[cfg(feature = "regex")]
+    pub fn is_allowed_default(
+        &self,
+        link: &CompactString,
+        blacklist_url: &Box<Vec<regex::Regex>>,
+    ) -> bool {
+        if !blacklist_url.is_empty() {
+            !contains(blacklist_url, &link)
+        } else {
+            self.is_allowed_robots(&link)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(not(feature = "regex"))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Option<Box<Vec<CompactString>>>,
+    ) -> bool {
+        if self.links_visited.contains(link) {
+            false
+        } else {
+            self.is_allowed_default(&link.0, blacklist_url)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(not(feature = "regex"))]
+    pub fn is_allowed_default(
+        &self,
+        link: &CompactString,
+        blacklist_url: &Option<Box<Vec<CompactString>>>,
+    ) -> bool {
+        if !blacklist_url.is_none() {
+            match &blacklist_url {
                 Some(v) => !contains(v, &link),
                 _ => true,
             }
@@ -338,6 +385,8 @@ impl Website {
             self.configuration.tld,
         );
 
+        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
+
         // crawl if valid selector
         if selectors.is_some() {
             let on_link_find_callback = self.on_link_find_callback;
@@ -345,24 +394,25 @@ impl Website {
             let throttle = Box::pin(self.get_delay());
             let shared = Arc::new((client, unsafe { selectors.unwrap_unchecked() }));
 
-            let mut links: HashSet<CaseInsensitiveString> =
-                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                    let page = Page::new(&self.domain, &shared.0).await;
+            let mut links: HashSet<CaseInsensitiveString> = if self
+                .is_allowed_default(&CompactString::new(&self.domain.as_str()), &blacklist_url)
+            {
+                let page = Page::new(&self.domain, &shared.0).await;
 
-                    let u = page.get_url().into();
+                let u = page.get_url().into();
 
-                    let link_result = match on_link_find_callback {
-                        Some(cb) => cb(u),
-                        _ => u,
-                    };
-
-                    self.links_visited
-                        .insert(CaseInsensitiveString { 0: link_result });
-
-                    HashSet::from(page.links(&shared.1).await)
-                } else {
-                    HashSet::new()
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
                 };
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
+                HashSet::from(page.links(&shared.1).await)
+            } else {
+                HashSet::new()
+            };
 
             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
             let chandle = Handle::current();
@@ -390,7 +440,7 @@ impl Website {
                                 None => (),
                             }
 
-                            if !self.is_allowed(&link) {
+                            if !self.is_allowed(&link, &blacklist_url) {
                                 continue;
                             }
                             log("fetch", &link);
@@ -440,6 +490,7 @@ impl Website {
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain) {
             Ok(domain) => {
+                let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
                 let domain = domain.as_str();
                 let on_link_find_callback = self.on_link_find_callback;
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
@@ -453,7 +504,7 @@ impl Website {
                 let mut links: HashSet<CaseInsensitiveString> = {
                     let domain = CompactString::new(domain);
 
-                    if self.is_allowed_default(&domain) {
+                    if self.is_allowed_default(&domain, &blacklist_url) {
                         let domain = if http_worker && domain.starts_with("https") {
                             domain.replacen("https", "http", 1)
                         } else {
@@ -503,7 +554,7 @@ impl Website {
                                     None => (),
                                 }
 
-                                if !self.is_allowed(&link) {
+                                if !self.is_allowed(&link, &blacklist_url) {
                                     continue;
                                 }
                                 log("fetch", &link);
@@ -564,6 +615,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
+        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
 
         if selectors.is_some() {
             let selectors = unsafe { selectors.unwrap_unchecked() };
@@ -574,19 +626,20 @@ impl Website {
 
             let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-            let mut links: HashSet<CaseInsensitiveString> =
-                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                    let page = Page::new(&self.domain, &client).await;
-                    let link_result = match on_link_find_callback {
-                        Some(cb) => cb(page.get_url().into()),
-                        _ => page.get_url().into(),
-                    };
-                    self.links_visited
-                        .insert(CaseInsensitiveString { 0: link_result });
-                    HashSet::from(page.links(&selectors).await)
-                } else {
-                    HashSet::new()
+            let mut links: HashSet<CaseInsensitiveString> = if self
+                .is_allowed_default(&CompactString::new(&self.domain.as_str()), &blacklist_url)
+            {
+                let page = Page::new(&self.domain, &client).await;
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(page.get_url().into()),
+                    _ => page.get_url().into(),
                 };
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+                HashSet::from(page.links(&selectors).await)
+            } else {
+                HashSet::new()
+            };
 
             // crawl while links exists
             loop {
@@ -603,7 +656,7 @@ impl Website {
                         }
                         None => (),
                     }
-                    if !self.is_allowed(&link) {
+                    if !self.is_allowed(&link, &blacklist_url) {
                         continue;
                     }
                     self.links_visited.insert(link.clone());
@@ -644,6 +697,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
+        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
 
         if selectors.is_some() {
             self.pages = Some(Box::new(Vec::new()));
@@ -653,23 +707,24 @@ impl Website {
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
 
             let throttle = Duration::from_millis(delay);
-            let mut links: HashSet<CaseInsensitiveString> =
-                if self.is_allowed_default(&CompactString::new(&self.domain.as_str())) {
-                    let page = Page::new(&self.domain, &client).await;
-                    let u = page.get_url().into();
+            let mut links: HashSet<CaseInsensitiveString> = if self
+                .is_allowed_default(&CompactString::new(&self.domain.as_str()), &blacklist_url)
+            {
+                let page = Page::new(&self.domain, &client).await;
+                let u = page.get_url().into();
 
-                    let link_result = match on_link_find_callback {
-                        Some(cb) => cb(u),
-                        _ => u,
-                    };
-
-                    self.links_visited
-                        .insert(CaseInsensitiveString { 0: link_result });
-
-                    HashSet::from(page.links(&selectors).await)
-                } else {
-                    HashSet::new()
+                let link_result = match on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
                 };
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
+                HashSet::from(page.links(&selectors).await)
+            } else {
+                HashSet::new()
+            };
 
             let mut set: JoinSet<(CompactString, Option<String>)> = JoinSet::new();
 
@@ -693,7 +748,7 @@ impl Website {
                         }
                         None => (),
                     }
-                    if !self.is_allowed(&link) {
+                    if !self.is_allowed(&link, &blacklist_url) {
                         continue;
                     }
                     self.links_visited.insert(link.clone());
@@ -868,7 +923,10 @@ async fn test_respect_robots_txt() {
 
     assert_eq!(website.configuration.delay, 0);
 
-    assert!(!website.is_allowed(&"https://stackoverflow.com/posts/".into()));
+    assert!(!website.is_allowed(
+        &"https://stackoverflow.com/posts/".into(),
+        &Default::default()
+    ));
 
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");

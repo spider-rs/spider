@@ -111,16 +111,13 @@ pub mod website;
 /// Black list checking url exist with Regex.
 pub mod black_list {
     use compact_str::CompactString;
-    use regex::Regex;
     /// check if link exist in blacklists with regex.
-    pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
-        for pattern in blacklist_url {
-            let re = Regex::new(pattern).unwrap();
+    pub fn contains(blacklist_url: &Vec<regex::Regex>, link: &CompactString) -> bool {
+        for re in blacklist_url {
             if re.is_match(link) {
                 return true;
             }
         }
-
         return false;
     }
 }

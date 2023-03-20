@@ -50,6 +50,33 @@ pub fn get_ua() -> &'static str {
     AGENT.as_ref()
 }
 
+#[cfg(feature = "regex")]
+/// compile the regex for the blacklist
+pub fn get_blacklist(blacklist: &Option<Box<Vec<CompactString>>>) -> Box<Vec<regex::Regex>> {
+    match blacklist {
+        Some(blacklist) => {
+            let blacklist = blacklist
+                .iter()
+                .filter_map(|pattern| match regex::Regex::new(&pattern) {
+                    Ok(re) => Some(re),
+                    _ => None,
+                })
+                .collect::<Vec<regex::Regex>>();
+
+            Box::new(blacklist)
+        }
+        _ => Default::default(),
+    }
+}
+
+#[cfg(not(feature = "regex"))]
+/// handle the blacklist options
+pub fn get_blacklist(
+    blacklist: &Option<Box<Vec<CompactString>>>,
+) -> &Option<Box<Vec<CompactString>>> {
+    blacklist
+}
+
 impl Configuration {
     /// Represents crawl configuration for a website.
     pub fn new() -> Self {
