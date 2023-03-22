@@ -210,29 +210,32 @@ impl Website {
     /// configure http client
     #[cfg(not(feature = "decentralized"))]
     pub fn configure_http_client(&mut self, _: bool) -> Client {
-        let mut headers = header::HeaderMap::new();
-        headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
-
         let client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
             })
-            .default_headers(headers)
             .brotli(true)
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
+        let client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
+            _ => client,
+        };
+
+        let client = if self.configuration.http2_prior_knowledge {
+            client.http2_prior_knowledge()
+        } else {
+            let mut headers = header::HeaderMap::new();
+            headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
+
+            client.default_headers(headers)
+        };
+
         // should unwrap using native-tls-alpn
-        unsafe {
-            match &self.configuration.request_timeout {
-                Some(t) => client.timeout(**t),
-                _ => client,
-            }
-            .build()
-            .unwrap_unchecked()
-        }
+        unsafe { client.build().unwrap_unchecked() }
     }
 
     /// configure http client

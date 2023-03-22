@@ -50,10 +50,10 @@ website.configuration.subdomains = true;
 website.configuration.tld = false;
 website.configuration.delay = 0; // Defaults to 0 ms due to concurrency handling
 website.configuration.request_timeout = None; // Defaults to 15000 ms
+website.configuration.http2_prior_knowledge = true; // Enable if you know the webserver supports http2
 website.configuration.channel_buffer = 100; // Defaults to 50 - tune this depending on on_link_find_callback
 website.configuration.user_agent = Some("myapp/version".into()); // Defaults to using a random agent
 website.on_link_find_callback = Some(|s| { println!("link target: {}", s); s }); // Callback to run on each link find
-
 website.crawl().await;
 ```
 

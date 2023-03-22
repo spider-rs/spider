@@ -29,6 +29,8 @@ pub struct Configuration {
     pub channel_buffer: i32,
     /// Request max timeout per page
     pub request_timeout: Option<Box<Duration>>,
+    /// Use HTTP2 for connection. Enable if you know the website has http2 support.
+    pub http2_prior_knowledge: bool,
 }
 
 /// get the user agent from the top agent list randomly.
