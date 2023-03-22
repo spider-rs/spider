@@ -1,5 +1,5 @@
 use crate::black_list::contains;
-use crate::configuration::{get_blacklist, get_ua, Configuration};
+use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 
@@ -127,7 +127,7 @@ impl Website {
     pub fn is_allowed(
         &self,
         link: &CaseInsensitiveString,
-        blacklist_url: &Option<Box<Vec<CompactString>>>,
+        blacklist_url: &Box<Vec<CompactString>>,
     ) -> bool {
         if self.links_visited.contains(link) {
             false
@@ -145,13 +145,10 @@ impl Website {
     pub fn is_allowed_default(
         &self,
         link: &CompactString,
-        blacklist_url: &Option<Box<Vec<CompactString>>>,
+        blacklist_url: &Box<Vec<CompactString>>,
     ) -> bool {
-        if !blacklist_url.is_none() {
-            match &blacklist_url {
-                Some(v) => !contains(v, &link),
-                _ => true,
-            }
+        if contains(blacklist_url, &link) {
+            false
         } else {
             self.is_allowed_robots(&link)
         }
@@ -220,11 +217,6 @@ impl Website {
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
-        let client = match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
-            _ => client,
-        };
-
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
         } else {
@@ -232,6 +224,11 @@ impl Website {
             headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
             client.default_headers(headers)
+        };
+
+        let client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
+            _ => client,
         };
 
         // should unwrap using native-tls-alpn
@@ -388,7 +385,7 @@ impl Website {
             self.configuration.tld,
         );
 
-        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
+        let blacklist_url = self.configuration.get_blacklist();
 
         // crawl if valid selector
         if selectors.is_some() {
@@ -493,7 +490,7 @@ impl Website {
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain) {
             Ok(domain) => {
-                let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
+                let blacklist_url = self.configuration.get_blacklist();
                 let domain = domain.as_str();
                 let on_link_find_callback = self.on_link_find_callback;
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
@@ -618,7 +615,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
+        let blacklist_url = self.configuration.get_blacklist();
 
         if selectors.is_some() {
             let selectors = unsafe { selectors.unwrap_unchecked() };
@@ -700,7 +697,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let blacklist_url = get_blacklist(&self.configuration.blacklist_url);
+        let blacklist_url = self.configuration.get_blacklist();
 
         if selectors.is_some() {
             self.pages = Some(Box::new(Vec::new()));

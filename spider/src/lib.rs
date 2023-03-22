@@ -52,7 +52,7 @@
 //! - `jemalloc`: Enables the jemalloc memory backend.
 //! - `decentralized`: Enables decentralized processing of IO,
 //!         requires the [spider_worker] startup before crawls.
-//! - `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
+//! - `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 //! - `full_resources`: Enables gathering all content that relates to the domain.
 //! - `serde`: Enables serde serialization support.
 
