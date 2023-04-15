@@ -24,14 +24,19 @@ lazy_static! {
         let logical = num_cpus::get();
         let physical = num_cpus::get_physical();
 
-        Semaphore::const_new(
-            (if logical > physical {
-                (logical) / (physical) as usize
-            } else {
-                logical
-            } * 10)
-                .max(50),
-        )
+        let sem_limit = if logical > physical {
+            (logical) / (physical) as usize
+        } else {
+            logical
+        };
+
+        let (sem_limit, sem_max) = if logical == physical {
+            (sem_limit * physical, 50)
+        } else {
+            (sem_limit * 4, 25)
+        };
+
+        Semaphore::const_new(sem_limit.max(sem_max))
     };
 }
 
