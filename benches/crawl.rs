@@ -22,7 +22,7 @@ pub fn bench_speed(c: &mut Criterion) {
         website.configuration.respect_robots_txt = false;
 
         b.to_async(&rt)
-            .iter(|| black_box(async_crawl_single(&website)))
+            .iter(|| black_box(async_crawl_single(website.clone())))
     });
 
     drop(rt);
@@ -68,8 +68,7 @@ pub fn bench_speed(c: &mut Criterion) {
 }
 
 /// crawl threaded internal test single
-async fn async_crawl_single(website: &Website) {
-    let mut website = website.clone();
+async fn async_crawl_single(mut website: Website) {
     website.crawl().await;
 }
 

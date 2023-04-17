@@ -7,6 +7,32 @@
 
 ## Benchmark Results
 
+All test are done remotely using 10-100 samples. We want to keep the benchmarks close to a real world scenario.
+
+### mac
+
+```sh
+----------------------
+mac Apple M1 Max
+10-core CPU
+64 GB of RAM memory
+1 TB of SSD disk space
+-----------------------
+
+Test url: `https://rsseau.fr`
+
+185 pages
+```
+
+|                                          | `libraries`           |
+| :--------------------------------------- | :-------------------- |
+| **`Rust[spider]: crawl 10 samples`**     | `2.5s` (✅ **1.00x**) |
+| **`Go[crolly]: crawl 10 samples`**       | `32s`  (✅ **1.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `15s`  (✅ **1.00x**) |
+| **`C[wget]: crawl 10 samples`**          | `70s`  (✅ **1.00x**) |
+
+### linux
+
 ```sh
 ----------------------
 linux ubuntu-latest
@@ -17,42 +43,23 @@ linux ubuntu-latest
 
 Test url: `https://rsseau.fr`
 
-15 pages
+185 pages
 ```
-
-We enable the `jemalloc` feature for the Rust spider crate. All test are done locally for test except C[wget]
-since the performance changes drastically due to dns implementation used. We want to keep the
-benchmarks close to a real world scenario without being impacted by drastic latency issues.
-
-### crawl-speed
-
-runs with 10 samples:
 
 |                                          | `libraries`           |
 | :--------------------------------------- | :-------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `1 s` (✅ **1.00x**)  |
-| **`Go[crolly]: crawl 10 samples`**       | `24 s` (✅ **1.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `38 s` (✅ **1.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `80 s` (✅ **1.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `2.2s` (✅ **1.00x**) |
+| **`Go[crolly]: crawl 10 samples`**       | `30s`  (✅ **1.00x**) |
+| **`Node.js[crawler]: crawl 10 samples`** | `3.4s`  (✅ **1.00x**)|
+| **`C[wget]: crawl 10 samples`**          | `60s` (✅ **1.00x**)  |
 
 The concurrent benchmarks are averaged across 10 individual runs for 10 concurrent crawls with 10 sample counts.
 
-In order for us to get better metrics we need to test the concurrency and simultaneous runs with a larger website and favorably a website that can spin up inside the local container so latency is not being tracked. The multi-threaded crawling capabilities shines bright the larger the website.
-Currently even with a small website this package still runs faster than the top OSS crawlers to date.
+In order for us to get better metrics we need to test the concurrency and simultaneous runs with a larger website. Favorably a website that can spin up inside the local container to avoid latency issues. The multi-threaded crawling capabilities shines brighter the larger the website.
+Currently even with a small website this package still runs faster than the top OSS crawlers to date. [Spider](https://github.com/spider-rs/spider/tree/main/spider) is capable of crawling over 10k pages between 1-10 minutes depending on the website and OS. When spider is used decentralized it can handle IO within fractions of the time depending on the specs and amount of workers. The IO handling in linux performs drastically better than macOS and windows.
 
-_Note_: Nodejs concurrency heavily impacts each additional run.
+_Note_: Nodejs concurrency heavily impacts each additional run. As soon as you add multiple crawlers with nodejs the performance reduces over 2x plus per, while other lanaguages that can handle concurrency scale effectively.
 
+## CI
 
-### Hyperfine
-
-Apple M1 Max (64gb)
-
-179 pages 0.243s with latency (Jan 29, 2023).
-
-Test url: `https://rsseau.fr`.
-
-```
-Benchmark 1: spider --domain https://rsseau.fr crawl
-  Time (mean ± σ):      4.311 s ±  0.263 s    [User: 0.354 s, System: 0.139 s]
-  Range (min … max):    4.102 s …  4.951 s    10 runs
-```
+You need a dedicated machine to get non flakey results. [Github Actions](https://github.com/spider-rs/spider/actions) results may differ across runs due to the shared env and the crawler built to scale across workloads.
