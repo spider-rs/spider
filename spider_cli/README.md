@@ -34,7 +34,7 @@ spider --domain https://choosealicense.com crawl -o > spider_choosealicense.json
 ```
 
 ```sh
-spider_cli 1.26.9
+spider_cli 1.27.1
 madeindjs <contact@rousseau-alexandre.fr>, j-mendez <jeff@a11ywatch.com>
 Multithreaded web crawler written in Rust.
 

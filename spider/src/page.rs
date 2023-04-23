@@ -179,7 +179,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(not(feature = "decentralized"))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
@@ -267,7 +267,7 @@ impl Page {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
 
-                        let mut can_process = match abs.host_str() {
+                        let can_process = match abs.host_str() {
                             Some(host) => parent_host.ends_with(host),
                             _ => false,
                         };
@@ -278,7 +278,6 @@ impl Page {
                             }
 
                             let h = abs.as_str();
-                            let hlen = h.len();
 
                             if can_process && base_domain.is_empty()
                                 || base_domain.as_str() == domain_name(&abs)
