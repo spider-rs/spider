@@ -50,7 +50,7 @@ website.configuration.subdomains = true;
 website.configuration.tld = false;
 website.configuration.delay = 0; // Defaults to 0 ms due to concurrency handling
 website.configuration.request_timeout = None; // Defaults to 15000 ms
-website.configuration.http2_prior_knowledge = true; // Enable if you know the webserver supports http2
+website.configuration.http2_prior_knowledge = false; // Enable if you know the webserver supports http2
 website.configuration.channel_buffer = 100; // Defaults to 50 - tune this depending on on_link_find_callback
 website.configuration.user_agent = Some("myapp/version".into()); // Defaults to using a random agent
 website.on_link_find_callback = Some(|s| { println!("link target: {}", s); s }); // Callback to run on each link find
@@ -70,7 +70,7 @@ spider = { version = "1.26.4", features = ["regex", "ua_generator"] }
 1. `regex`: Enables blacklisting paths with regx
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
-1. `control`: Enabled the ability to pause, start, and shutdown crawls on demand.
+1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 1. `serde`: Enables serde serialization support.
 
@@ -80,7 +80,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.26.4", features = ["regex"] }
+spider = { version = "1.27.2", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -107,7 +107,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.26.4", features = ["control"] }
+spider = { version = "1.27.2", features = ["control"] }
 ```
 
 ```rust
@@ -174,7 +174,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.26.4", features = ["decentralized"] }
+spider = { version = "1.27.2", features = ["decentralized"] }
 ```
 
 1. cargo install `spider_worker`.
@@ -191,7 +191,7 @@ Perform crawls sequential without any concurrency.
 
 ```toml
 [dependencies]
-spider = { version = "1.26.4", features = ["sequential"] }
+spider = { version = "1.27.2", features = ["sequential"] }
 ```
 
 ### Blocking
