@@ -1005,7 +1005,7 @@ async fn test_crawl_proxy() {
         .configuration
         .proxies
         .get_or_insert(Default::default())
-        .push("socks5://184.178.172.5:15303".into());
+        .push("socks5://127.0.0.1:1080".into());
 
     website.crawl().await;
 

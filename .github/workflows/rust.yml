@@ -25,5 +25,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Build
         run: cargo build --verbose
+      - name: Setup Proxy Server local
+        run: cargo install merino
       - name: Run tests
-        run: ./target/debug/spider_worker & cargo test --verbose --all-features
+        run: merino --no-auth & ./target/debug/spider_worker & cargo test --verbose --all-features
