@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 1.28.0
+## 1.28.1
 
 1. feat(proxies): add proxy support
 

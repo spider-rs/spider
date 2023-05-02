@@ -239,7 +239,7 @@ impl Website {
         let client = match &self.configuration.proxies {
             Some(proxies) => {
                 for proxie in proxies.iter() {
-                    client = client.proxy(if proxie.starts_with("https") {
+                    client = client.proxy(if proxie.starts_with("https") || proxie.starts_with("socks5") {
                         reqwest::Proxy::all(proxie).unwrap()
                     } else {
                         reqwest::Proxy::http(proxie).unwrap()
