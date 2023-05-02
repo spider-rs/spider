@@ -84,7 +84,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.28.1", features = ["regex"] }
+spider = { version = "1.28.2", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -111,7 +111,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.28.1", features = ["control"] }
+spider = { version = "1.28.2", features = ["control"] }
 ```
 
 ```rust
@@ -178,7 +178,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.28.1", features = ["decentralized"] }
+spider = { version = "1.28.2", features = ["decentralized"] }
 ```
 
 1. cargo install `spider_worker`.
@@ -195,7 +195,7 @@ Perform crawls sequential without any concurrency.
 
 ```toml
 [dependencies]
-spider = { version = "1.28.1", features = ["sequential"] }
+spider = { version = "1.28.2", features = ["sequential"] }
 ```
 
 ### Blocking

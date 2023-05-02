@@ -1,6 +1,6 @@
 [package]
 name = "spider_worker"
-version = "1.28.1"
+version = "1.28.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -21,7 +21,7 @@ warp = "0.3.3"
 lazy_static = "1.4.0"
 
 [dependencies.spider]
-version = "1.28.1"
+version = "1.28.2"
 path = "../spider"
 features = ["serde", "flexbuffers"]
 
