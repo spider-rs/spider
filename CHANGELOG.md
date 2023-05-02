@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.27.3
+
+1. feat(proxies): add proxies support
+
 ## 1.27.2
 
 1. feat(decentralization): add workload split

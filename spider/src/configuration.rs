@@ -31,6 +31,8 @@ pub struct Configuration {
     pub request_timeout: Option<Box<Duration>>,
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
     pub http2_prior_knowledge: bool,
+    /// Use proxy list for performing network request.
+    pub proxies: Option<Box<Vec<String>>>,
 }
 
 /// get the user agent from the top agent list randomly.

@@ -231,8 +231,22 @@ impl Website {
             client.default_headers(headers)
         };
 
-        let client = match &self.configuration.request_timeout {
+        let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
+            _ => client,
+        };
+
+        let client = match &self.configuration.proxies {
+            Some(proxies) => {
+                for proxie in proxies.iter() {
+                    client = client.proxy(if proxie.starts_with("https") {
+                        reqwest::Proxy::all(proxie).unwrap()
+                    } else {
+                        reqwest::Proxy::http(proxie).unwrap()
+                    })
+                }
+                client
+            }
             _ => client,
         };
 
@@ -240,7 +254,7 @@ impl Website {
         unsafe { client.build().unwrap_unchecked() }
     }
 
-    /// configure http client
+    /// configure http client for decentralization
     #[cfg(feature = "decentralized")]
     pub fn configure_http_client(&mut self, scraping: bool) -> Client {
         let mut headers = header::HeaderMap::new();
@@ -928,7 +942,7 @@ async fn test_respect_robots_txt() {
 
     assert_eq!(website.configuration.delay, 0);
 
-    assert!(!website.is_allowed(
+    assert!(!&website.is_allowed(
         &"https://stackoverflow.com/posts/".into(),
         &Default::default()
     ));
@@ -974,6 +988,27 @@ async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.tld = true;
     website.crawl().await;
+    assert!(
+        website
+            .links_visited
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
+#[cfg(feature = "socks")]
+#[tokio::test]
+async fn test_crawl_proxy() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website
+        .configuration
+        .proxies
+        .get_or_insert(Default::default())
+        .push("socks5://184.178.172.5:15303".into());
+
+    website.crawl().await;
+
     assert!(
         website
             .links_visited

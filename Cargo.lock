@@ -2850,6 +2850,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
+ "tokio-socks",
  "tokio-util",
  "tower-service",
  "url",
@@ -3216,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.27.2"
+version = "1.27.3"
 dependencies = [
  "ahash",
  "bytes",
@@ -3247,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.27.2"
+version = "1.27.3"
 dependencies = [
  "clap 3.2.23",
  "env_logger",
@@ -3259,7 +3260,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.27.2"
+version = "1.27.3"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger",
@@ -3280,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.27.2"
+version = "1.27.3"
 dependencies = [
  "lazy_static",
  "spider",
@@ -3590,6 +3591,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
 dependencies = [
  "native-tls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-socks"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51165dfa029d2a65969413a6cc96f354b86b464498702f174a4efa13608fd8c0"
+dependencies = [
+ "either",
+ "futures-util",
+ "thiserror",
  "tokio",
 ]
 

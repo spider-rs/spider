@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.27.2"
+version = "1.27.3"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -54,3 +54,4 @@ sequential = []
 flexbuffers = ["dep:flexbuffers", "dep:bytes"]
 serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
 full_resources = []
+socks = ["reqwest/socks"]
