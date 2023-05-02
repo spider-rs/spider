@@ -1009,13 +1009,17 @@ async fn test_crawl_proxy() {
 
     website.crawl().await;
 
-    assert!(
-        website
-            .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
-        "{:?}",
-        website.links_visited
-    );
+    let mut license_found = false;
+
+    for links_visited in website.links_visited.iter() {
+        // Proxy may return http or https in socks5 per platform.
+        // We may want to replace the protocol with the host of the platform regardless of proxy response.
+        if links_visited.0.as_str().contains("/licenses/") {
+            license_found = true;
+        };
+    }
+
+    assert!(license_found, "{:?}", website.links_visited);
 }
 
 #[tokio::test]
