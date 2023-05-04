@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use spider::{tokio, website::Website};
+use spider::{tokio, utils, website::Website};
 use warp::{path::FullPath, Filter};
 
 #[macro_use]
@@ -72,7 +72,7 @@ async fn forward(
 /// forward request to get links resources
 #[cfg(not(all(not(feature = "scrape"), not(feature = "all"))))]
 async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infallible> {
-    let data = spider::utils::fetch_page_html(
+    let data = utils::fetch_page_html(
         &format!(
             "{}://{}{}",
             if host.ends_with("443") {
@@ -93,6 +93,7 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
 #[tokio::main]
 #[cfg(all(not(feature = "scrape"), not(feature = "all")))]
 async fn main() {
+    env_logger::init();
     let host = warp::header::<String>("host");
     let referer = warp::header::optional::<String>("referer");
     let routes = warp::path::full()
@@ -100,22 +101,37 @@ async fn main() {
         .and(referer)
         .and_then(forward)
         .boxed();
+    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
+        .unwrap_or_else(|_| "3030".into())
+        .parse()
+        .unwrap_or_else(|_| 3030);
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
 
 #[tokio::main]
 #[cfg(feature = "scrape")]
 async fn main() {
+    env_logger::init();
     let host = warp::header::<String>("host");
     let routes = warp::path::full().and(host).and_then(scrape).boxed();
+    let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
+        .unwrap_or_else(|_| "3031".into())
+        .parse()
+        .unwrap_or_else(|_| 3031);
+    utils::log(
+        "Spider_Worker scraper starting at 0.0.0.0:",
+        &port.to_string(),
+    );
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3031)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
 
 #[tokio::main]
 #[cfg(feature = "all")]
 async fn main() {
+    env_logger::init();
     let host = warp::header::<String>("host");
     let referer = warp::header::optional::<String>("referer");
     let routes = warp::path::full()
@@ -127,9 +143,21 @@ async fn main() {
     tokio::spawn(async {
         let host = warp::header::<String>("host");
         let routes = warp::path::full().and(host).and_then(scrape).boxed();
+        let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
+            .unwrap_or_else(|_| "3031".into())
+            .parse()
+            .unwrap_or_else(|_| 3031);
 
-        warp::serve(routes).run(([0, 0, 0, 0], 3031)).await;
+        utils::log("Spider_Worker scraper starting at 0.0.0.0:", &port);
+
+        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
     });
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
+        .unwrap_or_else(|_| "3030".into())
+        .parse()
+        .unwrap_or_else(|_| 3030);
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port);
+
+    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }

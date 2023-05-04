@@ -275,6 +275,7 @@ impl Website {
         } else {
             std::env::var("SPIDER_WORKER").unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
         };
+        let worker_url = worker_url.split(",");
 
         let referer = if self.configuration.tld && self.configuration.subdomains {
             2
@@ -291,7 +292,9 @@ impl Website {
             headers.insert(reqwest::header::REFERER, header::HeaderValue::from(referer));
         }
 
-        client = client.proxy(reqwest::Proxy::all(worker_url).unwrap());
+        for worker in worker_url {
+            client = client.proxy(reqwest::Proxy::all(worker).unwrap());
+        }
 
         // should unwrap using native-tls-alpn
         unsafe {
