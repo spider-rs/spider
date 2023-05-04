@@ -84,7 +84,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.28.2", features = ["regex"] }
+spider = { version = "1.28.3", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -111,7 +111,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.28.2", features = ["control"] }
+spider = { version = "1.28.3", features = ["control"] }
 ```
 
 ```rust
@@ -178,16 +178,21 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.28.2", features = ["decentralized"] }
+spider = { version = "1.28.3", features = ["decentralized"] }
 ```
 
-1. cargo install `spider_worker`.
-1. `spider_worker`.
-1. `SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized`
+```sh
+# install the worker
+SPIDER_WORKER_PORT=3030 cargo install spider_worker
+# start the worker [set the worker on another machine in prod]
+RUST_LOG=info spider_worker
+# start rust project as normal with SPIDER_WORKER env variable
+SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized
+```
 
-Use `SPIDER_WORKER` env variable to adjust the spider worker onto a load balancer.
+The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers.
 The proxy needs to match the transport type for the request to fullfill correctly.
-If the `scrape` feature flag is use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
+If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
 
 ### Sequential
 
@@ -195,7 +200,7 @@ Perform crawls sequential without any concurrency.
 
 ```toml
 [dependencies]
-spider = { version = "1.28.2", features = ["sequential"] }
+spider = { version = "1.28.3", features = ["sequential"] }
 ```
 
 ### Blocking
