@@ -1120,6 +1120,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_logger"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "epaint"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1760,6 +1773,18 @@ name = "ipnet"
 version = "2.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12b6ee2129af8d4fb011108c73d99a1b83a85977f23b82460c0ae2e25bb4b57f"
+
+[[package]]
+name = "is-terminal"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adcf93614601c8129ddf72e2d5633df827ba6551541c6d8c59520a371475be1f"
+dependencies = [
+ "hermit-abi 0.3.1",
+ "io-lifetimes",
+ "rustix",
+ "windows-sys 0.48.0",
+]
 
 [[package]]
 name = "itertools"
@@ -3217,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.28.2"
+version = "1.28.4"
 dependencies = [
  "ahash",
  "bytes",
@@ -3248,10 +3273,10 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.28.2"
+version = "1.28.4"
 dependencies = [
  "clap 3.2.23",
- "env_logger",
+ "env_logger 0.9.3",
  "failure_derive",
  "quote",
  "serde_json",
@@ -3260,10 +3285,10 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.28.2"
+version = "1.28.4"
 dependencies = [
  "convert_case 0.5.0",
- "env_logger",
+ "env_logger 0.9.3",
  "flexbuffers",
  "htr",
  "spider",
@@ -3281,8 +3306,9 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.28.2"
+version = "1.28.4"
 dependencies = [
+ "env_logger 0.10.0",
  "lazy_static",
  "spider",
  "warp",

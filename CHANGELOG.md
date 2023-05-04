@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## 1.28.2
+## 1.28.4
+
+1. chore(request): fix resource success handling
+
+## 1.28.0
 
 1. feat(proxies): add proxy support
 

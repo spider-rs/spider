@@ -10,9 +10,9 @@ This project depends on the [spider](../spider/) crate.
 
 ## Usage
 
-The worker starts on port 3030 by default. 
+The worker starts on port 3030 and the scraper for html gathering on 3031 by default. 
 
-`cargo run`
+`SPIDER_WORKER_PORT=3030 SPIDER_WORKER_SCRAPER_PORT=3031 cargo run`
 
 ## Feature Flags
 
