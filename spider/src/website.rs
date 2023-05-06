@@ -447,7 +447,7 @@ impl Website {
                 self.links_visited
                     .insert(CaseInsensitiveString { 0: link_result });
 
-                HashSet::from(page.links(&base).await)
+                HashSet::from(page.links)
             } else {
                 HashSet::new()
             };
@@ -455,8 +455,52 @@ impl Website {
         links
     }
 
+    #[cfg(all(feature = "glob", feature = "decentralized"))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+    ) -> HashSet<CaseInsensitiveString> {
+        use crate::features::glob::expand_url;
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let (domain_name, _) = base;
+
+        let mut expanded = expand_url(&domain_name.as_str());
+
+        if expanded.len() == 0 {
+            expanded.push(domain_name.clone());
+        };
+
+        let blacklist_url = self.configuration.get_blacklist();
+
+        for link in expanded {
+            if self.is_allowed_default(&link, &blacklist_url) {
+                let page = Page::new(&link, &client).await;
+                let u = page.get_url();
+
+                let u = if u.is_empty() {
+                    link
+                } else {
+                    u.into()
+                };
+                
+                let link_result = match self.on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
+                };
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
+                links.extend(HashSet::from(page.links));
+            }
+        }
+
+        links
+    }
+
     /// expand links for crawl
-    #[cfg(feature = "glob")]
+    #[cfg(all(feature = "glob", not(feature = "decentralized")))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
