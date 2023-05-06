@@ -98,9 +98,6 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 pub mod configuration;
 /// Optional features to use.
 mod features;
-/// URL globbing
-#[cfg(feature = "glob")]
-mod glob;
 /// Internal packages customized.
 pub mod packages;
 /// A page scraped.

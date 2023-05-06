@@ -1,7 +1,8 @@
+use crate::CompactString;
 use itertools::Itertools;
 
 #[cfg(feature = "glob")]
-pub fn expand_url(url: &str) -> Vec<String> {
+pub fn expand_url(url: &str) -> Vec<CompactString> {
     let mut matches = Vec::new();
 
     for capture in regex::Regex::new(
@@ -89,13 +90,14 @@ pub fn expand_url(url: &str) -> Vec<String> {
         .into_iter()
         .multi_cartesian_product()
         .map(|combination| {
-            let mut new_url = String::from(url);
+            let mut new_url = CompactString::from(url);
+
             for (replacement, substring) in combination {
-                new_url = new_url.replace(substring, replacement.as_str());
+                new_url = new_url.replace(substring, replacement.as_str()).into();
             }
             new_url
         })
-        .collect::<Vec<String>>()
+        .collect::<Vec<CompactString>>()
 }
 
 #[cfg(feature = "glob")]
