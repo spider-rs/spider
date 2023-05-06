@@ -403,11 +403,11 @@ impl Website {
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        blacklist_url: &Box<Vec<CompactString>>,
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(&CompactString::new(&self.domain.as_str()), &blacklist_url)
-        {
+        let links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(
+            &CompactString::new(&self.domain.as_str()),
+            &self.configuration.get_blacklist(),
+        ) {
             let page = Page::new(&self.domain, &client).await;
             let u = page.get_url().into();
 
@@ -433,7 +433,6 @@ impl Website {
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        blacklist_url: &Box<Vec<CompactString>>,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -443,6 +442,8 @@ impl Website {
         if expanded.len() == 0 {
             expanded.push(*domain_name.clone());
         };
+
+        let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
             if self.is_allowed_default(&link, &blacklist_url) {
@@ -482,9 +483,8 @@ impl Website {
             let throttle = Box::pin(self.get_delay());
             let shared = Arc::new((client, unsafe { selectors.unwrap_unchecked() }));
 
-            let mut links: HashSet<CaseInsensitiveString> = self
-                .crawl_establish(&shared.0, &shared.1, &blacklist_url)
-                .await;
+            let mut links: HashSet<CaseInsensitiveString> =
+                self.crawl_establish(&shared.0, &shared.1).await;
 
             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
             let chandle = Handle::current();
@@ -573,8 +573,9 @@ impl Website {
                     .unwrap_or_else(|_| "http:".to_string())
                     .starts_with("http:");
 
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self.crawl_establish(None, &blacklist_url).await;
+                let mut links: HashSet<CaseInsensitiveString> = self
+                    .crawl_establish(&client, &(domain.clone().into(), Default::default()))
+                    .await;
 
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                 let chandle = Handle::current();
@@ -674,9 +675,8 @@ impl Website {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
             let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-            let mut links: HashSet<CaseInsensitiveString> = self
-                .crawl_establish(&client, &selectors, &blacklist_url)
-                .await;
+            let mut links: HashSet<CaseInsensitiveString> =
+                self.crawl_establish(&client, &selectors).await;
 
             // crawl while links exists
             loop {
@@ -745,11 +745,7 @@ impl Website {
 
             let throttle = Duration::from_millis(delay);
             let mut links: HashSet<CaseInsensitiveString> = self
-                .crawl_establish(
-                    &client,
-                    &(selectors.0.clone(), selectors.1.clone()),
-                    &blacklist_url,
-                )
+                .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()))
                 .await;
 
             let mut set: JoinSet<(CompactString, Option<String>)> = JoinSet::new();
