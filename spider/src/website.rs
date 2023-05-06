@@ -46,7 +46,7 @@ lazy_static! {
 /// let mut website = Website::new("http://example.com");
 /// website.crawl();
 /// // `Website` will be filled with `Pages` when crawled. To get them, just use
-/// for page in website.get_pages() {
+/// while let Some(page) = website.get_pages() {
 ///     // do something
 /// }
 /// ```
@@ -404,9 +404,11 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
+        let (domain_name, _) = base;
+
         let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&self.domain, &self.configuration.get_blacklist()) {
-                let page = Page::new(&self.domain, &client).await;
+            if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
+                let page = Page::new(&domain_name, &client).await;
                 let u = page.get_url().into();
 
                 let link_result = match self.on_link_find_callback {
