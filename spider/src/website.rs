@@ -404,25 +404,23 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> = if self.is_allowed_default(
-            &CompactString::new(&self.domain.as_str()),
-            &self.configuration.get_blacklist(),
-        ) {
-            let page = Page::new(&self.domain, &client).await;
-            let u = page.get_url().into();
+        let links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(&self.domain, &self.configuration.get_blacklist()) {
+                let page = Page::new(&self.domain, &client).await;
+                let u = page.get_url().into();
 
-            let link_result = match self.on_link_find_callback {
-                Some(cb) => cb(u),
-                _ => u,
+                let link_result = match self.on_link_find_callback {
+                    Some(cb) => cb(u),
+                    _ => u,
+                };
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
+                HashSet::from(page.links(&base).await)
+            } else {
+                HashSet::new()
             };
-
-            self.links_visited
-                .insert(CaseInsensitiveString { 0: link_result });
-
-            HashSet::from(page.links(&base).await)
-        } else {
-            HashSet::new()
-        };
 
         links
     }
