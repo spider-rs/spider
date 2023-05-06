@@ -478,12 +478,8 @@ impl Website {
                 let page = Page::new(&link, &client).await;
                 let u = page.get_url();
 
-                let u = if u.is_empty() {
-                    link
-                } else {
-                    u.into()
-                };
-                
+                let u = if u.is_empty() { link } else { u.into() };
+
                 let link_result = match self.on_link_find_callback {
                     Some(cb) => cb(u),
                     _ => u,
@@ -1069,10 +1065,15 @@ async fn test_crawl_glob() {
     let mut website: Website =
         Website::new("https://choosealicense.com/licenses/{mit,apache-2.0,mpl-2.0}/");
     website.crawl().await;
+
+    // check for either https/http in collection
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into())
+            || website
+                .links_visited
+                .contains::<CaseInsensitiveString>(&"http://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );

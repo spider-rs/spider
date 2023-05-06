@@ -4,8 +4,10 @@ use crate::CompactString;
 pub fn expand_url(url: &str) -> Vec<CompactString> {
     use itertools::Itertools;
     use regex::Regex;
+    use urlencoding::decode;
 
     let mut matches = Vec::new();
+    let url = decode(url).expect("UTF-8").to_string();
 
     lazy_static! {
         static ref RE: Regex = {
@@ -21,7 +23,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
         };
     }
 
-    for capture in RE.captures_iter(url) {
+    for capture in RE.captures_iter(&url) {
         match (
             capture.name("list"),
             capture.name("items"),
@@ -97,7 +99,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
         .into_iter()
         .multi_cartesian_product()
         .map(|combination| {
-            let mut new_url = CompactString::from(url);
+            let mut new_url = CompactString::from(&url);
 
             for (replacement, substring) in combination {
                 new_url = new_url.replace(substring, replacement.as_str()).into();

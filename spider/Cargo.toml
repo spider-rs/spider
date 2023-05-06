@@ -40,6 +40,7 @@ bytes = { version = "1.4.0", optional = true, features = [ "serde" ] }
 serde = { version = "^1.0.155", optional = true, features = ["derive"] }
 flexbuffers = { version = "2.0.0", optional = true }
 itertools = { version = "0.10.5", optional = true }
+urlencoding = { version = "2.1.2", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -47,7 +48,7 @@ tikv-jemallocator = { version = "0.5.0", optional = true }
 [features]
 default = ["ua_generator"]
 regex = ["dep:regex"]
-glob = ["dep:regex", "dep:itertools"]
+glob = ["dep:regex", "dep:itertools", "dep:urlencoding"]
 ua_generator = ["dep:ua_generator"]
 jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
