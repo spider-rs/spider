@@ -12,7 +12,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
             regex::Regex::new(
                 r"(?x)
                     # list
-                    (?<list>\{(?<items>[^}]+)}) |
+                    (?<list>\{(?<items>[^}\\}^\{]+)}) |
                     # range
                     (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
                 ",
@@ -84,6 +84,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
                         let items = (s..e + 1)
                             .map(|char| (String::from_utf8_lossy(&[char]).to_string(), substring))
                             .collect::<Vec<(String, &str)>>();
+
                         matches.push(items);
                     }
                 };
@@ -123,6 +124,14 @@ fn test_expand_url_list() {
 
 #[cfg(feature = "glob")]
 #[test]
+fn test_expand_url_list_escaped_closing() {
+    let url = "https://choosealicense.com/licenses/{mit\\}/";
+
+    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+}
+
+#[cfg(feature = "glob")]
+#[test]
 fn test_expand_url_numerical_range() {
     let url = "https://choosealicense.com/licenses/bsd-[2-4]-clause/";
 
@@ -133,6 +142,17 @@ fn test_expand_url_numerical_range() {
             "https://choosealicense.com/licenses/bsd-3-clause/",
             "https://choosealicense.com/licenses/bsd-4-clause/",
         ]
+    );
+}
+
+#[cfg(feature = "glob")]
+#[test]
+fn test_expand_url_numerical_range_singe_item() {
+    let url = "https://choosealicense.com/licenses/bsd-[4-4]-clause/";
+
+    assert_eq!(
+        expand_url(url),
+        ["https://choosealicense.com/licenses/bsd-4-clause/"]
     );
 }
 
