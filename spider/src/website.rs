@@ -457,6 +457,7 @@ impl Website {
         links
     }
 
+    /// expand links for crawl
     #[cfg(all(feature = "glob", feature = "decentralized"))]
     async fn crawl_establish(
         &mut self,
