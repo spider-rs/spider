@@ -162,7 +162,6 @@ fn test_expand_url_numerical_range_with_padding() {
 #[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
-    // NOTE: Not sure what is the proper behavior: is this fine or should be strict and throw an error?
     let url = "https://choosealicense.com/licenses/bsd-[008-10]-clause/";
 
     assert_eq!(
