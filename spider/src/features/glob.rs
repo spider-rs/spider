@@ -6,9 +6,6 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
     use regex::Regex;
     use urlencoding::decode;
 
-    let mut matches = Vec::new();
-    let url = decode(url).expect("UTF-8").to_string();
-
     lazy_static! {
         static ref RE: Regex = {
             regex::Regex::new(
@@ -22,6 +19,13 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
             .unwrap()
         };
     }
+
+    let mut matches = Vec::new();
+
+    let url = match decode(url) {
+        Ok(url) => url.to_string(),
+        _ => url.to_string(),
+    };
 
     for capture in RE.captures_iter(&url) {
         match (
@@ -104,6 +108,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
             for (replacement, substring) in combination {
                 new_url = new_url.replace(substring, replacement.as_str()).into();
             }
+
             new_url
         })
         .collect::<Vec<CompactString>>()
