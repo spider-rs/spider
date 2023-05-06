@@ -9,14 +9,21 @@ pub fn expand_url(url: &str) -> Vec<String> {
             # list
             (?<list>\{(?<items>[^}]+)}) |
             # range
-            (?<range>\[(?:(?<start>(?<padding>0*)\d+|\w))-(?:(?<end>\d+|\w))(?::(?<step>\d+))?])
+            (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
         ",
     )
     .unwrap()
     .captures_iter(url)
     {
-        match (capture.name("list"), capture.name("items")) {
-            (Some(list), Some(items)) => {
+        match (
+            capture.name("list"),
+            capture.name("items"),
+            capture.name("range"),
+            capture.name("start"),
+            capture.name("end"),
+        ) {
+            // matches a list
+            (Some(list), Some(items), _, _, _) => {
                 let substring = list.as_str();
 
                 let items = items
@@ -26,17 +33,9 @@ pub fn expand_url(url: &str) -> Vec<String> {
                     .collect::<Vec<(String, &str)>>();
 
                 matches.push(items);
-
-                continue;
             }
-            _ => {}
-        }
-        match (
-            capture.name("range"),
-            capture.name("start"),
-            capture.name("end"),
-        ) {
-            (Some(range), Some(start), Some(end)) => {
+            // matches a range
+            (_, _, Some(range), Some(start), Some(end)) => {
                 let substring = range.as_str();
                 let step = match capture.name("step") {
                     Some(step) => step.as_str().parse::<usize>().unwrap(),
@@ -57,6 +56,7 @@ pub fn expand_url(url: &str) -> Vec<String> {
                 };
 
                 match (start_str.parse::<u32>(), end_str.parse::<u32>()) {
+                    // start and end are numbers
                     (Ok(s), Ok(e)) => {
                         let items = (s..e + 1)
                             .step_by(step)
@@ -70,6 +70,7 @@ pub fn expand_url(url: &str) -> Vec<String> {
 
                         matches.push(items);
                     }
+                    // start and end are characters
                     _ => {
                         let s = start_str.as_bytes()[0];
                         let e = end_str.as_bytes()[0];
