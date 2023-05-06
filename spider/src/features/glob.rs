@@ -1,21 +1,27 @@
 use crate::CompactString;
-use itertools::Itertools;
 
 #[cfg(feature = "glob")]
 pub fn expand_url(url: &str) -> Vec<CompactString> {
+    use itertools::Itertools;
+    use regex::Regex;
+
     let mut matches = Vec::new();
 
-    for capture in regex::Regex::new(
-        r"(?x)
-            # list
-            (?<list>\{(?<items>[^}]+)}) |
-            # range
-            (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
-        ",
-    )
-    .unwrap()
-    .captures_iter(url)
-    {
+    lazy_static! {
+        static ref RE: Regex = {
+            regex::Regex::new(
+                r"(?x)
+                    # list
+                    (?<list>\{(?<items>[^}]+)}) |
+                    # range
+                    (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
+                ",
+            )
+            .unwrap()
+        };
+    }
+
+    for capture in RE.captures_iter(url) {
         match (
             capture.name("list"),
             capture.name("items"),
