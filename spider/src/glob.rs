@@ -74,6 +74,17 @@ fn test_expand_url_range() {
 
 #[cfg(feature = "glob")]
 #[test]
+fn test_expand_url_range_with_step() {
+    let url = "https://choosealicense.com/licenses/bsd-[2-4:2]-clause/";
+
+    assert_eq!(expand_url(url), [
+        "https://choosealicense.com/licenses/bsd-2-clause/",
+        "https://choosealicense.com/licenses/bsd-4-clause/",
+    ]);
+}
+
+#[cfg(feature = "glob")]
+#[test]
 fn test_expand_url_combination() {
     let url = "https://choosealicense.com/licenses/bsd-[2-4]-clause{,-clear}/";
 
