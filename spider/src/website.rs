@@ -398,7 +398,7 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(not(feature = "glob"))]
+    #[cfg(all(not(feature = "glob"), not(feature = "decentralized"),))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -426,7 +426,37 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(feature = "glob")]
+    #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+    ) -> HashSet<CaseInsensitiveString> {
+        let (base_link, _) = base;
+
+        let links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(&base_link, &self.configuration.get_blacklist()) {
+                let page = Page::new(&base_link, &client).await;
+                let link = base_link.clone();
+
+                let link_result = match self.on_link_find_callback {
+                    Some(cb) => cb(link),
+                    _ => link,
+                };
+
+                self.links_visited
+                    .insert(CaseInsensitiveString { 0: link_result });
+
+                HashSet::from(page.links(&base).await)
+            } else {
+                HashSet::new()
+            };
+
+        links
+    }
+
+    /// expand links for crawl
+    #[cfg(all(not(feature = "decentralized"), feature = "glob"))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -570,6 +600,12 @@ impl Website {
                 let http_worker = std::env::var("SPIDER_WORKER")
                     .unwrap_or_else(|_| "http:".to_string())
                     .starts_with("http:");
+
+                let domain = if http_worker && domain.starts_with("https") {
+                    domain.replacen("https", "http", 1)
+                } else {
+                    domain.to_string()
+                };
 
                 let mut links: HashSet<CaseInsensitiveString> = self
                     .crawl_establish(&client, &(domain.clone().into(), Default::default()))
