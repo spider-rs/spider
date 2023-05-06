@@ -3252,6 +3252,7 @@ dependencies = [
  "fast_html5ever",
  "flexbuffers",
  "hashbrown 0.13.2",
+ "itertools",
  "lazy_static",
  "log",
  "matches",
