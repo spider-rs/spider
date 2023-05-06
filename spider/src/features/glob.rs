@@ -207,3 +207,11 @@ fn test_expand_url_combination() {
         ]
     );
 }
+
+#[cfg(feature = "glob")]
+#[test]
+fn test_expand_url_empty() {
+    let url = "https://choosealicense.com";
+
+    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+}
