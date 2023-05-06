@@ -6,8 +6,10 @@ pub fn expand_url(url: &str) -> Vec<String> {
 
     for capture in regex::Regex::new(
         r"(?x)
-            (?<list>\{(?<items>[^}]+)}) |  # list
-            (?<range>\[(?:(?<start>\d+|\w))-(?:(?<end>\d+|\w))(?::(?<step>\d+))?])  # range
+            # list
+            (?<list>\{(?<items>[^}]+)}) |
+            # range
+            (?<range>\[(?:(?<start>(?<padding>0*)\d+|\w))-(?:(?<end>\d+|\w))(?::(?<step>\d+))?])
         ",
     )
     .unwrap()
@@ -29,40 +31,53 @@ pub fn expand_url(url: &str) -> Vec<String> {
             }
             _ => {}
         }
-        match capture.name("range") {
-            Some(range) => {
+        match (
+            capture.name("range"),
+            capture.name("start"),
+            capture.name("end"),
+        ) {
+            (Some(range), Some(start), Some(end)) => {
                 let substring = range.as_str();
                 let step = match capture.name("step") {
                     Some(step) => step.as_str().parse::<usize>().unwrap(),
                     None => 1,
                 };
+                let start_str = start.as_str();
+                let end_str = end.as_str();
 
-                match (capture.name("start"), capture.name("end")) {
-                    (Some(start), Some(end)) => {
-                        let start_str = start.as_str();
-                        let end_str = end.as_str();
-                        match (start_str.parse::<u32>(), end_str.parse::<u32>()) {
-                            (Ok(s), Ok(e)) => {
-                                let items = (s..e + 1)
-                                    .step_by(step)
-                                    .map(|num| (num.to_string(), substring))
-                                    .collect::<Vec<(String, &str)>>();
-
-                                matches.push(items);
-                            }
-                            _ => {
-                                let s = start_str.as_bytes()[0];
-                                let e = end_str.as_bytes()[0];
-                                let items = (s..e + 1)
-                                    .map(|char| {
-                                        (String::from_utf8_lossy(&[char]).to_string(), substring)
-                                    })
-                                    .collect::<Vec<(String, &str)>>();
-                                matches.push(items);
-                            }
-                        };
+                let width = match capture.name("padding") {
+                    Some(padding) => {
+                        if padding.as_str().len() > 0 {
+                            start_str.len()
+                        } else {
+                            0
+                        }
                     }
-                    _ => {}
+                    None => 0,
+                };
+
+                match (start_str.parse::<u32>(), end_str.parse::<u32>()) {
+                    (Ok(s), Ok(e)) => {
+                        let items = (s..e + 1)
+                            .step_by(step)
+                            .map(|num| {
+                                (
+                                    format!("{:0>width$}", num.to_string(), width = width),
+                                    substring,
+                                )
+                            })
+                            .collect::<Vec<(String, &str)>>();
+
+                        matches.push(items);
+                    }
+                    _ => {
+                        let s = start_str.as_bytes()[0];
+                        let e = end_str.as_bytes()[0];
+                        let items = (s..e + 1)
+                            .map(|char| (String::from_utf8_lossy(&[char]).to_string(), substring))
+                            .collect::<Vec<(String, &str)>>();
+                        matches.push(items);
+                    }
                 };
             }
             _ => {}
@@ -122,6 +137,37 @@ fn test_expand_url_numerical_range_with_step() {
         [
             "https://choosealicense.com/licenses/bsd-2-clause/",
             "https://choosealicense.com/licenses/bsd-4-clause/",
+        ]
+    );
+}
+
+#[cfg(feature = "glob")]
+#[test]
+fn test_expand_url_numerical_range_with_padding() {
+    let url = "https://choosealicense.com/licenses/bsd-[002-004]-clause/";
+
+    assert_eq!(
+        expand_url(url),
+        [
+            "https://choosealicense.com/licenses/bsd-002-clause/",
+            "https://choosealicense.com/licenses/bsd-003-clause/",
+            "https://choosealicense.com/licenses/bsd-004-clause/",
+        ]
+    );
+}
+
+#[cfg(feature = "glob")]
+#[test]
+fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
+    // NOTE: Not sure what is the proper behavior: is this fine or should be strict and throw an error?
+    let url = "https://choosealicense.com/licenses/bsd-[008-10]-clause/";
+
+    assert_eq!(
+        expand_url(url),
+        [
+            "https://choosealicense.com/licenses/bsd-008-clause/",
+            "https://choosealicense.com/licenses/bsd-009-clause/",
+            "https://choosealicense.com/licenses/bsd-010-clause/",
         ]
     );
 }
