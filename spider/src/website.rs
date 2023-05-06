@@ -398,7 +398,7 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(all(not(feature = "glob"), not(feature = "decentralized"),))]
+    #[cfg(all(not(feature = "glob"), not(feature = "decentralized")))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -456,7 +456,7 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(all(not(feature = "decentralized"), feature = "glob"))]
+    #[cfg(feature = "glob")]
     async fn crawl_establish(
         &mut self,
         client: &Client,
