@@ -64,7 +64,7 @@ pub fn domain_name(domain: &Url) -> &str {
 
 /// convert to absolute path
 #[inline]
-fn convert_abs_path(base: &Url, href: &str) -> Url {
+pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     match base.join(href) {
         Ok(mut joined) => {
             joined.set_fragment(None);
