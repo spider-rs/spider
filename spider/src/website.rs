@@ -474,6 +474,8 @@ impl Website {
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
+        use url::Url;
+
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
@@ -524,6 +526,8 @@ impl Website {
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
+        use url::Url;
+
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
