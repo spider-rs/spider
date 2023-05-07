@@ -4,7 +4,6 @@ use crate::CompactString;
 pub fn expand_url(url: &str) -> Vec<CompactString> {
     use itertools::Itertools;
     use regex::Regex;
-    use urlencoding::decode;
 
     lazy_static! {
         static ref RE: Regex = {
@@ -24,12 +23,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
 
     let mut matches = Vec::new();
 
-    let url: CompactString = match decode(url) {
-        Ok(u) => u.into(),
-        _ => url.into(),
-    };
-
-    for capture in RE.captures_iter(&url) {
+    for capture in RE.captures_iter(url) {
         match (
             capture.name("list"),
             capture.name("items"),
@@ -105,7 +99,7 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
         .into_iter()
         .multi_cartesian_product()
         .map(|combination| {
-            let mut new_url = url.clone();
+            let mut new_url = CompactString::from(url);
 
             for (replacement, substring) in combination {
                 new_url = new_url.replace(substring, replacement.as_str()).into();
@@ -247,6 +241,14 @@ fn test_expand_url_combination() {
 #[test]
 fn test_expand_url_empty() {
     let url = "https://choosealicense.com";
+
+    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+}
+
+#[cfg(feature = "glob")]
+#[test]
+fn test_expand_url_percent_encoded() {
+    let url = "https://choosealicense.com/licenses/%7Bmit%7D/";
 
     assert_eq!(expand_url(url), Vec::<CompactString>::new());
 }
