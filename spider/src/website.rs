@@ -1,7 +1,7 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{build, get_page_selectors, Page};
+use crate::page::{build, convert_abs_path, get_page_selectors, Page};
 
 use crate::utils::log;
 use crate::CaseInsensitiveString;
