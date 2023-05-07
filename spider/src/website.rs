@@ -405,6 +405,11 @@ impl Website {
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         let (domain_name, _) = base;
+        let domain_name = if domain_name.is_empty() {
+            &*self.domain
+        } else {
+            domain_name
+        };
 
         let links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
@@ -434,12 +439,16 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
-        let (base_link, _) = base;
-
+        let (domain_name, _) = base;
+        let domain_name = if domain_name.is_empty() {
+            &*self.domain
+        } else {
+            domain_name
+        };
         let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&base_link, &self.configuration.get_blacklist()) {
-                let page = Page::new(&base_link, &client).await;
-                let link = base_link.clone();
+            if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
+                let page = Page::new(&domain_name, &client).await;
+                let link = domain_name.clone();
 
                 let link_result = match self.on_link_find_callback {
                     Some(cb) => cb(link),
@@ -467,7 +476,11 @@ impl Website {
         use crate::features::glob::expand_url;
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
-
+        let domain_name = if domain_name.is_empty() {
+            &*self.domain
+        } else {
+            domain_name
+        };
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
@@ -507,7 +520,13 @@ impl Website {
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let domain_name = &self.domain;
+        let (domain_name, _) = base;
+        let domain_name = if domain_name.is_empty() {
+            &*self.domain
+        } else {
+            domain_name
+        };
+
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
@@ -819,8 +838,8 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-
             let throttle = Duration::from_millis(delay);
+
             let mut links: HashSet<CaseInsensitiveString> = self
                 .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()))
                 .await;
