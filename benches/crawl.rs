@@ -7,6 +7,16 @@ use std::process::Command;
 
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
+    let mut worker: Option<std::process::Child> = None;
+
+    if cfg!(feature = "decentralized") {
+        worker.replace(
+            std::process::Command::new("spider_worker")
+                .spawn()
+                .expect("spider_worker command failed to start"),
+        );
+    }
+
     let mut group = c.benchmark_group("crawl-speed/libraries");
     let sample_count = 10;
     let query = "https://rsseau.fr";
@@ -26,6 +36,11 @@ pub fn bench_speed(c: &mut Criterion) {
     });
 
     drop(rt);
+    match worker.take() {
+        Some(mut worker) => worker.kill().expect("spider_worker wasn't running"),
+        _ => (),
+    };
+    drop(worker);
 
     group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
         b.iter(|| {

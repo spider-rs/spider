@@ -8,6 +8,11 @@ pub fn main() {
     node_crawler::gen_crawl();
     go_crolly::gen_crawl();
 
+    // install spider_worker
+    Command::new("cargo")
+        .args(["install", "spider_worker"])
+        .output()
+        .expect("cargo install spider_worker failed");
     // install go deps
     Command::new("go")
         .args(["mod", "init", "example.com/gospider"])

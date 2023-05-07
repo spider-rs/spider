@@ -7,6 +7,16 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
+    let mut worker: Option<std::process::Child> = None;
+
+    if cfg!(feature = "decentralized") {
+        worker.replace(
+            std::process::Command::new("spider_worker")
+                .spawn()
+                .expect("spider_worker command failed to start"),
+        );
+    }
+
     let target = "https://www.va.gov";
     let mut website: Website = Website::new(&target); // todo: use stdin
     website.configuration.user_agent = Some(Box::new("usasearch".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
@@ -15,6 +25,11 @@ async fn main() {
     website.crawl().await;
     let duration = start.elapsed();
     let links = website.get_links();
+    match worker.take() {
+        Some(mut worker) => worker.kill().expect("spider_worker wasn't running"),
+        _ => (),
+    };
+    drop(worker);
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for {} with total pages: {:?}",
