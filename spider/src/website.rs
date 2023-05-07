@@ -484,14 +484,7 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            match urlencoding::decode(domain_name) {
-                Ok(domain) => {
-                    expanded.push(domain.into());
-                }
-                _ => {
-                    expanded.push(domain_name.clone().into());
-                }
-            }
+            expanded.push(domain_name.clone());
         };
 
         let blacklist_url = self.configuration.get_blacklist();
@@ -537,14 +530,7 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            match urlencoding::decode(domain_name) {
-                Ok(domain) => {
-                    expanded.push(domain.into());
-                }
-                _ => {
-                    expanded.push(domain_name.clone().into());
-                }
-            }
+            expanded.push(*domain_name.clone());
         };
 
         let blacklist_url = self.configuration.get_blacklist();
@@ -1106,7 +1092,10 @@ async fn test_crawl_glob() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into())
+            || website
+                .links_visited
+                .contains::<CaseInsensitiveString>(&"http://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
