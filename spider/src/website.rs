@@ -484,7 +484,12 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            expanded.push(domain_name.clone());
+            match Url::parse(domain_name) {
+                Ok(u) => {
+                    expanded.push(convert_abs_path(&u, "/").as_str().into());
+                },
+                _ => ()
+            };
         };
 
         let blacklist_url = self.configuration.get_blacklist();
@@ -530,7 +535,12 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            expanded.push(*domain_name.clone());
+            match Url::parse(domain_name) {
+                Ok(u) => {
+                    expanded.push(convert_abs_path(&u, "/").as_str().into());
+                },
+                _ => ()
+            };
         };
 
         let blacklist_url = self.configuration.get_blacklist();
