@@ -77,6 +77,7 @@ spider = { version = "1.26.4", features = ["regex", "ua_generator"] }
 1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 1. `serde`: Enables serde serialization support.
 1. `socks`: Enables socks5 proxy support.
+1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
 
 ### Regex Blacklisting
 
