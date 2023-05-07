@@ -2,15 +2,20 @@
 
 ## Unreleased
 
-## 1.28.5
+## v1.29.0
+
+1. feat(fs): add temp storage resource handling (#112)
+1. feat(url-glob): URL globbing (#113) thanks to [@roniemartinez](https://github.com/roniemartinez))
+
+## v1.28.5
 
 1. chore(request): fix resource success handling
 
-## 1.28.0
+## v1.28.0
 
 1. feat(proxies): add proxy support
 
-## 1.27.2
+## v1.27.2
 
 1. feat(decentralization): add workload split
 

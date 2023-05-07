@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.26.4"
+spider = "1.29.0"
 ```
 
 And then the code:
@@ -62,11 +62,11 @@ website.crawl().await;
 
 ## Features
 
-We have a couple optional feature flags. Regex blacklisting, jemaloc backend, decentralization, serde, gathering full assets, and randomizing user agents.
+We have a couple optional feature flags. Regex blacklisting, jemaloc backend, globbing, fs temp storage, decentralization, serde, gathering full assets, and randomizing user agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.26.4", features = ["regex", "ua_generator"] }
+spider = { version = "1.29.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
@@ -86,7 +86,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.28.5", features = ["regex"] }
+spider = { version = "1.29.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -113,7 +113,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.28.5", features = ["control"] }
+spider = { version = "1.29.0", features = ["control"] }
 ```
 
 ```rust
@@ -180,7 +180,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.28.5", features = ["decentralized"] }
+spider = { version = "1.29.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -202,7 +202,7 @@ Perform crawls sequential without any concurrency.
 
 ```toml
 [dependencies]
-spider = { version = "1.28.5", features = ["sequential"] }
+spider = { version = "1.29.0", features = ["sequential"] }
 ```
 
 ### Blocking
