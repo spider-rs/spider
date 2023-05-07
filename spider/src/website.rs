@@ -651,9 +651,9 @@ impl Website {
     #[cfg(feature = "decentralized")]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain) {
-            Ok(domain) => {
+            Ok(_) => {
                 let blacklist_url = self.configuration.get_blacklist();
-                let domain = domain.as_str();
+                let domain = self.domain.as_str();
                 let on_link_find_callback = self.on_link_find_callback;
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
                 let throttle = Box::pin(self.get_delay());
