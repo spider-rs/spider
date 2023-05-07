@@ -1,7 +1,7 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{build, convert_abs_path, get_page_selectors, Page};
+use crate::page::{build, get_page_selectors, Page};
 
 use crate::utils::log;
 use crate::CaseInsensitiveString;
@@ -404,16 +404,9 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
-        let (domain_name, _) = base;
-        let domain_name = if domain_name.is_empty() {
-            &*self.domain
-        } else {
-            domain_name
-        };
-
         let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
-                let page = Page::new(&domain_name, &client).await;
+            if self.is_allowed_default(&self.domain, &self.configuration.get_blacklist()) {
+                let page = Page::new(&self.domain, &client).await;
                 let u = page.get_url().into();
 
                 let link_result = match self.on_link_find_callback {
@@ -439,6 +432,7 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
+        // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
             &*self.domain
@@ -488,9 +482,9 @@ impl Website {
         if expanded.len() == 0 {
             match Url::parse(domain_name) {
                 Ok(u) => {
-                    expanded.push(convert_abs_path(&u, "/").as_str().into());
-                },
-                _ => ()
+                    expanded.push(crate::page::convert_abs_path(&u, "/").as_str().into());
+                }
+                _ => (),
             };
         };
 
@@ -541,9 +535,9 @@ impl Website {
         if expanded.len() == 0 {
             match Url::parse(domain_name) {
                 Ok(u) => {
-                    expanded.push(convert_abs_path(&u, "/").as_str().into());
-                },
-                _ => ()
+                    expanded.push(crate::page::convert_abs_path(&u, "/").as_str().into());
+                }
+                _ => (),
             };
         };
 
@@ -1121,6 +1115,9 @@ async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.tld = true;
     website.crawl().await;
+
+    println!("{:?}", website.links_visited);
+
     assert!(
         website
             .links_visited
