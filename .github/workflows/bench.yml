@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_LOG: "off"
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
