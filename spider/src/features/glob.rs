@@ -8,15 +8,17 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
 
     lazy_static! {
         static ref RE: Regex = {
-            regex::Regex::new(
-                r"(?x)
-                    # list
-                    (?<list>\{(?<items>[^}\\}^\{]+)}) |
-                    # range
-                    (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
-                ",
-            )
-            .unwrap()
+            unsafe {
+                regex::Regex::new(
+                    r"(?x)
+                        # list
+                        (?<list>\{(?<items>[^}\\}^\{]+)}) |
+                        # range
+                        (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
+                    ",
+                )
+                .unwrap_unchecked()
+            }
         };
     }
 
