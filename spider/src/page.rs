@@ -140,17 +140,15 @@ impl Page {
     #[cfg(feature = "decentralized")]
     pub async fn new(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
+        use bytes::Buf;
         let links = match crate::utils::fetch_page(&url, &client).await {
-            Some(b) => {
-                use bytes::Buf;
-                match flexbuffers::Reader::get_root(b.chunk()) {
-                    Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
-                        Ok(link) => link,
-                        _ => Default::default(),
-                    },
+            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+                Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
+                    Ok(link) => link,
                     _ => Default::default(),
-                }
-            }
+                },
+                _ => Default::default(),
+            },
             _ => Default::default(),
         };
 

@@ -29,18 +29,22 @@ async fn forward(
         string_concat::{string_concat, string_concat_impl},
     };
 
-    let url = &string_concat!(
-        if host.ends_with("443") {
-            "https"
-        } else {
-            "http"
-        },
-        "://",
-        host,
-        path.as_str()
-    );
+    let url_path = if host.starts_with("http") {
+        string_concat!(host, path.as_str())
+    } else {
+        string_concat!(
+            if host.ends_with("443") {
+                "https"
+            } else {
+                "http"
+            },
+            "://",
+            host,
+            path.as_str()
+        )
+    };
 
-    let page = spider::page::Page::new(&url, &CLIENT).await;
+    let page = spider::page::Page::new(&url_path, &CLIENT).await;
 
     Ok(if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {
@@ -48,7 +52,7 @@ async fn forward(
             _ => (false, false),
         };
 
-        match spider::page::get_page_selectors(url, subdomains, tld) {
+        match spider::page::get_page_selectors(&url_path, subdomains, tld) {
             Some(selectors) => {
                 let links = page
                     .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
@@ -72,20 +76,21 @@ async fn forward(
 /// forward request to get links resources
 #[cfg(not(all(not(feature = "scrape"), not(feature = "all"))))]
 async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infallible> {
-    let data = utils::fetch_page_html(
-        &format!(
-            "{}://{}{}",
+    let url_path = if host.starts_with("http") {
+        string_concat!(host, path.as_str())
+    } else {
+        string_concat!(
             if host.ends_with("443") {
                 "https"
             } else {
                 "http"
             },
+            "://",
             host,
             path.as_str()
-        ),
-        &CLIENT,
-    )
-    .await;
+        )
+    };
+    let data = utils::fetch_page_html(&url_path, &CLIENT).await;
 
     Ok(data.unwrap_or_default())
 }
@@ -96,15 +101,18 @@ async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
     let referer = warp::header::optional::<String>("referer");
+
     let routes = warp::path::full()
         .and(host)
         .and(referer)
         .and_then(forward)
         .boxed();
+
     let port: u16 = std::env::var("SPIDER_WORKER_PORT")
         .unwrap_or_else(|_| "3030".into())
         .parse()
         .unwrap_or_else(|_| 3030);
+
     utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
