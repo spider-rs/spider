@@ -185,9 +185,9 @@ spider = { version = "1.29.0", features = ["decentralized"] }
 
 ```sh
 # install the worker
-SPIDER_WORKER_PORT=3030 cargo install spider_worker
+cargo install spider_worker
 # start the worker [set the worker on another machine in prod]
-RUST_LOG=info spider_worker
+RUST_LOG=info SPIDER_WORKER_PORT=3030 spider_worker
 # start rust project as normal with SPIDER_WORKER env variable
 SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized
 ```

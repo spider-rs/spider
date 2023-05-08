@@ -17,3 +17,6 @@ harness = false
 name = "crawl_massive"
 path = "crawl_massive.rs"
 harness = false
+
+[features]
+decentralized = ["spider/decentralized"]
