@@ -9,10 +9,10 @@ use tokio::sync::Mutex;
 
 #[cfg(not(feature = "fs"))]
 /// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String> {
     use tokio_stream::StreamExt;
 
-    match client.get(url).send().await {
+    match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
             let mut stream = res.bytes_stream();
             let mut data: String = String::new();
@@ -28,7 +28,7 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
         }
         Ok(_) => None,
         Err(_) => {
-            log("- error parsing html text {}", &url);
+            log("- error parsing html text {}", &target_url);
             None
         }
     }
@@ -36,18 +36,18 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
 
 /// Perform a network request to a resource extracting all content as text.
 #[cfg(feature = "decentralized")]
-pub async fn fetch_page(url: &str, client: &Client) -> Option<bytes::Bytes> {
-    match client.get(url).send().await {
+pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+    match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => match res.bytes().await {
             Ok(text) => Some(text),
             Err(_) => {
-                log("- error fetching {}", &url);
+                log("- error fetching {}", &target_url);
                 None
             }
         },
         Ok(_) => None,
         Err(_) => {
-            log("- error parsing html bytes {}", &url);
+            log("- error parsing html bytes {}", &target_url);
             None
         }
     }
@@ -55,7 +55,7 @@ pub async fn fetch_page(url: &str, client: &Client) -> Option<bytes::Bytes> {
 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(feature = "fs")]
-pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String> {
     use crate::tokio::io::AsyncReadExt;
     use crate::tokio::io::AsyncWriteExt;
     use percent_encoding::utf8_percent_encode;
@@ -87,7 +87,7 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
         };
     };
 
-    match client.get(url).send().await {
+    match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
             let mut stream = res.bytes_stream();
             let mut data = Box::new(String::new());
@@ -106,7 +106,7 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
                             if !wrote_disk {
                                 file_path = string_concat!(
                                     TMP_DIR,
-                                    &utf8_percent_encode(url, NON_ALPHANUMERIC).to_string()
+                                    &utf8_percent_encode(target_url, NON_ALPHANUMERIC).to_string()
                                 );
                                 match tokio::fs::File::create(&file_path).await {
                                     Ok(f) => {
@@ -158,7 +158,7 @@ pub async fn fetch_page_html(url: &str, client: &Client) -> Option<String> {
         }
         Ok(_) => None,
         Err(_) => {
-            log("- error parsing html text {}", &url);
+            log("- error parsing html text {}", &target_url);
             None
         }
     }
