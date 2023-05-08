@@ -190,6 +190,14 @@ impl Website {
         Duration::from_millis(self.configuration.delay)
     }
 
+    /// absolute base url of crawl
+    pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<url::Url> {
+        match url::Url::parse(domain.unwrap_or_else(|| &self.domain)) {
+            Ok(u) => Some(crate::page::convert_abs_path(&u, "/")),
+            _ => None,
+        }
+    }
+
     /// configure the robots parser on initial crawl attempt and run.
     pub async fn configure_robots_parser(&mut self, client: Client) -> Client {
         if self.configuration.respect_robots_txt {
@@ -275,6 +283,7 @@ impl Website {
         } else {
             std::env::var("SPIDER_WORKER").unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
         };
+
         let worker_url = worker_url.split(",");
 
         let referer = if self.configuration.tld && self.configuration.subdomains {
@@ -292,8 +301,31 @@ impl Website {
             headers.insert(reqwest::header::REFERER, header::HeaderValue::from(referer));
         }
 
+        match self.get_absolute_path(None) {
+            Some(domain_url) => {
+                let domain_url = domain_url.as_str();
+                let domain_host = if domain_url.ends_with("/") {
+                    &domain_url[0..domain_url.len() - 1]
+                } else {
+                    domain_url
+                };
+                match header::HeaderValue::from_str(domain_host) {
+                    Ok(value) => {
+                        headers.insert(reqwest::header::HOST, value);
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+
         for worker in worker_url {
-            client = client.proxy(reqwest::Proxy::all(worker).unwrap());
+            match reqwest::Proxy::all(worker) {
+                Ok(worker) => {
+                    client = client.proxy(worker);
+                }
+                _ => (),
+            }
         }
 
         // should unwrap using native-tls-alpn
@@ -376,33 +408,13 @@ impl Website {
         (self.configure_robots_parser(client).await, None)
     }
 
-    /// Start to crawl website with async conccurency
-    pub async fn crawl(&mut self) {
-        let (client, handle) = self.setup(false).await;
-
-        self.crawl_concurrent(client, handle).await;
-    }
-
-    /// Start to crawl website in sync
-    pub async fn crawl_sync(&mut self) {
-        let (client, handle) = self.setup(false).await;
-
-        self.crawl_sequential(&client, handle).await;
-    }
-
-    /// Start to scrape/download website with async conccurency
-    pub async fn scrape(&mut self) {
-        let (client, handle) = self.setup(true).await;
-
-        self.scrape_concurrent(&client, handle).await;
-    }
-
     /// expand links for crawl
     #[cfg(all(not(feature = "glob"), not(feature = "decentralized")))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&self.domain, &self.configuration.get_blacklist()) {
@@ -431,6 +443,7 @@ impl Website {
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let (domain_name, _) = base;
@@ -441,7 +454,11 @@ impl Website {
         };
         let links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
-                let page = Page::new(&domain_name, &client).await;
+                let page = Page::new(&if http_worker && domain_name.starts_with("https") {
+                    domain_name.replacen("https", "http", 1)
+                } else {
+                    domain_name.to_string()
+                }, &client).await;
                 let link = domain_name.clone();
 
                 let link_result = match self.on_link_find_callback {
@@ -466,9 +483,9 @@ impl Website {
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
-        use url::Url;
 
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
@@ -480,9 +497,9 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            match Url::parse(domain_name) {
-                Ok(u) => {
-                    expanded.push(crate::page::convert_abs_path(&u, "/").as_str().into());
+            match self.get_absolute_path(Some(domain_name)) {
+                Some(u) => {
+                    expanded.push(u.as_str().into());
                 }
                 _ => (),
             };
@@ -492,9 +509,13 @@ impl Website {
 
         for link in expanded {
             if self.is_allowed_default(&link, &blacklist_url) {
-                let page = Page::new(&link, &client).await;
-                let u = page.get_url();
+                let page = Page::new(& if http_worker && link.starts_with("https") {
+                    link.replacen("https", "http", 1)
+                } else {
+                    link.to_string()
+                }, &client).await;
 
+                let u = page.get_url();
                 let u = if u.is_empty() { link } else { u.into() };
 
                 let link_result = match self.on_link_find_callback {
@@ -518,6 +539,7 @@ impl Website {
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
         use url::Url;
@@ -533,9 +555,9 @@ impl Website {
         let mut expanded = expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
-            match Url::parse(domain_name) {
-                Ok(u) => {
-                    expanded.push(crate::page::convert_abs_path(&u, "/").as_str().into());
+            match self.get_absolute_path(Some(domain_name)) {
+                Some(u) => {
+                    expanded.push(u.as_str().into());
                 }
                 _ => (),
             };
@@ -563,6 +585,27 @@ impl Website {
         links
     }
 
+    /// Start to crawl website with async conccurency
+    pub async fn crawl(&mut self) {
+        let (client, handle) = self.setup(false).await;
+
+        self.crawl_concurrent(client, handle).await;
+    }
+
+    /// Start to crawl website in sync
+    pub async fn crawl_sync(&mut self) {
+        let (client, handle) = self.setup(false).await;
+
+        self.crawl_sequential(&client, handle).await;
+    }
+
+    /// Start to scrape/download website with async conccurency
+    pub async fn scrape(&mut self) {
+        let (client, handle) = self.setup(true).await;
+
+        self.scrape_concurrent(&client, handle).await;
+    }
+
     /// Start to crawl website concurrently
     #[cfg(not(feature = "decentralized"))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
@@ -582,7 +625,7 @@ impl Website {
             let shared = Arc::new((client, unsafe { selectors.unwrap_unchecked() }));
 
             let mut links: HashSet<CaseInsensitiveString> =
-                self.crawl_establish(&shared.0, &shared.1).await;
+                self.crawl_establish(&shared.0, &shared.1, false).await;
 
             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
             let chandle = Handle::current();
@@ -671,14 +714,8 @@ impl Website {
                     .unwrap_or_else(|_| "http:".to_string())
                     .starts_with("http:");
 
-                let domain = if http_worker && domain.starts_with("https") {
-                    domain.replacen("https", "http", 1)
-                } else {
-                    domain.to_string()
-                };
-
                 let mut links: HashSet<CaseInsensitiveString> = self
-                    .crawl_establish(&client, &(domain.clone().into(), Default::default()))
+                    .crawl_establish(&client, &(domain.into(), Default::default()), http_worker)
                     .await;
 
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -780,7 +817,7 @@ impl Website {
 
             let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
             let mut links: HashSet<CaseInsensitiveString> =
-                self.crawl_establish(&client, &selectors).await;
+                self.crawl_establish(&client, &selectors, false).await;
 
             // crawl while links exists
             loop {
@@ -849,7 +886,7 @@ impl Website {
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = self
-                .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()))
+                .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()), false)
                 .await;
 
             let mut set: JoinSet<(CompactString, Option<String>)> = JoinSet::new();
@@ -960,11 +997,11 @@ async fn scrape() {
 #[tokio::test]
 #[cfg(not(feature = "decentralized"))]
 async fn crawl_invalid() {
-    let url = "https://w.com";
-    let mut website: Website = Website::new(url);
+    let domain = "https://w.com";
+    let mut website: Website = Website::new(domain);
     website.crawl().await;
     let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
-    uniq.insert(format!("{}/", url.to_string()).into()); // TODO: remove trailing slash mutate
+    uniq.insert(format!("{}/", domain.to_string()).into()); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -972,11 +1009,11 @@ async fn crawl_invalid() {
 #[tokio::test]
 #[cfg(feature = "decentralized")]
 async fn crawl_invalid() {
-    let url = "https://w.com";
-    let mut website: Website = Website::new(url);
+    let domain = "https://w.com";
+    let mut website: Website = Website::new(domain);
     website.crawl().await;
     let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
-    uniq.insert(format!("{}/", url.to_string().replace("https:", "http:")).into()); // TODO: remove trailing slash mutate
+    uniq.insert(format!("{}/", domain.to_string()).into()); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -1100,10 +1137,7 @@ async fn test_crawl_glob() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into())
-            || website
-                .links_visited
-                .contains::<CaseInsensitiveString>(&"http://choosealicense.com/licenses/".into()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -1115,8 +1149,6 @@ async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.tld = true;
     website.crawl().await;
-
-    println!("{:?}", website.links_visited);
 
     assert!(
         website
