@@ -480,9 +480,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.12.1"
+version = "3.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b1ce199063694f33ffb7dd4e0ee620741495c32833cde5aa08f02a0bf96f0c8"
+checksum = "3c6ed94e98ecff0c12dd1b04c15ec0d7d9458ca8fe806cea6f12954efe74c63b"
 
 [[package]]
 name = "bytemuck"
@@ -1855,9 +1855,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.143"
+version = "0.2.144"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc207893e85c5d6be840e969b496b53d94cec8be2d501b214f50daa97fa8024"
+checksum = "2b00cc1c228a6782d0f076e7b232802e0c5689d41bb5df366f2a6b6621cfdfe1"
 
 [[package]]
 name = "libloading"
@@ -2675,9 +2675,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4424af4bf778aae2051a77b60283332f386554255d722233d09fbfc7e30da2fc"
+checksum = "8f4f29d145265ec1c483c7c654450edde0bfe043d3938d6972630663356d9500"
 dependencies = [
  "proc-macro2",
 ]
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.29.5"
+version = "1.29.7"
 dependencies = [
  "ahash",
  "bytes",
@@ -3266,7 +3266,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.29.5"
+version = "1.29.7"
 dependencies = [
  "clap 3.2.25",
  "env_logger 0.9.3",
@@ -3278,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.29.5"
+version = "1.29.7"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.29.5"
+version = "1.29.7"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
@@ -3582,9 +3582,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.28.0"
+version = "1.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c786bf8134e5a3a166db9b29ab8f48134739014a3eca7bc6bfa95d673b136f"
+checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
 dependencies = [
  "autocfg",
  "bytes",
@@ -4501,9 +4501,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.7"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699d0104bcdd7e7af6d093d6c6e2d0c479b8a129ee0d1023b31d2e0c71bfdda2"
+checksum = "c1fcc45bb67e8bd9c33ada4b861bccfe2506e726169f7c1081b95841b3758eb3"
 
 [[package]]
 name = "zbus"
