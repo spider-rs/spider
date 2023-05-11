@@ -59,7 +59,7 @@ pub struct Website {
     /// contains page visited
     pages: Option<Box<Vec<Page>>>,
     /// callback when a link is found.
-    pub on_link_find_callback: Option<fn(CompactString) -> CompactString>,
+    pub on_link_find_callback: Option<fn(CaseInsensitiveString) -> CaseInsensitiveString>,
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
@@ -100,7 +100,7 @@ impl Website {
         if self.links_visited.contains(link) {
             false
         } else {
-            self.is_allowed_default(&link.0, blacklist_url)
+            self.is_allowed_default(link, blacklist_url)
         }
     }
 
@@ -112,13 +112,13 @@ impl Website {
     #[cfg(feature = "regex")]
     pub fn is_allowed_default(
         &self,
-        link: &CompactString,
+        link: &CaseInsensitiveString,
         blacklist_url: &Box<Vec<regex::Regex>>,
     ) -> bool {
         if !blacklist_url.is_empty() {
-            !contains(blacklist_url, &link)
+            !contains(blacklist_url, &link.inner())
         } else {
-            self.is_allowed_robots(&link)
+            self.is_allowed_robots(&link.as_ref())
         }
     }
 
@@ -137,7 +137,7 @@ impl Website {
         if self.links_visited.contains(link) {
             false
         } else {
-            self.is_allowed_default(&link.0, blacklist_url)
+            self.is_allowed_default(&link.inner(), blacklist_url)
         }
     }
 
@@ -426,8 +426,7 @@ impl Website {
                     _ => u,
                 };
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
+                self.links_visited.insert(link_result);
 
                 HashSet::from(page.links(&base).await)
             } else {
@@ -454,20 +453,22 @@ impl Website {
         };
         let links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
-                let page = Page::new(&if http_worker && domain_name.starts_with("https") {
-                    domain_name.replacen("https", "http", 1)
-                } else {
-                    domain_name.to_string()
-                }, &client).await;
-                let link = domain_name.clone();
-
+                let page = Page::new(
+                    &if http_worker && domain_name.starts_with("https") {
+                        domain_name.replacen("https", "http", 1)
+                    } else {
+                        domain_name.to_string()
+                    },
+                    &client,
+                )
+                .await;
+                let link = CaseInsensitiveString::new(&domain_name);
                 let link_result = match self.on_link_find_callback {
                     Some(cb) => cb(link),
                     _ => link,
                 };
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
+                self.links_visited.insert(link_result);
 
                 HashSet::from(page.links)
             } else {
@@ -509,11 +510,15 @@ impl Website {
 
         for link in expanded {
             if self.is_allowed_default(&link, &blacklist_url) {
-                let page = Page::new(& if http_worker && link.starts_with("https") {
-                    link.replacen("https", "http", 1)
-                } else {
-                    link.to_string()
-                }, &client).await;
+                let page = Page::new(
+                    &if http_worker && link.as_ref().starts_with("https") {
+                        link.inner().replacen("https", "http", 1).to_string()
+                    } else {
+                        link.inner().to_string()
+                    },
+                    &client,
+                )
+                .await;
 
                 let u = page.get_url();
                 let u = if u.is_empty() { link } else { u.into() };
@@ -523,8 +528,7 @@ impl Website {
                     _ => u,
                 };
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
+                self.links_visited.insert(link_result);
 
                 links.extend(HashSet::from(page.links));
             }
@@ -665,10 +669,10 @@ impl Website {
                             set.spawn_on(
                                 async move {
                                     let link_result = match on_link_find_callback {
-                                        Some(cb) => cb(link.0),
-                                        _ => link.0,
+                                        Some(cb) => cb(link),
+                                        _ => link,
                                     };
-                                    let page = Page::new(&link_result, &shared.0).await;
+                                    let page = Page::new(&link_result.as_ref(), &shared.0).await;
                                     let page_links = page.links(&shared.1).await;
 
                                     drop(permit);
@@ -756,19 +760,25 @@ impl Website {
 
                                 set.spawn_on(
                                     async move {
-                                        let link_results =
-                                            if http_worker && link.0.starts_with("https") {
-                                                link.0.replacen("https", "http", 1).into()
-                                            } else {
-                                                link.0
-                                            };
-
                                         let link_results = match on_link_find_callback {
-                                            Some(cb) => cb(link_results),
-                                            _ => link_results,
+                                            Some(cb) => cb(link),
+                                            _ => link,
                                         };
 
-                                        let page = Page::new(&link_results, &client).await;
+                                        let page = Page::new(
+                                            &if http_worker
+                                                && link_results.as_ref().starts_with("https")
+                                            {
+                                                link_results
+                                                    .as_ref()
+                                                    .replacen("https", "http", 1)
+                                                    .to_string()
+                                            } else {
+                                                link_results.as_ref().to_string()
+                                            },
+                                            &client,
+                                        )
+                                        .await;
 
                                         drop(permit);
 
@@ -844,11 +854,11 @@ impl Website {
                     }
                     let link = link.clone();
                     let link_result = match on_link_find_callback {
-                        Some(cb) => cb(link.0),
-                        _ => link.0,
+                        Some(cb) => cb(link),
+                        _ => link,
                     };
 
-                    let page = Page::new(&link_result, &client).await;
+                    let page = Page::new(&link_result.as_ref(), &client).await;
                     let page_links = page.links(&selectors).await;
                     task::yield_now().await;
                     new_links.extend(page_links);
@@ -889,7 +899,7 @@ impl Website {
                 .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()), false)
                 .await;
 
-            let mut set: JoinSet<(CompactString, Option<String>)> = JoinSet::new();
+            let mut set: JoinSet<(CaseInsensitiveString, Option<String>)> = JoinSet::new();
 
             // crawl while links exists
             loop {
@@ -920,14 +930,15 @@ impl Website {
                     let permit = SEM.acquire().await.unwrap();
 
                     set.spawn(async move {
-                        let link_result = match on_link_find_callback {
-                            Some(cb) => cb(link.0),
-                            _ => link.0,
-                        };
-
                         drop(permit);
 
-                        let page = crate::utils::fetch_page_html(&link_result, &client).await;
+                        let link_result = match on_link_find_callback {
+                            Some(cb) => cb(link),
+                            _ => link,
+                        };
+
+                        let page =
+                            crate::utils::fetch_page_html(&link_result.as_ref(), &client).await;
 
                         (link_result, page)
                     });
@@ -943,7 +954,7 @@ impl Website {
                     match res {
                         Ok(msg) => {
                             if msg.1.is_some() {
-                                let page = build(&msg.0, msg.1);
+                                let page = build(&msg.0.as_ref(), msg.1);
                                 let page_links = page.links(&*selectors).await;
                                 links.extend(&page_links - &self.links_visited);
                                 task::yield_now().await;
@@ -1176,7 +1187,7 @@ async fn test_crawl_proxy() {
     for links_visited in website.links_visited.iter() {
         // Proxy may return http or https in socks5 per platform.
         // We may want to replace the protocol with the host of the platform regardless of proxy response.
-        if links_visited.0.as_str().contains("/licenses/") {
+        if links_visited.as_ref().contains("/licenses/") {
             license_found = true;
         };
     }
