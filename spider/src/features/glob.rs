@@ -1,7 +1,7 @@
-use crate::CompactString;
+use crate::CaseInsensitiveString;
 
 #[cfg(feature = "glob")]
-pub fn expand_url(url: &str) -> Vec<CompactString> {
+pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
     use regex::Regex;
 
@@ -96,18 +96,21 @@ pub fn expand_url(url: &str) -> Vec<CompactString> {
     }
 
     matches
-        .into_iter()
+        .iter()
         .multi_cartesian_product()
         .map(|combination| {
-            let mut new_url = CompactString::from(url);
+            let mut new_url = CaseInsensitiveString::new(url);
 
             for (replacement, substring) in combination {
-                new_url = new_url.replace(substring, replacement.as_str()).into();
+                new_url = new_url
+                    .inner()
+                    .replace(substring, replacement.as_str())
+                    .into();
             }
 
             new_url
         })
-        .collect::<Vec<CompactString>>()
+        .collect::<Vec<CaseInsensitiveString>>()
 }
 
 #[cfg(feature = "glob")]
@@ -122,6 +125,9 @@ fn test_expand_url_list() {
             "https://choosealicense.com/licenses/apache-2.0/",
             "https://choosealicense.com/licenses/mpl-2.0/"
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -130,7 +136,7 @@ fn test_expand_url_list() {
 fn test_expand_url_list_escaped_closing() {
     let url = "https://choosealicense.com/licenses/{mit\\}/";
 
-    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+    assert_eq!(expand_url(url), Vec::<CaseInsensitiveString>::new());
 }
 
 #[cfg(feature = "glob")]
@@ -145,6 +151,9 @@ fn test_expand_url_numerical_range() {
             "https://choosealicense.com/licenses/bsd-3-clause/",
             "https://choosealicense.com/licenses/bsd-4-clause/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -156,6 +165,9 @@ fn test_expand_url_numerical_range_singe_item() {
     assert_eq!(
         expand_url(url),
         ["https://choosealicense.com/licenses/bsd-4-clause/"]
+            .iter()
+            .map(|url| CaseInsensitiveString::new(url))
+            .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -170,6 +182,9 @@ fn test_expand_url_numerical_range_with_step() {
             "https://choosealicense.com/licenses/bsd-2-clause/",
             "https://choosealicense.com/licenses/bsd-4-clause/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -185,6 +200,9 @@ fn test_expand_url_numerical_range_with_padding() {
             "https://choosealicense.com/licenses/bsd-003-clause/",
             "https://choosealicense.com/licenses/bsd-004-clause/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -200,6 +218,9 @@ fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
             "https://choosealicense.com/licenses/bsd-009-clause/",
             "https://choosealicense.com/licenses/bsd-010-clause/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -216,6 +237,9 @@ fn test_expand_url_alphabetical_range() {
             "https://choosealicense.com/licenses/ylib/",
             "https://choosealicense.com/licenses/zlib/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -234,6 +258,9 @@ fn test_expand_url_combination() {
             "https://choosealicense.com/licenses/bsd-4-clause/",
             "https://choosealicense.com/licenses/bsd-4-clause-clear/",
         ]
+        .iter()
+        .map(|url| CaseInsensitiveString::new(url))
+        .collect::<Vec<CaseInsensitiveString>>()
     );
 }
 
@@ -242,7 +269,7 @@ fn test_expand_url_combination() {
 fn test_expand_url_empty() {
     let url = "https://choosealicense.com";
 
-    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+    assert_eq!(expand_url(url), Vec::<CaseInsensitiveString>::new());
 }
 
 #[cfg(feature = "glob")]
@@ -250,5 +277,5 @@ fn test_expand_url_empty() {
 fn test_expand_url_percent_encoded() {
     let url = "https://choosealicense.com/licenses/%7Bmit%7D/";
 
-    assert_eq!(expand_url(url), Vec::<CompactString>::new());
+    assert_eq!(expand_url(url), Vec::<CaseInsensitiveString>::new());
 }
