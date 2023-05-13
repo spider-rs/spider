@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.30.2
+
+1. chore(glob): fix glob crawl establish
+
 ## v1.30.1
 
 1. chore(crawl): fix crawl asset detection and trailing start

@@ -540,7 +540,6 @@ impl Website {
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::features::glob::expand_url;
-        use url::Url;
 
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
@@ -564,8 +563,8 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
-            if self.is_allowed_default(&link, &blacklist_url) {
-                let page = Page::new(&link, &client).await;
+            if self.is_allowed_default(&link.inner(), &blacklist_url) {
+                let page = Page::new(&link.inner(), &client).await;
                 let u = page.get_url().into();
 
                 let link_result = match self.on_link_find_callback {
@@ -573,8 +572,7 @@ impl Website {
                     _ => u,
                 };
 
-                self.links_visited
-                    .insert(CaseInsensitiveString { 0: link_result });
+                self.links_visited.insert(link_result);
 
                 links.extend(HashSet::from(page.links(&base).await));
             }
