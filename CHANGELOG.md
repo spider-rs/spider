@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.30.1
+
+1. chore(crawl): fix crawl asset detection and trailing start
+
 ## v1.29.0
 
 1. feat(fs): add temp storage resource handling (#112)

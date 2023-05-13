@@ -210,27 +210,31 @@ impl Page {
                                 let _ = abs.set_scheme(parent_host_scheme.as_str());
                             }
 
-                            let h = abs.as_str();
-                            let hlen = h.len();
+                            // full url path
+                            let resource_url = abs.clone();
 
+                            // clean the resource to check if valid crawl asset
+                            abs.set_query(None);
+
+                            let clean_resource = abs.as_str();
+                            let hlen = clean_resource.len();
                             // a possible resource extension
-                            if hlen > 4 && !h.ends_with("/") {
-                                let hchars = &h[hlen - 5..hlen];
-                                if let Some(position) = hchars.find('.') {
-                                    let resource_ext = &hchars[position + 1..hchars.len()];
+                            let hchars = &clean_resource[hlen - 5..hlen];
 
-                                    if !ONLY_RESOURCES
-                                        .contains(&CaseInsensitiveString::from(resource_ext))
-                                    {
-                                        can_process = false;
-                                    }
+                            if let Some(position) = hchars.find('.') {
+                                let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                if !ONLY_RESOURCES
+                                    .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                {
+                                    can_process = false;
                                 }
                             }
 
                             if can_process && base_domain.is_empty()
                                 || base_domain.as_str() == domain_name(&abs)
                             {
-                                map.insert(h.to_string().into());
+                                map.insert(resource_url.as_str().to_string().into());
                             }
                         }
                     }
