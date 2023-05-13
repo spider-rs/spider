@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.30.3
+
+1. chore(request): add custom domain redirect policy
+
 ## v1.30.2
 
 1. chore(glob): fix glob crawl establish

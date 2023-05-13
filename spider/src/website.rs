@@ -214,11 +214,28 @@ impl Website {
     /// configure http client
     #[cfg(not(feature = "decentralized"))]
     pub fn configure_http_client(&mut self, _: bool) -> Client {
+        let host_str = match url::Url::parse(&self.domain) {
+            Ok(u) => Some(u),
+            _ => None,
+        };
+        let default_policy = reqwest::redirect::Policy::default();
+        let policy = match host_str {
+            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
+                if attempt.url().host_str() != host_s.host_str() {
+                    attempt.stop()
+                } else {
+                    default_policy.redirect(attempt)
+                }
+            }),
+            _ => default_policy,
+        };
+
         let client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
             })
+            .redirect(policy)
             .brotli(true)
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
@@ -261,12 +278,29 @@ impl Website {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
+        let host_str = match url::Url::parse(&self.domain) {
+            Ok(u) => Some(u),
+            _ => None,
+        };
+        let default_policy = reqwest::redirect::Policy::default();
+        let policy = match host_str {
+            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
+                if attempt.url().host_str() != host_s.host_str() {
+                    attempt.stop()
+                } else {
+                    default_policy.redirect(attempt)
+                }
+            }),
+            _ => default_policy,
+        };
+
         let mut client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
             })
             .brotli(true)
+            .redirect(policy)
             .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
