@@ -69,12 +69,6 @@ pub struct Website {
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(domain: &str) -> Self {
-        let domain = if domain.ends_with('/') {
-            domain.into()
-        } else {
-            string_concat!(domain, "/")
-        };
-
         Self {
             configuration: Configuration::new().into(),
             links_visited: Box::new(HashSet::new()),
