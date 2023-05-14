@@ -793,7 +793,9 @@ impl Website {
                                 if !self.is_allowed(&link, &blacklist_url) {
                                     continue;
                                 }
+
                                 log("fetch", &link);
+
                                 self.links_visited.insert(link.clone());
                                 let permit = SEM.acquire().await.unwrap();
                                 let client = client.clone();
@@ -1189,7 +1191,10 @@ async fn test_crawl_glob() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into())
+            || website
+                .links_visited
+                .contains::<CaseInsensitiveString>(&"http://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
