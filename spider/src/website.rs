@@ -797,7 +797,6 @@ impl Website {
                                 log("fetch", &link);
 
                                 self.links_visited.insert(link.clone());
-                                let permit = SEM.acquire().await.unwrap();
                                 let client = client.clone();
                                 task::yield_now().await;
 
@@ -822,8 +821,6 @@ impl Website {
                                             &client,
                                         )
                                         .await;
-
-                                        drop(permit);
 
                                         page.links
                                     },
