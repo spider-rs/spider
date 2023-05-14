@@ -3244,7 +3244,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.30.4"
+version = "1.30.6"
 dependencies = [
  "ahash",
  "bytes",
@@ -3277,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.30.4"
+version = "1.30.6"
 dependencies = [
  "clap 3.2.25",
  "env_logger 0.9.3",
@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.30.4"
+version = "1.30.6"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.30.4"
+version = "1.30.6"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
@@ -3628,6 +3628,17 @@ checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
 dependencies = [
  "native-tls",
  "tokio",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c43ee83903113e03984cb9e5cebe6c04a5116269e900e3ddba8f068a62adda59"
+dependencies = [
+ "rustls",
+ "tokio",
+ "webpki",
 ]
 
 [[package]]
@@ -3962,6 +3973,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",

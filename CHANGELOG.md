@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.30.5
+
+1. "feat(worker): add tls support"
+
 ## v1.30.3
 
 1. chore(request): add custom domain redirect policy

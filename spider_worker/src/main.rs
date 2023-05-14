@@ -98,9 +98,14 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
 }
 
 #[tokio::main]
-#[cfg(all(not(feature = "scrape"), not(feature = "all")))]
+#[cfg(all(
+    not(feature = "scrape"),
+    not(feature = "full_resources"),
+    not(feature = "tls")
+))]
 async fn main() {
     env_logger::init();
+
     let host = warp::header::<String>("host");
     let referer = warp::header::optional::<String>("referer");
 
@@ -139,7 +144,7 @@ async fn main() {
 }
 
 #[tokio::main]
-#[cfg(feature = "all")]
+#[cfg(feature = "full_resources")]
 async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
@@ -170,4 +175,116 @@ async fn main() {
     utils::log("Spider_Worker starting at 0.0.0.0:", &port);
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+}
+
+// tls handling 
+
+#[tokio::main]
+#[cfg(all(
+    not(feature = "scrape"),
+    not(feature = "full_resources"),
+    feature = "tls"
+))]
+async fn main() {
+    env_logger::init();
+
+    let host = warp::header::<String>("host");
+    let referer = warp::header::optional::<String>("referer");
+
+    let routes = warp::path::full()
+        .and(host)
+        .and(referer)
+        .and_then(forward)
+        .boxed();
+
+    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
+        .unwrap_or_else(|_| "3030".into())
+        .parse()
+        .unwrap_or_else(|_| 3030);
+
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
+
+    let pem_cert: String =
+        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
+    let rsa_key: String =
+        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
+
+    warp::serve(routes)
+        .tls()
+        .cert_path(pem_cert)
+        .key_path(rsa_key)
+        .run(([0, 0, 0, 0], port))
+        .await;
+}
+
+#[tokio::main]
+#[cfg(all(feature = "scrape", feature = "tls"))]
+async fn main() {
+    env_logger::init();
+    let host = warp::header::<String>("host");
+    let routes = warp::path::full().and(host).and_then(scrape).boxed();
+    let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
+        .unwrap_or_else(|_| "3031".into())
+        .parse()
+        .unwrap_or_else(|_| 3031);
+    utils::log(
+        "Spider_Worker scraper starting at 0.0.0.0:",
+        &port.to_string(),
+    );
+
+    let pem_cert: String =
+        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
+    let rsa_key: String =
+        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
+
+    warp::serve(routes)
+        .tls()
+        .cert_path(pem_cert)
+        .key_path(rsa_key)
+        .run(([0, 0, 0, 0], port))
+        .await;
+}
+
+#[tokio::main]
+#[cfg(all(feature = "full_resources", feature = "tls"))]
+async fn main() {
+    env_logger::init();
+    let host = warp::header::<String>("host");
+    let referer = warp::header::optional::<String>("referer");
+    let routes = warp::path::full()
+        .and(host)
+        .and(referer)
+        .and_then(forward)
+        .boxed();
+
+    tokio::spawn(async {
+        let host = warp::header::<String>("host");
+        let routes = warp::path::full().and(host).and_then(scrape).boxed();
+        let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
+            .unwrap_or_else(|_| "3031".into())
+            .parse()
+            .unwrap_or_else(|_| 3031);
+
+        utils::log("Spider_Worker scraper starting at 0.0.0.0:", &port);
+
+        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    });
+
+    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
+        .unwrap_or_else(|_| "3030".into())
+        .parse()
+        .unwrap_or_else(|_| 3030);
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port);
+
+    let pem_cert: String =
+        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
+    let rsa_key: String =
+        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
+
+    warp::serve(routes)
+        .tls()
+        .cert_path(pem_cert)
+        .key_path(rsa_key)
+        .run(([0, 0, 0, 0], port))
+        .await;
 }
