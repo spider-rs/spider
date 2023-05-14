@@ -126,7 +126,10 @@ async fn main() {
 }
 
 #[tokio::main]
-#[cfg(feature = "scrape")]
+#[cfg(all(
+    feature = "scrape",
+    not(feature = "tls"),
+))]
 async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
@@ -142,7 +145,11 @@ async fn main() {
 }
 
 #[tokio::main]
-#[cfg(feature = "full_resources")]
+#[cfg(all(
+    feature = "full_resources",
+    not(feature = "tls"),
+    not(feature = "scrape"),
+))]
 async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
@@ -173,7 +180,7 @@ async fn main() {
         .unwrap_or_else(|_| "3030".into())
         .parse()
         .unwrap_or_else(|_| 3030);
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port);
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
@@ -245,7 +252,7 @@ async fn main() {
 }
 
 #[tokio::main]
-#[cfg(all(feature = "full_resources", feature = "tls"))]
+#[cfg(all(not(feature = "scrape"), feature = "full_resources", feature = "tls"))]
 async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
