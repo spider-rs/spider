@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 use tokio::task;
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
+use url::Url;
 
 lazy_static! {
     static ref SEM: Semaphore = {
@@ -64,6 +65,8 @@ pub struct Website {
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
     domain: Box<CompactString>,
+    /// the domain url parsed
+    domain_parsed: Option<Box<Url>>,
 }
 
 impl Website {
@@ -76,6 +79,10 @@ impl Website {
             robot_file_parser: None,
             on_link_find_callback: None,
             domain: CompactString::new(domain).into(),
+            domain_parsed: match url::Url::parse(domain) {
+                Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                _ => None,
+            },
         }
     }
 
@@ -185,10 +192,14 @@ impl Website {
     }
 
     /// absolute base url of crawl
-    pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<url::Url> {
-        match url::Url::parse(domain.unwrap_or_else(|| &self.domain)) {
-            Ok(u) => Some(crate::page::convert_abs_path(&u, "/")),
-            _ => None,
+    pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
+        if domain.is_some() {
+            match url::Url::parse(domain.unwrap()) {
+                Ok(u) => Some(crate::page::convert_abs_path(&u, "/")),
+                _ => None,
+            }
+        } else {
+            self.domain_parsed.as_deref().cloned()
         }
     }
 
@@ -200,7 +211,17 @@ impl Website {
                 .get_or_insert_with(|| RobotFileParser::new());
 
             if robot_file_parser.mtime() <= 4000 {
-                robot_file_parser.read(&client, &self.domain).await;
+                let host_str = match &self.domain_parsed {
+                    Some(domain) => &*domain.as_str(),
+                    _ => &self.domain,
+                };
+                if host_str.ends_with("/") {
+                    robot_file_parser.read(&client, &host_str).await;
+                } else {
+                    robot_file_parser
+                        .read(&client, &string_concat!(host_str, "/"))
+                        .await;
+                }
                 self.configuration.delay = robot_file_parser
                     .get_crawl_delay(&self.configuration.user_agent) // returns the crawl delay in seconds
                     .unwrap_or_else(|| self.get_delay())
@@ -214,10 +235,7 @@ impl Website {
     /// configure http client
     #[cfg(not(feature = "decentralized"))]
     pub fn configure_http_client(&mut self, _: bool) -> Client {
-        let host_str = match url::Url::parse(&self.domain) {
-            Ok(u) => Some(u),
-            _ => None,
-        };
+        let host_str = self.domain_parsed.take();
         let default_policy = reqwest::redirect::Policy::default();
         let policy = match host_str {
             Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
@@ -278,10 +296,7 @@ impl Website {
         let mut headers = header::HeaderMap::new();
         headers.insert(CONNECTION, header::HeaderValue::from_static("keep-alive"));
 
-        let host_str = match url::Url::parse(&self.domain) {
-            Ok(u) => Some(u),
-            _ => None,
-        };
+        let host_str = self.domain_parsed.take();
         let default_policy = reqwest::redirect::Policy::default();
         let policy = match host_str {
             Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
