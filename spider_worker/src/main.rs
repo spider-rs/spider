@@ -74,7 +74,7 @@ async fn forward(
 }
 
 /// forward request to get links resources
-#[cfg(not(all(not(feature = "scrape"), not(feature = "all"))))]
+#[cfg(not(all(not(feature = "scrape"), not(feature = "full_resources"))))]
 async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infallible> {
     use spider::string_concat::{string_concat, string_concat_impl};
 
@@ -177,7 +177,7 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
 
-// tls handling 
+// tls handling
 
 #[tokio::main]
 #[cfg(all(
@@ -265,7 +265,10 @@ async fn main() {
             .parse()
             .unwrap_or_else(|_| 3031);
 
-        utils::log("Spider_Worker scraper starting at 0.0.0.0:", &port);
+        utils::log(
+            "Spider_Worker scraper starting at 0.0.0.0:",
+            &port.to_string(),
+        );
 
         warp::serve(routes).run(([0, 0, 0, 0], port)).await;
     });
@@ -274,7 +277,8 @@ async fn main() {
         .unwrap_or_else(|_| "3030".into())
         .parse()
         .unwrap_or_else(|_| 3030);
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port);
+
+    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
     let pem_cert: String =
         std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
