@@ -3374,7 +3374,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.31.0"
+version = "1.30.10"
 dependencies = [
  "clap 3.2.25",
  "env_logger 0.9.3",

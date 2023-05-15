@@ -469,7 +469,7 @@ impl Page {
                             let h = abs.as_str();
 
                             if can_process && base_domain.is_empty()
-                                || base_domain.as_str() == domain_name(&abs)
+                                || can_process && base_domain.as_str() == domain_name(&abs)
                             {
                                 map.insert(h.to_string().into());
                             }
