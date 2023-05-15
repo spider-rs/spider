@@ -271,13 +271,11 @@ impl Page {
         let parent_host_scheme = &parent_frags[1];
 
         let mut map = HashSet::new();
-
         let html = Box::new(self.get_html());
 
         if !base_domain.is_empty() && !html.starts_with("<") {
-            let links: std::collections::HashSet<CaseInsensitiveString> =
-                extract_links(&html);
-            let mut stream = tokio_stream::iter(links);
+            let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
+            let mut stream = tokio_stream::iter(&links);
 
             while let Some(href) = stream.next().await {
                 let mut abs = self.abs_path(href.inner());
