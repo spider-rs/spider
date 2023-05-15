@@ -269,12 +269,12 @@ impl Page {
         lazy_static! {
             /// include only list of resources
             static ref IGNORE_ASSETS: HashSet<&'static str> = {
-                let mut m: HashSet<&'static str> = HashSet::with_capacity(17);
+                let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
 
-                m.extend::<[&'static str; 17]>([
-                    "jquery.min.js", "jquery.qtip.min.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
-                    "vue.global.js", "vue.esm-browser.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-                    "otSDKStub.js", "clipboard.min.js"
+                m.extend::<[&'static str; 23]>([
+                    "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
+                    "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
+                    "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
                 ].map(|s| s.into()));
 
                 m
