@@ -231,10 +231,12 @@ impl Page {
                                 }
                             }
 
-                            if can_process && base_domain.is_empty()
-                                || base_domain.as_str() == domain_name(&abs)
-                            {
-                                map.insert(resource_url.as_str().to_string().into());
+                            if can_process {
+                                if base_domain.is_empty()
+                                    || base_domain.as_str() == domain_name(&abs)
+                                {
+                                    map.insert(resource_url.as_str().to_string().into());
+                                }
                             }
                         }
                     }
@@ -282,10 +284,12 @@ impl Page {
 
                             let h = abs.as_str();
 
-                            if can_process && base_domain.is_empty()
-                                || base_domain.as_str() == domain_name(&abs)
-                            {
-                                map.insert(h.to_string().into());
+                            if can_process {
+                                if base_domain.is_empty()
+                                    || base_domain.as_str() == domain_name(&abs)
+                                {
+                                    map.insert(h.to_string().into());
+                                }
                             }
                         }
                     }

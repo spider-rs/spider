@@ -126,10 +126,7 @@ async fn main() {
 }
 
 #[tokio::main]
-#[cfg(all(
-    feature = "scrape",
-    not(feature = "tls"),
-))]
+#[cfg(all(feature = "scrape", not(feature = "tls"),))]
 async fn main() {
     env_logger::init();
     let host = warp::header::<String>("host");
