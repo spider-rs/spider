@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.30.9"
+spider = "1.31.0"
 ```
 
 And then the code:
@@ -66,7 +66,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.30.9", features = ["regex", "ua_generator"] }
+spider = { version = "1.31.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
@@ -79,26 +79,7 @@ spider = { version = "1.30.9", features = ["regex", "ua_generator"] }
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
-
-### Decentralization
-
-Move processing to a worker, drastically increases performance even if worker is on the same machine due to efficient runtime split IO work.
-
-```toml
-[dependencies]
-spider = { version = "1.30.9", features = ["decentralized"] }
-```
-
-```sh
-# install the worker
-cargo install spider_worker
-# start the worker [set the worker on another machine in prod]
-RUST_LOG=info SPIDER_WORKER_PORT=3030 spider_worker
-# start rust project as normal with SPIDER_WORKER env variable
-SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized
-```
-
-The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
+1. `js`: Enables javascript parsing links created with the dom (Alpha).
 
 ### Regex Blacklisting
 
@@ -106,7 +87,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.30.9", features = ["regex"] }
+spider = { version = "1.31.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -133,7 +114,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.30.9", features = ["control"] }
+spider = { version = "1.31.0", features = ["control"] }
 ```
 
 ```rust
@@ -196,6 +177,26 @@ async fn main() {
 }
 ```
 
+### Decentralization
+
+Move processing to a worker, drastically increases performance even if worker is on the same machine due to efficient runtime split IO.
+
+```toml
+[dependencies]
+spider = { version = "1.31.0", features = ["decentralized"] }
+```
+
+```sh
+# install the worker
+cargo install spider_worker
+# start the worker [set the worker on another machine in prod]
+RUST_LOG=info SPIDER_WORKER_PORT=3030 spider_worker
+# start rust project as normal with SPIDER_WORKER env variable
+SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized
+```
+
+The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
+
 ### Sequential
 
 Perform crawls sequential without any concurrency.
@@ -207,6 +208,7 @@ let mut website: Website = Website::new("https://choosealicense.com");
 website.crawl_sync().await;
 
 ```
+
 ### Blocking
 
 If you need a blocking sync implementation use a version prior to `v1.12.0`.

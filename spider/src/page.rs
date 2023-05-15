@@ -177,7 +177,11 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        not(feature = "js")
+    ))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
@@ -240,6 +244,146 @@ impl Page {
                     }
                     _ => (),
                 };
+            }
+        }
+
+        map
+    }
+
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        feature = "js"
+    ))]
+    pub async fn links_stream<
+        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
+    >(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        use jsdom::extract::extract_links;
+
+        let base_domain = &selectors.0;
+        let parent_frags = &selectors.1; // todo: allow mix match tpt
+        let parent_host = &parent_frags[0];
+        let parent_host_scheme = &parent_frags[1];
+
+        let mut map = HashSet::new();
+
+        let html = Box::new(self.get_html());
+
+        if !base_domain.is_empty() && !html.starts_with("<") {
+            let links: std::collections::HashSet<CaseInsensitiveString> =
+                extract_links(&html);
+            let mut stream = tokio_stream::iter(links);
+
+            while let Some(href) = stream.next().await {
+                let mut abs = self.abs_path(href.inner());
+
+                // determine if the crawl can continue based on host match
+                let mut can_process = match abs.host_str() {
+                    Some(host) => parent_host.ends_with(host),
+                    _ => false,
+                };
+
+                if can_process {
+                    if abs.scheme() != parent_host_scheme.as_str() {
+                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                    }
+
+                    // full url path
+                    let resource_url = abs.clone();
+
+                    // clean the resource to check if valid crawl asset
+                    abs.set_query(None);
+
+                    let clean_resource = abs.as_str();
+                    let hlen = clean_resource.len();
+                    // a possible resource extension
+                    let hchars = &clean_resource[hlen - 5..hlen];
+
+                    if let Some(position) = hchars.find('.') {
+                        let resource_ext = &hchars[position + 1..hchars.len()];
+
+                        if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
+                            can_process = false;
+                        }
+                    }
+
+                    if can_process && base_domain.is_empty()
+                        || base_domain.as_str() == domain_name(&abs)
+                    {
+                        map.insert(resource_url.as_str().to_string().into());
+                    }
+                }
+            }
+        } else {
+            let html = Box::new(Html::parse_document(&html));
+            tokio::task::yield_now().await;
+
+            let mut stream = tokio_stream::iter(html.tree);
+
+            while let Some(node) = stream.next().await {
+                if let Some(element) = node.as_element() {
+                    if element.name() == "script" {
+                        match element.attr("src") {
+                            Some(src) => {
+                                if src.starts_with("/") {
+                                    let abs = self.abs_path(src);
+                                    map.insert(abs.as_str().to_string().into());
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    match element.attr("href") {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
+
+                            // determine if the crawl can continue based on host match
+                            let mut can_process = match abs.host_str() {
+                                Some(host) => parent_host.ends_with(host),
+                                _ => false,
+                            };
+
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
+
+                                // full url path
+                                let resource_url = abs.clone();
+
+                                // clean the resource to check if valid crawl asset
+                                abs.set_query(None);
+
+                                let clean_resource = abs.as_str();
+                                let hlen = clean_resource.len();
+                                // a possible resource extension
+                                let hchars = &clean_resource[hlen - 5..hlen];
+
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                    if !ONLY_RESOURCES
+                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+
+                                if can_process && base_domain.is_empty()
+                                    || base_domain.as_str() == domain_name(&abs)
+                                {
+                                    map.insert(resource_url.as_str().to_string().into());
+                                }
+                            }
+                        }
+                        _ => (),
+                    };
+                }
             }
         }
 

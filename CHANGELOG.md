@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## v1.30.5
+## v1.31.0
+
+1. "feat(jsparse): add javascript link extraction (Alpha)"
+
+## v1.30.9
 
 1. "feat(worker): add tls support"
 

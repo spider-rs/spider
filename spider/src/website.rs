@@ -884,14 +884,19 @@ impl Website {
                         }
                         None => (),
                     }
+
                     if !self.is_allowed(&link, &blacklist_url) {
                         continue;
                     }
+
                     self.links_visited.insert(link.clone());
+
                     log("fetch", link);
+
                     if delay_enabled {
                         tokio::time::sleep(Duration::from_millis(*delay)).await;
                     }
+
                     let link = link.clone();
                     let link_result = match on_link_find_callback {
                         Some(cb) => cb(link),
