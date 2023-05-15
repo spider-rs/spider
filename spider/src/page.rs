@@ -236,8 +236,9 @@ impl Page {
                             }
 
                             if can_process && base_domain.is_empty()
-                                || base_domain.as_str() == domain_name(&abs)
+                                || can_process && base_domain.as_str() == domain_name(&abs)
                             {
+
                                 map.insert(resource_url.as_str().to_string().into());
                             }
                         }
@@ -265,6 +266,21 @@ impl Page {
     ) -> HashSet<A> {
         use jsdom::extract::extract_links;
 
+        lazy_static! {
+            /// include only list of resources
+            static ref IGNORE_ASSETS: HashSet<&'static str> = {
+                let mut m: HashSet<&'static str> = HashSet::with_capacity(17);
+
+                m.extend::<[&'static str; 17]>([
+                    "jquery.min.js", "jquery.qtip.min.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
+                    "vue.global.js", "vue.esm-browser.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
+                    "otSDKStub.js", "clipboard.min.js"
+                ].map(|s| s.into()));
+
+                m
+            };
+        }
+
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
         let parent_host = &parent_frags[0];
@@ -274,6 +290,7 @@ impl Page {
         let html = Box::new(self.get_html());
 
         if !base_domain.is_empty() && !html.starts_with("<") {
+            println!("------ {:?} \n\n {:?} ---- \n\n", self.base.as_str(), &html);
             let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
             let mut stream = tokio_stream::iter(&links);
 
@@ -317,10 +334,10 @@ impl Page {
                     }
                 }
             }
+
         } else {
             let html = Box::new(Html::parse_document(&html));
             tokio::task::yield_now().await;
-
             let mut stream = tokio_stream::iter(html.tree);
 
             while let Some(node) = stream.next().await {
@@ -328,9 +345,36 @@ impl Page {
                     if element.name() == "script" {
                         match element.attr("src") {
                             Some(src) => {
-                                if src.starts_with("/") {
-                                    let abs = self.abs_path(src);
-                                    map.insert(abs.as_str().to_string().into());
+                                if src.starts_with("/")
+                                    && element.attr("id") != Some("gatsby-chunk-mapping")
+                                {
+                                    // check special framework paths todo: customize path segments to build for framework
+                                    // IGNORE: next.js pre-rendering pages since html is already rendered
+                                    if !src.starts_with("/_next/static/chunks/pages/")
+                                        && !src.starts_with("/webpack-runtime-")
+                                    {
+                                        let abs = self.abs_path(src);
+                                        // determine if script can run
+                                        let mut insertable = true;
+
+                                        match abs.path_segments().ok_or_else(|| "cannot be base") {
+                                            Ok(mut paths) => {
+                                                while let Some(p) = paths.next() {
+                                                    // todo: get the path last before None instead of checking for ends_with
+                                                    if p.ends_with(".js")
+                                                        && IGNORE_ASSETS.contains(&p)
+                                                    {
+                                                        insertable = false;
+                                                    }
+                                                }
+                                            }
+                                            _ => (),
+                                        };
+
+                                        if insertable {
+                                            map.insert(abs.as_str().to_string().into());
+                                        }
+                                    }
                                 }
                             }
                             _ => (),
@@ -373,7 +417,7 @@ impl Page {
                                 }
 
                                 if can_process && base_domain.is_empty()
-                                    || base_domain.as_str() == domain_name(&abs)
+                                    || can_process && base_domain.as_str() == domain_name(&abs)
                                 {
                                     map.insert(resource_url.as_str().to_string().into());
                                 }
