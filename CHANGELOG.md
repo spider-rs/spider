@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.31.0
+
+1. feat(js): add init of script parsing
+
 ## v1.30.5
 
 1. "feat(worker): add tls support"
