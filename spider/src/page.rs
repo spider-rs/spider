@@ -177,7 +177,11 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        not(feature = "js")
+    ))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
@@ -231,17 +235,196 @@ impl Page {
                                 }
                             }
 
-                            if can_process {
-                                if base_domain.is_empty()
-                                    || base_domain.as_str() == domain_name(&abs)
-                                {
-                                    map.insert(resource_url.as_str().to_string().into());
-                                }
+                            if can_process && base_domain.is_empty()
+                                || can_process && base_domain.as_str() == domain_name(&abs)
+                            {
+                                map.insert(resource_url.as_str().to_string().into());
                             }
                         }
                     }
                     _ => (),
                 };
+            }
+        }
+
+        map
+    }
+
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        feature = "js"
+    ))]
+    pub async fn links_stream<
+        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
+    >(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        use jsdom::extract::extract_links;
+
+        lazy_static! {
+            /// include only list of resources
+            static ref IGNORE_ASSETS: HashSet<&'static str> = {
+                let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
+
+                m.extend::<[&'static str; 23]>([
+                    "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
+                    "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
+                    "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
+                ].map(|s| s.into()));
+
+                m
+            };
+        }
+
+        let base_domain = &selectors.0;
+        let parent_frags = &selectors.1; // todo: allow mix match tpt
+        let parent_host = &parent_frags[0];
+        let parent_host_scheme = &parent_frags[1];
+
+        let mut map = HashSet::new();
+        let html = Box::new(self.get_html());
+
+        if !base_domain.is_empty() && !html.starts_with("<") {
+            println!("------ {:?} \n\n {:?} ---- \n\n", self.base.as_str(), &html);
+            let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
+            let mut stream = tokio_stream::iter(&links);
+
+            while let Some(href) = stream.next().await {
+                let mut abs = self.abs_path(href.inner());
+
+                // determine if the crawl can continue based on host match
+                let mut can_process = match abs.host_str() {
+                    Some(host) => parent_host.ends_with(host),
+                    _ => false,
+                };
+
+                if can_process {
+                    if abs.scheme() != parent_host_scheme.as_str() {
+                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                    }
+
+                    // full url path
+                    let resource_url = abs.clone();
+
+                    // clean the resource to check if valid crawl asset
+                    abs.set_query(None);
+
+                    let clean_resource = abs.as_str();
+                    let hlen = clean_resource.len();
+                    // a possible resource extension
+                    let hchars = &clean_resource[hlen - 5..hlen];
+
+                    if let Some(position) = hchars.find('.') {
+                        let resource_ext = &hchars[position + 1..hchars.len()];
+
+                        if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
+                            can_process = false;
+                        }
+                    }
+
+                    if can_process
+                        && (base_domain.is_empty() || base_domain.as_str() == domain_name(&abs))
+                    {
+                        map.insert(resource_url.as_str().to_string().into());
+                    }
+                }
+            }
+        } else {
+            let html = Box::new(Html::parse_document(&html));
+            tokio::task::yield_now().await;
+            let mut stream = tokio_stream::iter(html.tree);
+
+            while let Some(node) = stream.next().await {
+                if let Some(element) = node.as_element() {
+                    if element.name() == "script" {
+                        match element.attr("src") {
+                            Some(src) => {
+                                if src.starts_with("/")
+                                    && element.attr("id") != Some("gatsby-chunk-mapping")
+                                {
+                                    // check special framework paths todo: customize path segments to build for framework
+                                    // IGNORE: next.js pre-rendering pages since html is already rendered
+                                    if !src.starts_with("/_next/static/chunks/pages/")
+                                        && !src.starts_with("/webpack-runtime-")
+                                    {
+                                        let abs = self.abs_path(src);
+                                        // determine if script can run
+                                        let mut insertable = true;
+
+                                        match abs.path_segments().ok_or_else(|| "cannot be base") {
+                                            Ok(mut paths) => {
+                                                while let Some(p) = paths.next() {
+                                                    // todo: get the path last before None instead of checking for ends_with
+                                                    if p.ends_with(".js")
+                                                        && IGNORE_ASSETS.contains(&p)
+                                                    {
+                                                        insertable = false;
+                                                    }
+                                                }
+                                            }
+                                            _ => (),
+                                        };
+
+                                        if insertable {
+                                            map.insert(abs.as_str().to_string().into());
+                                        }
+                                    }
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    match element.attr("href") {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
+
+                            // determine if the crawl can continue based on host match
+                            let mut can_process = match abs.host_str() {
+                                Some(host) => parent_host.ends_with(host),
+                                _ => false,
+                            };
+
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
+
+                                // full url path
+                                let resource_url = abs.clone();
+
+                                // clean the resource to check if valid crawl asset
+                                abs.set_query(None);
+
+                                let clean_resource = abs.as_str();
+                                let hlen = clean_resource.len();
+                                // a possible resource extension
+                                let hchars = &clean_resource[hlen - 5..hlen];
+
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                    if !ONLY_RESOURCES
+                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+
+                                if can_process
+                                    && (base_domain.is_empty()
+                                        || base_domain.as_str() == domain_name(&abs))
+                                {
+                                    map.insert(resource_url.as_str().to_string().into());
+                                }
+                            }
+                        }
+                        _ => (),
+                    };
+                }
             }
         }
 
@@ -284,12 +467,10 @@ impl Page {
 
                             let h = abs.as_str();
 
-                            if can_process {
-                                if base_domain.is_empty()
-                                    || base_domain.as_str() == domain_name(&abs)
-                                {
-                                    map.insert(h.to_string().into());
-                                }
+                            if can_process && base_domain.is_empty()
+                                || can_process && base_domain.as_str() == domain_name(&abs)
+                            {
+                                map.insert(h.to_string().into());
                             }
                         }
                     }

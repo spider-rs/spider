@@ -41,6 +41,7 @@ serde = { version = "^1.0.155", optional = true, features = ["derive"] }
 flexbuffers = { version = "2.0.0", optional = true }
 itertools = { version = "0.10.5", optional = true }
 case_insensitive_string = { version = "0.1.6", features = [ "compact", "serde" ]}
+jsdom = { version = "0.0.9", optional = true, features = [ "hashbrown", "tokio" ] }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -58,3 +59,4 @@ serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
 fs = ["tokio/fs"]
 full_resources = []
 socks = ["reqwest/socks"]
+js = ["dep:jsdom"]
