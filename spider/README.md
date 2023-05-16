@@ -79,6 +79,7 @@ spider = { version = "1.30.11", features = ["regex", "ua_generator"] }
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
+1. `js`: Enables javascript parsing links created with the dom (Alpha-Experimental). You need to use the env variable `RUST_MIN_STACK=9999999` or release mode to prevent stack overflows.
 
 ### Decentralization
 
