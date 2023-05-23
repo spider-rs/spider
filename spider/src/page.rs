@@ -91,9 +91,8 @@ pub fn get_page_selectors(
             let scheme = host.scheme();
 
             Some(if tld || subdomains {
-                let base = Url::parse(&url).expect("Invalid page URL");
-                let dname = domain_name(&base);
-                let scheme = base.scheme();
+                let dname = domain_name(&host);
+                let scheme = host.scheme();
 
                 // static html group parse
                 (
