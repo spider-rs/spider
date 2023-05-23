@@ -226,8 +226,9 @@ impl Page {
                                 }
                             }
 
-                            if can_process && base_domain.is_empty()
-                                || can_process && base_domain.as_str() == domain_name(&abs)
+                            if can_process
+                                && (base_domain.is_empty()
+                                    || base_domain.as_str() == domain_name(&abs))
                             {
                                 map.insert(abs.as_str().to_string().into());
                             }
