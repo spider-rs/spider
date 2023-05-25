@@ -7,7 +7,7 @@
 
 ## Benchmark Results
 
-All test are done remotely using 10-100 samples. We want to keep the benchmarks close to a real world scenario.
+All test are done remotely using 10-100 samples with one decentralized worker on the same host machine. We want to keep the benchmarks close to a real world scenario reason for network IO instead of spinning up a local website.
 
 ### mac
 
@@ -26,7 +26,7 @@ Test url: `https://rsseau.fr`
 
 |                                          | `libraries`           |
 | :--------------------------------------- | :-------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `1.9s` (✅ **1.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `73ms` (✅ **1.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `32s`  (✅ **1.00x**) |
 | **`Node.js[crawler]: crawl 10 samples`** | `15s`  (✅ **1.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `70s`  (✅ **1.00x**) |
@@ -48,7 +48,7 @@ Test url: `https://rsseau.fr`
 
 |                                          | `libraries`           |
 | :--------------------------------------- | :-------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `1.5s` (✅ **1.00x**) |
+| **`Rust[spider]: crawl 10 samples`**     | `50ms` (✅ **1.00x**) |
 | **`Go[crolly]: crawl 10 samples`**       | `30s`  (✅ **1.00x**) |
 | **`Node.js[crawler]: crawl 10 samples`** | `3.4s` (✅ **1.00x**) |
 | **`C[wget]: crawl 10 samples`**          | `60s`  (✅ **1.00x**) |

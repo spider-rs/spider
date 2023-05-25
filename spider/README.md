@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.31.5"
+spider = "1.31.6"
 ```
 
 And then the code:
@@ -66,7 +66,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.31.5", features = ["regex", "ua_generator"] }
+spider = { version = "1.31.6", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
@@ -87,7 +87,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.31.5", features = ["decentralized"] }
+spider = { version = "1.31.6", features = ["decentralized"] }
 ```
 
 ```sh
@@ -107,7 +107,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.31.5", features = ["regex"] }
+spider = { version = "1.31.6", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -134,7 +134,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.31.5", features = ["control"] }
+spider = { version = "1.31.6", features = ["control"] }
 ```
 
 ```rust
