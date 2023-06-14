@@ -1866,13 +1866,13 @@ dependencies = [
 
 [[package]]
 name = "jsdom"
-version = "0.0.9"
+version = "0.0.11-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e7773991432f287751c7d17b40815696663cce97c147fe7a5f175dfa01f7dd9"
+checksum = "80d964f807a622d1acdac795847627f4797167a3f2ff4ce1e400afbe90f34e69"
 dependencies = [
  "hashbrown 0.13.2",
  "resast",
- "ressa_r",
+ "ressa",
  "tokio",
  "tokio-stream",
 ]
@@ -2912,9 +2912,9 @@ dependencies = [
 
 [[package]]
 name = "resast"
-version = "0.5.0"
+version = "0.6.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce018f9b95f19dd2df5c883fd6d394001ec093a72e0f8ea57b43612cf1f0827"
+checksum = "b63e30fe84cddd07054e1b48bd9c34725de55692480cb05d6deeb1636bf28978"
 
 [[package]]
 name = "ress"
@@ -2927,10 +2927,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ressa_r"
-version = "0.8.4"
+name = "ressa"
+version = "0.9.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56b22c922630fd506d5f5d12214f1ce4c24622e86ad819ec76247b8e4ad56f46"
+checksum = "bbb11820c8d8266d83601a7600367db2b4c80d0e343d3527d8055b7f9f341d15"
 dependencies = [
  "hash-chain",
  "log",
@@ -3315,7 +3315,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.31.7"
+version = "1.31.8"
 dependencies = [
  "ahash",
  "bytes",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.31.7"
+version = "1.31.8"
 dependencies = [
  "clap 3.2.25",
  "env_logger 0.9.3",
@@ -3361,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.31.7"
+version = "1.31.8"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -3382,7 +3382,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.31.7"
+version = "1.31.8"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
