@@ -9,8 +9,10 @@ use options::{Cli, Commands};
 use spider::compact_str::CompactString;
 use spider::page::get_page_selectors;
 use spider::tokio;
+use spider::url::Url;
 use spider::website::Website;
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[tokio::main]
@@ -66,6 +68,74 @@ async fn main() {
                 io::stdout()
                     .write_all(format!("{:?}", links).as_bytes())
                     .unwrap();
+            }
+        }
+        Some(Commands::DOWNLOAD { target_destination }) => {
+            let tmp_dir: String = target_destination
+                .to_owned()
+                .unwrap_or(String::from("./_temp_spider_downloads/"));
+            let tmp_path = Path::new(&tmp_dir);
+
+            if !Path::new(&tmp_path).exists() {
+                match std::fs::create_dir_all(&tmp_path) {
+                    _ => (),
+                };
+            }
+
+            website.scrape().await;
+            let selectors = get_page_selectors(&cli.domain, cli.subdomains, cli.tld);
+
+            if selectors.is_some() {
+                match website.get_pages() {
+                    Some(pages) => {
+                        for page in pages.iter() {
+                            let page_url = page.get_url();
+
+                            match Url::parse(page_url) {
+                                Ok(parsed_url) => {
+                                    let url_path = parsed_url.path();
+
+                                    println!("{}", page_url);
+
+                                    let split_paths: Vec<&str> = url_path.split("/").collect();
+                                    let it = split_paths.iter();
+                                    let last_item = split_paths.last().unwrap_or(&"");
+
+                                    let mut download_path = PathBuf::from(tmp_path.clone());
+
+                                    for p in it {
+                                        if p != last_item {
+                                            download_path.push(p);
+
+                                            if !Path::new(&download_path).exists() {
+                                                match std::fs::create_dir_all(&download_path) {
+                                                    _ => (),
+                                                };
+                                            }
+                                        } else {
+                                            let mut file = std::fs::OpenOptions::new()
+                                                .write(true)
+                                                .create(true)
+                                                .truncate(true)
+                                                .open(&download_path.join(format!(
+                                                    "{}.html",
+                                                    if p.is_empty() { "index" } else { p }
+                                                )))
+                                                .expect("Unable to open file");
+
+                                            let html = page.get_html();
+                                            let html = html.as_bytes();
+
+                                            file.write_all(html).unwrap();
+                                        }
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    None => {}
+                }
             }
         }
         Some(Commands::SCRAPE {

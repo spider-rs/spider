@@ -33,10 +33,16 @@ Crawl and output all links visited to a file.
 spider --domain https://choosealicense.com crawl -o > spider_choosealicense.json
 ```
 
+Download all html to local destination. Use the option `-t` to pass in the target destination folder.
+
 ```sh
-spider_cli 1.31.8
+spider --domain http://localhost:3000 download
+```
+
+```sh
+spider_cli 1.32.0
 madeindjs <contact@rousseau-alexandre.fr>, j-mendez <jeff@a11ywatch.com>
-Multithreaded web crawler written in Rust.
+The fastest web crawler CLI written in Rust.
 
 USAGE:
     spider [OPTIONS] --domain <DOMAIN> [SUBCOMMAND]
@@ -44,9 +50,6 @@ USAGE:
 OPTIONS:
     -b, --blacklist-url <BLACKLIST_URL>
             Comma seperated string list of pages to not crawl or regex with feature enabled
-
-    -c, --concurrency <CONCURRENCY>
-            How many request can be run simultaneously
 
     -d, --domain <DOMAIN>
             Domain to crawl
@@ -60,6 +63,12 @@ OPTIONS:
     -r, --respect-robots-txt
             Respect robots.txt file
 
+    -s, --subdomains
+            Allow sub-domain crawling
+
+    -t, --tld
+            Allow all tlds for domain
+
     -u, --user-agent <USER_AGENT>
             User-Agent
 
@@ -70,9 +79,10 @@ OPTIONS:
             Print version information
 
 SUBCOMMANDS:
-    crawl     crawl the website extracting links
-    help      Print this message or the help of the given subcommand(s)
-    scrape    scrape the website extracting html and links
+    crawl       Crawl the website extracting links
+    download    Download html markup to destination
+    help        Print this message or the help of the given subcommand(s)
+    scrape      Scrape the website extracting html and links
 ```
 
 All features are available except the Website struct `on_link_find_callback` configuration option.

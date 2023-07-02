@@ -2,7 +2,6 @@ use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
-
 use crate::utils::log;
 use crate::CaseInsensitiveString;
 use compact_str::CompactString;
@@ -969,9 +968,8 @@ impl Website {
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
             let throttle = Duration::from_millis(delay);
 
-            let mut links: HashSet<CaseInsensitiveString> = self
-                .crawl_establish(&client, &(selectors.0.clone(), selectors.1.clone()), false)
-                .await;
+            let mut links: HashSet<CaseInsensitiveString> =
+                HashSet::from([CaseInsensitiveString::from(self.domain.as_str())]);
 
             let mut set: JoinSet<(CaseInsensitiveString, Option<String>)> = JoinSet::new();
 
@@ -1032,7 +1030,10 @@ impl Website {
                                 let page_links = page.links(&*selectors).await;
                                 links.extend(&page_links - &self.links_visited);
                                 task::yield_now().await;
-                                self.pages.as_mut().unwrap().push(page);
+                                match self.pages.as_mut() {
+                                    Some(p) => p.push(page),
+                                    _ => (),
+                                }
                             }
                         }
                         _ => (),
