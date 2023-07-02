@@ -2,7 +2,7 @@ use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// crawl the website extracting links.
+    /// Crawl the website extracting links.
     CRAWL {
         /// sequentially one by one crawl pages
         #[clap(short, long)]
@@ -11,7 +11,7 @@ pub enum Commands {
         #[clap(short, long)]
         output_links: bool,
     },
-    /// scrape the website extracting html and links.
+    /// Scrape the website extracting html and links.
     SCRAPE {
         /// stdout all pages links crawled
         #[clap(short, long)]
@@ -19,5 +19,11 @@ pub enum Commands {
         /// stdout all pages html crawled
         #[clap(long)]
         output_html: bool,
+    },
+    /// Download html markup to destination.
+    DOWNLOAD {
+        /// store files at target destination
+        #[clap(short, long)]
+        target_destination: Option<String>,
     },
 }
