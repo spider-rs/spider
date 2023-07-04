@@ -104,7 +104,7 @@ pub struct Website {
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
-    domain: Box<CompactString>,
+    domain: Box<CaseInsensitiveString>,
     /// the domain url parsed
     domain_parsed: Option<Box<Url>>,
 }
@@ -118,11 +118,30 @@ impl Website {
             pages: None,
             robot_file_parser: None,
             on_link_find_callback: None,
-            domain: CompactString::new(domain).into(),
+            domain: CaseInsensitiveString::new(domain).into(),
             domain_parsed: match url::Url::parse(domain) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
             },
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(not(feature = "regex"))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<Vec<CompactString>>,
+    ) -> bool {
+        if self.links_visited.contains(link) {
+            false
+        } else {
+            self.is_allowed_default(&link.inner(), blacklist_url)
         }
     }
 
@@ -160,25 +179,6 @@ impl Website {
             !contains(blacklist_url, &link.inner())
         } else {
             self.is_allowed_robots(&link.as_ref())
-        }
-    }
-
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)
-    #[inline]
-    #[cfg(not(feature = "regex"))]
-    pub fn is_allowed(
-        &self,
-        link: &CaseInsensitiveString,
-        blacklist_url: &Box<Vec<CompactString>>,
-    ) -> bool {
-        if self.links_visited.contains(link) {
-            false
-        } else {
-            self.is_allowed_default(&link.inner(), blacklist_url)
         }
     }
 
@@ -253,7 +253,7 @@ impl Website {
             if robot_file_parser.mtime() <= 4000 {
                 let host_str = match &self.domain_parsed {
                     Some(domain) => &*domain.as_str(),
-                    _ => &self.domain,
+                    _ => &self.domain.inner(),
                 };
                 if host_str.ends_with("/") {
                     robot_file_parser.read(&client, &host_str).await;
@@ -420,7 +420,7 @@ impl Website {
 
         let paused = Arc::new(AtomicI8::new(0));
         let handle = paused.clone();
-        let domain = self.domain.clone();
+        let domain = self.domain.inner();
 
         tokio::spawn(async move {
             let mut l = CONTROLLER.lock().await.1.to_owned();
@@ -481,6 +481,18 @@ impl Website {
         (self.configure_robots_parser(client).await, None)
     }
 
+    /// get base link for crawl establishing
+    #[cfg(feature = "regex")]
+    fn get_base_link(&self) -> &CaseInsensitiveString {
+        &self.domain
+    }
+
+    /// get base link for crawl establishing
+    #[cfg(not(feature = "regex"))]
+    fn get_base_link(&self) -> &CompactString {
+        self.domain.inner()
+    }
+
     /// expand links for crawl
     #[cfg(all(not(feature = "glob"), not(feature = "decentralized")))]
     async fn crawl_establish(
@@ -489,22 +501,23 @@ impl Website {
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&self.domain, &self.configuration.get_blacklist()) {
-                let page = Page::new(&self.domain, &client).await;
-                let u = page.get_url().into();
+        let links: HashSet<CaseInsensitiveString> = if self
+            .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+        {
+            let page = Page::new(&self.domain.inner(), &client).await;
+            let u = page.get_url().into();
 
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u),
-                    _ => u,
-                };
-
-                self.links_visited.insert(link_result);
-
-                HashSet::from(page.links(&base).await)
-            } else {
-                HashSet::new()
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u),
+                _ => u,
             };
+
+            self.links_visited.insert(link_result);
+
+            HashSet::from(page.links(&base).await)
+        } else {
+            HashSet::new()
+        };
 
         links
     }
@@ -520,7 +533,7 @@ impl Website {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
-            &*self.domain
+            &*self.domain.inner()
         } else {
             domain_name
         };
@@ -564,7 +577,7 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
-            &*self.domain
+            &*self.domain.inner()
         } else {
             domain_name
         };
@@ -623,7 +636,7 @@ impl Website {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let (domain_name, _) = base;
         let domain_name = if domain_name.is_empty() {
-            &*self.domain
+            &*self.domain.inner()
         } else {
             domain_name
         };
@@ -685,7 +698,7 @@ impl Website {
     #[cfg(not(feature = "decentralized"))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
-            &self.domain,
+            &self.domain.inner(),
             self.configuration.subdomains,
             self.configuration.tld,
         );
@@ -776,10 +789,10 @@ impl Website {
     /// Start to crawl website concurrently
     #[cfg(feature = "decentralized")]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
-        match url::Url::parse(&self.domain) {
+        match url::Url::parse(&self.domain.inner()) {
             Ok(_) => {
                 let blacklist_url = self.configuration.get_blacklist();
-                let domain = self.domain.as_str();
+                let domain = self.domain.inner().as_str();
                 let on_link_find_callback = self.on_link_find_callback;
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
                 let throttle = Box::pin(self.get_delay());
@@ -885,7 +898,7 @@ impl Website {
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
-            &self.domain,
+            &self.domain.inner(),
             self.configuration.subdomains,
             self.configuration.tld,
         );
@@ -954,7 +967,7 @@ impl Website {
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
-            &self.domain,
+            &self.domain.inner(),
             self.configuration.subdomains,
             self.configuration.tld,
         );
@@ -968,8 +981,7 @@ impl Website {
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
             let throttle = Duration::from_millis(delay);
 
-            let mut links: HashSet<CaseInsensitiveString> =
-                HashSet::from([CaseInsensitiveString::from(self.domain.as_str())]);
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
 
             let mut set: JoinSet<(CaseInsensitiveString, Option<String>)> = JoinSet::new();
 
