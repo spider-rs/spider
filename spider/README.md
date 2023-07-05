@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.32.3"
+spider = "1.32.6"
 ```
 
 And then the code:
@@ -66,10 +66,10 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.32.3", features = ["regex", "ua_generator"] }
+spider = { version = "1.32.6", features = ["regex", "ua_generator"] }
 ```
 
-1. `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
+1. `ua_generator`: Enables auto generating a random real User-Agent.
 1. `regex`: Enables blacklisting paths with regx
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
@@ -79,7 +79,7 @@ spider = { version = "1.32.3", features = ["regex", "ua_generator"] }
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
-1. `js`: Enables javascript parsing links created with the dom (Alpha-Experimental). You need to use the env variable `RUST_MIN_STACK=9999999` or release mode to prevent stack overflows.
+1. `js`: Enables javascript parsing links created with the dom [alpha-experimental].
 
 ### Decentralization
 
@@ -87,7 +87,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.32.3", features = ["decentralized"] }
+spider = { version = "1.32.6", features = ["decentralized"] }
 ```
 
 ```sh
@@ -107,7 +107,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.32.3", features = ["regex"] }
+spider = { version = "1.32.6", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -134,7 +134,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.32.3", features = ["control"] }
+spider = { version = "1.32.6", features = ["control"] }
 ```
 
 ```rust
