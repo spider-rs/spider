@@ -63,3 +63,7 @@ _Note_: Nodejs concurrency heavily impacts each additional run. As soon as you a
 ## CI
 
 You need a dedicated machine to get non flakey results. [Github Actions](https://github.com/spider-rs/spider/actions) results may differ across runs due to the shared env and the crawler built to scale across workloads.
+
+## Env
+
+Adjusting the target url for the massive bench crawling can be done using the env variable `SPIDER_BENCH_URL_LARGE`.

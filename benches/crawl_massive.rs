@@ -17,8 +17,12 @@ async fn main() {
         );
     }
 
-    let target = "https://www.va.gov";
-    let mut website: Website = Website::new(&target); // todo: use stdin
+    let target = match std::env::var("SPIDER_BENCH_URL_LARGE") {
+        Ok(v) => v,
+        _ => "https://wikipedia.org".into()
+    };
+
+    let mut website: Website = Website::new(&target);
     website.configuration.user_agent = Some(Box::new("usasearch".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
     website.configuration.respect_robots_txt = true;
     let start = Instant::now();
