@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.33.0"
+spider = "1.33.1"
 ```
 
 And then the code:
@@ -59,13 +59,34 @@ website.configuration.proxies.get_or_insert(Default::default()).push("socks5://1
 website.crawl().await;
 ```
 
+The builder pattern is also available v1.33.0 and up: 
+
+```rust
+let mut website = Website::new("https://choosealicense.com");
+
+website
+    .with_respect_robots_txt(true)
+    .with_subdomains(true)
+    .with_tld(false)
+    .with_delay(0)
+    .with_request_timeout(None)
+    .with_http2_prior_knowledge(false)
+    .with_user_agent(Some("myapp/version".into()))
+    .with_on_link_find_callback(Some(|s| {
+        println!("link target: {}", s.inner());
+        s
+    }))
+    .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
+    .with_proxies(None);
+```
+
 ## Features
 
 We have a couple optional feature flags. Regex blacklisting, jemaloc backend, globbing, fs temp storage, decentralization, serde, gathering full assets, and randomizing user agents.
 
 ```toml
 [dependencies]
-spider = { version = "1.33.0", features = ["regex", "ua_generator"] }
+spider = { version = "1.33.1", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -86,7 +107,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.33.0", features = ["decentralized"] }
+spider = { version = "1.33.1", features = ["decentralized"] }
 ```
 
 ```sh
@@ -106,7 +127,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.33.0", features = ["regex"] }
+spider = { version = "1.33.1", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -133,7 +154,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.33.0", features = ["control"] }
+spider = { version = "1.33.1", features = ["control"] }
 ```
 
 ```rust
