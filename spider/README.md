@@ -59,6 +59,27 @@ website.configuration.proxies.get_or_insert(Default::default()).push("socks5://1
 website.crawl().await;
 ```
 
+The builder pattern is also available v1.33.0 and up: 
+
+```rust
+    let mut website = Website::new("https://choosealicense.com");
+
+    website
+        .with_respect_robots_txt(true)
+        .with_subdomains(true)
+        .with_tld(false)
+        .with_delay(0)
+        .with_request_timeout(None)
+        .with_http2_prior_knowledge(false)
+        .with_user_agent(Some("myapp/version".into()))
+        .with_on_link_find_callback(Some(|s| {
+            println!("link target: {}", s.inner());
+            s
+        }))
+        .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
+        .with_proxies(None);
+```
+
 ## Features
 
 We have a couple optional feature flags. Regex blacklisting, jemaloc backend, globbing, fs temp storage, decentralization, serde, gathering full assets, and randomizing user agents.
