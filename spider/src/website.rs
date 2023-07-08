@@ -1060,7 +1060,7 @@ impl Website {
         }
     }
 
-    /// perform a callback to run on each link find.
+    /// Perform a callback to run on each link find.
     pub fn with_on_link_find_callback(
         &mut self,
         on_link_find_callback: Option<fn(CaseInsensitiveString) -> CaseInsensitiveString>,
@@ -1072,20 +1072,20 @@ impl Website {
         self
     }
 
-    /// respect robots.txt file.
+    /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.configuration
             .with_respect_robots_txt(respect_robots_txt);
         self
     }
 
-    /// include subdomains detection.
+    /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.configuration.with_subdomains(subdomains);
         self
     }
 
-    /// include tld detection.
+    /// Include tld detection.
     pub fn with_tld(&mut self, tld: bool) -> &mut Self {
         self.configuration.with_tld(tld);
         self
@@ -1098,19 +1098,19 @@ impl Website {
         self
     }
 
-    /// delay between request as ms.
+    /// Delay between request as ms.
     pub fn with_delay(&mut self, delay: u64) -> &mut Self {
         self.configuration.with_delay(delay);
         self
     }
 
-    /// max time to wait for request.
+    /// Max time to wait for request.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         self.configuration.with_request_timeout(request_timeout);
         self
     }
 
-    /// add user agent to request.
+    /// Add user agent to request.
     pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
         self.configuration.with_user_agent(user_agent);
         self
@@ -1313,6 +1313,7 @@ async fn test_with_configuration() {
         }))
         .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
         .with_proxies(None);
+
 
     website.crawl().await;
 

@@ -21,7 +21,7 @@ pub struct Configuration {
     pub tld: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Option<Box<Vec<CompactString>>>,
-    /// User-Agent
+    /// User-Agent for request.
     pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
@@ -33,13 +33,13 @@ pub struct Configuration {
     pub proxies: Option<Box<Vec<String>>>,
 }
 
-/// get the user agent from the top agent list randomly.
+/// Get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
 pub fn get_ua() -> &'static str {
     ua_generator::ua::spoof_ua()
 }
 
-/// get the user agent via cargo package + version.
+/// Get the user agent via cargo package + version.
 #[cfg(not(any(feature = "ua_generator")))]
 pub fn get_ua() -> &'static str {
     use std::env;
@@ -63,7 +63,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "regex")]
-    /// compile the regex for the blacklist.
+    /// Compile the regex for the blacklist.
     pub fn get_blacklist(&self) -> Box<Vec<regex::Regex>> {
         match &self.blacklist_url {
             Some(blacklist) => {
@@ -82,7 +82,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "regex"))]
-    /// handle the blacklist options.
+    /// Handle the blacklist options.
     pub fn get_blacklist(&self) -> Box<Vec<CompactString>> {
         match &self.blacklist_url {
             Some(blacklist) => blacklist.to_owned(),
@@ -90,25 +90,25 @@ impl Configuration {
         }
     }
 
-    /// respect robots.txt file.
+    /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.respect_robots_txt = respect_robots_txt;
         self
     }
 
-    /// include subdomains detection.
+    /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.subdomains = subdomains;
         self
     }
 
-    /// include tld detection.
+    /// Include tld detection.
     pub fn with_tld(&mut self, tld: bool) -> &mut Self {
         self.tld = tld;
         self
     }
 
-    /// delay between request as ms.
+    /// Delay between request as ms.
     pub fn with_delay(&mut self, delay: u64) -> &mut Self {
         self.delay = delay;
         self
@@ -120,7 +120,7 @@ impl Configuration {
         self
     }
 
-    /// max time to wait for request.
+    /// Max time to wait for request.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         match request_timeout {
             Some(timeout) => {
@@ -134,7 +134,7 @@ impl Configuration {
         self
     }
 
-    /// add user agent to request.
+    /// Add user agent to request.
     pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
         match user_agent {
             Some(agent) => self.user_agent = Some(agent.into()),
