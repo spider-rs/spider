@@ -25,8 +25,6 @@ pub struct Configuration {
     pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
-    /// Crawl channel buffer tuned to callback.
-    pub channel_buffer: i32,
     /// Request max timeout per page
     pub request_timeout: Option<Box<Duration>>,
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
@@ -59,14 +57,13 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
-            channel_buffer: 111,
             request_timeout: Some(Box::new(Duration::from_millis(15000))),
             ..Default::default()
         }
     }
 
     #[cfg(feature = "regex")]
-    /// compile the regex for the blacklist
+    /// compile the regex for the blacklist.
     pub fn get_blacklist(&self) -> Box<Vec<regex::Regex>> {
         match &self.blacklist_url {
             Some(blacklist) => {
@@ -85,11 +82,85 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "regex"))]
-    /// handle the blacklist options
+    /// handle the blacklist options.
     pub fn get_blacklist(&self) -> Box<Vec<CompactString>> {
         match &self.blacklist_url {
             Some(blacklist) => blacklist.to_owned(),
             _ => Default::default(),
         }
+    }
+
+    /// respect robots.txt file.
+    pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
+        self.respect_robots_txt = respect_robots_txt;
+        self
+    }
+
+    /// include subdomains detection.
+    pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
+        self.subdomains = subdomains;
+        self
+    }
+
+    /// include tld detection.
+    pub fn with_tld(&mut self, tld: bool) -> &mut Self {
+        self.tld = tld;
+        self
+    }
+
+    /// delay between request as ms.
+    pub fn with_delay(&mut self, delay: u64) -> &mut Self {
+        self.delay = delay;
+        self
+    }
+
+    /// Only use HTTP/2.
+    pub fn with_http2_prior_knowledge(&mut self, http2_prior_knowledge: bool) -> &mut Self {
+        self.http2_prior_knowledge = http2_prior_knowledge;
+        self
+    }
+
+    /// max time to wait for request.
+    pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
+        match request_timeout {
+            Some(timeout) => {
+                self.request_timeout = Some(timeout.into());
+            }
+            _ => {
+                self.request_timeout = None;
+            }
+        };
+
+        self
+    }
+
+    /// add user agent to request.
+    pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
+        match user_agent {
+            Some(agent) => self.user_agent = Some(agent.into()),
+            _ => self.user_agent = None,
+        };
+        self
+    }
+
+    /// Use proxies for request.
+    pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
+        match proxies {
+            Some(p) => self.proxies = Some(p.into()),
+            _ => self.proxies = None,
+        };
+        self
+    }
+
+    /// Add blacklist urls to ignore.
+    pub fn with_blacklist_url<T>(&mut self, blacklist_url: Option<Vec<T>>) -> &mut Self
+    where
+        Vec<CompactString>: From<Vec<T>>,
+    {
+        match blacklist_url {
+            Some(p) => self.blacklist_url = Some(Box::new(p.into())),
+            _ => self.blacklist_url = None,
+        };
+        self
     }
 }

@@ -1059,6 +1059,77 @@ impl Website {
             }
         }
     }
+
+    /// perform a callback to run on each link find.
+    pub fn with_on_link_find_callback(
+        &mut self,
+        on_link_find_callback: Option<fn(CaseInsensitiveString) -> CaseInsensitiveString>,
+    ) -> &mut Self {
+        match on_link_find_callback {
+            Some(callback) => self.on_link_find_callback = Some(callback.into()),
+            _ => self.on_link_find_callback = None,
+        };
+        self
+    }
+
+    /// respect robots.txt file.
+    pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
+        self.configuration
+            .with_respect_robots_txt(respect_robots_txt);
+        self
+    }
+
+    /// include subdomains detection.
+    pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
+        self.configuration.with_subdomains(subdomains);
+        self
+    }
+
+    /// include tld detection.
+    pub fn with_tld(&mut self, tld: bool) -> &mut Self {
+        self.configuration.with_tld(tld);
+        self
+    }
+
+    /// Only use HTTP/2.
+    pub fn with_http2_prior_knowledge(&mut self, http2_prior_knowledge: bool) -> &mut Self {
+        self.configuration
+            .with_http2_prior_knowledge(http2_prior_knowledge);
+        self
+    }
+
+    /// delay between request as ms.
+    pub fn with_delay(&mut self, delay: u64) -> &mut Self {
+        self.configuration.with_delay(delay);
+        self
+    }
+
+    /// max time to wait for request.
+    pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
+        self.configuration.with_request_timeout(request_timeout);
+        self
+    }
+
+    /// add user agent to request.
+    pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
+        self.configuration.with_user_agent(user_agent);
+        self
+    }
+
+    /// Use proxies for request.
+    pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
+        self.configuration.with_proxies(proxies);
+        self
+    }
+
+    /// Add blacklist urls to ignore.
+    pub fn with_blacklist_url<T>(&mut self, blacklist_url: Option<Vec<T>>) -> &mut Self
+    where
+        Vec<CompactString>: From<Vec<T>>,
+    {
+        self.configuration.with_blacklist_url(blacklist_url);
+        self
+    }
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -1217,6 +1288,36 @@ async fn test_crawl_subdomains() {
     website.crawl().await;
     assert!(
         website
+            .links_visited
+            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+        "{:?}",
+        website.links_visited
+    );
+}
+
+#[tokio::test]
+async fn test_with_configuration() {
+    let mut website = Website::new("https://choosealicense.com");
+
+    website
+        .with_respect_robots_txt(true)
+        .with_subdomains(true)
+        .with_tld(false)
+        .with_delay(0)
+        .with_request_timeout(None)
+        .with_http2_prior_knowledge(false)
+        .with_user_agent(Some("myapp/version".into()))
+        .with_on_link_find_callback(Some(|s| {
+            println!("link target: {}", s.inner());
+            s
+        }))
+        .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
+        .with_proxies(None);
+
+    website.crawl().await;
+
+    assert!(
+        !website
             .links_visited
             .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
         "{:?}",

@@ -19,7 +19,7 @@ async fn main() {
 
     let target = match std::env::var("SPIDER_BENCH_URL_LARGE") {
         Ok(v) => v,
-        _ => "https://wikipedia.org".into()
+        _ => "https://wikipedia.org".into(),
     };
 
     let mut website: Website = Website::new(&target);
