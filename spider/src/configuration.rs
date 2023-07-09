@@ -64,18 +64,13 @@ impl Configuration {
 
     #[cfg(feature = "regex")]
     /// Compile the regex for the blacklist.
-    pub fn get_blacklist(&self) -> Box<Vec<regex::Regex>> {
+    pub fn get_blacklist(&self) -> Box<regex::RegexSet> {
         match &self.blacklist_url {
             Some(blacklist) => {
-                let blacklist = blacklist
-                    .iter()
-                    .filter_map(|pattern| match regex::Regex::new(&pattern) {
-                        Ok(re) => Some(re),
-                        _ => None,
-                    })
-                    .collect::<Vec<regex::Regex>>();
-
-                Box::new(blacklist)
+                match regex::RegexSet::new(&**blacklist) {
+                    Ok(s) => Box::new(s),
+                    _ => Default::default(),
+                }
             }
             _ => Default::default(),
         }
