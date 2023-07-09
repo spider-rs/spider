@@ -115,13 +115,8 @@ pub use case_insensitive_string::CaseInsensitiveString;
 pub mod black_list {
     use compact_str::CompactString;
     /// check if link exist in blacklists with regex.
-    pub fn contains(blacklist_url: &Vec<regex::Regex>, link: &CompactString) -> bool {
-        for re in blacklist_url {
-            if re.is_match(link) {
-                return true;
-            }
-        }
-        return false;
+    pub fn contains(blacklist_url: &regex::RegexSet, link: &CompactString) -> bool {
+        blacklist_url.is_match(link)
     }
 }
 

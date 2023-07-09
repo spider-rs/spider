@@ -155,7 +155,7 @@ impl Website {
     pub fn is_allowed(
         &self,
         link: &CaseInsensitiveString,
-        blacklist_url: &Box<Vec<regex::Regex>>,
+        blacklist_url: &Box<regex::RegexSet>,
     ) -> bool {
         if self.links_visited.contains(link) {
             false
@@ -173,7 +173,7 @@ impl Website {
     pub fn is_allowed_default(
         &self,
         link: &CaseInsensitiveString,
-        blacklist_url: &Box<Vec<regex::Regex>>,
+        blacklist_url: &Box<regex::RegexSet>,
     ) -> bool {
         if !blacklist_url.is_empty() {
             !contains(blacklist_url, &link.inner())
@@ -1227,11 +1227,7 @@ async fn not_crawl_blacklist() {
 #[cfg(feature = "regex")]
 async fn not_crawl_blacklist_regex() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website
-        .configuration
-        .blacklist_url
-        .insert(Default::default())
-        .push(CompactString::from("/choosealicense.com/"));
+    website.with_blacklist_url(Some(Vec::from(["choosealicense.com".into()])));
     website.crawl().await;
     assert_eq!(website.links_visited.len(), 0);
 }
