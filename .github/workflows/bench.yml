@@ -35,4 +35,4 @@ jobs:
       # - name: Run Benchmark Massive 50k pages plus
       #   run: cargo bench --bench crawl_massive
       - name: Run Benchmark Massive 50k pages plus - Features[decentralized]
-        run: cargo bench --bench crawl_massive --features decentralized
+        run: SPIDER_BENCH_URL_LARGE=$SPIDER_BENCH_URL_LARGE cargo bench --bench crawl_massive --features decentralized

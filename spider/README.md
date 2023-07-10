@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.33.3"
+spider = "1.34.0"
 ```
 
 And then the code:
@@ -76,6 +76,7 @@ website
         println!("link target: {}", s.inner());
         s
     }))
+    .with_headers(None)
     .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
     .with_proxies(None);
 ```
@@ -86,7 +87,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.33.3", features = ["regex", "ua_generator"] }
+spider = { version = "1.34.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -107,7 +108,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.33.3", features = ["decentralized"] }
+spider = { version = "1.34.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -127,7 +128,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.33.3", features = ["regex"] }
+spider = { version = "1.34.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -139,7 +140,7 @@ use spider::tokio;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.blacklist_url.push("/licenses/".to_string());
+    website.configuration.blacklist_url.push("/licenses/".into());
     website.crawl().await;
 
     for link in website.get_links() {
@@ -154,7 +155,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.33.3", features = ["control"] }
+spider = { version = "1.34.0", features = ["control"] }
 ```
 
 ```rust
