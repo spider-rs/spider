@@ -305,6 +305,11 @@ impl Website {
             client
         };
 
+        let client = match &self.configuration.headers {
+            Some(headers) => client.default_headers(*headers.to_owned()),
+            _ => client,
+        };
+
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
             _ => client,
@@ -373,6 +378,11 @@ impl Website {
             // use expected http headers for providers that drop invalid headers
             headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
         }
+
+        match &self.configuration.headers {
+            Some(h) => headers.extend(*h.to_owned()),
+            _ => (),
+        };
 
         match self.get_absolute_path(None) {
             Some(domain_url) => {
@@ -1130,6 +1140,12 @@ impl Website {
         self.configuration.with_blacklist_url(blacklist_url);
         self
     }
+
+    /// Set HTTP headers for request using [reqwest::header::HeaderMap](https://docs.rs/reqwest/latest/reqwest/header/struct.HeaderMap.html).
+    pub fn with_headers(&mut self, headers: Option<reqwest::header::HeaderMap>) -> &mut Self {
+        self.configuration.with_headers(headers);
+        self
+    }
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -1307,9 +1323,11 @@ async fn test_with_configuration() {
             println!("link target: {}", s.inner());
             s
         }))
-        .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
+        .with_blacklist_url(Some(Vec::from([
+            "https://choosealicense.com/licenses/".into()
+        ])))
+        .with_headers(None)
         .with_proxies(None);
-
 
     website.crawl().await;
 

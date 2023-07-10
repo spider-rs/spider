@@ -1,6 +1,5 @@
-use std::time::Duration;
-
 use compact_str::CompactString;
+use std::time::Duration;
 
 /// Structure to configure `Website` crawler
 /// ```rust
@@ -31,6 +30,8 @@ pub struct Configuration {
     pub http2_prior_knowledge: bool,
     /// Use proxy list for performing network request.
     pub proxies: Option<Box<Vec<String>>>,
+    /// Headers to include with request.
+    pub headers: Option<Box<reqwest::header::HeaderMap>>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -66,12 +67,10 @@ impl Configuration {
     /// Compile the regex for the blacklist.
     pub fn get_blacklist(&self) -> Box<regex::RegexSet> {
         match &self.blacklist_url {
-            Some(blacklist) => {
-                match regex::RegexSet::new(&**blacklist) {
-                    Ok(s) => Box::new(s),
-                    _ => Default::default(),
-                }
-            }
+            Some(blacklist) => match regex::RegexSet::new(&**blacklist) {
+                Ok(s) => Box::new(s),
+                _ => Default::default(),
+            },
             _ => Default::default(),
         }
     }
@@ -155,6 +154,15 @@ impl Configuration {
         match blacklist_url {
             Some(p) => self.blacklist_url = Some(Box::new(p.into())),
             _ => self.blacklist_url = None,
+        };
+        self
+    }
+
+    /// Set HTTP headers for request using [reqwest::header::HeaderMap](https://docs.rs/reqwest/latest/reqwest/header/struct.HeaderMap.html).
+    pub fn with_headers(&mut self, headers: Option<reqwest::header::HeaderMap>) -> &mut Self {
+        match headers {
+            Some(m) => self.headers = Some(m.into()),
+            _ => self.headers = None,
         };
         self
     }
