@@ -8,6 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_LOG: "off"
+  SPIDER_BENCH_URL_LARGE: ${{ vars.SPIDER_BENCH_URL_LARGE }}
 
 concurrency:
   group: ${{ github.ref }}
@@ -35,4 +36,4 @@ jobs:
       # - name: Run Benchmark Massive 50k pages plus
       #   run: cargo bench --bench crawl_massive
       - name: Run Benchmark Massive 50k pages plus - Features[decentralized]
-        run: SPIDER_BENCH_URL_LARGE=$SPIDER_BENCH_URL_LARGE cargo bench --bench crawl_massive --features decentralized
+        run: cargo bench --bench crawl_massive --features decentralized
