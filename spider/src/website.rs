@@ -492,13 +492,13 @@ impl Website {
     }
 
     /// get base link for crawl establishing
-    #[cfg(feature = "regex")]
+    #[cfg(all(feature = "regex", not(feature = "glob"), not(feature = "decentralized")))]
     fn get_base_link(&self) -> &CaseInsensitiveString {
         &self.domain
     }
 
     /// get base link for crawl establishing
-    #[cfg(not(feature = "regex"))]
+    #[cfg(all(not(feature = "glob"), not(feature = "decentralized"), not(feature = "regex")))]
     fn get_base_link(&self) -> &CompactString {
         self.domain.inner()
     }
