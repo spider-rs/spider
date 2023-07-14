@@ -294,8 +294,6 @@ impl Website {
                 _ => &get_ua(),
             })
             .redirect(policy)
-            .brotli(true)
-            .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
@@ -358,9 +356,7 @@ impl Website {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
             })
-            .brotli(true)
             .redirect(policy)
-            .gzip(true)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
@@ -492,13 +488,13 @@ impl Website {
     }
 
     /// get base link for crawl establishing
-    #[cfg(all(feature = "regex", not(feature = "glob"), not(feature = "decentralized")))]
+    #[cfg(all(not(feature = "glob"), feature = "regex"))]
     fn get_base_link(&self) -> &CaseInsensitiveString {
         &self.domain
     }
 
     /// get base link for crawl establishing
-    #[cfg(all(not(feature = "glob"), not(feature = "decentralized"), not(feature = "regex")))]
+    #[cfg(all(not(feature = "glob"), not(feature = "regex")))]
     fn get_base_link(&self) -> &CompactString {
         self.domain.inner()
     }
@@ -515,14 +511,11 @@ impl Website {
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             let page = Page::new(&self.domain.inner(), &client).await;
-            let u = page.get_url().into();
 
-            let link_result = match self.on_link_find_callback {
-                Some(cb) => cb(u),
-                _ => u,
-            };
-
-            self.links_visited.insert(link_result);
+            self.links_visited.insert(match self.on_link_find_callback {
+                Some(cb) => cb(*self.domain.clone()),
+                _ => *self.domain.clone(),
+            });
 
             HashSet::from(page.links(&base).await)
         } else {
@@ -537,34 +530,28 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
-        let (domain_name, _) = base;
-        let domain_name = if domain_name.is_empty() {
-            &*self.domain.inner()
-        } else {
-            domain_name
-        };
         let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(&domain_name, &self.configuration.get_blacklist()) {
+            if self.is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist()) {
+                let link = self.domain.inner();
+
                 let page = Page::new(
-                    &if http_worker && domain_name.starts_with("https") {
-                        domain_name.replacen("https", "http", 1)
+                    &if http_worker && link.starts_with("https") {
+                        link.replacen("https", "http", 1)
                     } else {
-                        domain_name.to_string()
+                        link.to_string()
                     },
                     &client,
                 )
                 .await;
-                let link = CaseInsensitiveString::new(&domain_name);
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(link),
-                    _ => link,
-                };
 
-                self.links_visited.insert(link_result);
+                self.links_visited.insert(match self.on_link_find_callback {
+                    Some(cb) => cb(*self.domain.to_owned()),
+                    _ => *self.domain.to_owned(),
+                });
 
                 HashSet::from(page.links)
             } else {
@@ -579,19 +566,12 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        use crate::features::glob::expand_url;
-
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let (domain_name, _) = base;
-        let domain_name = if domain_name.is_empty() {
-            &*self.domain.inner()
-        } else {
-            domain_name
-        };
-        let mut expanded = expand_url(&domain_name.as_str());
+        let domain_name = self.domain.inner();
+        let mut expanded = crate::features::glob::expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
             match self.get_absolute_path(Some(domain_name)) {
@@ -641,17 +621,9 @@ impl Website {
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        use crate::features::glob::expand_url;
-
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let (domain_name, _) = base;
-        let domain_name = if domain_name.is_empty() {
-            &*self.domain.inner()
-        } else {
-            domain_name
-        };
-
-        let mut expanded = expand_url(&domain_name.as_str());
+        let domain_name = self.domain.inner();
+        let mut expanded = crate::features::glob::expand_url(&domain_name.as_str());
 
         if expanded.len() == 0 {
             match self.get_absolute_path(Some(domain_name)) {
@@ -728,69 +700,71 @@ impl Website {
             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
             let chandle = Handle::current();
 
-            // crawl while links exists
-            loop {
-                let stream =
-                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                        .throttle(*throttle);
-                tokio::pin!(stream);
-
+            if !links.is_empty() {
+                // crawl while links exists
                 loop {
-                    match stream.next().await {
-                        Some(link) => {
-                            match handle.as_ref() {
-                                Some(handle) => {
-                                    while handle.load(Ordering::Relaxed) == 1 {
-                                        interval.tick().await;
+                    let stream =
+                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                            .throttle(*throttle);
+                    tokio::pin!(stream);
+    
+                    loop {
+                        match stream.next().await {
+                            Some(link) => {
+                                match handle.as_ref() {
+                                    Some(handle) => {
+                                        while handle.load(Ordering::Relaxed) == 1 {
+                                            interval.tick().await;
+                                        }
+                                        if handle.load(Ordering::Relaxed) == 2 {
+                                            set.shutdown().await;
+                                            break;
+                                        }
                                     }
-                                    if handle.load(Ordering::Relaxed) == 2 {
-                                        set.shutdown().await;
-                                        break;
-                                    }
+                                    None => (),
                                 }
-                                None => (),
+    
+                                if !self.is_allowed(&link, &blacklist_url) {
+                                    continue;
+                                }
+                                log("fetch", &link);
+                                self.links_visited.insert(link.clone());
+                                let permit = SEM.acquire().await.unwrap();
+                                let shared = shared.clone();
+                                task::yield_now().await;
+    
+                                set.spawn_on(
+                                    async move {
+                                        let link_result = match on_link_find_callback {
+                                            Some(cb) => cb(link),
+                                            _ => link,
+                                        };
+                                        let page = Page::new(&link_result.as_ref(), &shared.0).await;
+                                        let page_links = page.links(&shared.1).await;
+    
+                                        drop(permit);
+    
+                                        page_links
+                                    },
+                                    &chandle,
+                                );
                             }
-
-                            if !self.is_allowed(&link, &blacklist_url) {
-                                continue;
-                            }
-                            log("fetch", &link);
-                            self.links_visited.insert(link.clone());
-                            let permit = SEM.acquire().await.unwrap();
-                            let shared = shared.clone();
-                            task::yield_now().await;
-
-                            set.spawn_on(
-                                async move {
-                                    let link_result = match on_link_find_callback {
-                                        Some(cb) => cb(link),
-                                        _ => link,
-                                    };
-                                    let page = Page::new(&link_result.as_ref(), &shared.0).await;
-                                    let page_links = page.links(&shared.1).await;
-
-                                    drop(permit);
-
-                                    page_links
-                                },
-                                &chandle,
-                            );
+                            _ => break,
                         }
-                        _ => break,
                     }
-                }
-
-                while let Some(res) = set.join_next().await {
-                    match res {
-                        Ok(msg) => {
-                            links.extend(&msg - &self.links_visited);
-                        }
-                        _ => (),
-                    };
-                }
-
-                if links.is_empty() {
-                    break;
+    
+                    while let Some(res) = set.join_next().await {
+                        match res {
+                            Ok(msg) => {
+                                links.extend(&msg - &self.links_visited);
+                            }
+                            _ => (),
+                        };
+                    }
+    
+                    if links.is_empty() {
+                        break;
+                    }
                 }
             }
         }
