@@ -5,7 +5,7 @@ use crate::packages::scraper::error::SelectorErrorKind;
 use cssparser::ToCss;
 use fast_html5ever::{LocalName, Namespace};
 use selectors::parser::SelectorParseErrorKind;
-use selectors::{matching, parser};
+use selectors::{matching, parser, NthIndexCache};
 use smallvec::SmallVec;
 use std::convert::TryFrom;
 use std::fmt;
@@ -26,7 +26,7 @@ impl Selector {
         let mut parser_input = cssparser::ParserInput::new(selectors);
         let mut parser = cssparser::Parser::new(&mut parser_input);
 
-        parser::SelectorList::parse(&Parser, &mut parser)
+        parser::SelectorList::parse(&Parser, &mut parser, parser::ParseRelative::No)
             .map(|list| Selector { selectors: list.0 })
             .map_err(SelectorErrorKind::from)
     }
@@ -40,16 +40,19 @@ impl Selector {
     /// The optional `scope` argument is used to specify which element has `:scope` pseudo-class.
     /// When it is `None`, `:scope` will match the root element.
     pub fn matches_with_scope(&self, element: &ElementRef, scope: Option<ElementRef>) -> bool {
+        let mut binding = NthIndexCache::default();
         let mut context = matching::MatchingContext::new(
             matching::MatchingMode::Normal,
             None,
-            None,
+            &mut binding,
             matching::QuirksMode::NoQuirks,
+            matching::NeedsSelectorFlags::No,
+            matching::IgnoreNthChildForInvalidation::No
         );
         context.scope_element = scope.map(|x| selectors::Element::opaque(&x));
         self.selectors
             .iter()
-            .any(|s| matching::matches_selector(s, 0, None, element, &mut context, &mut |_, _| {}))
+            .any(|s| matching::matches_selector(s, 0, None, element, &mut context))
     }
 }
 
@@ -77,7 +80,7 @@ impl parser::SelectorImpl for Simple {
     type PseudoElement = PseudoElement;
 
     // see: https://github.com/servo/servo/pull/19747#issuecomment-357106065
-    type ExtraMatchingData = String;
+    type ExtraMatchingData<'a> = std::marker::PhantomData<&'a ()>;
 }
 
 /// Wraps [`String`] so that it can be used with [`selectors`]

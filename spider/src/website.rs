@@ -433,15 +433,9 @@ impl Website {
 
             while l.changed().await.is_ok() {
                 let n = &*l.borrow();
-                let (name, rest) = n;
+                let (target, rest) = n;
 
-                let url = if name.ends_with('/') {
-                    name.into()
-                } else {
-                    string_concat!(name.clone(), "/")
-                };
-
-                if domain.eq_ignore_ascii_case(&url) {
+                if domain.eq_ignore_ascii_case(&target) {
                     if rest == &Handler::Resume {
                         paused.store(0, Ordering::Relaxed);
                     }
@@ -1163,7 +1157,7 @@ async fn crawl_invalid() {
     let mut website: Website = Website::new(domain);
     website.crawl().await;
     let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
-    uniq.insert(format!("{}/", domain.to_string()).into()); // TODO: remove trailing slash mutate
+    uniq.insert(format!("{}", domain.to_string()).into()); // TODO: remove trailing slash mutate
 
     assert_eq!(website.links_visited, uniq); // only the target url should exist
 }
@@ -1401,16 +1395,16 @@ async fn test_link_duplicates() {
 async fn test_crawl_pause_resume() {
     use crate::utils::{pause, resume};
 
-    let url = "https://choosealicense.com/";
-    let mut website: Website = Website::new(&url);
+    let domain = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&domain);
 
     let start = tokio::time::Instant::now();
 
     tokio::spawn(async move {
-        pause(url).await;
+        pause(domain).await;
         // static website test pause/resume - scan will never take longer than 5secs for target website choosealicense
         tokio::time::sleep(Duration::from_millis(5000)).await;
-        resume(url).await;
+        resume(domain).await;
     });
 
     website.crawl().await;
@@ -1435,11 +1429,11 @@ async fn test_crawl_shutdown() {
     use crate::utils::shutdown;
 
     // use target blog to prevent shutdown of prior crawler
-    let url = "https://rsseau.fr/";
-    let mut website: Website = Website::new(&url);
+    let domain = "https://rsseau.fr/";
+    let mut website: Website = Website::new(&domain);
 
     tokio::spawn(async move {
-        shutdown(url).await;
+        shutdown(domain).await;
     });
 
     website.crawl().await;

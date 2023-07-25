@@ -193,31 +193,34 @@ lazy_static! {
 pub async fn pause(domain: &str) {
     let s = CONTROLLER.clone();
 
-    s.lock()
-        .await
-        .0
-        .send((domain.to_string(), Handler::Pause))
-        .unwrap();
+    match s.lock().await.0.send((domain.into(), Handler::Pause)) {
+        _ => (),
+    };
 }
 
 /// resume a target website crawl
 pub async fn resume(domain: &str) {
     let s = CONTROLLER.clone();
 
-    s.lock()
-        .await
-        .0
-        .send((domain.to_string(), Handler::Resume))
-        .unwrap();
+    match s.lock().await.0.send((domain.into(), Handler::Resume)) {
+        _ => (),
+    };
 }
 
 /// shutdown a target website crawl
 pub async fn shutdown(domain: &str) {
     let s = CONTROLLER.clone();
 
-    s.lock()
-        .await
-        .0
-        .send((domain.to_string(), Handler::Shutdown))
-        .unwrap();
+    match s.lock().await.0.send((domain.into(), Handler::Shutdown)) {
+        _ => (),
+    };
+}
+
+/// reset a target website crawl
+pub async fn reset(domain: &str) {
+    let s = CONTROLLER.clone();
+
+    match s.lock().await.0.send((domain.into(), Handler::Start)) {
+        _ => (),
+    };
 }
