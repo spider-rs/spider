@@ -26,6 +26,14 @@ impl<'a> Element for ElementRef<'a> {
         None
     }
 
+    fn first_element_child(&self) -> Option<Self> {
+        self.prev_siblings().nth(0).and_then(ElementRef::wrap)
+    }
+
+    fn apply_selector_flags(&self, _: selectors::matching::ElementSelectorFlags) {
+        // Apply selector flags when enabled
+    }
+
     fn is_pseudo_element(&self) -> bool {
         false
     }
@@ -80,11 +88,10 @@ impl<'a> Element for ElementRef<'a> {
         })
     }
 
-    fn match_non_ts_pseudo_class<F>(
+    fn match_non_ts_pseudo_class(
         &self,
         _pc: &NonTSPseudoClass,
         _context: &mut matching::MatchingContext<Self::Impl>,
-        _flags_setter: &mut F,
     ) -> bool {
         false
     }
