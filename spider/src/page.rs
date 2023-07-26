@@ -49,13 +49,12 @@ pub fn domain_name(domain: &Url) -> &str {
     match domain.host_str() {
         Some(b) => {
             let b = b.split('.').collect::<Vec<&str>>();
+            let bsize = b.len();
 
-            if b.len() > 2 {
-                b[1]
-            } else if b.len() == 2 {
-                b[0]
-            } else {
-                b[b.len() - 2]
+            if bsize > 0 {
+                b[bsize - 1]
+            }  else {
+                ""
             }
         }
         _ => "",
