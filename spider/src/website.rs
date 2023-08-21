@@ -548,7 +548,11 @@ impl Website {
             .await;
 
             self.links_visited.insert(match self.on_link_find_callback {
-                Some(cb) => cb(*self.domain.to_owned()),
+                Some(cb) => {
+                    let c = cb(*self.domain.to_owned(), None);
+
+                    c.0
+                },
                 _ => *self.domain.to_owned(),
             });
 

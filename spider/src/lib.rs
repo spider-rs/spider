@@ -80,11 +80,11 @@ pub extern crate url;
 #[macro_use]
 pub extern crate string_concat;
 #[macro_use]
-extern crate lazy_static;
+pub extern crate lazy_static;
 #[macro_use]
-extern crate fast_html5ever;
+pub extern crate fast_html5ever;
 #[macro_use]
-extern crate matches;
+pub extern crate matches;
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
     not(windows),
