@@ -99,14 +99,14 @@ pub struct Website {
     links_visited: Box<HashSet<CaseInsensitiveString>>,
     /// contains page visited
     pages: Option<Box<Vec<Page>>>,
-    /// callback when a link is found.
-    pub on_link_find_callback: Option<fn(CaseInsensitiveString) -> CaseInsensitiveString>,
     /// Robot.txt parser holder.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// the base root domain of the crawl
     domain: Box<CaseInsensitiveString>,
     /// the domain url parsed
     domain_parsed: Option<Box<Url>>,
+    /// callback when a link is found.
+    pub on_link_find_callback: Option<fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)>
 }
 
 impl Website {
@@ -122,7 +122,7 @@ impl Website {
             domain_parsed: match url::Url::parse(domain) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
-            },
+            }
         }
     }
 
@@ -507,7 +507,11 @@ impl Website {
             let page = Page::new(&self.domain.inner(), &client).await;
 
             self.links_visited.insert(match self.on_link_find_callback {
-                Some(cb) => cb(*self.domain.clone()),
+                Some(cb) => {
+                    let c = cb(*self.domain.clone(), None);
+
+                    c.0
+                },
                 _ => *self.domain.clone(),
             });
 
@@ -595,11 +599,11 @@ impl Website {
                 let u = if u.is_empty() { link } else { u.into() };
 
                 let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u),
-                    _ => u,
+                    Some(cb) => cb(u, None),
+                    _ => (u, None),
                 };
 
-                self.links_visited.insert(link_result);
+                self.links_visited.insert(link_result.0);
 
                 links.extend(HashSet::from(page.links));
             }
@@ -732,11 +736,11 @@ impl Website {
                                 set.spawn_on(
                                     async move {
                                         let link_result = match on_link_find_callback {
-                                            Some(cb) => cb(link),
-                                            _ => link,
+                                            Some(cb) => cb(link, None),
+                                            _ => (link, None),
                                         };
                                         let page =
-                                            Page::new(&link_result.as_ref(), &shared.0).await;
+                                            Page::new(&link_result.0.as_ref(), &shared.0).await;
                                         let page_links = page.links(&shared.1).await;
 
                                         drop(permit);
@@ -828,20 +832,19 @@ impl Website {
                                 set.spawn_on(
                                     async move {
                                         let link_results = match on_link_find_callback {
-                                            Some(cb) => cb(link),
-                                            _ => link,
+                                            Some(cb) => cb(link, None),
+                                            _ => (link, None),
                                         };
-
+                                        let link_results = link_results.0.as_ref();
                                         let page = Page::new(
                                             &if http_worker
-                                                && link_results.as_ref().starts_with("https")
+                                                && link_results.starts_with("https")
                                             {
                                                 link_results
-                                                    .as_ref()
                                                     .replacen("https", "http", 1)
                                                     .to_string()
                                             } else {
-                                                link_results.as_ref().to_string()
+                                                link_results.to_string()
                                             },
                                             &client,
                                         )
@@ -921,11 +924,11 @@ impl Website {
                     }
                     let link = link.clone();
                     let link_result = match on_link_find_callback {
-                        Some(cb) => cb(link),
-                        _ => link,
+                        Some(cb) => cb(link, None),
+                        _ => (link, None),
                     };
 
-                    let page = Page::new(&link_result.as_ref(), &client).await;
+                    let page = Page::new(&link_result.0.as_ref(), &client).await;
                     let page_links = page.links(&selectors).await;
                     task::yield_now().await;
                     new_links.extend(page_links);
@@ -997,14 +1000,19 @@ impl Website {
                     set.spawn(async move {
                         drop(permit);
 
-                        let link_result = match on_link_find_callback {
-                            Some(cb) => cb(link),
-                            _ => link,
-                        };
-
                         let page =
-                            crate::utils::fetch_page_html(&link_result.as_ref(), &client).await;
+                            crate::utils::fetch_page_html(&link.as_ref(), &client).await;
 
+                            let (link_result, page) = match on_link_find_callback {
+                                Some(cb) => {
+                                    let c = cb(link, page);
+
+                                    c
+                                },
+                                _ => (link, page),
+                            };
+    
+    
                         (link_result, page)
                     });
                 }
@@ -1044,7 +1052,7 @@ impl Website {
     /// Perform a callback to run on each link find.
     pub fn with_on_link_find_callback(
         &mut self,
-        on_link_find_callback: Option<fn(CaseInsensitiveString) -> CaseInsensitiveString>,
+        on_link_find_callback: Option<fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)>,
     ) -> &mut Self {
         match on_link_find_callback {
             Some(callback) => self.on_link_find_callback = Some(callback.into()),
@@ -1178,9 +1186,9 @@ async fn crawl_invalid() {
 #[cfg(not(feature = "decentralized"))]
 async fn crawl_link_callback() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.on_link_find_callback = Some(|s| {
+    website.on_link_find_callback = Some(|s, ss| {
         log("callback link target: {}", &s);
-        s
+        (s, ss)
     });
     website.crawl().await;
 
@@ -1290,9 +1298,9 @@ async fn test_with_configuration() {
         .with_request_timeout(None)
         .with_http2_prior_knowledge(false)
         .with_user_agent(Some("myapp/version".into()))
-        .with_on_link_find_callback(Some(|s| {
+        .with_on_link_find_callback(Some(|s, ss| {
             println!("link target: {}", s.inner());
-            s
+            (s, ss)
         }))
         .with_blacklist_url(Some(Vec::from([
             "https://choosealicense.com/licenses/".into()
