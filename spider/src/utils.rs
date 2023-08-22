@@ -1,12 +1,6 @@
 use log::{info, log_enabled, Level};
 use reqwest::Client;
 
-use std::sync::Arc;
-use tokio::sync::watch;
-use tokio::sync::watch::Receiver;
-use tokio::sync::watch::Sender;
-use tokio::sync::Mutex;
-
 #[cfg(not(feature = "fs"))]
 /// Perform a network request to a resource extracting all content as text streaming.
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String> {
@@ -171,6 +165,7 @@ pub fn log(message: &'static str, data: impl AsRef<str>) {
     }
 }
 
+#[cfg(feature = "control")]
 /// determine action
 #[derive(PartialEq, Debug)]
 pub enum Handler {
@@ -184,11 +179,13 @@ pub enum Handler {
     Shutdown,
 }
 
+#[cfg(feature = "control")]
 lazy_static! {
     /// control handle for crawls
-    pub static ref CONTROLLER: Arc<Mutex<(Sender<(String, Handler)>, Receiver<(String, Handler)>)>> = Arc::new(Mutex::new(watch::channel(("handles".to_string(), Handler::Start))));
+    pub static ref CONTROLLER: std::sync::Arc<tokio::sync::Mutex<(tokio::sync::watch::Sender<(String, Handler)>, tokio::sync::watch::Receiver<(String, Handler)>)>> = std::sync::Arc::new(tokio::sync::Mutex::new(tokio::sync::watch::channel(("handles".to_string(), Handler::Start))));
 }
 
+#[cfg(feature = "control")]
 /// pause a target website running crawl
 pub async fn pause(domain: &str) {
     let s = CONTROLLER.clone();
@@ -198,6 +195,7 @@ pub async fn pause(domain: &str) {
     };
 }
 
+#[cfg(feature = "control")]
 /// resume a target website crawl
 pub async fn resume(domain: &str) {
     let s = CONTROLLER.clone();
@@ -207,6 +205,7 @@ pub async fn resume(domain: &str) {
     };
 }
 
+#[cfg(feature = "control")]
 /// shutdown a target website crawl
 pub async fn shutdown(domain: &str) {
     let s = CONTROLLER.clone();
@@ -216,6 +215,7 @@ pub async fn shutdown(domain: &str) {
     };
 }
 
+#[cfg(feature = "control")]
 /// reset a target website crawl
 pub async fn reset(domain: &str) {
     let s = CONTROLLER.clone();

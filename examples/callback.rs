@@ -9,7 +9,7 @@ async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr");
     website.on_link_find_callback = Some(|s, ss| {
         println!("link target: {:?}", s);
-       (s, ss)
+        (s, ss)
     });
     website.crawl().await;
 }

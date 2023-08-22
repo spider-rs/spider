@@ -106,7 +106,9 @@ pub struct Website {
     /// the domain url parsed
     domain_parsed: Option<Box<Url>>,
     /// callback when a link is found.
-    pub on_link_find_callback: Option<fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)>
+    pub on_link_find_callback: Option<
+        fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
+    >,
 }
 
 impl Website {
@@ -122,7 +124,7 @@ impl Website {
             domain_parsed: match url::Url::parse(domain) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
-            }
+            },
         }
     }
 
@@ -511,7 +513,7 @@ impl Website {
                     let c = cb(*self.domain.clone(), None);
 
                     c.0
-                },
+                }
                 _ => *self.domain.clone(),
             });
 
@@ -552,7 +554,7 @@ impl Website {
                     let c = cb(*self.domain.to_owned(), None);
 
                     c.0
-                },
+                }
                 _ => *self.domain.to_owned(),
             });
 
@@ -841,9 +843,7 @@ impl Website {
                                         };
                                         let link_results = link_results.0.as_ref();
                                         let page = Page::new(
-                                            &if http_worker
-                                                && link_results.starts_with("https")
-                                            {
+                                            &if http_worker && link_results.starts_with("https") {
                                                 link_results
                                                     .replacen("https", "http", 1)
                                                     .to_string()
@@ -1004,19 +1004,17 @@ impl Website {
                     set.spawn(async move {
                         drop(permit);
 
-                        let page =
-                            crate::utils::fetch_page_html(&link.as_ref(), &client).await;
+                        let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
 
-                            let (link_result, page) = match on_link_find_callback {
-                                Some(cb) => {
-                                    let c = cb(link, page);
+                        let (link_result, page) = match on_link_find_callback {
+                            Some(cb) => {
+                                let c = cb(link, page);
 
-                                    c
-                                },
-                                _ => (link, page),
-                            };
-    
-    
+                                c
+                            }
+                            _ => (link, page),
+                        };
+
                         (link_result, page)
                     });
                 }
@@ -1056,7 +1054,9 @@ impl Website {
     /// Perform a callback to run on each link find.
     pub fn with_on_link_find_callback(
         &mut self,
-        on_link_find_callback: Option<fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)>,
+        on_link_find_callback: Option<
+            fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
+        >,
     ) -> &mut Self {
         match on_link_find_callback {
             Some(callback) => self.on_link_find_callback = Some(callback.into()),

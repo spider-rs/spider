@@ -47,7 +47,7 @@ impl Selector {
             &mut binding,
             matching::QuirksMode::NoQuirks,
             matching::NeedsSelectorFlags::No,
-            matching::IgnoreNthChildForInvalidation::No
+            matching::IgnoreNthChildForInvalidation::No,
         );
         context.scope_element = scope.map(|x| selectors::Element::opaque(&x));
         self.selectors

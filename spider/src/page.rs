@@ -53,7 +53,7 @@ pub fn domain_name(domain: &Url) -> &str {
 
             if bsize > 0 {
                 b[bsize - 1]
-            }  else {
+            } else {
                 ""
             }
         }
