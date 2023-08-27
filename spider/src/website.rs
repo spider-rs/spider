@@ -523,7 +523,18 @@ impl Website {
                 _ => *self.domain.clone(),
             });
 
-            HashSet::from(page.links(&base).await)
+            let links = HashSet::from(page.links(&base).await);
+
+            match &self.channel {
+                Some(c) => {
+                    match c.0.send(page) {
+                        _ => (),
+                    };
+                }
+                _ => (),
+            };
+
+            links
         } else {
             HashSet::new()
         };
@@ -564,7 +575,18 @@ impl Website {
                 _ => *self.domain.to_owned(),
             });
 
-            HashSet::from(page.links)
+            let page_links = HashSet::from(page.links);
+
+            match &self.channel {
+                Some(c) => {
+                    match c.0.send(page.clone()) {
+                        _ => (),
+                    };
+                }
+                _ => (),
+            };
+
+            page_links
         } else {
             HashSet::new()
         };
@@ -617,7 +639,18 @@ impl Website {
 
                 self.links_visited.insert(link_result.0);
 
-                links.extend(HashSet::from(page.links));
+                match &self.channel {
+                    Some(c) => {
+                        match c.0.send(page.clone()) {
+                            _ => (),
+                        };
+                    }
+                    _ => (),
+                };
+
+                let page_links = HashSet::from(page.links);
+
+                links.extend(page_links);
             }
         }
 
@@ -658,8 +691,18 @@ impl Website {
                 };
 
                 self.links_visited.insert(link_result);
+                let page_links = HashSet::from(page.links(&base).await);
 
-                links.extend(HashSet::from(page.links(&base).await));
+                links.extend(page_links);
+
+                match &self.channel {
+                    Some(c) => {
+                        match c.0.send(page) {
+                            _ => (),
+                        };
+                    }
+                    _ => (),
+                };
             }
         }
 
@@ -706,7 +749,7 @@ impl Website {
             let shared = Arc::new((
                 client,
                 unsafe { selectors.unwrap_unchecked() },
-                self.channel.clone()
+                self.channel.clone(),
             ));
 
             let mut links: HashSet<CaseInsensitiveString> =
@@ -960,7 +1003,6 @@ impl Website {
                     new_links.extend(page_links);
                     task::yield_now().await;
 
-
                     match &channel {
                         Some(c) => {
                             match c.0.send(page) {
@@ -969,7 +1011,6 @@ impl Website {
                         }
                         _ => (),
                     };
-
                 }
 
                 links.clone_from(&(&new_links - &self.links_visited));
@@ -1173,14 +1214,19 @@ impl Website {
 
     /// Setup subscription for data.
     #[cfg(not(feature = "sync"))]
-    pub fn subscribe(&mut self, capacity: usize) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+    pub fn subscribe(
+        &mut self,
+        capacity: usize,
+    ) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
         None
     }
 
     /// Setup subscription for data.
     #[cfg(feature = "sync")]
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
-        let channel = self.channel.get_or_insert(Arc::new(broadcast::channel(capacity.max(1))));
+        let channel = self
+            .channel
+            .get_or_insert(Arc::new(broadcast::channel(capacity.max(1))));
         let channel = channel.clone();
 
         let rx2 = channel.0.subscribe();
@@ -1415,6 +1461,37 @@ async fn test_crawl_tld() {
         "{:?}",
         website.links_visited
     );
+}
+
+#[tokio::test]
+#[cfg(feature = "sync")]
+async fn test_crawl_subscription() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    let mut rx2 = website.subscribe(100).unwrap();
+    let count = Arc::new(tokio::sync::Mutex::new(0));
+    let count1 = count.clone();
+
+    tokio::spawn(async move {
+        while let Ok(res) = rx2.recv().await {
+            let mut lock = count1.lock().await;
+            *lock += 1;
+            assert!(
+                res.get_url().starts_with(&"https://choosealicense.com/"),
+                "{:?}",
+                true
+            );
+        }
+    });
+
+    website.crawl().await;
+    let website_links = website.get_links().len();
+
+    // no subscription if did not fulfill. The root page is always captured in links.
+    if website_links == 1 {
+        assert!(*count.lock().await == 0, "{:?}", true);
+    } else {
+        assert!(*count.lock().await == website_links, "{:?}", true);
+    }
 }
 
 #[cfg(all(feature = "socks", not(feature = "decentralized")))]
