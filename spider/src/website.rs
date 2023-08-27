@@ -1173,17 +1173,19 @@ impl Website {
 
     /// Setup subscription for data.
     #[cfg(not(feature = "sync"))]
-    pub fn subscribe(&mut self) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+    pub fn subscribe(&mut self, capacity: usize) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
         None
     }
 
     /// Setup subscription for data.
     #[cfg(feature = "sync")]
-    pub fn subscribe(&mut self) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
-        let channel = self.channel.get_or_insert(Arc::new(broadcast::channel(16)));
+    pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
+        let channel = self.channel.get_or_insert(Arc::new(broadcast::channel(capacity.max(1))));
         let channel = channel.clone();
 
-        Some(channel)
+        let rx2 = channel.0.subscribe();
+
+        Some(rx2)
     }
 }
 
