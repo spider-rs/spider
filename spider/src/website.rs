@@ -17,6 +17,9 @@ use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use url::Url;
 
+#[cfg(feature = "sync")]
+use tokio::sync::broadcast;
+
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
     static ref SEM: Semaphore = {
@@ -109,6 +112,8 @@ pub struct Website {
     pub on_link_find_callback: Option<
         fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
     >,
+    /// subscribe and broadcast changes
+    channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
 }
 
 impl Website {
@@ -125,6 +130,7 @@ impl Website {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
             },
+            channel: None,
         }
     }
 
@@ -697,7 +703,11 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
             let throttle = Box::pin(self.get_delay());
-            let shared = Arc::new((client, unsafe { selectors.unwrap_unchecked() }));
+            let shared = Arc::new((
+                client,
+                unsafe { selectors.unwrap_unchecked() },
+                self.channel.clone()
+            ));
 
             let mut links: HashSet<CaseInsensitiveString> =
                 self.crawl_establish(&shared.0, &shared.1, false).await;
@@ -733,6 +743,7 @@ impl Website {
                                 if !self.is_allowed(&link, &blacklist_url) {
                                     continue;
                                 }
+
                                 log("fetch", &link);
                                 self.links_visited.insert(link.clone());
                                 let permit = SEM.acquire().await.unwrap();
@@ -748,6 +759,15 @@ impl Website {
                                         let page =
                                             Page::new(&link_result.0.as_ref(), &shared.0).await;
                                         let page_links = page.links(&shared.1).await;
+
+                                        match &shared.2 {
+                                            Some(c) => {
+                                                match c.0.send(page) {
+                                                    _ => (),
+                                                };
+                                            }
+                                            _ => (),
+                                        };
 
                                         drop(permit);
 
@@ -903,6 +923,8 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> =
                 self.crawl_establish(&client, &selectors, false).await;
 
+            let channel = self.channel.clone();
+
             // crawl while links exists
             loop {
                 for link in links.iter() {
@@ -937,6 +959,17 @@ impl Website {
                     task::yield_now().await;
                     new_links.extend(page_links);
                     task::yield_now().await;
+
+
+                    match &channel {
+                        Some(c) => {
+                            match c.0.send(page) {
+                                _ => (),
+                            };
+                        }
+                        _ => (),
+                    };
+
                 }
 
                 links.clone_from(&(&new_links - &self.links_visited));
@@ -970,7 +1003,6 @@ impl Website {
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
-
             let mut set: JoinSet<(CaseInsensitiveString, Option<String>)> = JoinSet::new();
 
             // crawl while links exists
@@ -1000,10 +1032,10 @@ impl Website {
                     log("fetch", &link);
                     let client = client.clone();
                     let permit = SEM.acquire().await.unwrap();
+                    let channel = self.channel.clone();
 
                     set.spawn(async move {
                         drop(permit);
-
                         let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
 
                         let (link_result, page) = match on_link_find_callback {
@@ -1013,6 +1045,15 @@ impl Website {
                                 c
                             }
                             _ => (link, page),
+                        };
+
+                        match &channel {
+                            Some(c) => {
+                                match c.0.send(build(link_result.inner(), page.clone())) {
+                                    _ => (),
+                                };
+                            }
+                            _ => (),
                         };
 
                         (link_result, page)
@@ -1036,7 +1077,7 @@ impl Website {
                                 match self.pages.as_mut() {
                                     Some(p) => p.push(page),
                                     _ => (),
-                                }
+                                };
                             }
                         }
                         _ => (),
@@ -1128,6 +1169,21 @@ impl Website {
     pub fn with_headers(&mut self, headers: Option<reqwest::header::HeaderMap>) -> &mut Self {
         self.configuration.with_headers(headers);
         self
+    }
+
+    /// Setup subscription for data.
+    #[cfg(not(feature = "sync"))]
+    pub fn subscribe(&mut self) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+        None
+    }
+
+    /// Setup subscription for data.
+    #[cfg(feature = "sync")]
+    pub fn subscribe(&mut self) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+        let channel = self.channel.get_or_insert(Arc::new(broadcast::channel(16)));
+        let channel = channel.clone();
+
+        Some(channel)
     }
 }
 

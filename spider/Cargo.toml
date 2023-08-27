@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.35.6"
+version = "1.36.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -15,7 +15,7 @@ edition = "2018"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = { version = "0.11.18", features = [ "brotli", "gzip", "native-tls-alpn", "stream" ] }
+reqwest = { version = "0.11.20", features = [ "brotli", "gzip", "deflate", "native-tls-alpn", "stream" ] }
 url = "2.4.0"
 tokio = { version = "1.32.0", features = [ "rt-multi-thread", "macros", "time", "parking_lot" ] }
 tokio-stream = "0.1.14"
@@ -47,13 +47,14 @@ jsdom = { version = "0.0.11-alpha.1", optional = true, features = [ "hashbrown",
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = []
+default = ["sync"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
 jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
+sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers", "dep:bytes"]
 serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
 fs = ["tokio/fs"]

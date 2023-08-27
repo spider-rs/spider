@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.35.6"
+spider = "1.36.0"
 ```
 
 And then the code:
@@ -87,13 +87,14 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.35.6", features = ["regex", "ua_generator"] }
+spider = { version = "1.36.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
 1. `regex`: Enables blacklisting paths with regx
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker] startup before crawls.
+1. `sync`: Subscribe to changes for Page data processing async.
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 1. `serde`: Enables serde serialization support.
@@ -108,7 +109,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.35.6", features = ["decentralized"] }
+spider = { version = "1.36.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -122,13 +123,45 @@ SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decen
 
 The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
 
+
+### Subscribe to changes
+
+Use the subscribe method to get a broadcast channel.
+
+```toml
+[dependencies]
+spider = { version = "1.36.0", features = ["sync"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::website::Website;
+use spider::tokio;
+
+#[tokio::main]
+async fn main() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    let sub = website.subscribe().unwrap();
+    let mut rx2 = sub.0.subscribe();
+
+    let join_handle = tokio::spawn(async move {
+        while let Ok(res) = rx2.recv().await {
+            println!("{:?}", res.get_url());
+        }
+    });
+
+    website.crawl().await;
+}
+```
+
 ### Regex Blacklisting
 
 Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.35.6", features = ["regex"] }
+spider = { version = "1.36.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -155,7 +188,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.35.6", features = ["control"] }
+spider = { version = "1.36.0", features = ["control"] }
 ```
 
 ```rust

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.36.0
+
+1. feat(sync): subscribe to page updates to perform async handling of data
+
 ## v1.31.0
 
 1. feat(js): add init of script parsing
