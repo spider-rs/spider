@@ -1,6 +1,7 @@
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 use crate::CaseInsensitiveString;
+use bytes::Bytes;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
@@ -14,7 +15,7 @@ use url::Url;
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
-    html: Option<String>,
+    html: Option<Bytes>,
     /// Base absolute url for page.
     base: Url,
 }
@@ -24,7 +25,7 @@ pub struct Page {
 #[derive(Debug, Clone)]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
-    html: Option<String>,
+    html: Option<Bytes>,
     /// The current links for the page.
     pub links: HashSet<CaseInsensitiveString>,
 }
@@ -111,7 +112,7 @@ pub fn get_page_selectors(
 
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
-pub fn build(url: &str, html: Option<String>) -> Page {
+pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         base: Url::parse(&url).expect("Invalid page URL"),
@@ -120,7 +121,7 @@ pub fn build(url: &str, html: Option<String>) -> Page {
 
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(feature = "decentralized")]
-pub fn build(_: &str, html: Option<String>) -> Page {
+pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         links: Default::default(),
@@ -165,11 +166,27 @@ impl Page {
         ""
     }
 
-    /// Html getter for page.
-    pub fn get_html(&self) -> &str {
+    /// Html getter for bytes on the page.
+    pub fn get_bytes(&self) -> Option<&Bytes> {
+        match self.html.as_ref() {
+            Some(html) => Some(html),
+            _ => None,
+        }
+    }
+
+    /// Html getter for bytes on the page as string.
+    pub fn get_html(&self) -> String {
+        match self.html.as_ref() {
+            Some(html) => String::from_utf8_lossy(&html).to_string(),
+            _ => Default::default(),
+        }
+    }
+
+    /// Html getter for page to u8.
+    pub fn get_html_bytes_u8(&self) -> &[u8] {
         match self.html.as_deref() {
             Some(html) => html,
-            _ => "",
+            _ => Default::default(),
         }
     }
 
@@ -184,7 +201,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_document(self.get_html()));
+        let html = Box::new(Html::parse_fragment(&self.get_html()));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);

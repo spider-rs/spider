@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.36.5"
+spider = "1.37.0"
 ```
 
 And then the code:
@@ -52,7 +52,6 @@ website.configuration.delay = 0; // Defaults to 0 ms due to concurrency handling
 website.configuration.request_timeout = None; // Defaults to 15000 ms
 website.configuration.http2_prior_knowledge = false; // Enable if you know the webserver supports http2
 website.configuration.user_agent = Some("myapp/version".into()); // Defaults to using a random agent
-website.on_link_find_callback = Some(|s, html| { println!("link target: {}", s); (s, html)}); // Callback to run on each link find
 website.configuration.blacklist_url.get_or_insert(Default::default()).push("https://choosealicense.com/licenses/".into());
 website.configuration.proxies.get_or_insert(Default::default()).push("socks5://10.1.1.1:12345".into()); // Defaults to none - proxy list.
 
@@ -72,10 +71,6 @@ website
     .with_request_timeout(None)
     .with_http2_prior_knowledge(false)
     .with_user_agent(Some("myapp/version".into()))
-    .with_on_link_find_callback(Some(|link, html| {
-        println!("link target: {}", link.inner());
-        (link, html)
-    }))
     .with_headers(None)
     .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
     .with_proxies(None);
@@ -87,7 +82,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.36.5", features = ["regex", "ua_generator"] }
+spider = { version = "1.37.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -109,7 +104,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.36.5", features = ["decentralized"] }
+spider = { version = "1.37.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -130,7 +125,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.36.5", features = ["sync"] }
+spider = { version = "1.37.0", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -160,7 +155,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.36.5", features = ["regex"] }
+spider = { version = "1.37.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -187,7 +182,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.36.5", features = ["control"] }
+spider = { version = "1.37.0", features = ["control"] }
 ```
 
 ```rust
