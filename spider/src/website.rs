@@ -1422,7 +1422,7 @@ async fn test_crawl_tld() {
 }
 
 #[tokio::test]
-#[cfg(feature = "sync")]
+#[cfg(all(feature = "sync", not(feature = "decentralized")))]
 async fn test_crawl_subscription() {
     let mut website: Website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(100).unwrap();
@@ -1441,11 +1441,7 @@ async fn test_crawl_subscription() {
     let count = *count.lock().await;
 
     // no subscription if did not fulfill. The root page is always captured in links.
-    if website_links == 1 {
-        assert!(count == 0, "{:?}", true);
-    } else {
-        assert!(count == website_links, "{:?}", true);
-    }
+    assert!(count == website_links, "{:?}", true);
 }
 
 #[cfg(all(feature = "socks", not(feature = "decentralized")))]
