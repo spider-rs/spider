@@ -428,7 +428,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_document(self.get_html()));
+        let html = Box::new(Html::parse_document(&self.get_html()));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -441,7 +441,15 @@ impl Page {
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
-                match element.attr("href") {
+                let ele_attribute =  if element.name() == "a" {
+                    "href"
+                } else if element.name() == "script" {
+                    "src"
+                } else {
+                    "href"
+                };
+
+                match element.attr(ele_attribute) {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
 
