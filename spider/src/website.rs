@@ -1438,12 +1438,13 @@ async fn test_crawl_subscription() {
 
     website.crawl().await;
     let website_links = website.get_links().len();
+    let count = *count.lock().await;
 
     // no subscription if did not fulfill. The root page is always captured in links.
     if website_links == 1 {
-        assert!(*count.lock().await == 0, "{:?}", true);
+        assert!(count == 0, "{:?}", true);
     } else {
-        assert!(*count.lock().await == website_links, "{:?}", true);
+        assert!(count == website_links, "{:?}", true);
     }
 }
 

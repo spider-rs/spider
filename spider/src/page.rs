@@ -214,43 +214,45 @@ impl Page {
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
-                match element.attr("href") {
-                    Some(href) => {
-                        let mut abs = self.abs_path(href);
+                if element.name() == "a" {
+                    match element.attr("href") {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
 
-                        // determine if the crawl can continue based on host match
-                        let mut can_process = match abs.host_str() {
-                            Some(host) => parent_host.ends_with(host),
-                            _ => false,
-                        };
+                            // determine if the crawl can continue based on host match
+                            let mut can_process = match abs.host_str() {
+                                Some(host) => parent_host.ends_with(host),
+                                _ => false,
+                            };
 
-                        if can_process {
-                            if abs.scheme() != parent_host_scheme.as_str() {
-                                let _ = abs.set_scheme(parent_host_scheme.as_str());
-                            }
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
 
-                            let hchars = abs.path();
+                                let hchars = abs.path();
 
-                            if let Some(position) = hchars.find('.') {
-                                let resource_ext = &hchars[position + 1..hchars.len()];
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                if !ONLY_RESOURCES
-                                    .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    if !ONLY_RESOURCES
+                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+
+                                if can_process
+                                    && (base_domain.is_empty()
+                                        || base_domain.as_str() == domain_name(&abs))
                                 {
-                                    can_process = false;
+                                    map.insert(abs.as_str().to_string().into());
                                 }
                             }
-
-                            if can_process
-                                && (base_domain.is_empty()
-                                    || base_domain.as_str() == domain_name(&abs))
-                            {
-                                map.insert(abs.as_str().to_string().into());
-                            }
                         }
-                    }
-                    _ => (),
-                };
+                        _ => (),
+                    };
+                }
             }
         }
 
@@ -374,42 +376,44 @@ impl Page {
                             _ => (),
                         }
                     }
-                    match element.attr("href") {
-                        Some(href) => {
-                            let mut abs = self.abs_path(href);
+                    if element.name() == "a" {
+                        match element.attr("href") {
+                            Some(href) => {
+                                let mut abs = self.abs_path(href);
 
-                            // determine if the crawl can continue based on host match
-                            let mut can_process = match abs.host_str() {
-                                Some(host) => parent_host.ends_with(host),
-                                _ => false,
-                            };
+                                // determine if the crawl can continue based on host match
+                                let mut can_process = match abs.host_str() {
+                                    Some(host) => parent_host.ends_with(host),
+                                    _ => false,
+                                };
 
-                            if can_process {
-                                if abs.scheme() != parent_host_scheme.as_str() {
-                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                }
-                                let hchars = abs.path();
+                                if can_process {
+                                    if abs.scheme() != parent_host_scheme.as_str() {
+                                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                    }
+                                    let hchars = abs.path();
 
-                                if let Some(position) = hchars.find('.') {
-                                    let resource_ext = &hchars[position + 1..hchars.len()];
+                                    if let Some(position) = hchars.find('.') {
+                                        let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                    if !ONLY_RESOURCES
-                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                        if !ONLY_RESOURCES
+                                            .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                        {
+                                            can_process = false;
+                                        }
+                                    }
+
+                                    if can_process
+                                        && (base_domain.is_empty()
+                                            || base_domain.as_str() == domain_name(&abs))
                                     {
-                                        can_process = false;
+                                        map.insert(abs.as_str().to_string().into());
                                     }
                                 }
-
-                                if can_process
-                                    && (base_domain.is_empty()
-                                        || base_domain.as_str() == domain_name(&abs))
-                                {
-                                    map.insert(abs.as_str().to_string().into());
-                                }
                             }
-                        }
-                        _ => (),
-                    };
+                            _ => (),
+                        };
+                    }
                 }
             }
         }
