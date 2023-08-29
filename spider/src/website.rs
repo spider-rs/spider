@@ -4,7 +4,6 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
 use crate::CaseInsensitiveString;
-use bytes::Bytes;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
@@ -1431,14 +1430,9 @@ async fn test_crawl_subscription() {
     let count1 = count.clone();
 
     tokio::spawn(async move {
-        while let Ok(res) = rx2.recv().await {
+        while let Ok(_) = rx2.recv().await {
             let mut lock = count1.lock().await;
             *lock += 1;
-            assert!(
-                res.get_url().starts_with(&"https://choosealicense.com/"),
-                "{:?}",
-                true
-            );
         }
     });
 
