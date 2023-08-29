@@ -61,6 +61,7 @@ pub extern crate hashbrown;
 extern crate log;
 pub extern crate reqwest;
 pub extern crate tokio;
+pub extern crate bytes;
 
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;
@@ -85,6 +86,7 @@ pub extern crate lazy_static;
 pub extern crate fast_html5ever;
 #[macro_use]
 pub extern crate matches;
+
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
     not(windows),

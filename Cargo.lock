@@ -3411,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.37.0"
+version = "1.36.5"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
