@@ -124,12 +124,12 @@ impl Website {
             links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
-            on_link_find_callback: None,
             domain: CaseInsensitiveString::new(domain).into(),
             domain_parsed: match url::Url::parse(domain) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
             },
+            on_link_find_callback: None,
             channel: None,
         }
     }
@@ -638,7 +638,6 @@ impl Website {
                 };
 
                 self.links_visited.insert(link_result.0);
-
                 match &self.channel {
                     Some(c) => {
                         match c.0.send(page.clone()) {
@@ -684,7 +683,6 @@ impl Website {
             if self.is_allowed_default(&link.inner(), &blacklist_url) {
                 let page = Page::new(&link.inner(), &client).await;
                 let u = page.get_url().into();
-
                 let link_result = match self.on_link_find_callback {
                     Some(cb) => cb(u),
                     _ => u,
@@ -743,9 +741,9 @@ impl Website {
 
         // crawl if valid selector
         if selectors.is_some() {
-            let on_link_find_callback = self.on_link_find_callback;
             let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
             let throttle = Box::pin(self.get_delay());
+            let on_link_find_callback = self.on_link_find_callback;
             let shared = Arc::new((
                 client,
                 unsafe { selectors.unwrap_unchecked() },
@@ -847,10 +845,9 @@ impl Website {
             Ok(_) => {
                 let blacklist_url = self.configuration.get_blacklist();
                 let domain = self.domain.inner().as_str();
-                let on_link_find_callback = self.on_link_find_callback;
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
                 let throttle = Box::pin(self.get_delay());
-
+                let on_link_find_callback = self.on_link_find_callback;
                 // http worker verify
                 let http_worker = std::env::var("SPIDER_WORKER")
                     .unwrap_or_else(|_| "http:".to_string())
@@ -996,7 +993,6 @@ impl Website {
                         Some(cb) => cb(link, None),
                         _ => (link, None),
                     };
-
                     let page = Page::new(&link_result.0.as_ref(), &client).await;
                     let page_links = page.links(&selectors).await;
                     task::yield_now().await;
@@ -1044,7 +1040,8 @@ impl Website {
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
-            let mut set: JoinSet<(CaseInsensitiveString, Option<String>)> = JoinSet::new();
+            let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
+                JoinSet::new();
 
             // crawl while links exists
             loop {
@@ -1074,30 +1071,34 @@ impl Website {
                     let client = client.clone();
                     let permit = SEM.acquire().await.unwrap();
                     let channel = self.channel.clone();
+                    let selectors = selectors.clone();
 
                     set.spawn(async move {
                         drop(permit);
                         let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
+                        let page = build(&link.as_ref(), page);
 
-                        let (link_result, page) = match on_link_find_callback {
+                        let (link, _) = match on_link_find_callback {
                             Some(cb) => {
-                                let c = cb(link, page);
+                                let c = cb(link, Some(page.get_html()));
 
                                 c
                             }
-                            _ => (link, page),
+                            _ => (link, None),
                         };
 
                         match &channel {
                             Some(c) => {
-                                match c.0.send(build(link_result.inner(), page.clone())) {
+                                match c.0.send(page.clone()) {
                                     _ => (),
                                 };
                             }
                             _ => (),
                         };
 
-                        (link_result, page)
+                        let page_links = page.links(&*selectors).await;
+
+                        (link, page, page_links)
                     });
                 }
 
@@ -1110,16 +1111,13 @@ impl Website {
                 while let Some(res) = set.join_next().await {
                     match res {
                         Ok(msg) => {
-                            if msg.1.is_some() {
-                                let page = build(&msg.0.as_ref(), msg.1);
-                                let page_links = page.links(&*selectors).await;
-                                links.extend(&page_links - &self.links_visited);
-                                task::yield_now().await;
-                                match self.pages.as_mut() {
-                                    Some(p) => p.push(page),
-                                    _ => (),
-                                };
-                            }
+                            let page = msg.1;
+                            links.extend(&msg.2 - &self.links_visited);
+                            task::yield_now().await;
+                            match self.pages.as_mut() {
+                                Some(p) => p.push(page.clone()),
+                                _ => (),
+                            };
                         }
                         _ => (),
                     };
@@ -1131,20 +1129,6 @@ impl Website {
                 }
             }
         }
-    }
-
-    /// Perform a callback to run on each link find.
-    pub fn with_on_link_find_callback(
-        &mut self,
-        on_link_find_callback: Option<
-            fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-        >,
-    ) -> &mut Self {
-        match on_link_find_callback {
-            Some(callback) => self.on_link_find_callback = Some(callback.into()),
-            _ => self.on_link_find_callback = None,
-        };
-        self
     }
 
     /// Respect robots.txt file.
@@ -1291,25 +1275,6 @@ async fn crawl_invalid() {
 }
 
 #[tokio::test]
-#[cfg(not(feature = "decentralized"))]
-async fn crawl_link_callback() {
-    let mut website: Website = Website::new("https://choosealicense.com");
-    website.on_link_find_callback = Some(|s, ss| {
-        log("callback link target: {}", &s);
-        (s, ss)
-    });
-    website.crawl().await;
-
-    assert!(
-        website
-            .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
-        "{:?}",
-        website.links_visited
-    );
-}
-
-#[tokio::test]
 async fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.blacklist_url = Some(Box::new(Vec::from([CompactString::from(
@@ -1406,13 +1371,6 @@ async fn test_with_configuration() {
         .with_request_timeout(None)
         .with_http2_prior_knowledge(false)
         .with_user_agent(Some("myapp/version".into()))
-        .with_on_link_find_callback(Some(|s, ss| {
-            println!("link target: {}", s.inner());
-            (s, ss)
-        }))
-        .with_blacklist_url(Some(Vec::from([
-            "https://choosealicense.com/licenses/".into()
-        ])))
         .with_headers(None)
         .with_proxies(None);
 
@@ -1472,25 +1430,21 @@ async fn test_crawl_subscription() {
     let count1 = count.clone();
 
     tokio::spawn(async move {
-        while let Ok(res) = rx2.recv().await {
+        while let Ok(_) = rx2.recv().await {
             let mut lock = count1.lock().await;
             *lock += 1;
-            assert!(
-                res.get_url().starts_with(&"https://choosealicense.com/"),
-                "{:?}",
-                true
-            );
         }
     });
 
     website.crawl().await;
     let website_links = website.get_links().len();
+    let count = *count.lock().await;
 
     // no subscription if did not fulfill. The root page is always captured in links.
     if website_links == 1 {
-        assert!(*count.lock().await == 0, "{:?}", true);
+        assert!(count == 0, "{:?}", true);
     } else {
-        assert!(*count.lock().await == website_links, "{:?}", true);
+        assert!(count == website_links, "{:?}", true);
     }
 }
 

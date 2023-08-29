@@ -3,22 +3,24 @@ use reqwest::Client;
 
 #[cfg(not(feature = "fs"))]
 /// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+    use crate::bytes::BufMut;
+    use bytes::BytesMut;
     use tokio_stream::StreamExt;
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
             let mut stream = res.bytes_stream();
-            let mut data: String = String::new();
+            let mut data: BytesMut = BytesMut::new();
 
             while let Some(item) = stream.next().await {
                 match item {
-                    Ok(text) => data += &String::from_utf8_lossy(&text),
+                    Ok(text) => data.put(text),
                     _ => (),
                 }
             }
 
-            Some(data)
+            Some(data.into())
         }
         Ok(_) => None,
         Err(_) => {
@@ -49,12 +51,15 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(feature = "fs")]
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+    use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
     use crate::tokio::io::AsyncWriteExt;
+    use bytes::BytesMut;
     use percent_encoding::utf8_percent_encode;
     use percent_encoding::NON_ALPHANUMERIC;
     use std::time::SystemTime;
+    use tendril::fmt::Slice;
     use tokio_stream::StreamExt;
 
     lazy_static! {
@@ -84,7 +89,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
             let mut stream = res.bytes_stream();
-            let mut data = Box::new(String::new());
+            let mut data: BytesMut = BytesMut::new();
             let mut file: Option<tokio::fs::File> = None;
             let mut file_path = String::new();
 
@@ -95,7 +100,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String
 
                         // perform operations entire in memory to build resource
                         if !wrote_disk && data.capacity() < 8192 {
-                            *data += &String::from_utf8_lossy(&text);
+                            data.put(text);
                         } else {
                             if !wrote_disk {
                                 file_path = string_concat!(
@@ -106,22 +111,21 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String
                                     Ok(f) => {
                                         let file = file.insert(f);
 
-                                        *data += &String::from_utf8_lossy(&text);
+                                        data.put(text);
 
                                         match file.write_all(data.as_bytes()).await {
                                             Ok(_) => {
                                                 data.clear();
-                                                data.shrink_to(0);
                                             }
                                             _ => (),
                                         };
                                     }
-                                    _ => *data += &String::from_utf8_lossy(&text),
+                                    _ => data.put(text),
                                 };
                             } else {
                                 match &file.as_mut().unwrap().write_all(&text).await {
                                     Ok(_) => (),
-                                    _ => *data += &String::from_utf8_lossy(&text),
+                                    _ => data.put(text),
                                 };
                             }
                         }
@@ -132,22 +136,22 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<String
 
             // get data from disk
             Some(if file.is_some() {
-                let mut buffer = String::new();
-                let data: String = match tokio::fs::File::open(&file_path).await {
-                    Ok(mut b) => match b.read_to_string(&mut buffer).await {
-                        Ok(_) => buffer,
-                        _ => *data,
+                let mut buffer = vec![];
+
+                match tokio::fs::File::open(&file_path).await {
+                    Ok(mut b) => match b.read_to_end(&mut buffer).await {
+                        _ => (),
                     },
-                    _ => *data,
+                    _ => (),
                 };
 
                 match tokio::fs::remove_file(file_path).await {
                     _ => (),
                 };
 
-                data
+                buffer.into()
             } else {
-                *data
+                data.into()
             })
         }
         Ok(_) => None,

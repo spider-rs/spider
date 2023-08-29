@@ -1,6 +1,7 @@
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 use crate::CaseInsensitiveString;
+use bytes::Bytes;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
@@ -14,7 +15,7 @@ use url::Url;
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
-    html: Option<String>,
+    html: Option<Bytes>,
     /// Base absolute url for page.
     base: Url,
 }
@@ -24,7 +25,7 @@ pub struct Page {
 #[derive(Debug, Clone)]
 pub struct Page {
     /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
-    html: Option<String>,
+    html: Option<Bytes>,
     /// The current links for the page.
     pub links: HashSet<CaseInsensitiveString>,
 }
@@ -111,7 +112,7 @@ pub fn get_page_selectors(
 
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
-pub fn build(url: &str, html: Option<String>) -> Page {
+pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         base: Url::parse(&url).expect("Invalid page URL"),
@@ -120,7 +121,7 @@ pub fn build(url: &str, html: Option<String>) -> Page {
 
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(feature = "decentralized")]
-pub fn build(_: &str, html: Option<String>) -> Page {
+pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         links: Default::default(),
@@ -165,11 +166,27 @@ impl Page {
         ""
     }
 
-    /// Html getter for page.
-    pub fn get_html(&self) -> &str {
+    /// Html getter for bytes on the page.
+    pub fn get_bytes(&self) -> Option<&Bytes> {
+        match self.html.as_ref() {
+            Some(html) => Some(html),
+            _ => None,
+        }
+    }
+
+    /// Html getter for bytes on the page as string.
+    pub fn get_html(&self) -> String {
+        match self.html.as_ref() {
+            Some(html) => String::from_utf8_lossy(&html).to_string(),
+            _ => Default::default(),
+        }
+    }
+
+    /// Html getter for page to u8.
+    pub fn get_html_bytes_u8(&self) -> &[u8] {
         match self.html.as_deref() {
             Some(html) => html,
-            _ => "",
+            _ => Default::default(),
         }
     }
 
@@ -184,7 +201,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_document(self.get_html()));
+        let html = Box::new(Html::parse_fragment(&self.get_html()));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -197,43 +214,45 @@ impl Page {
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
-                match element.attr("href") {
-                    Some(href) => {
-                        let mut abs = self.abs_path(href);
+                if element.name() == "a" {
+                    match element.attr("href") {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
 
-                        // determine if the crawl can continue based on host match
-                        let mut can_process = match abs.host_str() {
-                            Some(host) => parent_host.ends_with(host),
-                            _ => false,
-                        };
+                            // determine if the crawl can continue based on host match
+                            let mut can_process = match abs.host_str() {
+                                Some(host) => parent_host.ends_with(host),
+                                _ => false,
+                            };
 
-                        if can_process {
-                            if abs.scheme() != parent_host_scheme.as_str() {
-                                let _ = abs.set_scheme(parent_host_scheme.as_str());
-                            }
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
 
-                            let hchars = abs.path();
+                                let hchars = abs.path();
 
-                            if let Some(position) = hchars.find('.') {
-                                let resource_ext = &hchars[position + 1..hchars.len()];
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                if !ONLY_RESOURCES
-                                    .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    if !ONLY_RESOURCES
+                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+
+                                if can_process
+                                    && (base_domain.is_empty()
+                                        || base_domain.as_str() == domain_name(&abs))
                                 {
-                                    can_process = false;
+                                    map.insert(abs.as_str().to_string().into());
                                 }
                             }
-
-                            if can_process
-                                && (base_domain.is_empty()
-                                    || base_domain.as_str() == domain_name(&abs))
-                            {
-                                map.insert(abs.as_str().to_string().into());
-                            }
                         }
-                    }
-                    _ => (),
-                };
+                        _ => (),
+                    };
+                }
             }
         }
 
@@ -357,42 +376,44 @@ impl Page {
                             _ => (),
                         }
                     }
-                    match element.attr("href") {
-                        Some(href) => {
-                            let mut abs = self.abs_path(href);
+                    if element.name() == "a" {
+                        match element.attr("href") {
+                            Some(href) => {
+                                let mut abs = self.abs_path(href);
 
-                            // determine if the crawl can continue based on host match
-                            let mut can_process = match abs.host_str() {
-                                Some(host) => parent_host.ends_with(host),
-                                _ => false,
-                            };
+                                // determine if the crawl can continue based on host match
+                                let mut can_process = match abs.host_str() {
+                                    Some(host) => parent_host.ends_with(host),
+                                    _ => false,
+                                };
 
-                            if can_process {
-                                if abs.scheme() != parent_host_scheme.as_str() {
-                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                }
-                                let hchars = abs.path();
+                                if can_process {
+                                    if abs.scheme() != parent_host_scheme.as_str() {
+                                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                    }
+                                    let hchars = abs.path();
 
-                                if let Some(position) = hchars.find('.') {
-                                    let resource_ext = &hchars[position + 1..hchars.len()];
+                                    if let Some(position) = hchars.find('.') {
+                                        let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                    if !ONLY_RESOURCES
-                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                        if !ONLY_RESOURCES
+                                            .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                        {
+                                            can_process = false;
+                                        }
+                                    }
+
+                                    if can_process
+                                        && (base_domain.is_empty()
+                                            || base_domain.as_str() == domain_name(&abs))
                                     {
-                                        can_process = false;
+                                        map.insert(abs.as_str().to_string().into());
                                     }
                                 }
-
-                                if can_process
-                                    && (base_domain.is_empty()
-                                        || base_domain.as_str() == domain_name(&abs))
-                                {
-                                    map.insert(abs.as_str().to_string().into());
-                                }
                             }
-                        }
-                        _ => (),
-                    };
+                            _ => (),
+                        };
+                    }
                 }
             }
         }

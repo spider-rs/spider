@@ -56,10 +56,12 @@ async fn main() {
             .open(&download_file)
             .expect("Unable to open file");
 
-        let html = page.get_html();
-        let html = html.as_bytes();
-
-        file.write_all(html).unwrap();
+        match page.get_bytes() {
+            Some(b) => {
+                file.write_all(b).unwrap_or_default();
+            }
+            _ => (),
+        }
 
         log("downloaded", download_file)
     }
