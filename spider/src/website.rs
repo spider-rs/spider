@@ -1041,7 +1041,8 @@ impl Website {
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
-            let mut set: JoinSet<(CaseInsensitiveString, Page)> = JoinSet::new();
+            let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
+                JoinSet::new();
 
             // crawl while links exists
             loop {
@@ -1071,6 +1072,7 @@ impl Website {
                     let client = client.clone();
                     let permit = SEM.acquire().await.unwrap();
                     let channel = self.channel.clone();
+                    let selectors = selectors.clone();
 
                     set.spawn(async move {
                         drop(permit);
@@ -1083,7 +1085,7 @@ impl Website {
 
                                 c
                             }
-                            _ => (link, Some(page.get_html())),
+                            _ => (link, None),
                         };
 
                         match &channel {
@@ -1095,7 +1097,9 @@ impl Website {
                             _ => (),
                         };
 
-                        (link, page)
+                        let page_links = page.links(&*selectors).await;
+
+                        (link, page, page_links)
                     });
                 }
 
@@ -1109,8 +1113,7 @@ impl Website {
                     match res {
                         Ok(msg) => {
                             let page = msg.1;
-                            let page_links = page.links(&*selectors).await;
-                            links.extend(&page_links - &self.links_visited);
+                            links.extend(&msg.2 - &self.links_visited);
                             task::yield_now().await;
                             match self.pages.as_mut() {
                                 Some(p) => p.push(page.clone()),
