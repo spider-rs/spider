@@ -36,11 +36,11 @@ spider --domain https://choosealicense.com crawl -o > spider_choosealicense.json
 Download all html to local destination. Use the option `-t` to pass in the target destination folder.
 
 ```sh
-spider --domain http://localhost:3000 download
+spider --domain http://localhost:3000 download -t _temp_spider_downloads
 ```
 
 ```sh
-spider_cli 1.37.2
+spider_cli 1.37.3
 madeindjs <contact@rousseau-alexandre.fr>, j-mendez <jeff@a11ywatch.com>
 The fastest web crawler CLI written in Rust.
 

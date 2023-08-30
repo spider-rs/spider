@@ -8,6 +8,8 @@ use clap::Parser;
 use options::{Cli, Commands};
 use spider::compact_str::CompactString;
 use spider::page::get_page_selectors;
+use spider::string_concat::string_concat;
+use spider::string_concat::string_concat_impl;
 use spider::tokio;
 use spider::url::Url;
 use spider::utils::log;
@@ -95,7 +97,6 @@ async fn main() {
                             match Url::parse(page_url) {
                                 Ok(parsed_url) => {
                                     let url_path = parsed_url.path();
-
                                     log("- ", page_url);
 
                                     let split_paths: Vec<&str> = url_path.split("/").collect();
@@ -118,10 +119,14 @@ async fn main() {
                                                 .write(true)
                                                 .create(true)
                                                 .truncate(true)
-                                                .open(&download_path.join(format!(
-                                                    "{}.html",
-                                                    if p.is_empty() { "index" } else { p }
-                                                )))
+                                                .open(&download_path.join(if p.contains(".") {
+                                                    p.to_string()
+                                                } else {
+                                                    string_concat!(
+                                                        if p.is_empty() { "index" } else { p },
+                                                        ".html"
+                                                    )
+                                                }))
                                                 .expect("Unable to open file");
 
                                             match page.get_bytes() {
