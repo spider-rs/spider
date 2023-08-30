@@ -338,7 +338,9 @@ impl Page {
 
             while let Some(node) = stream.next().await {
                 if let Some(element) = node.as_element() {
-                    if element.name() == "script" {
+                    let element_name = element.name();
+
+                    if element_name == "script" {
                         match element.attr("src") {
                             Some(src) => {
                                 if src.starts_with("/")
@@ -376,7 +378,7 @@ impl Page {
                             _ => (),
                         }
                     }
-                    if element.name() == "a" {
+                    if element_name == "a" {
                         match element.attr("href") {
                             Some(href) => {
                                 let mut abs = self.abs_path(href);
@@ -441,9 +443,11 @@ impl Page {
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
-                let ele_attribute =  if element.name() == "a" {
+                let element_name = element.name();
+
+                let ele_attribute = if element_name == "a" || element_name == "link" {
                     "href"
-                } else if element.name() == "script" {
+                } else if element_name == "script" {
                     "src"
                 } else {
                     "href"
