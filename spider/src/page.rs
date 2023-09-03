@@ -18,6 +18,8 @@ pub struct Page {
     html: Option<Bytes>,
     /// Base absolute url for page.
     base: Url,
+    /// The raw url for the page. Useful since Url::parse adds a trailing slash.
+    url: String
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -116,6 +118,7 @@ pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         base: Url::parse(&url).expect("Invalid page URL"),
+        url: url.into()
     }
 }
 
@@ -154,10 +157,16 @@ impl Page {
         Page { html: None, links }
     }
 
-    /// URL getter for page.
+    /// Url getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {
-        self.base.as_str()
+        &self.url
+    }
+    
+    /// Parsed URL getter for page.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn get_url_parsed(&self) -> &Url {
+        &self.base
     }
 
     #[cfg(feature = "decentralized")]
