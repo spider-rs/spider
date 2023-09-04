@@ -234,6 +234,11 @@ impl Website {
         &self.links_visited
     }
 
+    /// domain name getter
+    pub fn get_domain(&self) -> &CaseInsensitiveString {
+        &self.domain
+    }
+
     /// crawl delay getter
     fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
