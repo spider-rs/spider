@@ -234,6 +234,11 @@ impl Website {
         &self.links_visited
     }
 
+    /// domain parsed url getter
+    pub fn get_domain_parsed(&self) -> &Option<Box<Url>> {
+        &self.domain_parsed
+    }
+
     /// domain name getter
     pub fn get_domain(&self) -> &CaseInsensitiveString {
         &self.domain
