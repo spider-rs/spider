@@ -9,7 +9,7 @@ The fastest web crawler and indexer.
 
 ## Getting Started
 
-View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory to get started.
+The simplest way to get started is to use the new [hosted service](https://spiderwebai.xyz). View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local insallations.
 
 ## Benchmarks
 
@@ -18,6 +18,12 @@ See [BENCHMARKS](./benches/BENCHMARKS.md).
 ## Examples
 
 See [EXAMPLES](./examples/).
+
+## License
+
+This project is licensed under the [MIT license].
+
+[MIT license]: https://github.com/spider-rs/spider/blob/master/LICENSE
 
 ## Contributing
 
