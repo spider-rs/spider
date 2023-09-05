@@ -1,3 +1,4 @@
+
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 use crate::CaseInsensitiveString;
@@ -6,6 +7,12 @@ use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
 use smallvec::SmallVec;
+
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
+use tokio::time::Instant;
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
+use std::time::Duration;
+
 #[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
@@ -19,8 +26,12 @@ pub struct Page {
     /// Base absolute url for page.
     base: Url,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
-    url: String
+    url: String,
+    #[cfg(feature = "time")]
+    /// The duration from start of parsing to end of gathering links.
+    duration: Instant
 }
+
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[cfg(feature = "decentralized")]
@@ -118,7 +129,9 @@ pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         base: Url::parse(&url).expect("Invalid page URL"),
-        url: url.into()
+        url: url.into(),
+        #[cfg(feature = "time")]
+        duration: Instant::now()
     }
 }
 
@@ -197,6 +210,12 @@ impl Page {
             Some(html) => html,
             _ => Default::default(),
         }
+    }
+
+    /// Get the elasped duration of the page since scraped.
+    #[cfg(all(feature = "time", not(feature = "decentralized")))]
+    pub fn get_duration_elasped(&self) -> Duration {
+        self.duration.elapsed()
     }
 
     /// Find the links as a stream using string resource validation
@@ -593,5 +612,24 @@ async fn test_abs_path() {
     assert_eq!(
         page.abs_path("tel://+212 3456"),
         Url::parse("https://choosealicense.com/").unwrap()
+    );
+}
+
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
+#[tokio::test]
+async fn test_duration() {
+    let client = Client::builder()
+        .user_agent("spider/1.1.2")
+        .build()
+        .unwrap();
+
+    let link_result = "https://choosealicense.com/";
+    let page: Page = Page::new(&link_result, &client).await;
+    let duration_elasped = page.get_duration_elasped().as_millis();
+
+    assert!(
+        duration_elasped < 6000,
+        "Duration took longer than expected {}.",
+        duration_elasped,
     );
 }

@@ -40,7 +40,7 @@ spider --domain http://localhost:3000 download -t _temp_spider_downloads
 ```
 
 ```sh
-spider_cli 1.37.7
+spider_cli 1.38.0
 madeindjs <contact@rousseau-alexandre.fr>, j-mendez <jeff@a11ywatch.com>
 The fastest web crawler CLI written in Rust.
 

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.37.7"
+version = "1.38.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -54,6 +54,7 @@ ua_generator = ["dep:ua_generator"]
 jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
+time = []
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
