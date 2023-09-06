@@ -9,7 +9,7 @@ The fastest web crawler and indexer.
 
 ## Getting Started
 
-The simplest way to get started is to use the new [hosted service](https://spiderwebai.xyz). View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local insallations.
+The simplest way to get started is to use the new [hosted service](https://spiderwebai.xyz). View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local installations.
 
 ## Benchmarks
 

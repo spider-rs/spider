@@ -62,6 +62,7 @@ extern crate log;
 pub extern crate reqwest;
 pub extern crate tokio;
 pub extern crate bytes;
+pub extern crate tokio_stream;
 
 #[cfg(feature = "ua_generator")]
 extern crate ua_generator;

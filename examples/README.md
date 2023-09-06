@@ -8,7 +8,11 @@ Simple concurrent crawl [Simple](./example.rs).
 
 - `cargo run --example example`
 
-Live handle index example [Callback](./callback.rs).
+Subscribe to realtime changes [Subscribe](./subscribe.rs).
+
+- `cargo run --example subscribe`
+
+Live handle index mutation example [Callback](./callback.rs).
 
 - `cargo run --example callback`
 
@@ -20,7 +24,7 @@ Scrape the webpage with and gather html [Scrape](./scrape.rs).
 
 - `cargo run --example scrape`
 
-Scrape and download the html file to fs [Download HTML](./download.rs). \*Note: Only HTML is downloaded.
+Scrape and download the html file to fs [Download HTML](./download.rs). \*Note: Enable feature flag [full_resources] to gather all files like css, jss, and etc.
 
 - `cargo run --example download`
 
