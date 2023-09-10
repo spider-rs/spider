@@ -170,6 +170,11 @@ impl Page {
         Page { html: None, links }
     }
 
+    /// Page request fulfilled.
+    pub fn is_empty(&self) -> bool {
+        self.html.is_none()
+    }
+
     /// Url getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {

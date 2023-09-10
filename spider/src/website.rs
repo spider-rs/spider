@@ -84,6 +84,28 @@ lazy_static! {
     };
 }
 
+
+/// the active status of the crawl.
+#[derive(Debug, Clone)]
+pub enum CrawlStatus {
+    /// The crawl did not start yet.
+    Start,
+    /// The crawl is idle and has completed.
+    Idle,
+    /// The crawl is active.
+    Active,
+    /// The crawl blocked from network ratelimit, firewall, etc.
+    Blocked,
+    /// The initial request ran without returning html.
+    Empty,
+    #[cfg(feature = "control")]
+    /// The crawl shutdown manually.
+    Shutdown,
+    #[cfg(feature = "control")]
+    /// The crawl paused manually.
+    Paused,
+}
+
 /// Represents a website to crawl and gather all links.
 /// ```rust
 /// use spider::website::Website;
@@ -114,6 +136,8 @@ pub struct Website {
     >,
     /// subscribe and broadcast changes
     channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
+    /// the status of the active crawl
+    status: CrawlStatus
 }
 
 impl Website {
@@ -131,6 +155,7 @@ impl Website {
             },
             on_link_find_callback: None,
             channel: None,
+            status: CrawlStatus::Start
         }
     }
 
@@ -249,6 +274,11 @@ impl Website {
         Duration::from_millis(self.configuration.delay)
     }
 
+    /// get the active crawl status
+    pub fn get_status(&self) -> &CrawlStatus {
+        &self.status
+    }
+    
     /// absolute base url of crawl
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
@@ -524,16 +554,23 @@ impl Website {
         {
             let page = Page::new(&self.domain.inner(), &client).await;
 
-            self.links_visited.insert(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.domain.clone(), None);
+            let links = if !page.is_empty() {
+                self.links_visited.insert(match self.on_link_find_callback {
+                    Some(cb) => {
+                        let c = cb(*self.domain.clone(), None);
+    
+                        c.0
+                    }
+                    _ => *self.domain.clone(),
+                });
+    
+                let links = HashSet::from(page.links(&base).await);
 
-                    c.0
-                }
-                _ => *self.domain.clone(),
-            });
-
-            let links = HashSet::from(page.links(&base).await);
+                links
+            } else {
+                self.status = CrawlStatus::Empty;
+                Default::default()
+            };
 
             match &self.channel {
                 Some(c) => {
@@ -692,16 +729,21 @@ impl Website {
         for link in expanded {
             if self.is_allowed_default(&link.inner(), &blacklist_url) {
                 let page = Page::new(&link.inner(), &client).await;
-                let u = page.get_url().into();
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u),
-                    _ => u,
+
+                if !page.is_empty() {
+                    let u = page.get_url().into();
+                    let link_result = match self.on_link_find_callback {
+                        Some(cb) => cb(u),
+                        _ => u,
+                    };
+    
+                    self.links_visited.insert(link_result);
+                    let page_links = HashSet::from(page.links(&base).await);
+    
+                    links.extend(page_links);
+                } else {
+                    self.status = CrawlStatus::Empty;
                 };
-
-                self.links_visited.insert(link_result);
-                let page_links = HashSet::from(page.links(&base).await);
-
-                links.extend(page_links);
 
                 match &self.channel {
                     Some(c) => {
@@ -746,11 +788,11 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-
-        let blacklist_url = self.configuration.get_blacklist();
-
+        
         // crawl if valid selector
         if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
             let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
             let throttle = Box::pin(self.get_delay());
             let on_link_find_callback = self.on_link_find_callback;
@@ -845,6 +887,8 @@ impl Website {
                     }
                 }
             }
+
+            self.status = CrawlStatus::Idle;
         }
     }
 
@@ -960,9 +1004,10 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let blacklist_url = self.configuration.get_blacklist();
-
+        
         if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
             let selectors = unsafe { selectors.unwrap_unchecked() };
             let delay = Box::from(self.configuration.delay);
             let delay_enabled = self.configuration.delay > 0;
@@ -1029,6 +1074,8 @@ impl Website {
                     break;
                 }
             }
+
+            self.status = CrawlStatus::Idle;
         }
     }
 
@@ -1039,9 +1086,10 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        let blacklist_url = self.configuration.get_blacklist();
-
+        
         if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
             self.pages = Some(Box::new(Vec::new()));
             let delay = self.configuration.delay;
             let on_link_find_callback = self.on_link_find_callback;
@@ -1138,6 +1186,8 @@ impl Website {
                     break;
                 }
             }
+
+            self.status = CrawlStatus::Idle;
         }
     }
 
