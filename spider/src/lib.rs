@@ -5,7 +5,7 @@
 //!
 //! Spider is multi-threaded crawler that can be configured
 //! to scrape web pages. It has the ability to gather
-//! tens of thousands of pages within seconds.
+//! millions of pages within seconds.
 //!
 //! # How to use Spider
 //!
@@ -47,14 +47,19 @@
 //!
 //! ## Feature flags
 //!
-//! - `ua_generator`: Enables auto generating a random real User-Agent. Enabled by default.
+//! - `ua_generator`: Enables auto generating a random real User-Agent.
 //! - `regex`: Enables blacklisting paths with regx
-//! - `jemalloc`: Enables the jemalloc memory backend.
-//! - `decentralized`: Enables decentralized processing of IO,
-//!         requires the [spider_worker] startup before crawls.
+//! - `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
+//! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
+//! - `sync`: Subscribe to changes for Page data processing async.
 //! - `control`: Enables the ability to pause, start, and shutdown crawls on demand.
-//! - `full_resources`: Enables gathering all content that relates to the domain.
+//! - `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 //! - `serde`: Enables serde serialization support.
+//! - `socks`: Enables socks5 proxy support.
+//! - `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
+//! - `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
+//! - `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
+//! - `time`: Enabled duration tracking per page.
 
 pub extern crate compact_str;
 pub extern crate hashbrown;
