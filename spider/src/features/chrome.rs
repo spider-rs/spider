@@ -26,7 +26,14 @@ pub fn get_browser_config(
         }
         _ => builder.args(CHROME_ARGS),
     };
-
+    let builder = if std::env::var("CHROME_BIN").is_ok() {
+        match std::env::var("CHROME_BIN") {
+            Ok(v) => builder.chrome_executable(v),
+            _ => builder,
+        }
+    } else {
+        builder
+    };
     builder.build()
 }
 
@@ -55,7 +62,14 @@ pub fn get_browser_config(
         }
         _ => builder.args(CHROME_ARGS),
     };
-
+    let builder = if std::env::var("CHROME_BIN").is_ok() {
+        match std::env::var("CHROME_BIN") {
+            Ok(v) => builder.chrome_executable(v),
+            _ => builder,
+        }
+    } else {
+        builder
+    };
     builder.build()
 }
 
