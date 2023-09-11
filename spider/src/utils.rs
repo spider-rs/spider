@@ -6,14 +6,13 @@ use reqwest::Client;
 pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromiumoxide_fork::Page,
 ) -> Option<bytes::Bytes> {
     match page.goto(target_url).await {
         Ok(page) => {
             let _ = page.wait_for_navigation_response().await;
             let res = page.content().await;
-            let content = res.unwrap_or_default().into();
-            Some(content)
+            Some(res.unwrap_or_default())
         }
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -190,17 +189,15 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes:
 pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromiumoxide_fork::Page,
 ) -> Option<bytes::Bytes> {
     match &page {
         page => match page.goto(target_url).await {
             Ok(page) => {
                 let res = page.content().await;
-                let content = res.unwrap_or_default().into();
-
                 // let _ = page.close().await;
 
-                Some(content)
+                Some(res.unwrap_or_default())
             }
             _ => {
                 log(

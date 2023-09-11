@@ -637,7 +637,7 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
-        page: &chromiumoxide::Page,
+        page: &chromiumoxide_fork::Page,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
@@ -874,11 +874,20 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
             let (mut browser, browser_handle) = launch_browser(&self.configuration.proxies).await;
 
+            let new_page = browser.new_page("about:blank").await.unwrap();
+            if cfg!(feature = "chrome_stealth") {
+                let _ = new_page.enable_stealth_mode(&if self.configuration.user_agent.is_some() {
+                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                } else {
+                    ""
+                });
+            }
+
             let shared = Arc::new((
                 client,
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
-                browser.new_page("about:blank").await.unwrap(),
+                new_page,
             ));
 
             let mut links: HashSet<CaseInsensitiveString> = self
@@ -1323,7 +1332,15 @@ impl Website {
             let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
                 JoinSet::new();
             let (mut browser, _) = launch_browser(&self.configuration.proxies).await;
-            let page = Arc::new(browser.new_page("about:blank").await.unwrap());
+            let new_page = browser.new_page("about:blank").await.unwrap();
+            if cfg!(feature = "chrome_stealth") {
+                let _ = new_page.enable_stealth_mode(&if self.configuration.user_agent.is_some() {
+                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                } else {
+                    ""
+                });
+            }
+            let page = Arc::new(new_page);
 
             // crawl while links exists
             loop {

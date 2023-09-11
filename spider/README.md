@@ -106,6 +106,7 @@ spider = { version = "1.40.5", features = ["regex", "ua_generator"] }
 1. `chrome`: Enables chrome headless rendering [experimental].
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
+1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 
 ### Decentralization
 

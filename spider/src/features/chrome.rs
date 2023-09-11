@@ -1,5 +1,5 @@
 use crate::tokio_stream::StreamExt;
-use chromiumoxide::{Browser, BrowserConfig};
+use chromiumoxide_fork::{Browser, BrowserConfig};
 use tokio::task;
 
 /// get chrome configuration

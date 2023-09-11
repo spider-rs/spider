@@ -145,7 +145,7 @@ pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
 impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
-    pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
+    pub async fn new(url: &str, client: &Client, page: &chromiumoxide_fork::Page) -> Self {
         build(
             url,
             crate::utils::fetch_page_html(&url, &client, &page).await,
