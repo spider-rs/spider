@@ -59,14 +59,16 @@
 //! - `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 //! - `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
 //! - `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
-//! - `time`: Enabled duration tracking per page.
+//! - `time`: Enables duration tracking per page.
+//! - `chrome`: Enables chrome headless rendering [experimental].
+//! - `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 
+pub extern crate bytes;
 pub extern crate compact_str;
 pub extern crate hashbrown;
 extern crate log;
 pub extern crate reqwest;
 pub extern crate tokio;
-pub extern crate bytes;
 pub extern crate tokio_stream;
 
 #[cfg(feature = "ua_generator")]

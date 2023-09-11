@@ -1,7 +1,59 @@
+#[cfg(feature = "chrome")]
+use crate::website::CHROME;
+
 use log::{info, log_enabled, Level};
 use reqwest::Client;
 
-#[cfg(not(feature = "fs"))]
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+    match &CHROME.0 {
+        Some(browser) => match browser.new_page(target_url).await {
+            Ok(page) => {
+                let res = page.content().await;
+                let content = res.unwrap_or_default().into();
+
+                let _ = page.close().await;
+
+                Some(content)
+            }
+            _ => Default::default(),
+        },
+        _ => {
+            log(
+                "- error parsing html text defaulting to raw http request {}",
+                &target_url,
+            );
+
+            use crate::bytes::BufMut;
+            use bytes::BytesMut;
+            use tokio_stream::StreamExt;
+
+            match client.get(target_url).send().await {
+                Ok(res) if res.status().is_success() => {
+                    let mut stream = res.bytes_stream();
+                    let mut data: BytesMut = BytesMut::new();
+
+                    while let Some(item) = stream.next().await {
+                        match item {
+                            Ok(text) => data.put(text),
+                            _ => (),
+                        }
+                    }
+
+                    Some(data.into())
+                }
+                Ok(_) => None,
+                Err(_) => {
+                    log("- error parsing html text {}", &target_url);
+                    None
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
 /// Perform a network request to a resource extracting all content as text streaming.
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
     use crate::bytes::BufMut;

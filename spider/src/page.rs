@@ -1,4 +1,3 @@
-
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 use crate::CaseInsensitiveString;
@@ -9,9 +8,9 @@ use reqwest::Client;
 use smallvec::SmallVec;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
-use tokio::time::Instant;
-#[cfg(all(feature = "time", not(feature = "decentralized")))]
 use std::time::Duration;
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
+use tokio::time::Instant;
 
 #[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
@@ -29,9 +28,8 @@ pub struct Page {
     url: String,
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
-    duration: Instant
+    duration: Instant,
 }
-
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[cfg(feature = "decentralized")]
@@ -131,7 +129,7 @@ pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
         base: Url::parse(&url).expect("Invalid page URL"),
         url: url.into(),
         #[cfg(feature = "time")]
-        duration: Instant::now()
+        duration: Instant::now(),
     }
 }
 
@@ -180,7 +178,7 @@ impl Page {
     pub fn get_url(&self) -> &str {
         &self.url
     }
-    
+
     /// Parsed URL getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_parsed(&self) -> &Url {
