@@ -4,29 +4,66 @@ use tokio::task;
 
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
-pub fn get_browser_config() -> Result<BrowserConfig, String> {
+pub fn get_browser_config(
+    proxies: &Option<Box<Vec<string_concat::String>>>,
+) -> Result<BrowserConfig, String> {
     use std::time::Duration;
-    BrowserConfig::builder()
+    let builder = BrowserConfig::builder()
         .disable_default_args()
-        .args(CHROME_ARGS)
-        .request_timeout(Duration::from_secs(30))
-        .build()
+        .request_timeout(Duration::from_secs(30));
+
+    let builder = match proxies {
+        Some(proxies) => {
+            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+
+            chrome_args.push(string_concat!(
+                r#"--proxy-server=""#,
+                proxies.join(";"),
+                r#"""#
+            ));
+
+            builder.args(chrome_args)
+        }
+        _ => builder.args(CHROME_ARGS),
+    };
+
+    builder.build()
 }
 
 /// get chrome configuration headful
 #[cfg(feature = "chrome_headed")]
-pub fn get_browser_config() -> Result<BrowserConfig, String> {
-    BrowserConfig::builder()
-        .with_head()
+pub fn get_browser_config(
+    proxies: &Option<Box<Vec<string_concat::String>>>,
+) -> Result<BrowserConfig, String> {
+    use std::time::Duration;
+    let builder = BrowserConfig::builder()
         .disable_default_args()
-        .args(CHROME_ARGS)
         .request_timeout(Duration::from_secs(30))
-        .build()
+        .with_head();
+
+    let builder = match proxies {
+        Some(proxies) => {
+            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+
+            chrome_args.push(string_concat!(
+                r#"--proxy-server=""#,
+                proxies.join(";"),
+                r#"""#
+            ));
+
+            builder.args(chrome_args)
+        }
+        _ => builder.args(CHROME_ARGS),
+    };
+
+    builder.build()
 }
 
 /// launch a chromium browser and wait until the instance is up.
-pub async fn launch_browser() -> (Browser, tokio::task::JoinHandle<()>) {
-    let (browser, mut handler) = Browser::launch(get_browser_config().unwrap())
+pub async fn launch_browser(
+    proxies: &Option<Box<Vec<string_concat::String>>>,
+) -> (Browser, tokio::task::JoinHandle<()>) {
+    let (browser, mut handler) = Browser::launch(get_browser_config(&proxies).unwrap())
         .await
         .unwrap();
 

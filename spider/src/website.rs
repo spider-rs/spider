@@ -872,7 +872,7 @@ impl Website {
         if selectors.is_some() {
             let (blacklist_url, mut interval, throttle) = self.setup_crawl();
             let on_link_find_callback = self.on_link_find_callback;
-            let (mut browser, browser_handle) = launch_browser().await;
+            let (mut browser, browser_handle) = launch_browser(&self.configuration.proxies).await;
 
             let shared = Arc::new((
                 client,
@@ -1322,7 +1322,7 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
             let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
                 JoinSet::new();
-            let (mut browser, _) = launch_browser().await;
+            let (mut browser, _) = launch_browser(&self.configuration.proxies).await;
             let page = Arc::new(browser.new_page("about:blank").await.unwrap());
 
             // crawl while links exists
