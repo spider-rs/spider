@@ -548,7 +548,7 @@ impl Website {
     /// setup shared concurrent configs
     #[cfg(not(feature = "decentralized"))]
     fn setup_crawl(
-        &mut self
+        &mut self,
     ) -> (
         Box<Vec<CompactString>>,
         std::pin::Pin<Box<tokio::time::Interval>>,

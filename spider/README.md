@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.40.4"
+spider = "1.40.5"
 ```
 
 And then the code:
@@ -87,7 +87,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.40.4", features = ["regex", "ua_generator"] }
+spider = { version = "1.40.5", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -105,6 +105,7 @@ spider = { version = "1.40.4", features = ["regex", "ua_generator"] }
 1. `time`: Enables duration tracking per page.
 1. `chrome`: Enables chrome headless rendering [experimental].
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
+1. `chrome_cpu`: Disable gpu usage for chrome browser.
 
 ### Decentralization
 
@@ -112,7 +113,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.40.4", features = ["decentralized"] }
+spider = { version = "1.40.5", features = ["decentralized"] }
 ```
 
 ```sh
@@ -133,7 +134,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.40.4", features = ["sync"] }
+spider = { version = "1.40.5", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -163,7 +164,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.40.4", features = ["regex"] }
+spider = { version = "1.40.5", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -190,7 +191,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.40.4", features = ["control"] }
+spider = { version = "1.40.5", features = ["control"] }
 ```
 
 ```rust
