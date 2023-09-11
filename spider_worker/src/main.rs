@@ -44,7 +44,7 @@ async fn forward(
         )
     };
 
-    let page = spider::page::Page::new(&url_path, &CLIENT).await;
+    let page = spider::page::Page::new_page(&url_path, &CLIENT).await;
 
     Ok(if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {

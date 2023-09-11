@@ -21,7 +21,7 @@ use url::Url;
 use tokio::sync::broadcast;
 
 #[cfg(feature = "chrome")]
-use chromiumoxide::BrowserConfig;
+use chromiumoxide::{Browser, BrowserConfig};
 
 /// get chrome configuration
 #[cfg(all(feature = "chrome", not(feature = "chrome_headed")))]
@@ -35,79 +35,23 @@ pub fn get_browser_config() -> Result<BrowserConfig, String> {
     BrowserConfig::builder().with_head().build()
 }
 
-/// shutdown the chrome instance by process id
-#[cfg(feature = "chrome")]
-#[cfg(target_os = "windows")]
-fn shutdown_chrome(pid: &u32) {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/F"])
-        .spawn();
-}
-
-/// shutdown the chrome instance by process id
-#[cfg(feature = "chrome")]
-#[cfg(not(target_os = "windows"))]
-fn shutdown_chrome(pid: &u32) {
-    let _ = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .spawn();
-}
-
 #[cfg(feature = "chrome")]
 /// launch a chromium browser and wait until the instance is up blocking the thread.
-pub fn launch_browser() -> (
-    std::option::Option<chromiumoxide::Browser>,
-    tokio::task::JoinHandle<()>,
-    u32,
-) {
-    let (tx, mut rx) = tokio::sync::oneshot::channel();
-    use chromiumoxide::Browser;
+pub async fn launch_browser() -> (Browser, tokio::task::JoinHandle<()>) {
+    let (browser, mut handler) = Browser::launch(get_browser_config().unwrap())
+        .await
+        .unwrap();
 
-    let handle = tokio::task::spawn(async move {
-        match get_browser_config() {
-            Ok(c) => match Browser::launch(c).await {
-                Ok(x) => {
-                    let (mut browser, mut handler) = x;
-                    let id = browser.get_mut_child().unwrap().as_mut_inner().id();
-
-                    if let Err(_) = tx.send((browser, id)) {
-                        println!("the receiver dropped");
-                    }
-
-                    while let Some(h) = handler.next().await {
-                        if h.is_err() {
-                            break;
-                        }
-                    }
-                }
-                _ => (),
-            },
-            _ => (),
-        };
+    // spawn a new task that continuously polls the handler
+    let handle = task::spawn(async move {
+        while let Some(h) = handler.next().await {
+            if h.is_err() {
+                break;
+            }
+        }
     });
 
-    loop {
-        let x = match rx.try_recv() {
-            Ok(v) => (Some(v.0), v.1),
-            Err(_) => (None, Default::default()),
-        };
-
-        if x.0.is_some() {
-            break (x.0, handle, x.1.unwrap_or_default());
-        }
-    }
-}
-
-#[cfg(feature = "chrome")]
-lazy_static! {
-    /// a chrome instance
-    pub static ref CHROME: (
-        std::option::Option<chromiumoxide::Browser>,
-        tokio::task::JoinHandle<()>,
-        u32
-    ) = {
-        launch_browser()
-    };
+    (browser, handle)
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -631,7 +575,11 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(all(not(feature = "glob"), not(feature = "decentralized")))]
+    #[cfg(all(
+        not(feature = "glob"),
+        not(feature = "decentralized"),
+        not(feature = "chrome")
+    ))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -642,6 +590,59 @@ impl Website {
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             let page = Page::new(&self.domain.inner(), &client).await;
+
+            let links = if !page.is_empty() {
+                self.links_visited.insert(match self.on_link_find_callback {
+                    Some(cb) => {
+                        let c = cb(*self.domain.clone(), None);
+
+                        c.0
+                    }
+                    _ => *self.domain.clone(),
+                });
+
+                let links = HashSet::from(page.links(&base).await);
+
+                links
+            } else {
+                self.status = CrawlStatus::Empty;
+                Default::default()
+            };
+
+            match &self.channel {
+                Some(c) => {
+                    match c.0.send(page) {
+                        _ => (),
+                    };
+                }
+                _ => (),
+            };
+
+            links
+        } else {
+            HashSet::new()
+        };
+
+        links
+    }
+
+    /// expand links for crawl
+    #[cfg(all(
+        not(feature = "glob"),
+        not(feature = "decentralized"),
+        feature = "chrome"
+    ))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: bool,
+        page: &chromiumoxide::Page,
+    ) -> HashSet<CaseInsensitiveString> {
+        let links: HashSet<CaseInsensitiveString> = if self
+            .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+        {
+            let page = Page::new(&self.domain.inner(), &client, &page).await;
 
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
@@ -869,8 +870,126 @@ impl Website {
         self.scrape_concurrent(&client, handle).await;
     }
 
+        /// Start to crawl website concurrently
+        #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+        async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
+            let selectors = get_page_selectors(
+                &self.domain.inner(),
+                self.configuration.subdomains,
+                self.configuration.tld,
+            );
+    
+            // crawl if valid selector
+            if selectors.is_some() {
+                self.status = CrawlStatus::Active;
+                let blacklist_url = self.configuration.get_blacklist();
+                let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
+                let throttle = Box::pin(self.get_delay());
+                let on_link_find_callback = self.on_link_find_callback;
+    
+                let (mut browser, _) = launch_browser().await;
+    
+                let shared = Arc::new((
+                    client,
+                    unsafe { selectors.unwrap_unchecked() },
+                    self.channel.clone(),
+                    browser.new_page("about:blank").await.unwrap(),
+                ));
+    
+                let mut links: HashSet<CaseInsensitiveString> = self
+                    .crawl_establish(&shared.0, &shared.1, false, &shared.3)
+                    .await;
+    
+                if !links.is_empty() {
+                    let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                    let chandle = Handle::current();
+    
+                    // crawl while links exists
+                    loop {
+                        let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                            links.drain().collect(),
+                        )
+                        .throttle(*throttle);
+                        tokio::pin!(stream);
+    
+                        loop {
+                            match stream.next().await {
+                                Some(link) => {
+                                    match handle.as_ref() {
+                                        Some(handle) => {
+                                            while handle.load(Ordering::Relaxed) == 1 {
+                                                interval.tick().await;
+                                            }
+                                            if handle.load(Ordering::Relaxed) == 2 {
+                                                set.shutdown().await;
+                                                break;
+                                            }
+                                        }
+                                        None => (),
+                                    }
+    
+                                    if !self.is_allowed(&link, &blacklist_url) {
+                                        continue;
+                                    }
+    
+                                    log("fetch", &link);
+                                    self.links_visited.insert(link.clone());
+                                    let permit = SEM.acquire().await.unwrap();
+                                    let shared = shared.clone();
+                                    task::yield_now().await;
+    
+                                    set.spawn_on(
+                                        async move {
+                                            let link_result = match on_link_find_callback {
+                                                Some(cb) => cb(link, None),
+                                                _ => (link, None),
+                                            };
+                                            let page =
+                                                Page::new(&link_result.0.as_ref(), &shared.0, &shared.3).await;
+                                            let page_links = page.links(&shared.1).await;
+    
+                                            match &shared.2 {
+                                                Some(c) => {
+                                                    match c.0.send(page) {
+                                                        _ => (),
+                                                    };
+                                                }
+                                                _ => (),
+                                            };
+    
+                                            drop(permit);
+    
+                                            page_links
+                                        },
+                                        &chandle,
+                                    );
+                                }
+                                _ => break,
+                            }
+                        }
+    
+                        while let Some(res) = set.join_next().await {
+                            match res {
+                                Ok(msg) => {
+                                    links.extend(&msg - &self.links_visited);
+                                }
+                                _ => (),
+                            };
+                        }
+    
+                        if links.is_empty() {
+                            break;
+                        }
+                    }
+                }
+    
+                self.status = CrawlStatus::Idle;
+                let _ = browser.close().await;
+            }
+        }
+    
     /// Start to crawl website concurrently
-    #[cfg(not(feature = "decentralized"))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
@@ -885,14 +1004,16 @@ impl Website {
             let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
             let throttle = Box::pin(self.get_delay());
             let on_link_find_callback = self.on_link_find_callback;
+
             let shared = Arc::new((
                 client,
                 unsafe { selectors.unwrap_unchecked() },
-                self.channel.clone(),
+                self.channel.clone()
             ));
 
-            let mut links: HashSet<CaseInsensitiveString> =
-                self.crawl_establish(&shared.0, &shared.1, false).await;
+            let mut links: HashSet<CaseInsensitiveString> = self
+                .crawl_establish(&shared.0, &shared.1, false)
+                .await;
 
             if !links.is_empty() {
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -1086,6 +1207,97 @@ impl Website {
         }
     }
 
+    #[cfg(feature = "chrome")]
+    /// Start to crawl website sequential
+    async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
+        let selectors = get_page_selectors(
+            &self.domain.inner(),
+            self.configuration.subdomains,
+            self.configuration.tld,
+        );
+
+        if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
+            let selectors = unsafe { selectors.unwrap_unchecked() };
+            let delay = Box::from(self.configuration.delay);
+            let delay_enabled = self.configuration.delay > 0;
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+            let (mut browser, _) = launch_browser().await;
+            let page = Arc::new(browser.new_page("about:blank").await.unwrap());
+
+            let mut links: HashSet<CaseInsensitiveString> =
+                self.crawl_establish(&client, &selectors, false, &page).await;
+            
+            let channel = self.channel.clone();
+
+            // crawl while links exists
+            loop {
+                for link in links.iter() {
+                    match handle.as_ref() {
+                        Some(handle) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                links.clear();
+                                break;
+                            }
+                        }
+                        None => (),
+                    }
+                    if !self.is_allowed(&link, &blacklist_url) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    log("fetch", link);
+                    if delay_enabled {
+                        tokio::time::sleep(Duration::from_millis(*delay)).await;
+                    }
+                    let link = link.clone();
+                    let link_result = match on_link_find_callback {
+                        Some(cb) => cb(link, None),
+                        _ => (link, None),
+                    };
+                    let page = page.clone();
+                    let page = Page::new(&link_result.0.as_ref(), &client, &page).await;
+                    let page_links = page.links(&selectors).await;
+                    task::yield_now().await;
+                    new_links.extend(page_links);
+                    task::yield_now().await;
+
+                    match &channel {
+                        Some(c) => {
+                            match c.0.send(page) {
+                                _ => (),
+                            };
+                        }
+                        _ => (),
+                    };
+                }
+
+                links.clone_from(&(&new_links - &self.links_visited));
+                new_links.clear();
+                if new_links.capacity() >= 1500 {
+                    new_links.shrink_to_fit();
+                }
+                task::yield_now().await;
+                if links.is_empty() {
+                    break;
+                }
+            }
+
+            self.status = CrawlStatus::Idle;
+            let _ = browser.close().await;
+        }
+    }
+
+
+    #[cfg(not(feature = "chrome"))]
     /// Start to crawl website sequential
     async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
@@ -1168,6 +1380,7 @@ impl Website {
         }
     }
 
+    #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
@@ -1280,6 +1493,124 @@ impl Website {
         }
     }
 
+    #[cfg(feature = "chrome")]
+    /// Start to scape website concurrently and store html
+    async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
+        let selectors = get_page_selectors(
+            &self.domain.inner(),
+            self.configuration.subdomains,
+            self.configuration.tld,
+        );
+
+        if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
+            self.pages = Some(Box::new(Vec::new()));
+            let delay = self.configuration.delay;
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+            let throttle = Duration::from_millis(delay);
+
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
+            let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
+                JoinSet::new();
+            let (mut browser, _) = launch_browser().await;
+            let page = Arc::new(browser.new_page("about:blank").await.unwrap());
+
+            // crawl while links exists
+            loop {
+                let stream =
+                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                        .throttle(throttle);
+                tokio::pin!(stream);
+
+                while let Some(link) = stream.next().await {
+                    match handle.as_ref() {
+                        Some(handle) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                set.shutdown().await;
+                                break;
+                            }
+                        }
+                        None => (),
+                    }
+                    if !self.is_allowed(&link, &blacklist_url) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    log("fetch", &link);
+                    let client = client.clone();
+                    let permit = SEM.acquire().await.unwrap();
+                    let channel = self.channel.clone();
+                    let selectors = selectors.clone();
+                    let page = page.clone();
+
+                    set.spawn(async move {
+                        drop(permit);
+                        let page =
+                            crate::utils::fetch_page_html(&link.as_ref(), &client, &page).await;
+                        let page = build(&link.as_ref(), page);
+
+                        let (link, _) = match on_link_find_callback {
+                            Some(cb) => {
+                                let c = cb(link, Some(page.get_html()));
+
+                                c
+                            }
+                            _ => (link, None),
+                        };
+
+                        match &channel {
+                            Some(c) => {
+                                match c.0.send(page.clone()) {
+                                    _ => (),
+                                };
+                            }
+                            _ => (),
+                        };
+
+                        let page_links = page.links(&*selectors).await;
+
+                        (link, page, page_links)
+                    });
+                }
+
+                task::yield_now().await;
+
+                if links.capacity() >= 1500 {
+                    links.shrink_to_fit();
+                }
+
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Ok(msg) => {
+                            let page = msg.1;
+                            links.extend(&msg.2 - &self.links_visited);
+                            task::yield_now().await;
+                            match self.pages.as_mut() {
+                                Some(p) => p.push(page.clone()),
+                                _ => (),
+                            };
+                        }
+                        _ => (),
+                    };
+                }
+
+                task::yield_now().await;
+                if links.is_empty() {
+                    break;
+                }
+            }
+
+            self.status = CrawlStatus::Idle;
+            let _ = browser.close().await;
+        }
+    }
+
     /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.configuration
@@ -1365,28 +1696,6 @@ impl Website {
         let rx2 = channel.0.subscribe();
 
         Some(rx2)
-    }
-}
-
-#[cfg(feature = "chrome")]
-impl Drop for Website {
-    /// check if chrome instances are alive if not drop the browser
-    fn drop(&mut self) {
-        match &CHROME.0 {
-            Some(browser) => {
-                tokio::spawn(async move {
-                    match browser.pages().await {
-                        Ok(pages) => {
-                            if pages.len() == 0 {
-                                shutdown_chrome(&CHROME.2);
-                            }
-                        }
-                        _ => (),
-                    };
-                });
-            }
-            _ => (),
-        }
     }
 }
 

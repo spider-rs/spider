@@ -143,8 +143,26 @@ pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
 }
 
 impl Page {
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
+    pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
+        build(
+            url,
+            crate::utils::fetch_page_html(&url, &client, &page).await,
+        )
+    }
+
     #[cfg(not(feature = "decentralized"))]
+    /// Instantiate a new page and gather the html repro of standard fetch_page_html.
+    pub async fn new_page(url: &str, client: &Client) -> Self {
+        build(
+            url,
+            crate::utils::fetch_page_html_raw(&url, &client).await,
+        )
+    }
+
+    /// Instantiate a new page and gather the html.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     pub async fn new(url: &str, client: &Client) -> Self {
         build(url, crate::utils::fetch_page_html(&url, &client).await)
     }
@@ -560,7 +578,7 @@ impl Page {
     }
 }
 
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
 #[tokio::test]
 async fn parse_links() {
     let client = Client::builder()
@@ -582,7 +600,7 @@ async fn parse_links() {
     );
 }
 
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
 #[tokio::test]
 async fn test_abs_path() {
     let client = Client::builder()

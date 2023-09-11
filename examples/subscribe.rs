@@ -16,4 +16,6 @@ async fn main() {
     });
 
     website.crawl().await;
+
+    println!("Links found {:?}", website.get_links().len());
 }
