@@ -40,7 +40,11 @@ lazy_static! {
         } else {
             (sem_limit * 4, 25)
         };
-
+        let sem_limit = if cfg!(feature = "chrome") {
+            sem_limit / 2
+        } else {
+            sem_limit
+        };
         Semaphore::const_new(sem_limit.max(sem_max))
     };
 }
@@ -531,6 +535,33 @@ impl Website {
         (self.configure_robots_parser(client).await, None)
     }
 
+    /// setup selectors for handling link targets
+    #[cfg(not(feature = "decentralized"))]
+    fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
+        get_page_selectors(
+            &self.domain.inner(),
+            self.configuration.subdomains,
+            self.configuration.tld,
+        )
+    }
+
+    /// setup shared concurrent configs
+    #[cfg(not(feature = "decentralized"))]
+    fn setup_crawl(
+        &mut self
+    ) -> (
+        Box<Vec<CompactString>>,
+        std::pin::Pin<Box<tokio::time::Interval>>,
+        std::pin::Pin<Box<Duration>>,
+    ) {
+        self.status = CrawlStatus::Active;
+        let blacklist_url = self.configuration.get_blacklist();
+        let interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
+        let throttle = Box::pin(self.get_delay());
+
+        (blacklist_url, interval, throttle)
+    }
+
     /// get base link for crawl establishing
     #[cfg(all(not(feature = "glob"), feature = "regex"))]
     fn get_base_link(&self) -> &CaseInsensitiveString {
@@ -835,21 +866,13 @@ impl Website {
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
+        let selectors = self.setup_selectors();
 
         // crawl if valid selector
         if selectors.is_some() {
-            self.status = CrawlStatus::Active;
-            let blacklist_url = self.configuration.get_blacklist();
-            let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
-            let throttle = Box::pin(self.get_delay());
+            let (blacklist_url, mut interval, throttle) = self.setup_crawl();
             let on_link_find_callback = self.on_link_find_callback;
-
-            let (mut browser, _) = launch_browser().await;
+            let (mut browser, browser_handle) = launch_browser().await;
 
             let shared = Arc::new((
                 client,
@@ -936,9 +959,7 @@ impl Website {
 
                     while let Some(res) = set.join_next().await {
                         match res {
-                            Ok(msg) => {
-                                links.extend(&msg - &self.links_visited);
-                            }
+                            Ok(msg) => links.extend(&msg - &self.links_visited),
                             _ => (),
                         };
                     }
@@ -951,24 +972,18 @@ impl Website {
 
             self.status = CrawlStatus::Idle;
             let _ = browser.close().await;
+            let _ = browser_handle.await;
         }
     }
 
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
+        let selectors = self.setup_selectors();
 
         // crawl if valid selector
         if selectors.is_some() {
-            self.status = CrawlStatus::Active;
-            let blacklist_url = self.configuration.get_blacklist();
-            let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
-            let throttle = Box::pin(self.get_delay());
+            let (blacklist_url, mut interval, throttle) = self.setup_crawl();
             let on_link_find_callback = self.on_link_find_callback;
 
             let shared = Arc::new((
