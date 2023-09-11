@@ -12,6 +12,6 @@ async fn main() {
         // forward link to a different destination
         (s.as_ref().replacen("/fr/", "", 1).into(), ss)
     });
-    
+
     website.crawl().await;
 }

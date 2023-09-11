@@ -20,6 +20,96 @@ use url::Url;
 #[cfg(feature = "sync")]
 use tokio::sync::broadcast;
 
+#[cfg(feature = "chrome")]
+use chromiumoxide::BrowserConfig;
+
+/// get chrome configuration
+#[cfg(all(feature = "chrome", not(feature = "chrome_headed")))]
+pub fn get_browser_config() -> Result<BrowserConfig, String> {
+    BrowserConfig::builder().build()
+}
+
+/// get chrome configuration headful
+#[cfg(all(feature = "chrome", feature = "chrome_headed"))]
+pub fn get_browser_config() -> Result<BrowserConfig, String> {
+    BrowserConfig::builder().with_head().build()
+}
+
+/// shutdown the chrome instance by process id
+#[cfg(feature = "chrome")]
+#[cfg(target_os = "windows")]
+fn shutdown_chrome(pid: &u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .spawn();
+}
+
+/// shutdown the chrome instance by process id
+#[cfg(feature = "chrome")]
+#[cfg(not(target_os = "windows"))]
+fn shutdown_chrome(pid: &u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .spawn();
+}
+
+#[cfg(feature = "chrome")]
+/// launch a chromium browser and wait until the instance is up blocking the thread.
+pub fn launch_browser() -> (
+    std::option::Option<chromiumoxide::Browser>,
+    tokio::task::JoinHandle<()>,
+    u32,
+) {
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    use chromiumoxide::Browser;
+
+    let handle = tokio::task::spawn(async move {
+        match get_browser_config() {
+            Ok(c) => match Browser::launch(c).await {
+                Ok(x) => {
+                    let (mut browser, mut handler) = x;
+                    let id = browser.get_mut_child().unwrap().as_mut_inner().id();
+
+                    if let Err(_) = tx.send((browser, id)) {
+                        println!("the receiver dropped");
+                    }
+
+                    while let Some(h) = handler.next().await {
+                        if h.is_err() {
+                            break;
+                        }
+                    }
+                }
+                _ => (),
+            },
+            _ => (),
+        };
+    });
+
+    loop {
+        let x = match rx.try_recv() {
+            Ok(v) => (Some(v.0), v.1),
+            Err(_) => (None, Default::default()),
+        };
+
+        if x.0.is_some() {
+            break (x.0, handle, x.1.unwrap_or_default());
+        }
+    }
+}
+
+#[cfg(feature = "chrome")]
+lazy_static! {
+    /// a chrome instance
+    pub static ref CHROME: (
+        std::option::Option<chromiumoxide::Browser>,
+        tokio::task::JoinHandle<()>,
+        u32
+    ) = {
+        launch_browser()
+    };
+}
+
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
     static ref SEM: Semaphore = {
@@ -84,7 +174,6 @@ lazy_static! {
     };
 }
 
-
 /// the active status of the crawl.
 #[derive(Debug, Clone)]
 pub enum CrawlStatus {
@@ -137,7 +226,7 @@ pub struct Website {
     /// subscribe and broadcast changes
     channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
     /// the status of the active crawl
-    status: CrawlStatus
+    status: CrawlStatus,
 }
 
 impl Website {
@@ -155,7 +244,7 @@ impl Website {
             },
             on_link_find_callback: None,
             channel: None,
-            status: CrawlStatus::Start
+            status: CrawlStatus::Start,
         }
     }
 
@@ -278,7 +367,7 @@ impl Website {
     pub fn get_status(&self) -> &CrawlStatus {
         &self.status
     }
-    
+
     /// absolute base url of crawl
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
@@ -558,12 +647,12 @@ impl Website {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
                         let c = cb(*self.domain.clone(), None);
-    
+
                         c.0
                     }
                     _ => *self.domain.clone(),
                 });
-    
+
                 let links = HashSet::from(page.links(&base).await);
 
                 links
@@ -736,10 +825,10 @@ impl Website {
                         Some(cb) => cb(u),
                         _ => u,
                     };
-    
+
                     self.links_visited.insert(link_result);
                     let page_links = HashSet::from(page.links(&base).await);
-    
+
                     links.extend(page_links);
                 } else {
                     self.status = CrawlStatus::Empty;
@@ -773,6 +862,12 @@ impl Website {
         self.crawl_sequential(&client, handle).await;
     }
 
+    #[cfg(feature = "chrome")]
+    /// close the chrome process
+    pub async fn start_chrome() {
+        launch_browser();
+    }
+
     /// Start to scrape/download website with async conccurency
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
@@ -788,7 +883,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        
+
         // crawl if valid selector
         if selectors.is_some() {
             self.status = CrawlStatus::Active;
@@ -1004,7 +1099,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        
+
         if selectors.is_some() {
             self.status = CrawlStatus::Active;
             let blacklist_url = self.configuration.get_blacklist();
@@ -1086,7 +1181,7 @@ impl Website {
             self.configuration.subdomains,
             self.configuration.tld,
         );
-        
+
         if selectors.is_some() {
             self.status = CrawlStatus::Active;
             let blacklist_url = self.configuration.get_blacklist();
@@ -1276,6 +1371,28 @@ impl Website {
         let rx2 = channel.0.subscribe();
 
         Some(rx2)
+    }
+}
+
+#[cfg(feature = "chrome")]
+impl Drop for Website {
+    /// check if chrome instances are alive if not drop the browser
+    fn drop(&mut self) {
+        match &CHROME.0 {
+            Some(browser) => {
+                tokio::spawn(async move {
+                    match browser.pages().await {
+                        Ok(pages) => {
+                            if pages.len() == 0 {
+                                shutdown_chrome(&CHROME.2);
+                            }
+                        }
+                        _ => (),
+                    };
+                });
+            }
+            _ => (),
+        }
     }
 }
 
