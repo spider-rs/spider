@@ -8,16 +8,14 @@ pub async fn fetch_page_html(
     client: &Client,
     page: &chromiumoxide::Page,
 ) -> Option<bytes::Bytes> {
-    match &page {
-        page => match page.goto(target_url).await {
-            Ok(page) => {
-                let res = page.content().await;
-                let content = res.unwrap_or_default().into();
-                // let _ = page.close().await;
-                Some(content)
-            }
-            _ => fetch_page_html_raw(&target_url, &client).await,
-        },
+    match page.goto(target_url).await {
+        Ok(page) => {
+            let _ = page.wait_for_navigation_response().await;
+            let res = page.content().await;
+            let content = res.unwrap_or_default().into();
+            Some(content)
+        }
+        _ => fetch_page_html_raw(&target_url, &client).await,
     }
 }
 

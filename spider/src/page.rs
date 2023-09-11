@@ -278,7 +278,7 @@ impl Page {
 
                                 let hchars = abs.path();
 
-                                if let Some(position) = hchars.find('.') {
+                                if let Some(position) = hchars.rfind('.') {
                                     let resource_ext = &hchars[position + 1..hchars.len()];
 
                                     if !ONLY_RESOURCES
@@ -362,7 +362,7 @@ impl Page {
                     }
                     let hchars = abs.path();
 
-                    if let Some(position) = hchars.find('.') {
+                    if let Some(position) = hchars.rfind('.') {
                         let resource_ext = &hchars[position + 1..hchars.len()];
 
                         if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
