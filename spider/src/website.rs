@@ -856,13 +856,6 @@ impl Website {
         self.crawl_concurrent(client, handle).await;
     }
 
-    /// Start to crawl website in sync
-    pub async fn crawl_sync(&mut self) {
-        let (client, handle) = self.setup().await;
-
-        self.crawl_sequential(&client, handle).await;
-    }
-
     /// Start to scrape/download website with async conccurency
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
@@ -1207,179 +1200,6 @@ impl Website {
         }
     }
 
-    #[cfg(feature = "chrome")]
-    /// Start to crawl website sequential
-    async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-
-        if selectors.is_some() {
-            self.status = CrawlStatus::Active;
-            let blacklist_url = self.configuration.get_blacklist();
-            let selectors = unsafe { selectors.unwrap_unchecked() };
-            let delay = Box::from(self.configuration.delay);
-            let delay_enabled = self.configuration.delay > 0;
-            let on_link_find_callback = self.on_link_find_callback;
-            let mut interval = tokio::time::interval(Duration::from_millis(10));
-
-            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-
-            let (mut browser, _) = launch_browser().await;
-            let page = Arc::new(browser.new_page("about:blank").await.unwrap());
-
-            let mut links: HashSet<CaseInsensitiveString> =
-                self.crawl_establish(&client, &selectors, false, &page).await;
-            
-            let channel = self.channel.clone();
-
-            // crawl while links exists
-            loop {
-                for link in links.iter() {
-                    match handle.as_ref() {
-                        Some(handle) => {
-                            while handle.load(Ordering::Relaxed) == 1 {
-                                interval.tick().await;
-                            }
-                            if handle.load(Ordering::Relaxed) == 2 {
-                                links.clear();
-                                break;
-                            }
-                        }
-                        None => (),
-                    }
-                    if !self.is_allowed(&link, &blacklist_url) {
-                        continue;
-                    }
-                    self.links_visited.insert(link.clone());
-                    log("fetch", link);
-                    if delay_enabled {
-                        tokio::time::sleep(Duration::from_millis(*delay)).await;
-                    }
-                    let link = link.clone();
-                    let link_result = match on_link_find_callback {
-                        Some(cb) => cb(link, None),
-                        _ => (link, None),
-                    };
-                    let page = page.clone();
-                    let page = Page::new(&link_result.0.as_ref(), &client, &page).await;
-                    let page_links = page.links(&selectors).await;
-                    task::yield_now().await;
-                    new_links.extend(page_links);
-                    task::yield_now().await;
-
-                    match &channel {
-                        Some(c) => {
-                            match c.0.send(page) {
-                                _ => (),
-                            };
-                        }
-                        _ => (),
-                    };
-                }
-
-                links.clone_from(&(&new_links - &self.links_visited));
-                new_links.clear();
-                if new_links.capacity() >= 1500 {
-                    new_links.shrink_to_fit();
-                }
-                task::yield_now().await;
-                if links.is_empty() {
-                    break;
-                }
-            }
-
-            self.status = CrawlStatus::Idle;
-            let _ = browser.close().await;
-        }
-    }
-
-
-    #[cfg(not(feature = "chrome"))]
-    /// Start to crawl website sequential
-    async fn crawl_sequential(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-
-        if selectors.is_some() {
-            self.status = CrawlStatus::Active;
-            let blacklist_url = self.configuration.get_blacklist();
-            let selectors = unsafe { selectors.unwrap_unchecked() };
-            let delay = Box::from(self.configuration.delay);
-            let delay_enabled = self.configuration.delay > 0;
-            let on_link_find_callback = self.on_link_find_callback;
-            let mut interval = tokio::time::interval(Duration::from_millis(10));
-
-            let mut new_links: HashSet<CaseInsensitiveString> = HashSet::new();
-            let mut links: HashSet<CaseInsensitiveString> =
-                self.crawl_establish(&client, &selectors, false).await;
-
-            let channel = self.channel.clone();
-
-            // crawl while links exists
-            loop {
-                for link in links.iter() {
-                    match handle.as_ref() {
-                        Some(handle) => {
-                            while handle.load(Ordering::Relaxed) == 1 {
-                                interval.tick().await;
-                            }
-                            if handle.load(Ordering::Relaxed) == 2 {
-                                links.clear();
-                                break;
-                            }
-                        }
-                        None => (),
-                    }
-                    if !self.is_allowed(&link, &blacklist_url) {
-                        continue;
-                    }
-                    self.links_visited.insert(link.clone());
-                    log("fetch", link);
-                    if delay_enabled {
-                        tokio::time::sleep(Duration::from_millis(*delay)).await;
-                    }
-                    let link = link.clone();
-                    let link_result = match on_link_find_callback {
-                        Some(cb) => cb(link, None),
-                        _ => (link, None),
-                    };
-                    let page = Page::new(&link_result.0.as_ref(), &client).await;
-                    let page_links = page.links(&selectors).await;
-                    task::yield_now().await;
-                    new_links.extend(page_links);
-                    task::yield_now().await;
-
-                    match &channel {
-                        Some(c) => {
-                            match c.0.send(page) {
-                                _ => (),
-                            };
-                        }
-                        _ => (),
-                    };
-                }
-
-                links.clone_from(&(&new_links - &self.links_visited));
-                new_links.clear();
-                if new_links.capacity() >= 1500 {
-                    new_links.shrink_to_fit();
-                }
-                task::yield_now().await;
-                if links.is_empty() {
-                    break;
-                }
-            }
-
-            self.status = CrawlStatus::Idle;
-        }
-    }
-
     #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
@@ -1552,7 +1372,7 @@ impl Website {
                     set.spawn(async move {
                         drop(permit);
                         let page =
-                            crate::utils::fetch_page_html(&link.as_ref(), &client, &page).await;
+                            crate::utils::fetch_page_html_chrome(&link.as_ref(), &client, &page).await;
                         let page = build(&link.as_ref(), page);
 
                         let (link, _) = match on_link_find_callback {
