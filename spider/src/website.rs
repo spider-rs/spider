@@ -21,38 +21,7 @@ use url::Url;
 use tokio::sync::broadcast;
 
 #[cfg(feature = "chrome")]
-use chromiumoxide::{Browser, BrowserConfig};
-
-/// get chrome configuration
-#[cfg(all(feature = "chrome", not(feature = "chrome_headed")))]
-pub fn get_browser_config() -> Result<BrowserConfig, String> {
-    BrowserConfig::builder().build()
-}
-
-/// get chrome configuration headful
-#[cfg(all(feature = "chrome", feature = "chrome_headed"))]
-pub fn get_browser_config() -> Result<BrowserConfig, String> {
-    BrowserConfig::builder().with_head().build()
-}
-
-#[cfg(feature = "chrome")]
-/// launch a chromium browser and wait until the instance is up blocking the thread.
-pub async fn launch_browser() -> (Browser, tokio::task::JoinHandle<()>) {
-    let (browser, mut handler) = Browser::launch(get_browser_config().unwrap())
-        .await
-        .unwrap();
-
-    // spawn a new task that continuously polls the handler
-    let handle = task::spawn(async move {
-        while let Some(h) = handler.next().await {
-            if h.is_err() {
-                break;
-            }
-        }
-    });
-
-    (browser, handle)
-}
+use crate::features::chrome::launch_browser;
 
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
