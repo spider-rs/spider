@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.40.11"
+version = "1.40.13"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -42,7 +42,7 @@ flexbuffers = { version = "2.0.0", optional = true }
 itertools = { version = "0.10.5", optional = true }
 case_insensitive_string = { version = "0.1.6", features = [ "compact", "serde" ]}
 jsdom = { version = "0.0.11-alpha.1", optional = true, features = [ "hashbrown", "tokio" ] }
-chromiumoxide_fork = { version = "0.5.7", optional = true, features = ["tokio-runtime", "bytes"], default-features = false }
+chromiumoxide_fork = { version = "0.5.9", optional = true, features = ["tokio-runtime", "bytes"], default-features = false }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
