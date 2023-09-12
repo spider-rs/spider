@@ -81,7 +81,8 @@ pub async fn launch_browser(
     let (browser, mut handler) = match std::env::var("CHROME_URL") {
         Ok(v) => Browser::connect(&v).await,
         _ => Browser::launch(get_browser_config(&proxies).unwrap()).await,
-    }.unwrap();
+    }
+    .unwrap();
 
     // spawn a new task that continuously polls the handler
     let handle = task::spawn(async move {

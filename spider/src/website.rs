@@ -875,6 +875,7 @@ impl Website {
             let (mut browser, browser_handle) = launch_browser(&self.configuration.proxies).await;
 
             let new_page = browser.new_page("about:blank").await.unwrap();
+
             if cfg!(feature = "chrome_stealth") {
                 let _ = new_page.enable_stealth_mode(&if self.configuration.user_agent.is_some() {
                     &self.configuration.user_agent.as_ref().unwrap().as_str()
@@ -887,7 +888,7 @@ impl Website {
                 client,
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
-                new_page,
+                new_page.clone(),
             ));
 
             let mut links: HashSet<CaseInsensitiveString> = self
@@ -983,6 +984,8 @@ impl Website {
             if !std::env::var("CHROME_URL").is_ok() {
                 let _ = browser.close().await;
                 let _ = browser_handle.await;
+            } else {
+                let _ = new_page.close().await;
             }
         }
     }
@@ -1342,8 +1345,7 @@ impl Website {
                     ""
                 });
             }
-            let page = Arc::new(new_page);
-
+            let page = Arc::new(new_page.clone());
             // crawl while links exists
             loop {
                 let stream =
@@ -1437,6 +1439,8 @@ impl Website {
 
             if !std::env::var("CHROME_URL").is_ok() {
                 let _ = browser.close().await;
+            } else {
+                let _ = new_page.close().await;
             }
         }
     }
