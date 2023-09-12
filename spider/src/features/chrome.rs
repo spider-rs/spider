@@ -46,6 +46,7 @@ pub fn get_browser_config(
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .request_timeout(Duration::from_secs(30))
+        .no_sandbox()
         .with_head();
 
     let builder = match proxies {
@@ -77,9 +78,10 @@ pub fn get_browser_config(
 pub async fn launch_browser(
     proxies: &Option<Box<Vec<string_concat::String>>>,
 ) -> (Browser, tokio::task::JoinHandle<()>) {
-    let (browser, mut handler) = Browser::launch(get_browser_config(&proxies).unwrap())
-        .await
-        .unwrap();
+    let (browser, mut handler) =  match std::env::var("CHROME_URL") {
+        Ok(v) => Browser::connect(&v).await,
+        _ => Browser::launch(get_browser_config(&proxies).unwrap()).await,
+    }.unwrap();
 
     // spawn a new task that continuously polls the handler
     let handle = task::spawn(async move {

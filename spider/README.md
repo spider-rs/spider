@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.40.6"
+spider = "1.40.7"
 ```
 
 And then the code:
@@ -87,7 +87,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.40.6", features = ["regex", "ua_generator"] }
+spider = { version = "1.40.7", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -103,7 +103,7 @@ spider = { version = "1.40.6", features = ["regex", "ua_generator"] }
 1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
 1. `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 1. `time`: Enables duration tracking per page.
-1. `chrome`: Enables chrome headless rendering [experimental].
+1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely [experimental].
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
 1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
@@ -114,7 +114,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.40.6", features = ["decentralized"] }
+spider = { version = "1.40.7", features = ["decentralized"] }
 ```
 
 ```sh
@@ -135,7 +135,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.40.6", features = ["sync"] }
+spider = { version = "1.40.7", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -165,7 +165,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.40.6", features = ["regex"] }
+spider = { version = "1.40.7", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -192,7 +192,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.40.6", features = ["control"] }
+spider = { version = "1.40.7", features = ["control"] }
 ```
 
 ```rust
