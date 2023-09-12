@@ -980,8 +980,10 @@ impl Website {
             }
 
             self.status = CrawlStatus::Idle;
-            let _ = browser.close().await;
-            let _ = browser_handle.await;
+            if !std::env::var("CHROME_URL").is_ok() {
+                let _ = browser.close().await;
+                let _ = browser_handle.await;
+            }
         }
     }
 
@@ -1432,7 +1434,10 @@ impl Website {
             }
 
             self.status = CrawlStatus::Idle;
-            let _ = browser.close().await;
+
+            if !std::env::var("CHROME_URL").is_ok() {
+                let _ = browser.close().await;
+            }
         }
     }
 

@@ -78,7 +78,7 @@ pub fn get_browser_config(
 pub async fn launch_browser(
     proxies: &Option<Box<Vec<string_concat::String>>>,
 ) -> (Browser, tokio::task::JoinHandle<()>) {
-    let (browser, mut handler) =  match std::env::var("CHROME_URL") {
+    let (browser, mut handler) = match std::env::var("CHROME_URL") {
         Ok(v) => Browser::connect(&v).await,
         _ => Browser::launch(get_browser_config(&proxies).unwrap()).await,
     }.unwrap();
