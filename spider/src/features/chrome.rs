@@ -93,7 +93,7 @@ pub async fn launch_browser(
     (browser, handle)
 }
 
-#[cfg(feature = "chrome_cpu")]
+#[cfg(not(feature = "chrome_cpu"))]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
 static CHROME_ARGS: [&'static str; 59] = [
     "--headless",
@@ -160,7 +160,7 @@ static CHROME_ARGS: [&'static str; 59] = [
     "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
 ];
 
-#[cfg(not(feature = "chrome_cpu"))]
+#[cfg(feature = "chrome_cpu")]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
 static CHROME_ARGS: [&'static str; 62] = [
     "--headless",
