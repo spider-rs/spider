@@ -1575,6 +1575,7 @@ impl Website {
                                                     _ => (),
                                                 }
                                             });
+                                            
                                         }
                                         Location::None | Location::ParseErr(_) => (),
                                     },
@@ -1600,6 +1601,8 @@ impl Website {
                 }
                 Err(err) => log("http network error: ", err.to_string()),
             };
+
+            drop(tx);
 
             if let Ok(handle) = handles.await {
                 match self.pages.as_mut() {
@@ -1653,8 +1656,15 @@ impl Website {
     }
 
     /// Add user agent to request.
-    pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
+    pub fn with_user_agent(&mut self, user_agent: Option<&str>) -> &mut Self {
         self.configuration.with_user_agent(user_agent);
+        self
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Add user agent to request.
+    pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
+        self.configuration.with_sitemap(sitemap_url);
         self
     }
 

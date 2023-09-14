@@ -131,10 +131,20 @@ impl Configuration {
         self
     }
 
+    #[cfg(feature = "sitemap")]
+    /// Set the sitemap url.
+    pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
+        match sitemap_url {
+            Some(sitemap_url) => self.sitemap_url = Some(CompactString::new(sitemap_url.to_string()).into()),
+            _ => self.sitemap_url = None,
+        };
+        self
+    }
+
     /// Add user agent to request.
-    pub fn with_user_agent(&mut self, user_agent: Option<CompactString>) -> &mut Self {
+    pub fn with_user_agent(&mut self, user_agent: Option<&str>) -> &mut Self {
         match user_agent {
-            Some(agent) => self.user_agent = Some(agent.into()),
+            Some(agent) => self.user_agent = Some(CompactString::new(agent.to_string()).into()),
             _ => self.user_agent = None,
         };
         self
