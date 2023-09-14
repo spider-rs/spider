@@ -32,6 +32,9 @@ pub struct Configuration {
     pub proxies: Option<Box<Vec<String>>>,
     /// Headers to include with request.
     pub headers: Option<Box<reqwest::header::HeaderMap>>,
+    #[cfg(feature = "sitemap")]
+    /// Include a sitemap in response of the crawl
+    pub sitemap_url: Option<Box<CompactString>>,
 }
 
 /// Get the user agent from the top agent list randomly.

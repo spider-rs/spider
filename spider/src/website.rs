@@ -849,23 +849,43 @@ impl Website {
         links
     }
 
-    /// Start to crawl website with async conccurency
+    #[cfg(not(feature = "sitemap"))]
+    /// Start to crawl website with async concurrency
     pub async fn crawl(&mut self) {
         let (client, handle) = self.setup().await;
 
-        self.crawl_concurrent(client, handle).await;
+        self.crawl_concurrent(&client, &handle).await;
     }
 
-    /// Start to scrape/download website with async conccurency
+    #[cfg(not(feature = "sitemap"))]
+    /// Start to scrape/download website with async concurrency
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
 
-        self.scrape_concurrent(&client, handle).await;
+        self.scrape_concurrent(&client, &handle).await;
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Start to crawl website and include sitemap links
+    pub async fn crawl(&mut self) {
+        let (client, handle) = self.setup().await;
+
+        self.crawl_concurrent(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, false).await;
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Start to scrape/download website with async concurrency
+    pub async fn scrape(&mut self) {
+        let (client, handle) = self.setup().await;
+
+        self.scrape_concurrent(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, true).await;
     }
 
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
+    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = self.setup_selectors();
 
         // crawl if valid selector
@@ -885,7 +905,7 @@ impl Website {
             }
 
             let shared = Arc::new((
-                client,
+                client.to_owned(),
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
                 new_page.clone(),
@@ -992,7 +1012,7 @@ impl Website {
 
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
-    async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
+    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = self.setup_selectors();
 
         // crawl if valid selector
@@ -1001,7 +1021,7 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
 
             let shared = Arc::new((
-                client,
+                client.to_owned(),
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
             ));
@@ -1098,7 +1118,7 @@ impl Website {
 
     /// Start to crawl website concurrently
     #[cfg(feature = "decentralized")]
-    async fn crawl_concurrent(&mut self, client: Client, handle: Option<Arc<AtomicI8>>) {
+    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain.inner()) {
             Ok(_) => {
                 let blacklist_url = self.configuration.get_blacklist();
@@ -1203,7 +1223,7 @@ impl Website {
 
     #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store html
-    async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
+    async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,
@@ -1316,7 +1336,7 @@ impl Website {
 
     #[cfg(feature = "chrome")]
     /// Start to scape website concurrently and store html
-    async fn scrape_concurrent(&mut self, client: &Client, handle: Option<Arc<AtomicI8>>) {
+    async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,
@@ -1442,6 +1462,155 @@ impl Website {
             } else {
                 let _ = new_page.close().await;
             }
+        }
+    }
+
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap.
+    #[cfg(feature = "sitemap")]
+    pub async fn sitemap_crawl(
+        &mut self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+        scrape: bool,
+    ) {
+        use sitemap::reader::{SiteMapEntity, SiteMapReader};
+        use sitemap::structs::Location;
+        let domain = self.domain.inner().as_str();
+        let handle = handle.clone().unwrap_or_default();
+
+        let mut interval = tokio::time::interval(Duration::from_millis(15));
+
+        let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
+            Some(sitemap_path) => {
+                let sitemap_path = sitemap_path.as_str();
+                if domain.ends_with('/') && sitemap_path.starts_with('/') {
+                    (&sitemap_path[1..], false)
+                } else if !domain.ends_with('/')
+                    && !sitemap_path.is_empty()
+                    && !sitemap_path.starts_with('/')
+                {
+                    (sitemap_path, true)
+                } else {
+                    (sitemap_path, false)
+                }
+            }
+            _ => ("sitemap.xml", !domain.ends_with("/")),
+        };
+
+        self.configuration.sitemap_url = Some(Box::new(
+            string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path).into(),
+        ));
+
+        let blacklist_url = self.configuration.get_blacklist();
+
+        while let Some(site) = &self.configuration.sitemap_url {
+            if !handle.load(Ordering::Relaxed) == 2 {
+                break;
+            }
+
+            let mut sitemap_added = false;
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
+            let client = client.clone();
+
+            let channel = self.channel.clone();
+
+            let handles = tokio::spawn(async move {
+                let mut pages = Vec::new();
+
+                while let Some(page) = rx.recv().await {
+                    if scrape {
+                        pages.push(page.clone());
+                    };
+                    match &channel {
+                        Some(c) => {
+                            match c.0.send(page) {
+                                _ => (),
+                            };
+                        }
+                        _ => (),
+                    };
+                }
+
+                pages
+            });
+
+            match client.get(site.as_str()).send().await {
+                Ok(response) => {
+                    match response.text().await {
+                        Ok(text) => {
+                            // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
+                            let mut stream =
+                                tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
+
+                            while let Some(entity) = stream.next().await {
+                                while handle.load(Ordering::Relaxed) == 1 {
+                                    interval.tick().await;
+                                }
+                                // shutdown all links
+                                if handle.load(Ordering::Relaxed) == 2 {
+                                    break;
+                                }
+
+                                match entity {
+                                    SiteMapEntity::Url(url_entry) => match url_entry.loc {
+                                        Location::Url(url) => {
+                                            let link: CaseInsensitiveString = url.as_str().into();
+
+                                            if !self.is_allowed(&link, &blacklist_url) {
+                                                continue;
+                                            }
+
+                                            self.links_visited.insert(link.clone());
+
+                                            let client = client.clone();
+                                            let tx = tx.clone();
+
+                                            tokio::spawn(async move {
+                                                let page = Page::new(&link.inner(), &client).await;
+
+                                                match tx.reserve().await {
+                                                    Ok(permit) => {
+                                                        permit.send(page);
+                                                    }
+                                                    _ => (),
+                                                }
+                                            });
+                                        }
+                                        Location::None | Location::ParseErr(_) => (),
+                                    },
+                                    SiteMapEntity::SiteMap(sitemap_entry) => {
+                                        match sitemap_entry.loc {
+                                            Location::Url(url) => {
+                                                self.configuration
+                                                    .sitemap_url
+                                                    .replace(Box::new(url.as_str().into()));
+                                                sitemap_added = true;
+                                            }
+                                            Location::None | Location::ParseErr(_) => (),
+                                        }
+                                    }
+                                    SiteMapEntity::Err(err) => {
+                                        log("incorrect sitemap error: ", err.msg())
+                                    }
+                                };
+                            }
+                        }
+                        Err(err) => log("http parse error: ", err.to_string()),
+                    };
+                }
+                Err(err) => log("http network error: ", err.to_string()),
+            };
+
+            if let Ok(handle) = handles.await {
+                match self.pages.as_mut() {
+                    Some(p) => p.extend(handle),
+                    _ => (),
+                };
+            }
+
+            if !sitemap_added {
+                self.configuration.sitemap_url = None;
+            };
         }
     }
 

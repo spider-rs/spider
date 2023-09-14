@@ -75,7 +75,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "paste",
- "windows",
+ "windows 0.42.0",
 ]
 
 [[package]]
@@ -172,6 +172,21 @@ name = "android-properties"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7eb209b1518d6bb87b283c20095f5228ecda460da70b44f0802523dea6da04"
+
+[[package]]
+name = "android-tzdata"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e999941b234f3131b00bc13c22d06e8c5ff726d1b6318ac7eb276997bbb4fef0"
+
+[[package]]
+name = "android_system_properties"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "anyhow"
@@ -728,6 +743,29 @@ checksum = "304350d6db3cbb12eba21ab08118bc697f6fd990e46628a910d712b62a8324d3"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "chrono"
+version = "0.4.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defd4e7873dbddba6c7c91e199c7fcb946abc4a6a4ac3195400bcfb01b5de877"
+dependencies = [
+ "android-tzdata",
+ "iana-time-zone",
+ "js-sys",
+ "num-traits",
+ "wasm-bindgen",
+ "windows-targets 0.48.5",
+]
+
+[[package]]
+name = "chrono_utils"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f69ed74e2117892a1a4e05d31f6612178e8e827bfbd83bbf8ca8c1bcfbda710"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]
@@ -1896,6 +1934,29 @@ dependencies = [
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "iana-time-zone"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fad5b825842d2b38bd206f3e81d6957625fd7f0a361e345c30e01a0ae2dd613"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "wasm-bindgen",
+ "windows 0.48.0",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -3403,6 +3464,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
+name = "sitemap"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c697e1d88854f66d7d805e8b532e341661a4b8f49fab419be8e82b0cafdeb4d"
+dependencies = [
+ "chrono",
+ "chrono_utils",
+ "url",
+ "xml-rs",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3477,7 +3550,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.40.13"
+version = "1.41.0"
 dependencies = [
  "ahash",
  "bytes",
@@ -3500,6 +3573,7 @@ dependencies = [
  "reqwest",
  "selectors",
  "serde",
+ "sitemap",
  "smallvec",
  "string_concat",
  "tendril",
@@ -3512,7 +3586,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.40.13"
+version = "1.41.0"
 dependencies = [
  "clap 3.2.25",
  "env_logger 0.9.3",
@@ -3524,7 +3598,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.40.13"
+version = "1.41.0"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
@@ -3545,7 +3619,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.40.13"
+version = "1.41.0"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
@@ -4559,6 +4633,15 @@ dependencies = [
  "windows_x86_64_gnu 0.42.2",
  "windows_x86_64_gnullvm 0.42.2",
  "windows_x86_64_msvc 0.42.2",
+]
+
+[[package]]
+name = "windows"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
+dependencies = [
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

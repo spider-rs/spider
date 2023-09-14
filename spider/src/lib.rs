@@ -55,10 +55,13 @@
 //! - `socks`: Enables socks5 proxy support.
 //! - `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 //! - `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
+//! - `sitemap`: Include sitemap pages in results.
 //! - `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 //! - `time`: Enables duration tracking per page.
-//! - `chrome`: Enables chrome headless rendering [experimental].
+//! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely [experimental].
 //! - `chrome_headed`: Enables chrome rendering headful rendering [experimental].
+//! - `chrome_cpu`: Disable gpu usage for chrome browser.
+//! - `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 
 pub extern crate bytes;
 pub extern crate compact_str;
