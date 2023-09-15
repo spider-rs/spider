@@ -7,6 +7,7 @@ use crate::CaseInsensitiveString;
 use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::Client;
+use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -144,6 +145,10 @@ pub struct Website {
     channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
     /// the status of the active crawl
     status: CrawlStatus,
+    /// external domains to include
+    pub external_domains: Box<HashSet<String>>,
+    /// external domains to include case-insensitive
+    external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
 }
 
 impl Website {
@@ -162,6 +167,8 @@ impl Website {
             on_link_find_callback: None,
             channel: None,
             status: CrawlStatus::Start,
+            external_domains: Default::default(),
+            external_domains_caseless: Default::default(),
         }
     }
 
@@ -591,6 +598,18 @@ impl Website {
         {
             let page = Page::new(&self.domain.inner(), &client).await;
 
+            if !self.external_domains.is_empty() {
+                self.external_domains_caseless = self
+                    .external_domains
+                    .iter()
+                    .filter_map(|d| match Url::parse(d) {
+                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
+                        _ => None,
+                    })
+                    .collect::<HashSet<CaseInsensitiveString>>()
+                    .into();
+            }
+
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
@@ -643,6 +662,18 @@ impl Website {
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             let page = Page::new(&self.domain.inner(), &client, &page).await;
+
+            if !self.external_domains.is_empty() {
+                self.external_domains_caseless = self
+                    .external_domains
+                    .iter()
+                    .filter_map(|d| match Url::parse(d) {
+                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
+                        _ => None,
+                    })
+                    .collect::<HashSet<CaseInsensitiveString>>()
+                    .into();
+            }
 
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
@@ -909,6 +940,7 @@ impl Website {
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
                 new_page.clone(),
+                self.external_domains_caseless.clone(),
             ));
 
             let mut links: HashSet<CaseInsensitiveString> = self
@@ -965,6 +997,9 @@ impl Website {
                                             &shared.3,
                                         )
                                         .await;
+
+                                        page.set_external(shared.4.clone());
+
                                         let page_links = page.links(&shared.1).await;
 
                                         match &shared.2 {
@@ -1024,6 +1059,7 @@ impl Website {
                 client.to_owned(),
                 unsafe { selectors.unwrap_unchecked() },
                 self.channel.clone(),
+                self.external_domains_caseless.clone(),
             ));
 
             let mut links: HashSet<CaseInsensitiveString> =
@@ -1073,8 +1109,10 @@ impl Website {
                                             Some(cb) => cb(link, None),
                                             _ => (link, None),
                                         };
-                                        let page =
+                                        let mut page =
                                             Page::new(&link_result.0.as_ref(), &shared.0).await;
+                                        page.set_external(shared.3.to_owned());
+
                                         let page_links = page.links(&shared.1).await;
 
                                         match &shared.2 {
@@ -1269,15 +1307,17 @@ impl Website {
                     }
                     self.links_visited.insert(link.clone());
                     log("fetch", &link);
-                    let client = client.clone();
                     let permit = SEM.acquire().await.unwrap();
+                    // these clones should move into a single arc
+                    let client = client.clone();
                     let channel = self.channel.clone();
                     let selectors = selectors.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
 
                     set.spawn(async move {
                         drop(permit);
                         let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
-                        let page = build(&link.as_ref(), page);
+                        let mut page = build(&link.as_ref(), page);
 
                         let (link, _) = match on_link_find_callback {
                             Some(cb) => {
@@ -1296,6 +1336,8 @@ impl Website {
                             }
                             _ => (),
                         };
+
+                        page.set_external(external_domains_caseless);
 
                         let page_links = page.links(&*selectors).await;
 
@@ -1396,13 +1438,14 @@ impl Website {
                     let channel = self.channel.clone();
                     let selectors = selectors.clone();
                     let page = page.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
 
                     set.spawn(async move {
                         drop(permit);
                         let page =
                             crate::utils::fetch_page_html_chrome(&link.as_ref(), &client, &page)
                                 .await;
-                        let page = build(&link.as_ref(), page);
+                        let mut page = build(&link.as_ref(), page);
 
                         let (link, _) = match on_link_find_callback {
                             Some(cb) => {
@@ -1422,6 +1465,7 @@ impl Website {
                             _ => (),
                         };
 
+                        page.set_external(external_domains_caseless);
                         let page_links = page.links(&*selectors).await;
 
                         (link, page, page_links)
@@ -1575,7 +1619,6 @@ impl Website {
                                                     _ => (),
                                                 }
                                             });
-                                            
                                         }
                                         Location::None | Location::ParseErr(_) => (),
                                     },
@@ -1687,6 +1730,34 @@ impl Website {
     pub fn with_headers(&mut self, headers: Option<reqwest::header::HeaderMap>) -> &mut Self {
         self.configuration.with_headers(headers);
         self
+    }
+
+    /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
+    pub fn with_external_domains<'a, 'b>(&mut self, external_domains: Option<impl Iterator<Item = String> + 'a>) -> &mut Self {
+        match external_domains {
+            Some(external_domains) => {
+                self.external_domains_caseless = external_domains
+                    .into_iter()
+                    .filter_map(|d| match Url::parse(&d) {
+                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
+                        _ => None,
+                    })
+                    .collect::<HashSet<CaseInsensitiveString>>()
+                    .into();
+            }
+            _ => self.external_domains_caseless.clear(),
+        }
+
+        self
+    }
+
+    /// Build the website configuration when using with_builder
+    pub fn build(&self) -> Result<Self, Error> {
+        if self.domain_parsed.is_none() {
+            Err(ErrorKind::NotFound.into())
+        } else {
+            Ok(self.to_owned())
+        }
     }
 
     /// Setup subscription for data.

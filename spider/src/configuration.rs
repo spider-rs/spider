@@ -135,7 +135,9 @@ impl Configuration {
     /// Set the sitemap url.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
         match sitemap_url {
-            Some(sitemap_url) => self.sitemap_url = Some(CompactString::new(sitemap_url.to_string()).into()),
+            Some(sitemap_url) => {
+                self.sitemap_url = Some(CompactString::new(sitemap_url.to_string()).into())
+            }
             _ => self.sitemap_url = None,
         };
         self

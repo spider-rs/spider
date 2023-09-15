@@ -29,6 +29,8 @@ pub struct Page {
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
     duration: Instant,
+    /// The external urls to group with the domain
+    pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -39,6 +41,8 @@ pub struct Page {
     html: Option<Bytes>,
     /// The current links for the page.
     pub links: HashSet<CaseInsensitiveString>,
+    /// The external urls to group with the domain
+    pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
 }
 
 lazy_static! {
@@ -130,6 +134,7 @@ pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
         url: url.into(),
         #[cfg(feature = "time")]
         duration: Instant::now(),
+        external_domains_caseless: Default::default(),
     }
 }
 
@@ -139,6 +144,7 @@ pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
     Page {
         html: if html.is_some() { html } else { None },
         links: Default::default(),
+        external_domains_caseless: Default::default(),
     }
 }
 
@@ -180,7 +186,11 @@ impl Page {
             _ => Default::default(),
         };
 
-        Page { html: None, links }
+        Page {
+            html: None,
+            links,
+            external_domains_caseless: Default::default(),
+        }
     }
 
     /// Page request fulfilled.
@@ -192,6 +202,11 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {
         &self.url
+    }
+
+    /// Set the external domains to treat as one
+    pub fn set_external(&mut self, external_domains_caseless: Box<HashSet<CaseInsensitiveString>>) {
+        self.external_domains_caseless = external_domains_caseless;
     }
 
     /// Parsed URL getter for page.
@@ -264,12 +279,21 @@ impl Page {
                     match element.attr("href") {
                         Some(href) => {
                             let mut abs = self.abs_path(href);
-
-                            // determine if the crawl can continue based on host match
-                            let mut can_process = match abs.host_str() {
+                            let host_name = abs.host_str();
+                            let mut can_process = match host_name {
                                 Some(host) => parent_host.ends_with(host),
                                 _ => false,
                             };
+                            if !can_process
+                                && host_name.is_some()
+                                && !self.external_domains_caseless.is_empty()
+                            {
+                                can_process = self
+                                    .external_domains_caseless
+                                    .contains::<CaseInsensitiveString>(
+                                        &host_name.unwrap_or_default().into(),
+                                    )
+                            }
 
                             if can_process {
                                 if abs.scheme() != parent_host_scheme.as_str() {
@@ -349,12 +373,17 @@ impl Page {
 
             while let Some(href) = stream.next().await {
                 let mut abs = self.abs_path(href.inner());
-
-                // determine if the crawl can continue based on host match
-                let mut can_process = match abs.host_str() {
+                let host_name = abs.host_str();
+                let mut can_process = match host_name {
                     Some(host) => parent_host.ends_with(host),
                     _ => false,
                 };
+                if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
+                {
+                    can_process = self
+                        .external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                }
 
                 if can_process {
                     if abs.scheme() != parent_host_scheme.as_str() {
