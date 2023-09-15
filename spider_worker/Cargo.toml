@@ -2,7 +2,7 @@
 name = "spider_worker"
 version = "1.42.3"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
-description = "The fastest web crawler CLI written in Rust."
+description = "The fastest web crawler as a worker or proxy."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider", "spider_cli"]

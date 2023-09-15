@@ -23,8 +23,8 @@ See [EXAMPLES](./examples/).
 
 The hosted pay as you go service provides scraping with AI capabilities to collect and learn from the data extremely fast.
 
-![The hosted service dashboard example](https://github.com/spider-rs/spiderwebai-help/raw/main/dashboard-resources.png)
-![The hosted service chat feature to perform task based on complete website data example](https://github.com/spider-rs/spiderwebai-help/raw/main/ai-example.png)
+![The hosted service dashboard example](https://github.com/spider-rs/spiderwebai-help/raw/main/media.png)
+![The hosted service chat feature to perform task based on complete website data example](https://github.com/spider-rs/spiderwebai-help/raw/main/ai-chat.png)
 
 ## License
 
