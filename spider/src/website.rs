@@ -854,11 +854,11 @@ impl Website {
                 if !page.is_empty() {
                     let u = page.get_url().into();
                     let link_result = match self.on_link_find_callback {
-                        Some(cb) => cb(u),
-                        _ => u,
+                        Some(cb) => cb(u, None),
+                        _ => (link, None),
                     };
 
-                    self.links_visited.insert(link_result);
+                    self.links_visited.insert(link_result.0);
                     let page_links = HashSet::from(page.links(&base).await);
 
                     links.extend(page_links);
