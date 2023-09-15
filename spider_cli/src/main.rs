@@ -67,7 +67,7 @@ async fn main() {
             website.crawl().await;
 
             if *output_links {
-                let links: Vec<_> = website.get_links().iter().collect();
+                let links: Vec<String> = website.get_links().iter().map(|l| l.inner().to_string()).collect();
                 io::stdout()
                     .write_all(format!("{:?}", links).as_bytes())
                     .unwrap();
@@ -170,7 +170,7 @@ async fn main() {
                                 let page_links = page.links(&*selectors).await;
 
                                 for link in page_links {
-                                    links.push(link.as_ref().to_owned());
+                                    links.push(link.as_ref().to_string());
                                 }
                             }
 
