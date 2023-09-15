@@ -25,10 +25,5 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Build
         run: cargo build --verbose
-      - name: Setup Proxy Server local
-        uses: baptiste0928/cargo-install@v1
-        with:
-          crate: merino
-          version: "0.1.3"
       - name: Run tests
-        run: merino --no-auth & ./target/debug/spider_worker & cargo test --verbose --all-features
+        run: ./target/debug/spider_worker & cargo test --verbose --all-features

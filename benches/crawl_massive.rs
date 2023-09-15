@@ -23,7 +23,6 @@ async fn main() {
     };
 
     let mut website: Website = Website::new(&target);
-    website.configuration.user_agent = Some(Box::new("usasearch".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
     website.configuration.respect_robots_txt = true;
     let start = Instant::now();
     website.crawl().await;
