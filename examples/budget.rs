@@ -1,4 +1,4 @@
-//! `cargo run --example budget`
+//! `cargo run --example budget --features budget`
 extern crate spider;
 
 use spider::tokio;

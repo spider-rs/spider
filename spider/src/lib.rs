@@ -49,6 +49,7 @@
 //! - `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 //! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
 //! - `sync`: Subscribe to changes for Page data processing async.
+//! - `budget`: Allows setting a crawl budget per path with depth.
 //! - `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 //! - `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 //! - `serde`: Enables serde serialization support.
