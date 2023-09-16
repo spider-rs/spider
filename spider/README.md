@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.44.1"
+spider = "1.45.0"
 ```
 
 And then the code:
@@ -90,7 +90,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.44.1", features = ["regex", "ua_generator"] }
+spider = { version = "1.45.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -98,6 +98,7 @@ spider = { version = "1.44.1", features = ["regex", "ua_generator"] }
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
 1. `sync`: Subscribe to changes for Page data processing async.
+1. `budget`: Allows setting a crawl budget per path with depth.
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 1. `serde`: Enables serde serialization support.
@@ -118,7 +119,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.44.1", features = ["decentralized"] }
+spider = { version = "1.45.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -139,7 +140,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.44.1", features = ["sync"] }
+spider = { version = "1.45.0", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -169,7 +170,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.44.1", features = ["regex"] }
+spider = { version = "1.45.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -196,7 +197,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.44.1", features = ["control"] }
+spider = { version = "1.45.0", features = ["control"] }
 ```
 
 ```rust

@@ -5,7 +5,10 @@ use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
 use crate::CaseInsensitiveString;
 use compact_str::CompactString;
+
+#[cfg(feature = "budget")]
 use hashbrown::HashMap;
+
 use hashbrown::HashSet;
 use reqwest::Client;
 use std::io::{Error, ErrorKind};
@@ -94,9 +97,10 @@ lazy_static! {
 }
 
 /// the active status of the crawl.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum CrawlStatus {
     /// The crawl did not start yet.
+    #[default]
     Start,
     /// The crawl is idle and has completed.
     Idle,
@@ -124,7 +128,7 @@ pub enum CrawlStatus {
 ///     // do something
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Website {
     /// configuration properties for website.
     pub configuration: Box<Configuration>,
@@ -150,6 +154,7 @@ pub struct Website {
     pub external_domains: Box<HashSet<String>>,
     /// external domains to include case-insensitive
     external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
+    #[cfg(feature = "budget")]
     /// A crawl budget for the paths
     budget: Option<HashMap<CaseInsensitiveString, u32>>,
 }
@@ -170,9 +175,7 @@ impl Website {
             on_link_find_callback: None,
             channel: None,
             status: CrawlStatus::Start,
-            external_domains: Default::default(),
-            external_domains_caseless: Default::default(),
-            budget: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -182,7 +185,27 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     #[inline]
-    #[cfg(not(feature = "regex"))]
+    #[cfg(all(not(feature = "regex"), not(feature = "budget")))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<Vec<CompactString>>,
+    ) -> bool {
+        if self.links_visited.contains(link) {
+            false
+        } else {
+            self.is_allowed_default(&link.inner(), blacklist_url)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over crawl budget
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(not(feature = "regex"), feature = "budget"))]
     pub fn is_allowed(
         &mut self,
         link: &CaseInsensitiveString,
@@ -203,7 +226,27 @@ impl Website {
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     #[inline]
-    #[cfg(feature = "regex")]
+    #[cfg(all(feature = "regex", not(feature = "budget")))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<regex::RegexSet>,
+    ) -> bool {
+        if self.links_visited.contains(link) {
+            false
+        } else {
+            self.is_allowed_default(link, blacklist_url)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over crawl budget
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(feature = "regex", feature = "budget"))]
     pub fn is_allowed(
         &mut self,
         link: &CaseInsensitiveString,
@@ -270,6 +313,7 @@ impl Website {
         }
     }
 
+    #[cfg(feature = "budget")]
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
         if self.budget.is_some() {
@@ -1813,6 +1857,7 @@ impl Website {
         self
     }
 
+    #[cfg(feature = "budget")]
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*".
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.budget = match budget {
@@ -2152,6 +2197,7 @@ async fn test_link_duplicates() {
 }
 
 #[tokio::test]
+#[cfg(feature = "budget")]
 async fn test_crawl_budget() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.with_budget(Some(HashMap::from([("*", 1), ("/licenses", 1)])));
