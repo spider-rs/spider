@@ -1316,8 +1316,9 @@ impl Website {
 
                     set.spawn(async move {
                         drop(permit);
-                        let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
-                        let mut page = build(&link.as_ref(), page);
+                        let page_resource = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
+                        let mut page = build(&link.as_ref(), page_resource.0);
+                        page.final_redirect_destination = page_resource.1;
 
                         let (link, _) = match on_link_find_callback {
                             Some(cb) => {

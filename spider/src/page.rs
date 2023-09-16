@@ -20,7 +20,7 @@ use url::Url;
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
-    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
+    /// The bytes of the resource.
     html: Option<Bytes>,
     /// Base absolute url for page.
     base: Url,
@@ -31,17 +31,19 @@ pub struct Page {
     duration: Instant,
     /// The external urls to group with the domain
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
+    /// The final destination of the page if redirects were performed [Not implemented in the chrome feature].
+    pub final_redirect_destination: Option<String>
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[cfg(feature = "decentralized")]
 #[derive(Debug, Clone)]
 pub struct Page {
-    /// HTML parsed with [scraper](https://crates.io/crates/scraper) lib. The html is not stored and only used to parse links.
+    /// The bytes of the resource.
     html: Option<Bytes>,
     /// The current links for the page.
     pub links: HashSet<CaseInsensitiveString>,
-    /// The external urls to group with the domain
+    /// The external urls to group with the domain.
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
 }
 
@@ -109,7 +111,6 @@ pub fn get_page_selectors(
                 let dname = domain_name(&host);
                 let scheme = host.scheme();
 
-                // static html group parse
                 (
                     dname.into(),
                     smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
@@ -135,6 +136,7 @@ pub fn build(url: &str, html: Option<bytes::Bytes>) -> Page {
         #[cfg(feature = "time")]
         duration: Instant::now(),
         external_domains_caseless: Default::default(),
+        final_redirect_destination: Default::default(),
     }
 }
 
@@ -161,13 +163,20 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     pub async fn new_page(url: &str, client: &Client) -> Self {
-        build(url, crate::utils::fetch_page_html_raw(&url, &client).await)
+        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+        let mut page =  build(url, page_resource.0);
+        // set final_redirect_destination directly to prevent cluttering build params, if more metadata is required move to hash
+        page.final_redirect_destination = page_resource.1;
+        page
     }
 
     /// Instantiate a new page and gather the html.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     pub async fn new(url: &str, client: &Client) -> Self {
-        build(url, crate::utils::fetch_page_html(&url, &client).await)
+        let page_resource = crate::utils::fetch_page_html(&url, &client).await;
+        let mut page = build(url, page_resource.0);
+        page.final_redirect_destination = page_resource.1;
+        page
     }
 
     /// Instantiate a new page and gather the links.
@@ -204,6 +213,17 @@ impl Page {
         &self.url
     }
 
+    /// Url getter for page after redirects.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn get_url_final(&self) -> &str {
+        match self.final_redirect_destination.as_ref() {
+            Some(u) => {
+                &u
+            }
+            _ => &self.url
+        }
+    }
+
     /// Set the external domains to treat as one
     pub fn set_external(&mut self, external_domains_caseless: Box<HashSet<CaseInsensitiveString>>) {
         self.external_domains_caseless = external_domains_caseless;
@@ -214,6 +234,7 @@ impl Page {
     pub fn get_url_parsed(&self) -> &Url {
         &self.base
     }
+
 
     #[cfg(feature = "decentralized")]
     /// URL getter for page.

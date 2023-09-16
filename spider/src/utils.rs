@@ -18,14 +18,22 @@ pub async fn fetch_page_html(
     }
 }
 
-/// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+/// Perform a network request to a resource extracting all content streaming.
+pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> (Option<bytes::Bytes>, Option<String>) {
     use crate::bytes::BufMut;
     use bytes::BytesMut;
     use tokio_stream::StreamExt;
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
+            let u = res.url().as_str();
+
+            let rd = if target_url != u {
+                Some(u.into())
+            } else {
+                None
+            };
+
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
 
@@ -35,20 +43,21 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> Option<by
                     _ => (),
                 }
             }
-
-            Some(data.into())
+            
+            (Some(data.into()), rd)
         }
-        Ok(_) => None,
+        Ok(_) => Default::default(),
         Err(_) => {
             log("- error parsing html text {}", &target_url);
-            None
+            Default::default()
         }
     }
+
 }
 
 #[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
 /// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes::Bytes>, Option<String>) {
     fetch_page_html_raw(&target_url, &client).await
 }
 
