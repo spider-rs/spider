@@ -7,14 +7,16 @@ use std::io::Error;
 use std::time::Instant;
 
 #[tokio::main]
-async fn main() -> Result<(), Error>{
+async fn main() -> Result<(), Error> {
     let mut website = Website::new("https://rsseau.fr")
         .with_user_agent(Some("SpiderBot"))
         .with_blacklist_url(Some(Vec::from(["https://rsseau.fr/resume".into()])))
         .with_subdomains(true)
         .with_tld(true)
         .with_respect_robots_txt(true)
-        .with_external_domains(Some(Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter()))
+        .with_external_domains(Some(
+            Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter(),
+        ))
         .build()?;
 
     let start = Instant::now();

@@ -1316,8 +1316,10 @@ impl Website {
 
                     set.spawn(async move {
                         drop(permit);
-                        let page = crate::utils::fetch_page_html(&link.as_ref(), &client).await;
-                        let mut page = build(&link.as_ref(), page);
+                        let page_resource =
+                            crate::utils::fetch_page_html(&link.as_ref(), &client).await;
+                        let mut page = build(&link.as_ref(), page_resource.0);
+                        page.set_final_redirect(page_resource.1);
 
                         let (link, _) = match on_link_find_callback {
                             Some(cb) => {
@@ -1733,7 +1735,10 @@ impl Website {
     }
 
     /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
-    pub fn with_external_domains<'a, 'b>(&mut self, external_domains: Option<impl Iterator<Item = String> + 'a>) -> &mut Self {
+    pub fn with_external_domains<'a, 'b>(
+        &mut self,
+        external_domains: Option<impl Iterator<Item = String> + 'a>,
+    ) -> &mut Self {
         match external_domains {
             Some(external_domains) => {
                 self.external_domains_caseless = external_domains

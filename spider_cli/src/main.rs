@@ -67,7 +67,11 @@ async fn main() {
             website.crawl().await;
 
             if *output_links {
-                let links: Vec<String> = website.get_links().iter().map(|l| l.inner().to_string()).collect();
+                let links: Vec<String> = website
+                    .get_links()
+                    .iter()
+                    .map(|l| l.inner().to_string())
+                    .collect();
                 io::stdout()
                     .write_all(format!("{:?}", links).as_bytes())
                     .unwrap();
