@@ -156,7 +156,7 @@ pub struct Website {
     external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     #[cfg(feature = "budget")]
     /// A crawl budget for the paths
-    budget: Option<HashMap<CaseInsensitiveString, u32>>,
+    pub budget: Option<HashMap<CaseInsensitiveString, u32>>,
 }
 
 impl Website {
@@ -1873,6 +1873,13 @@ impl Website {
             _ => None,
         };
         self
+    }
+
+
+    #[cfg(feature = "budget")]
+    /// Set the crawl budget directly.
+    pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
+        self.budget = budget;
     }
 
     /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
