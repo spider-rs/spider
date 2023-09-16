@@ -5,6 +5,7 @@ use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
 use crate::CaseInsensitiveString;
 use compact_str::CompactString;
+use hashbrown::HashMap;
 use hashbrown::HashSet;
 use reqwest::Client;
 use std::io::{Error, ErrorKind};
@@ -149,6 +150,8 @@ pub struct Website {
     pub external_domains: Box<HashSet<String>>,
     /// external domains to include case-insensitive
     external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
+    /// A crawl budget for the paths
+    budget: Option<HashMap<CaseInsensitiveString, u32>>,
 }
 
 impl Website {
@@ -169,6 +172,7 @@ impl Website {
             status: CrawlStatus::Start,
             external_domains: Default::default(),
             external_domains_caseless: Default::default(),
+            budget: Default::default(),
         }
     }
 
@@ -180,11 +184,13 @@ impl Website {
     #[inline]
     #[cfg(not(feature = "regex"))]
     pub fn is_allowed(
-        &self,
+        &mut self,
         link: &CaseInsensitiveString,
         blacklist_url: &Box<Vec<CompactString>>,
     ) -> bool {
         if self.links_visited.contains(link) {
+            false
+        } else if self.is_over_budget(&link) {
             false
         } else {
             self.is_allowed_default(&link.inner(), blacklist_url)
@@ -204,6 +210,8 @@ impl Website {
         blacklist_url: &Box<regex::RegexSet>,
     ) -> bool {
         if self.links_visited.contains(link) {
+            false
+        } else if self.is_over_budget(&link) {
             false
         } else {
             self.is_allowed_default(link, blacklist_url)
@@ -259,6 +267,77 @@ impl Website {
             } // unwrap will always return
         } else {
             true
+        }
+    }
+
+    /// Validate if url exceeds crawl budget and should not be handled.
+    pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
+        if self.budget.is_some() {
+            match Url::parse(&link.inner()) {
+                Ok(r) => {
+                    match self.budget.as_mut() {
+                        Some(budget) => {
+                            let wild = CaseInsensitiveString::from("*");
+                            let has_wildpath = budget.contains_key(&wild);
+
+                            let exceeded_wild_budget = if has_wildpath {
+                                let budget = budget.get_mut(&wild).unwrap();
+                                if budget.abs_diff(0) == 1 {
+                                    true
+                                } else {
+                                    *budget -= 1;
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            // set this up prior to crawl to avoid checks per link
+                            let skip_paths = has_wildpath && budget.len() == 1;
+
+                            // check if paths pass
+                            if !skip_paths && !exceeded_wild_budget {
+                                match r.path_segments() {
+                                    Some(mut segments) => {
+                                        let mut joint_segment = String::new();
+                                        let mut over = false;
+
+                                        while let Some(seg) = segments.next() {
+                                            let next_segment = string_concat!(joint_segment, seg);
+                                            let caseless_segment =
+                                                CaseInsensitiveString::from(next_segment);
+
+                                            if budget.contains_key(&caseless_segment) {
+                                                let budget =
+                                                    budget.get_mut(&caseless_segment).unwrap();
+
+                                                if budget.abs_diff(0) == 0 {
+                                                    over = true;
+                                                    break;
+                                                } else {
+                                                    *budget -= 1;
+                                                    continue;
+                                                }
+                                            }
+
+                                            joint_segment = joint_segment;
+                                        }
+
+                                        over
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                exceeded_wild_budget
+                            }
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            }
+        } else {
+            false
         }
     }
 
@@ -1734,6 +1813,23 @@ impl Website {
         self
     }
 
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*".
+    pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
+        self.budget = match budget {
+            Some(budget) => {
+                let mut crawl_budget: HashMap<CaseInsensitiveString, u32> = HashMap::new();
+
+                for b in budget.into_iter() {
+                    crawl_budget.insert(CaseInsensitiveString::from(b.0), b.1);
+                }
+
+                Some(crawl_budget)
+            }
+            _ => None,
+        };
+        self
+    }
+
     /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
     pub fn with_external_domains<'a, 'b>(
         &mut self,
@@ -2053,6 +2149,15 @@ async fn test_link_duplicates() {
     website.crawl().await;
 
     assert!(has_unique_elements(&*website.links_visited));
+}
+
+#[tokio::test]
+async fn test_crawl_budget() {
+    let mut website: Website = Website::new("https://choosealicense.com");
+    website.with_budget(Some(HashMap::from([("*", 1), ("/licenses", 1)])));
+    website.crawl().await;
+
+    assert!(website.links_visited.len() <= 1);
 }
 
 #[cfg(feature = "control")]
