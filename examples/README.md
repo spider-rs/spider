@@ -35,3 +35,7 @@ Scrape and download html to react components and store to fs [Download to React 
 Crawl the page and output the links via [Serde](./serde.rs).
 
 - `cargo run --example serde --features serde`
+
+Crawl links with a budget of amount of pages allowed [Budget](./budget.rs).
+
+- `cargo run --example budget`
