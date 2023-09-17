@@ -7,14 +7,43 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide_fork::Page,
-) -> Option<bytes::Bytes> {
+) -> (Option<bytes::Bytes>, Option<String>) {
     match page.goto(target_url).await {
         Ok(page) => {
-            let _ = page.wait_for_navigation_response().await;
+            let p = page.wait_for_navigation_response().await;
             let res = page.content().await;
-            Some(res.unwrap_or_default())
+
+            (
+                Some(res.unwrap_or_default()),
+                match p {
+                    Ok(u) => get_last_redirect(&target_url, &u),
+                    _ => None,
+                },
+            )
         }
-        _ => fetch_page_html_raw(&target_url, &client).await.0,
+        _ => fetch_page_html_raw(&target_url, &client).await,
+    }
+}
+
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+/// Check if url matches the last item in a redirect chain for chrome CDP
+pub fn get_last_redirect(
+    target_url: &str,
+    u: &Option<std::sync::Arc<chromiumoxide_fork::handler::http::HttpRequest>>,
+) -> Option<String> {
+    match u {
+        Some(u) => match u.redirect_chain.last()? {
+            r => match r.url.as_ref()? {
+                u => {
+                    if target_url != u {
+                        Some(u.into())
+                    } else {
+                        None
+                    }
+                }
+            },
+        },
+        _ => None,
     }
 }
 
@@ -87,7 +116,7 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(feature = "fs")]
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes::Bytes>, Option<String>) {
     use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
     use crate::tokio::io::AsyncWriteExt;
@@ -124,6 +153,16 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes:
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
+
+            let u = res.url().as_str();
+
+            let rd = if target_url != u {
+                Some(u.into())
+            } else {
+                None
+            };
+
+
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
             let mut file: Option<tokio::fs::File> = None;
@@ -171,7 +210,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes:
             }
 
             // get data from disk
-            Some(if file.is_some() {
+            (Some(if file.is_some() {
                 let mut buffer = vec![];
 
                 match tokio::fs::File::open(&file_path).await {
@@ -188,12 +227,12 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> Option<bytes:
                 buffer.into()
             } else {
                 data.into()
-            })
+            }), rd)
         }
-        Ok(_) => None,
+        Ok(_) => (None, None),
         Err(_) => {
             log("- error parsing html text {}", &target_url);
-            None
+            (None, None)
         }
     }
 }
