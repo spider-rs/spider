@@ -5,7 +5,7 @@
 [![Documentation](https://docs.rs/spider/badge.svg)](https://docs.rs/spider)
 [![Rust](https://img.shields.io/badge/rust-1.56.1%2B-blue.svg?maxAge=3600)](https://github.com/madeindjs/spider)
 
-The fastest web crawler and indexer.
+The fastest web crawler and indexer. Foundational building blocks for building scrapers that need to handle extreme workloads.
 
 ## Getting Started
 
