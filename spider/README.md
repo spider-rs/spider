@@ -54,8 +54,8 @@ website.configuration.http2_prior_knowledge = false; // Enable if you know the w
 website.configuration.user_agent = Some("myapp/version".into()); // Defaults to using a random agent
 website.on_link_find_callback = Some(|s, html| { println!("link target: {}", s); (s, html)}); // Callback to run on each link find
 website.configuration.blacklist_url.get_or_insert(Default::default()).push("https://choosealicense.com/licenses/".into());
-website.configuration.proxies.get_or_insert(Default::default()).push("socks5://10.1.1.1:12345".into()); // Defaults to none - proxy list.
-website.budget = Some(spider::hashbrown::HashMap::from([(spider::CaseInsensitiveString::new("*"), 300), (spider::CaseInsensitiveString::new("/licenses"), 10)]));
+website.configuration.proxies.get_or_insert(Default::default()).push("socks5://10.1.1.1:12345".into()); // Defaults to None - proxy list.
+website.budget = Some(spider::hashbrown::HashMap::from([(spider::CaseInsensitiveString::new("*"), 300), (spider::CaseInsensitiveString::new("/licenses"), 10)])); // Defaults to None - Requires the `budget` feature flag
 
 website.crawl().await;
 ```
@@ -73,6 +73,7 @@ website
     .with_request_timeout(None)
     .with_http2_prior_knowledge(false)
     .with_user_agent(Some("myapp/version".into()))
+    // requires the `budget` feature flag
     .with_budget(Some(spider::hashbrown::HashMap::from([("*", 300), ("/licenses", 10)])))
     .with_on_link_find_callback(Some(|link, html| {
         println!("link target: {}", link.inner());
