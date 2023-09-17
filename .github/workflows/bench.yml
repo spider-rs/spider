@@ -29,11 +29,11 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      # - name: Run Benchmark Compare OSS
-      #   run: cargo bench --bench crawl
+      - name: Run Benchmark Compare OSS
+        run: cargo bench --bench crawl
       - name: Run Benchmark Compare OSS - Features[decentralized]
         run: cargo bench --bench crawl --features decentralized
-      # - name: Run Benchmark Massive 50k pages plus
-      #   run: cargo bench --bench crawl_massive
+      - name: Run Benchmark Massive 50k pages plus
+        run: cargo bench --bench crawl_massive
       - name: Run Benchmark Massive 50k pages plus - Features[decentralized]
         run: cargo bench --bench crawl_massive --features decentralized
