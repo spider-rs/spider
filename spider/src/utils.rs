@@ -14,7 +14,7 @@ pub async fn fetch_page_html(
             let res = page.content().await;
             Some(res.unwrap_or_default())
         }
-        _ => fetch_page_html_raw(&target_url, &client).await,
+        _ => fetch_page_html_raw(&target_url, &client).await.0,
     }
 }
 

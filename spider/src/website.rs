@@ -1114,7 +1114,7 @@ impl Website {
                                             Some(cb) => cb(link, None),
                                             _ => (link, None),
                                         };
-                                        let page = Page::new(
+                                        let mut page = Page::new(
                                             &link_result.0.as_ref(),
                                             &shared.0,
                                             &shared.3,
