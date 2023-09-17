@@ -94,7 +94,7 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
     };
     let data = utils::fetch_page_html(&url_path, &CLIENT).await;
 
-    Ok(data.unwrap_or_default().to_vec())
+    Ok(data.unwrap_or_default().to_vec().0)
 }
 
 #[tokio::main]

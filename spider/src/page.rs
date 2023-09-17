@@ -157,10 +157,10 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide_fork::Page) -> Self {
-        build(
-            url,
-            crate::utils::fetch_page_html(&url, &client, &page).await,
-        )
+        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
+        let mut page = build(url, page_resource.0);
+        page.set_final_redirect(page_resource.1);
+        page
     }
 
     #[cfg(not(feature = "decentralized"))]

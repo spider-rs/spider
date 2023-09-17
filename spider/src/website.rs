@@ -1875,7 +1875,6 @@ impl Website {
         self
     }
 
-
     #[cfg(feature = "budget")]
     /// Set the crawl budget directly.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
