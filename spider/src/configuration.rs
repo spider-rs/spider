@@ -12,7 +12,7 @@ use std::time::Duration;
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct Configuration {
-    /// Respect robots.txt file and not scrape not allowed files.
+    /// Respect robots.txt file and not scrape not allowed files. This may slow down crawls if robots.txt file has a delay included.
     pub respect_robots_txt: bool,
     /// Allow sub-domains.
     pub subdomains: bool,

@@ -19,6 +19,7 @@ pub fn bench_speed(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("crawl-speed/libraries");
     let sample_count = 10;
+    // 200 static pages are found on the website for the baseline.
     let query = "https://rsseau.fr";
     let sample_title = format!("crawl {} samples", sample_count);
 
@@ -28,7 +29,7 @@ pub fn bench_speed(c: &mut Criterion) {
 
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
         let mut website = Website::new(&query);
-        website.configuration.delay = 0;
+        // try to only enable when you know you can or have permission from the website to avoid being blocked.
         website.configuration.respect_robots_txt = false;
 
         b.to_async(&rt)
