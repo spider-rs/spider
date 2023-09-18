@@ -248,7 +248,7 @@ async fn main() {
 
     let separator = "-".repeat(url.len());
 
-    for page in website.get_pages().unwrap() {
+    for page in website.get_pages().unwrap().iter() {
         writeln!(
             lock,
             "{}\n{}\n\n{}\n\n{}",
