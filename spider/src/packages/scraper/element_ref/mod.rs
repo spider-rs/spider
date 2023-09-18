@@ -71,6 +71,11 @@ impl<'a> ElementRef<'a> {
         self.serialize(TraversalScope::ChildrenOnly(None))
     }
 
+    /// Returns the value of an attribute.
+    pub fn attr(&self, attr: &str) -> Option<&str> {
+        self.value().attr(attr)
+    }
+
     /// Returns an iterator over descendent text nodes.
     pub fn text(&self) -> Text<'a> {
         Text {
