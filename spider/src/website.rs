@@ -16,14 +16,12 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, broadcast};
 use tokio::task;
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use url::Url;
 
-#[cfg(feature = "sync")]
-use tokio::sync::broadcast;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome::launch_browser;

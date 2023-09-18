@@ -116,7 +116,10 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(feature = "fs")]
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes::Bytes>, Option<String>) {
+pub async fn fetch_page_html(
+    target_url: &str,
+    client: &Client,
+) -> (Option<bytes::Bytes>, Option<String>) {
     use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
     use crate::tokio::io::AsyncWriteExt;
@@ -153,7 +156,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
-
             let u = res.url().as_str();
 
             let rd = if target_url != u {
@@ -161,7 +163,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes
             } else {
                 None
             };
-
 
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
@@ -210,24 +211,27 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> (Option<bytes
             }
 
             // get data from disk
-            (Some(if file.is_some() {
-                let mut buffer = vec![];
+            (
+                Some(if file.is_some() {
+                    let mut buffer = vec![];
 
-                match tokio::fs::File::open(&file_path).await {
-                    Ok(mut b) => match b.read_to_end(&mut buffer).await {
+                    match tokio::fs::File::open(&file_path).await {
+                        Ok(mut b) => match b.read_to_end(&mut buffer).await {
+                            _ => (),
+                        },
                         _ => (),
-                    },
-                    _ => (),
-                };
+                    };
 
-                match tokio::fs::remove_file(file_path).await {
-                    _ => (),
-                };
+                    match tokio::fs::remove_file(file_path).await {
+                        _ => (),
+                    };
 
-                buffer.into()
-            } else {
-                data.into()
-            }), rd)
+                    buffer.into()
+                } else {
+                    data.into()
+                }),
+                rd,
+            )
         }
         Ok(_) => (None, None),
         Err(_) => {
