@@ -52,16 +52,17 @@ pub fn bench_speed(c: &mut Criterion) {
             )
         })
     });
-    group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
-        b.iter(|| {
-            black_box(
-                Command::new("node")
-                    .arg("./node-crawler.js")
-                    .output()
-                    .expect("node command failed to start"),
-            )
-        })
-    });
+    // this is commented out since the crawl seems to stop on the first failure on linux giving an invalid output for node v18 up.
+    // group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
+    //     b.iter(|| {
+    //         black_box(
+    //             Command::new("node")
+    //                 .arg("./node-crawler.js")
+    //                 .output()
+    //                 .expect("node command failed to start"),
+    //         )
+    //     })
+    // });
     group.bench_function(format!("C[wget]: {}", sample_title), |b| {
         b.iter(|| {
             black_box(
