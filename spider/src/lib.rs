@@ -90,8 +90,6 @@ pub extern crate string_concat;
 pub extern crate lazy_static;
 #[macro_use]
 pub extern crate fast_html5ever;
-#[macro_use]
-pub extern crate matches;
 
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
