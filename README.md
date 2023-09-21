@@ -9,8 +9,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 
 ## Getting Started
 
-The simplest way to get started is to use our [hosted service](https://spiderwebai.xyz).
-View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local installations.
+The simplest way to get started is to use our [hosted service](https://spiderwebai.xyz), use the promotional code `SPIDER40` for an early launch 40% discount at checkout. View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local installations.
 
 ## Benchmarks
 
@@ -19,14 +18,6 @@ See [BENCHMARKS](./benches/BENCHMARKS.md).
 ## Examples
 
 See [EXAMPLES](./examples/).
-
-## Hosted Service 
-
-The hosted pay as you go service provides web scraping with AI capabilities to learn from the data extremely fast.
-Your creativeness is limitless with the chat service. Leverage information collected from entire websites to perform magnificent tasks like creating personas, re-writing content for SEO, and much more. Use the promotional code `OPENSOURCE20` for an early launch 20% discount at checkout.
-
-![The hosted service dashboard example](https://github.com/spider-rs/spiderwebai-help/raw/main/media.png)
-![The hosted service chat feature to perform task based on complete website data example](https://github.com/spider-rs/spiderwebai-help/raw/main/ai-chat.png)
 
 ## License
 
