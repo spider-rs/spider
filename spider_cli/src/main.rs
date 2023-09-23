@@ -7,6 +7,7 @@ pub mod options;
 use clap::Parser;
 use options::{Cli, Commands};
 use spider::compact_str::CompactString;
+use spider::hashbrown::HashMap;
 use spider::page::get_page_selectors;
 use spider::string_concat::string_concat;
 use spider::string_concat::string_concat_impl;
@@ -52,11 +53,25 @@ async fn main() {
         blacklists.extend(blacklist_url);
     }
 
+    match cli.budget {
+        Some(budget) => {
+            website.with_budget(Some(
+                budget
+                    .split(",")
+                    .collect::<Vec<_>>()
+                    .chunks(2)
+                    .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
+                    .collect::<HashMap<&str, u32>>(),
+            ));
+        }
+        _ => (),
+    }
+
     match cli.user_agent {
         Some(user_agent) => {
             website.configuration.user_agent = Some(Box::new(user_agent.into()));
         }
-        _ => {}
+        _ => (),
     }
 
     match &cli.command {

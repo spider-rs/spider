@@ -32,4 +32,7 @@ pub struct Cli {
     /// User-Agent
     #[clap(short, long)]
     pub user_agent: Option<String>,
+    /// Crawl Budget preventing extra paths from being crawled. Use commas to split the path followed by the limit ex: "*,1" - to only allow one page.
+    #[clap(short = 'B', long)]
+    pub budget: Option<String>,
 }
