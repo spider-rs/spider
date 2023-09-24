@@ -9,7 +9,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 
 ## Getting Started
 
-The simplest way to get started is to use our [hosted service](https://spiderwebai.xyz), use the promotional code `SPIDER40` for an early launch 40% discount at checkout. View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local installations.
+The simplest way to get started is to use the [hosted service](https://spiderwebai.xyz). View the [spider](./spider/README.md) or [CLI](./spider_cli/README.md) directory for local installations.
 
 ## Benchmarks
 
