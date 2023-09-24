@@ -6,7 +6,6 @@ pub mod options;
 
 use clap::Parser;
 use options::{Cli, Commands};
-use spider::compact_str::CompactString;
 use spider::hashbrown::HashMap;
 use spider::page::get_page_selectors;
 use spider::string_concat::string_concat;
@@ -32,47 +31,30 @@ async fn main() {
         env_logger::init_from_env(env);
     }
 
-    let mut website: Website = Website::new(&cli.domain);
-
-    let delay = cli.delay.unwrap_or_else(|| website.configuration.delay);
-    let blacklist_url = cli.blacklist_url.unwrap_or_default();
-
-    website.configuration.respect_robots_txt = cli.respect_robots_txt;
-    website.configuration.delay = delay;
-    website.configuration.subdomains = cli.subdomains;
-    website.configuration.tld = cli.tld;
-
-    if !blacklist_url.is_empty() {
-        let blacklist_url: Vec<CompactString> =
-            blacklist_url.split(',').map(|l| l.into()).collect();
-        let blacklists = website
-            .configuration
-            .blacklist_url
-            .insert(Default::default());
-
-        blacklists.extend(blacklist_url);
-    }
-
-    match cli.budget {
-        Some(budget) => {
-            website.with_budget(Some(
+    let mut website: Website = Website::new(&cli.domain)
+        .with_respect_robots_txt(cli.respect_robots_txt)
+        .with_delay(cli.delay.unwrap_or_default())
+        .with_subdomains(cli.subdomains)
+        .with_tld(cli.tld)
+        .with_user_agent(cli.user_agent.as_deref())
+        .with_budget(match cli.budget {
+            Some(ref budget) => Some(
                 budget
                     .split(",")
                     .collect::<Vec<_>>()
                     .chunks(2)
                     .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
                     .collect::<HashMap<&str, u32>>(),
-            ));
-        }
-        _ => (),
-    }
-
-    match cli.user_agent {
-        Some(user_agent) => {
-            website.configuration.user_agent = Some(Box::new(user_agent.into()));
-        }
-        _ => (),
-    }
+            ),
+            _ => None,
+        })
+        .with_blacklist_url(match cli.blacklist_url {
+            Some(blacklist_url) => Some(blacklist_url.split(',').map(|l| l.into()).collect()),
+            _ => None,
+        })
+        .with_external_domains(Some(cli.external_domains.unwrap_or_default().into_iter()))
+        .build()
+        .unwrap();
 
     match &cli.command {
         Some(Commands::CRAWL {
@@ -105,6 +87,7 @@ async fn main() {
             }
 
             website.scrape().await;
+
             let selectors = get_page_selectors(&cli.domain, cli.subdomains, cli.tld);
 
             if selectors.is_some() {

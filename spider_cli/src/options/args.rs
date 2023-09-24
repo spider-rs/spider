@@ -35,4 +35,7 @@ pub struct Cli {
     /// Crawl Budget preventing extra paths from being crawled. Use commas to split the path followed by the limit ex: "*,1" - to only allow one page.
     #[clap(short = 'B', long)]
     pub budget: Option<String>,
+    /// Set external domains to group with crawl.
+    #[clap(short = 'E', long)]
+    pub external_domains: Option<Vec<String>>,
 }
