@@ -16,6 +16,11 @@ use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use url::Url;
 
+lazy_static! {
+    /// Wildcard match all domains.
+    static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
+}
+
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
@@ -319,6 +324,9 @@ impl Page {
                                     .contains::<CaseInsensitiveString>(
                                         &host_name.unwrap_or_default().into(),
                                     )
+                                    || self
+                                        .external_domains_caseless
+                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD)
                             }
 
                             if can_process {

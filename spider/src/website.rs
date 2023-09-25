@@ -722,9 +722,15 @@ impl Website {
                 self.external_domains_caseless = self
                     .external_domains
                     .iter()
-                    .filter_map(|d| match Url::parse(d) {
-                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
-                        _ => None,
+                    .filter_map(|d| {
+                        if d == "*" {
+                            Some("*".into())
+                        } else {
+                            match Url::parse(d) {
+                                Ok(d) => Some(d.host_str().unwrap_or_default().into()),
+                                _ => None,
+                            }
+                        }
                     })
                     .collect::<HashSet<CaseInsensitiveString>>()
                     .into();
