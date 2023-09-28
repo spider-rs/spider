@@ -410,16 +410,16 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.22.2"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce01ac37fdc85f10a43c43bc582cbd566720357011578a935761075f898baf58"
+checksum = "a1e9efbe14612da0a19fb983059a0b621e9cf6225d7018ecab4f9988215540dc"
 dependencies = [
  "futures-io",
  "futures-util",
  "log",
  "pin-project-lite",
  "tokio",
- "tungstenite 0.19.0",
+ "tungstenite 0.20.1",
 ]
 
 [[package]]
@@ -740,9 +740,9 @@ dependencies = [
 
 [[package]]
 name = "chromiumoxide_fork"
-version = "0.5.9"
+version = "0.5.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4b5b95d3a77395174c7617078adcb8a25975569257d91599834b19a05fbf039"
+checksum = "367ec368afb1d4a8ac3f2badac08ba6eab1bd5c92ff0b21031f91b526562826b"
 dependencies = [
  "async-tungstenite",
  "base64 0.21.3",
@@ -3569,7 +3569,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.46.0"
+version = "1.46.2"
 dependencies = [
  "ahash",
  "bytes",
@@ -3604,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.46.0"
+version = "1.46.2"
 dependencies = [
  "clap 4.4.4",
  "env_logger 0.9.3",
@@ -3616,7 +3616,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.46.0"
+version = "1.46.2"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
@@ -3637,7 +3637,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.46.0"
+version = "1.46.2"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
@@ -4102,9 +4102,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.19.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15fba1a6d6bb030745759a9a2a588bfe8490fc8b4751a277db3a0be1c9ebbf67"
+checksum = "9e3dac10fd62eaf6617d3a904ae222845979aec67c615d1c842b4002c7666fb9"
 dependencies = [
  "byteorder",
  "bytes",
