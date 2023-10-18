@@ -105,7 +105,7 @@ async fn main() {
                                     let it = split_paths.iter();
                                     let last_item = split_paths.last().unwrap_or(&"");
 
-                                    let mut download_path = PathBuf::from(tmp_path.clone());
+                                    let mut download_path = PathBuf::from(tmp_path);
 
                                     for p in it {
                                         if p != last_item {

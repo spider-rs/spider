@@ -1,4 +1,5 @@
 use crate::tokio_stream::StreamExt;
+use crate::utils::log;
 use chromiumoxide_fork::{Browser, BrowserConfig};
 use tokio::task;
 
@@ -6,7 +7,7 @@ use tokio::task;
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
-) -> Result<BrowserConfig, String> {
+) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
@@ -34,14 +35,20 @@ pub fn get_browser_config(
     } else {
         builder
     };
-    builder.build()
+    match builder.build() {
+        Ok(b) => Some(b),
+        Err(error) => {
+            log("", error);
+            None
+        }
+    }
 }
 
 /// get chrome configuration headful
 #[cfg(feature = "chrome_headed")]
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
-) -> Result<BrowserConfig, String> {
+) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
@@ -71,29 +78,49 @@ pub fn get_browser_config(
     } else {
         builder
     };
-    builder.build()
+    match builder.build() {
+        Ok(b) => Some(b),
+        Err(error) => {
+            log("", error);
+            None
+        }
+    }
 }
 
 /// launch a chromium browser and wait until the instance is up.
 pub async fn launch_browser(
     proxies: &Option<Box<Vec<string_concat::String>>>,
-) -> (Browser, tokio::task::JoinHandle<()>) {
-    let (browser, mut handler) = match std::env::var("CHROME_URL") {
-        Ok(v) => Browser::connect(&v).await,
-        _ => Browser::launch(get_browser_config(&proxies).unwrap()).await,
-    }
-    .unwrap();
+) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
+    let b_conf = match std::env::var("CHROME_URL") {
+        Ok(v) => match Browser::connect(&v).await {
+            Ok(browser) => Some(browser),
+            _ => None,
+        },
+        _ => match get_browser_config(&proxies) {
+            Some(browser_config) => match Browser::launch(browser_config).await {
+                Ok(browser) => Some(browser),
+                _ => None,
+            },
+            _ => None,
+        },
+    };
 
-    // spawn a new task that continuously polls the handler
-    let handle = task::spawn(async move {
-        while let Some(h) = handler.next().await {
-            if h.is_err() {
-                break;
-            }
+    match b_conf {
+        Some(c) => {
+            let (browser, mut handler) = c;
+            // spawn a new task that continuously polls the handler
+            let handle = task::spawn(async move {
+                while let Some(h) = handler.next().await {
+                    if h.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            Some((browser, handle))
         }
-    });
-
-    (browser, handle)
+        _ => None,
+    }
 }
 
 #[cfg(not(feature = "chrome_cpu"))]
