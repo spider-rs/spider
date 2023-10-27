@@ -94,14 +94,14 @@ spider = { version = "1.46.4", features = ["regex", "ua_generator"] }
 1. `regex`: Enables blacklisting paths with regx
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
-1. `sync`: Subscribe to changes for Page data processing async.
+1. `sync`: Subscribe to changes for Page data processing async. [Enabled by default]
 1. `budget`: Allows setting a crawl budget per path with depth.
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
 1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
 1. `serde`: Enables serde serialization support.
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
-1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
+1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). [Enabled by default]
 1. `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 1. `sitemap`: Include sitemap pages in results.
 1. `time`: Enables duration tracking per page.
@@ -129,7 +129,6 @@ SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decen
 ```
 
 The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
-
 
 ### Subscribe to changes
 
