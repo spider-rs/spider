@@ -39,7 +39,7 @@ async fn main() {
     match website.get_pages() {
         Some(pages) => {
             for page in pages.iter() {
-                let download_file = page.get_url().clone();
+                let download_file = page.get_url();
                 let download_file = download_file.replace(website_name, "");
                 let download_file = download_file.replace(".", "-");
                 let download_file = download_file.replace("/", "-");
