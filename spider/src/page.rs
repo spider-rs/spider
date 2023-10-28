@@ -312,7 +312,13 @@ impl Page {
                             let mut abs = self.abs_path(href);
                             let host_name = abs.host_str();
                             let mut can_process = match host_name {
-                                Some(host) => parent_host.ends_with(host),
+                                Some(host) => {
+                                    if base_domain.is_empty() {
+                                        parent_host.eq(&host)
+                                    } else {
+                                        parent_host.ends_with(host)
+                                    }
+                                }
                                 _ => false,
                             };
                             if !can_process
@@ -409,7 +415,13 @@ impl Page {
                 let mut abs = self.abs_path(href.inner());
                 let host_name = abs.host_str();
                 let mut can_process = match host_name {
-                    Some(host) => parent_host.ends_with(host),
+                    Some(host) => {
+                        if base_domain.is_empty() {
+                            parent_host.eq(&host)
+                        } else {
+                            parent_host.ends_with(host)
+                        }
+                    }
                     _ => false,
                 };
                 if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
@@ -494,7 +506,13 @@ impl Page {
 
                                 // determine if the crawl can continue based on host match
                                 let mut can_process = match abs.host_str() {
-                                    Some(host) => parent_host.ends_with(host),
+                                    Some(host) => {
+                                        if base_domain.is_empty() {
+                                            parent_host.eq(&host)
+                                        } else {
+                                            parent_host.ends_with(host)
+                                        }
+                                    }
                                     _ => false,
                                 };
 
@@ -567,7 +585,13 @@ impl Page {
                         let mut abs = self.abs_path(href);
 
                         let can_process = match abs.host_str() {
-                            Some(host) => parent_host.ends_with(host),
+                            Some(host) => {
+                                if base_domain.is_empty() {
+                                    parent_host.eq(&host)
+                                } else {
+                                    parent_host.ends_with(host)
+                                }
+                            }
                             _ => false,
                         };
 
