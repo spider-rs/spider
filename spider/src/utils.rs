@@ -3,7 +3,7 @@ use reqwest::Client;
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
+pub async fn fetch_page_html_browser(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide_fork::Page,
@@ -86,7 +86,7 @@ pub async fn fetch_page_html_raw(
     }
 }
 
-#[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
+#[cfg(all(not(feature = "fs")))]
 /// Perform a network request to a resource extracting all content as text streaming.
 pub async fn fetch_page_html(
     target_url: &str,

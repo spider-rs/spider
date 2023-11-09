@@ -711,7 +711,6 @@ impl Website {
     #[cfg(all(
         not(feature = "glob"),
         not(feature = "decentralized"),
-        not(feature = "chrome")
     ))]
     async fn crawl_establish(
         &mut self,
@@ -783,7 +782,7 @@ impl Website {
         not(feature = "decentralized"),
         feature = "chrome"
     ))]
-    async fn crawl_establish(
+    async fn crawl_establish_chrome(
         &mut self,
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
@@ -793,7 +792,7 @@ impl Website {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
-            let page = Page::new(&self.domain.inner(), &client, &page).await;
+            let page = Page::new_chrome(&self.domain.inner(), &client, &page).await;
 
             if !self.external_domains.is_empty() {
                 self.external_domains_caseless = self
@@ -1020,6 +1019,14 @@ impl Website {
         self.crawl_concurrent(&client, &handle).await;
     }
 
+    #[cfg(feature = "chrome")]
+    /// Start to crawl website with async concurrency using headless CDP
+    pub async fn crawl_chrome(&mut self) {
+        let (client, handle) = self.setup().await;
+
+        self.crawl_concurrent_chrome(&client, &handle).await;
+    }
+
     #[cfg(not(feature = "sitemap"))]
     /// Start to scrape/download website with async concurrency
     pub async fn scrape(&mut self) {
@@ -1027,6 +1034,15 @@ impl Website {
 
         self.scrape_concurrent(&client, &handle).await;
     }
+
+    #[cfg(feature = "chrome")]
+    /// Start to scrape/download website with async concurrency using headless CDP
+    pub async fn scrape_chrome(&mut self) {
+        let (client, handle) = self.setup().await;
+
+        self.scrape_concurrent_chrome(&client, &handle).await;
+    }
+
 
     #[cfg(feature = "sitemap")]
     /// Start to crawl website and include sitemap links
@@ -1048,7 +1064,7 @@ impl Website {
 
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    async fn crawl_concurrent_chrome(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = self.setup_selectors();
 
         // crawl if valid selector
@@ -1081,7 +1097,7 @@ impl Website {
                             ));
 
                             let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&shared.0, &shared.1, false, &shared.3)
+                                .crawl_establish_chrome(&shared.0, &shared.1, false, &shared.3)
                                 .await;
 
                             if !links.is_empty() {
@@ -1131,7 +1147,7 @@ impl Website {
                                                                 Some(cb) => cb(link, None),
                                                                 _ => (link, None),
                                                             };
-                                                        let mut page = Page::new(
+                                                        let mut page = Page::new_chrome(
                                                             &link_result.0.as_ref(),
                                                             &shared.0,
                                                             &shared.3,
@@ -1193,7 +1209,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(not(feature = "decentralized"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = self.setup_selectors();
 
@@ -1406,7 +1422,6 @@ impl Website {
         }
     }
 
-    #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store html
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
@@ -1527,7 +1542,7 @@ impl Website {
 
     #[cfg(feature = "chrome")]
     /// Start to scape website concurrently and store html
-    async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    async fn scrape_concurrent_chrome(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,

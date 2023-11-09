@@ -161,24 +161,15 @@ pub fn build(_: &str, html: Option<bytes::Bytes>) -> Page {
 impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
-    pub async fn new(url: &str, client: &Client, page: &chromiumoxide_fork::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
-        let mut page = build(url, page_resource.0);
-        page.set_final_redirect(page_resource.1);
-        page
-    }
-
-    #[cfg(not(feature = "decentralized"))]
-    /// Instantiate a new page and gather the html repro of standard fetch_page_html.
-    pub async fn new_page(url: &str, client: &Client) -> Self {
-        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+    pub async fn new_chrome(url: &str, client: &Client, page: &chromiumoxide_fork::Page) -> Self {
+        let page_resource = crate::utils::fetch_page_html_browser(&url, &client, &page).await;
         let mut page = build(url, page_resource.0);
         page.set_final_redirect(page_resource.1);
         page
     }
 
     /// Instantiate a new page and gather the html.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(not(feature = "decentralized")))]
     pub async fn new(url: &str, client: &Client) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client).await;
         let mut page = build(url, page_resource.0);
@@ -208,6 +199,15 @@ impl Page {
             external_domains_caseless: Default::default(),
             final_redirect_destination: Default::default(),
         }
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Instantiate a new page and gather the html repro of standard fetch_page_html.
+    pub async fn new_page(url: &str, client: &Client) -> Self {
+        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+        let mut page = build(url, page_resource.0);
+        page.set_final_redirect(page_resource.1);
+        page
     }
 
     /// Page request fulfilled.
