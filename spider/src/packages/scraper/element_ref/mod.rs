@@ -127,26 +127,36 @@ impl<'a> Iterator for Text<'a> {
 
     fn next(&mut self) -> Option<&'a str> {
         for edge in &mut self.inner {
-            if let Edge::Open(node) = edge {
-                let node_value = node.value();
-
-                match node_value.as_element() {
-                    Some(v) => {
-                        let n = v.name();
-                        if n != "script" || n != "style" {
-                            if let Node::Text(ref text) = node_value {
-                                return Some(&**text);
+            if let Edge::Open(ref node) = edge {
+                // check if the element is not a script or link.
+                let processable = match node.parent() {
+                    Some(e) => {
+                        match e.value().as_element() {
+                            Some(n) => {
+                                let name = n.name();
+                                // prevent all script and style elements
+                                if name == "script" || name == "style" {
+                                    false
+                                } else {
+                                    true
+                                }
                             }
+                            _ => true,
                         }
                     }
-                    _ => {
-                        if let Node::Text(ref text) = node_value {
-                            return Some(&**text);
-                        }
-                    }
+                    _ => true,
+                };
+
+                if !processable {
+                    continue;
+                }
+
+                if let Node::Text(text) = node.value() {
+                    return Some(&**text);
                 }
             }
         }
+
         None
     }
 }
@@ -177,5 +187,16 @@ mod tests {
         let element1 = fragment.select(&sel1).next().unwrap();
         let element2 = element1.select(&sel2).next().unwrap();
         assert_eq!(element2.inner_html(), "3");
+    }
+
+    #[test]
+    fn test_text() {
+        let fragment = Html::parse_fragment("<h1>Hello, <i>world!</i></h1><script>window.var = true</script><style>.main { background: white };</style>");
+        let selector = Selector::parse("h1").unwrap();
+
+        let h1 = fragment.select(&selector).next().unwrap();
+        let text = h1.text().collect::<Vec<_>>();
+
+        assert_eq!(vec!["Hello, ", "world!"], text);
     }
 }
