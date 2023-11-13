@@ -128,8 +128,22 @@ impl<'a> Iterator for Text<'a> {
     fn next(&mut self) -> Option<&'a str> {
         for edge in &mut self.inner {
             if let Edge::Open(node) = edge {
-                if let Node::Text(ref text) = node.value() {
-                    return Some(&**text);
+                let node_value = node.value();
+
+                match node_value.as_element() {
+                    Some(v) => {
+                        let n = v.name();
+                        if n != "script" || n != "style" {
+                            if let Node::Text(ref text) = node_value {
+                                return Some(&**text);
+                            }
+                        }
+                    }
+                    _ => {
+                        if let Node::Text(ref text) = node_value {
+                            return Some(&**text);
+                        }
+                    }
                 }
             }
         }

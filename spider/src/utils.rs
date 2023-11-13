@@ -1,5 +1,18 @@
 use log::{info, log_enabled, Level};
-use reqwest::Client;
+use reqwest::{Client, Error, Response, StatusCode};
+
+/// The response of a web page.
+#[derive(Debug, Default)]
+pub struct PageResponse {
+    /// The page response resource.
+    pub content: Option<bytes::Bytes>,
+    /// The status code of the request.
+    pub status_code: StatusCode,
+    /// The final url destination after any redirects.
+    pub final_url: Option<String>,
+    /// The message of the response error if any.
+    pub error_for_status: Option<Result<Response, Error>>,
+}
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -7,19 +20,31 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide_fork::Page,
-) -> (Option<bytes::Bytes>, Option<String>) {
+) -> PageResponse {
     match page.goto(target_url).await {
         Ok(page) => {
             let p = page.wait_for_navigation_response().await;
             let res = page.content().await;
+            let ok = res.is_ok();
 
-            (
-                Some(res.unwrap_or_default()),
-                match p {
+            PageResponse {
+                content: if ok {
+                    Some(res.unwrap_or_default())
+                } else {
+                    None
+                },
+                // todo: get the cdp error to status code.
+                status_code: if ok {
+                    StatusCode::OK
+                } else {
+                    Default::default()
+                },
+                final_url: match p {
                     Ok(u) => get_last_redirect(&target_url, &u),
                     _ => None,
                 },
-            )
+                ..Default::default()
+            }
         }
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -48,10 +73,7 @@ pub fn get_last_redirect(
 }
 
 /// Perform a network request to a resource extracting all content streaming.
-pub async fn fetch_page_html_raw(
-    target_url: &str,
-    client: &Client,
-) -> (Option<bytes::Bytes>, Option<String>) {
+pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use bytes::BytesMut;
     use tokio_stream::StreamExt;
@@ -65,7 +87,7 @@ pub async fn fetch_page_html_raw(
             } else {
                 None
             };
-
+            let status_code = res.status();
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
 
@@ -76,7 +98,12 @@ pub async fn fetch_page_html_raw(
                 }
             }
 
-            (Some(data.into()), rd)
+            PageResponse {
+                content: Some(data.into()),
+                final_url: rd,
+                status_code,
+                ..Default::default()
+            }
         }
         Ok(_) => Default::default(),
         Err(_) => {
@@ -88,10 +115,7 @@ pub async fn fetch_page_html_raw(
 
 #[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
 /// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html(
-    target_url: &str,
-    client: &Client,
-) -> (Option<bytes::Bytes>, Option<String>) {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     fetch_page_html_raw(&target_url, &client).await
 }
 
@@ -116,10 +140,7 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(feature = "fs")]
-pub async fn fetch_page_html(
-    target_url: &str,
-    client: &Client,
-) -> (Option<bytes::Bytes>, Option<String>) {
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
     use crate::tokio::io::AsyncWriteExt;
@@ -210,9 +231,8 @@ pub async fn fetch_page_html(
                 }
             }
 
-            // get data from disk
-            (
-                Some(if file.is_some() {
+            PageResponse {
+                content: Some(if file.is_some() {
                     let mut buffer = vec![];
 
                     match tokio::fs::File::open(&file_path).await {
@@ -230,13 +250,14 @@ pub async fn fetch_page_html(
                 } else {
                     data.into()
                 }),
-                rd,
-            )
+                final_url: rd,
+                ..Default::default()
+            }
         }
-        Ok(_) => (None, None),
+        Ok(_) => Default::default(),
         Err(_) => {
             log("- error parsing html text {}", &target_url);
-            (None, None)
+            Default::default()
         }
     }
 }
@@ -247,14 +268,21 @@ pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide_fork::Page,
-) -> Option<bytes::Bytes> {
+) -> PageResponse {
     match &page {
         page => match page.goto(target_url).await {
             Ok(page) => {
                 let res = page.content().await;
                 // let _ = page.close().await;
 
-                Some(res.unwrap_or_default())
+                PageResponse {
+                    content: if res.is_ok() {
+                        Some(res.unwrap_or_default())
+                    } else {
+                        None
+                    },
+                    ..Default::default()
+                }
             }
             _ => {
                 log(
@@ -266,7 +294,7 @@ pub async fn fetch_page_html_chrome(
                 use bytes::BytesMut;
                 use tokio_stream::StreamExt;
 
-                match client.get(target_url).send().await {
+                let content = match client.get(target_url).send().await {
                     Ok(res) if res.status().is_success() => {
                         let mut stream = res.bytes_stream();
                         let mut data: BytesMut = BytesMut::new();
@@ -285,6 +313,11 @@ pub async fn fetch_page_html_chrome(
                         log("- error parsing html text {}", &target_url);
                         None
                     }
+                };
+
+                PageResponse {
+                    content: content,
+                    ..Default::default()
                 }
             }
         },
