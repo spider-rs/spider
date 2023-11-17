@@ -127,32 +127,32 @@ pub enum CrawlStatus {
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct Website {
-    /// configuration properties for website.
+    /// Configuration properties for website.
     pub configuration: Box<Configuration>,
-    /// contains all visited URL.
+    /// All URLs visited.
     links_visited: Box<HashSet<CaseInsensitiveString>>,
-    /// contains page visited
+    /// Pages visited.
     pages: Option<Box<Vec<Page>>>,
-    /// Robot.txt parser holder.
+    /// Robot.txt parser.
     robot_file_parser: Option<Box<RobotFileParser>>,
-    /// the base root domain of the crawl
+    /// Base root domain of the crawl.
     domain: Box<CaseInsensitiveString>,
-    /// the domain url parsed
+    /// The domain url parsed.
     domain_parsed: Option<Box<Url>>,
-    /// callback when a link is found.
+    /// The callback when a link is found.
     pub on_link_find_callback: Option<
         fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
     >,
-    /// subscribe and broadcast changes
+    /// Subscribe and broadcast changes.
     channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
-    /// the status of the active crawl
+    /// The status of the active crawl.
     status: CrawlStatus,
-    /// external domains to include
+    /// External domains to include in the crawl if found.
     pub external_domains: Box<HashSet<String>>,
-    /// external domains to include case-insensitive
+    /// External domains to include case-insensitive.
     external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     #[cfg(feature = "budget")]
-    /// A crawl budget for the paths
+    /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<HashMap<CaseInsensitiveString, u32>>,
 }
 
