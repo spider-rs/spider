@@ -31,7 +31,13 @@ async fn main() {
         env_logger::init_from_env(env);
     }
 
-    let mut website: Website = Website::new(&cli.domain)
+    let url = if cli.domain.starts_with("http") {
+        cli.domain
+    } else {
+        string_concat!("https://", cli.domain)
+    };
+
+    let mut website: Website = Website::new(&url)
         .with_respect_robots_txt(cli.respect_robots_txt)
         .with_delay(cli.delay.unwrap_or_default())
         .with_subdomains(cli.subdomains)
@@ -88,7 +94,7 @@ async fn main() {
 
             website.scrape().await;
 
-            let selectors = get_page_selectors(&cli.domain, cli.subdomains, cli.tld);
+            let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
 
             if selectors.is_some() {
                 match website.get_pages() {
@@ -158,7 +164,7 @@ async fn main() {
 
             let mut page_objects: Vec<_> = vec![];
 
-            let selectors = get_page_selectors(&cli.domain, cli.subdomains, cli.tld);
+            let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
 
             if selectors.is_some() {
                 let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });

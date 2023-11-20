@@ -1,5 +1,6 @@
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
+use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
 use bytes::Bytes;
@@ -103,7 +104,11 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
             joined.set_fragment(None);
             joined
         }
-        Err(_) => base.clone(),
+        Err(e) => {
+            log("URL Parse Error: ", e.to_string());
+            // todo: we may want to repair the url being passed in.
+            base.clone()
+        }
     }
 }
 
