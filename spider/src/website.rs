@@ -462,7 +462,7 @@ impl Website {
     /// configure http client
     #[cfg(not(feature = "decentralized"))]
     pub fn configure_http_client(&mut self) -> Client {
-        let host_str = self.domain_parsed.take();
+        let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
         let policy = match host_str {
             Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
