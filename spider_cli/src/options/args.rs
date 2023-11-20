@@ -8,9 +8,9 @@ pub struct Cli {
     /// Build main sub commands
     #[clap(subcommand)]
     pub command: Option<Commands>,
-    /// Domain to crawl
+    /// The website URL to crawl.
     #[clap(short, long)]
-    pub domain: String,
+    pub url: String,
     /// Respect robots.txt file
     #[clap(short, long)]
     pub respect_robots_txt: bool,
