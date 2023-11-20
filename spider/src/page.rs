@@ -194,8 +194,12 @@ pub fn build(_: &str, res: PageResponse) -> Page {
 impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
-    pub async fn new(url: &str, client: &Client, page: &chromiumoxide_fork::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
+    pub async fn new_page_chrome(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide_fork::Page,
+    ) -> Self {
+        let page_resource = crate::utils::fetch_page_html_chrome(&url, &client, &page).await;
         build(url, page_resource)
     }
 
@@ -207,7 +211,7 @@ impl Page {
     }
 
     /// Instantiate a new page and gather the html.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(not(feature = "decentralized")))]
     pub async fn new(url: &str, client: &Client) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client).await;
         build(url, page_resource)

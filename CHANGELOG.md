@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.51.0
+
+1. chore(chrome): split chrome calls
+
 ## v1.36.0
 
 1. feat(sync): subscribe to page updates to perform async handling of data

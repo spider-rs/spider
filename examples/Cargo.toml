@@ -1,8 +1,8 @@
 [package]
 name = "spider_examples"
-version = "1.48.3"
+version = "1.51.0"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
-description = "Multithreaded web crawler written in Rust."
+description = "Multi-threaded web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider"]
@@ -22,7 +22,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "1.48.3"
+version = "1.51.0"
 path = "../spider"
 features = ["serde"]
 
@@ -71,3 +71,8 @@ path = "configuration.rs"
 name = "budget"
 path = "budget.rs"
 required-features = ["spider/budget", "spider/sync"]
+
+[[example]]
+name = "chrome"
+path = "chrome.rs"
+required-features = ["spider/chrome_headed"]

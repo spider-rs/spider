@@ -14,9 +14,9 @@ pub struct PageResponse {
     pub error_for_status: Option<Result<Response, Error>>,
 }
 
-#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
+pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide_fork::Page,
@@ -50,7 +50,7 @@ pub async fn fetch_page_html(
     }
 }
 
-#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+#[cfg(feature = "chrome")]
 /// Check if url matches the last item in a redirect chain for chrome CDP
 pub fn get_last_redirect(
     target_url: &str,
@@ -113,7 +113,7 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
     }
 }
 
-#[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
+#[cfg(all(not(feature = "fs")))]
 /// Perform a network request to a resource extracting all content as text streaming.
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     fetch_page_html_raw(&target_url, &client).await
@@ -259,68 +259,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             log("- error parsing html text {}", &target_url);
             Default::default()
         }
-    }
-}
-
-#[cfg(feature = "chrome")]
-/// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome(
-    target_url: &str,
-    client: &Client,
-    page: &chromiumoxide_fork::Page,
-) -> PageResponse {
-    match &page {
-        page => match page.goto(target_url).await {
-            Ok(page) => {
-                let res = page.content().await;
-                // let _ = page.close().await;
-
-                PageResponse {
-                    content: if res.is_ok() {
-                        Some(res.unwrap_or_default())
-                    } else {
-                        None
-                    },
-                    ..Default::default()
-                }
-            }
-            _ => {
-                log(
-                    "- error parsing html text defaulting to raw http request {}",
-                    &target_url,
-                );
-
-                use crate::bytes::BufMut;
-                use bytes::BytesMut;
-                use tokio_stream::StreamExt;
-
-                let content = match client.get(target_url).send().await {
-                    Ok(res) if res.status().is_success() => {
-                        let mut stream = res.bytes_stream();
-                        let mut data: BytesMut = BytesMut::new();
-
-                        while let Some(item) = stream.next().await {
-                            match item {
-                                Ok(text) => data.put(text),
-                                _ => (),
-                            }
-                        }
-
-                        Some(data.into())
-                    }
-                    Ok(_) => None,
-                    Err(_) => {
-                        log("- error parsing html text {}", &target_url);
-                        None
-                    }
-                };
-
-                PageResponse {
-                    content: content,
-                    ..Default::default()
-                }
-            }
-        },
     }
 }
 
