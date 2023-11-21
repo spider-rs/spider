@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.49.7"
+version = "1.49.8"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -30,7 +30,7 @@ compact_str = "0.7.0"
 fast_html5ever = "0.26.1"
 selectors = "0.25.0"
 tendril = "0.4.3"
-ahash = "0.8.3"
+ahash = "0.8.6"
 cssparser = "0.31.2"
 smallvec = "1.10.0"
 ego-tree = "0.6.2"
