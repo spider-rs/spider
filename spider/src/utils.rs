@@ -105,7 +105,12 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
                 ..Default::default()
             }
         }
-        Ok(_) => Default::default(),
+        Ok(res) => {
+            PageResponse {
+                status_code: res.status(),
+                ..Default::default()
+            }
+        }
         Err(_) => {
             log("- error parsing html text {}", &target_url);
             Default::default()

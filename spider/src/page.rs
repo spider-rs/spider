@@ -715,6 +715,19 @@ async fn parse_links() {
 
 #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
 #[tokio::test]
+async fn test_status_code() {
+    let client = Client::builder()
+        .user_agent("spider/1.1.2")
+        .build()
+        .unwrap();
+    let link_result = "https://choosealicense.com/does-not-exist";
+    let page: Page = Page::new(&link_result, &client).await;
+
+    assert_eq!(page.status_code.as_u16(), 404);
+}
+
+#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+#[tokio::test]
 async fn test_abs_path() {
     let client = Client::builder()
         .user_agent("spider/1.1.2")
