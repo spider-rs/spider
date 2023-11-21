@@ -708,7 +708,11 @@ impl Website {
     }
 
     /// expand links for crawl
-    #[cfg(all(not(feature = "glob"), not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(
+        not(feature = "glob"),
+        not(feature = "decentralized"),
+        not(feature = "chrome")
+    ))]
     async fn _crawl_establish(
         &mut self,
         client: &Client,
@@ -799,7 +803,7 @@ impl Website {
         client: &Client,
         base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
-        page: &chromiumoxide_fork::Page,
+        page: &chromiumoxide::Page,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
@@ -1068,7 +1072,7 @@ impl Website {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             if cfg!(feature = "chrome_stealth") {
-                                let _ = new_page.enable_stealth_mode(&if self
+                                let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
                                     .is_some()
@@ -1559,7 +1563,7 @@ impl Website {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             if cfg!(feature = "chrome_stealth") {
-                                let _ = new_page.enable_stealth_mode(&if self
+                                let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
                                     .is_some()
@@ -2150,7 +2154,11 @@ async fn test_with_configuration() {
 
     website.crawl().await;
 
-    assert!(website.links_visited.len() >= 1, "{:?}", website.links_visited);
+    assert!(
+        website.links_visited.len() >= 1,
+        "{:?}",
+        website.links_visited
+    );
 }
 
 #[cfg(all(feature = "glob", not(feature = "decentralized")))]

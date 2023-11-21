@@ -1,6 +1,6 @@
 use crate::tokio_stream::StreamExt;
 use crate::utils::log;
-use chromiumoxide_fork::{Browser, BrowserConfig};
+use chromiumoxide::{Browser, BrowserConfig};
 use tokio::task;
 
 /// get chrome configuration
@@ -56,15 +56,16 @@ pub fn get_browser_config(
         .no_sandbox()
         .with_head();
 
+    let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| {
+        if e == "--headless" {
+            "".to_string()
+        } else {
+            e.replace("://", "=").to_string()
+        }
+    }));
+
     let builder = match proxies {
         Some(proxies) => {
-            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| {
-                if e == "--headless" {
-                    "--headless=false".to_string()
-                } else {
-                    e.replace("://", "=").to_string()
-                }
-            }));
             chrome_args.push(string_concat!(
                 r#"--proxy-server=""#,
                 proxies.join(";"),
@@ -73,7 +74,7 @@ pub fn get_browser_config(
 
             builder.args(chrome_args)
         }
-        _ => builder.args(CHROME_ARGS),
+        _ => builder.args(chrome_args),
     };
     let builder = if std::env::var("CHROME_BIN").is_ok() {
         match std::env::var("CHROME_BIN") {

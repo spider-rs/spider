@@ -727,22 +727,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "chromiumoxide_cdp"
-version = "0.5.1"
+name = "chromiumoxide"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe7dfe7394e5863cca4716e908e826da15e6b2bd0f29e346425270ed3dcdea0d"
-dependencies = [
- "chromiumoxide_pdl",
- "chromiumoxide_types",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "chromiumoxide_fork"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "367ec368afb1d4a8ac3f2badac08ba6eab1bd5c92ff0b21031f91b526562826b"
+checksum = "cdea2fa69adb96b3f503c4ae5a9b0ab17ae9b92a0f0702710485b12cc7758ff8"
 dependencies = [
  "async-tungstenite",
  "base64 0.21.3",
@@ -763,7 +751,19 @@ dependencies = [
  "tracing",
  "url",
  "which",
- "winreg",
+ "winreg 0.51.0",
+]
+
+[[package]]
+name = "chromiumoxide_cdp"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe7dfe7394e5863cca4716e908e826da15e6b2bd0f29e346425270ed3dcdea0d"
+dependencies = [
+ "chromiumoxide_pdl",
+ "chromiumoxide_types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3093,7 +3093,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "winreg",
+ "winreg 0.50.0",
 ]
 
 [[package]]
@@ -3569,12 +3569,12 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.49.5"
+version = "1.49.6"
 dependencies = [
  "ahash",
  "bytes",
  "case_insensitive_string",
- "chromiumoxide_fork",
+ "chromiumoxide",
  "compact_str",
  "cssparser",
  "ego-tree",
@@ -3604,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.49.5"
+version = "1.49.6"
 dependencies = [
  "clap 4.4.4",
  "env_logger 0.9.3",
@@ -3616,7 +3616,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.49.5"
+version = "1.49.6"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
@@ -3637,7 +3637,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.49.5"
+version = "1.49.6"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
@@ -4854,6 +4854,16 @@ name = "winreg"
 version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "winreg"
+version = "0.51.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "937f3df7948156640f46aacef17a70db0de5917bda9c92b0f751f3a955b588fc"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",

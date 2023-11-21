@@ -59,7 +59,7 @@ async fn main() {
             _ => None,
         })
         .with_external_domains(Some(cli.external_domains.unwrap_or_default().into_iter()))
-        .build() 
+        .build()
     {
         Ok(mut website) => {
             match cli.command {
@@ -85,13 +85,13 @@ async fn main() {
                         .to_owned()
                         .unwrap_or(String::from("./_temp_spider_downloads/"));
                     let tmp_path = Path::new(&tmp_dir);
-        
+
                     if !Path::new(&tmp_path).exists() {
                         match std::fs::create_dir_all(&tmp_path) {
                             _ => (),
                         };
                     }
-        
+
                     website.scrape().await;
 
                     let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
@@ -101,7 +101,7 @@ async fn main() {
                             Some(pages) => {
                                 for page in pages.iter() {
                                     let page_url = page.get_url();
-        
+
                                     match Url::parse(page_url) {
                                         Ok(parsed_url) => {
                                             let url_path = parsed_url.path();
@@ -110,13 +110,13 @@ async fn main() {
                                             let split_paths: Vec<&str> = url_path.split("/").collect();
                                             let it = split_paths.iter();
                                             let last_item = split_paths.last().unwrap_or(&"");
-        
+
                                             let mut download_path = PathBuf::from(tmp_path);
-        
+
                                             for p in it {
                                                 if p != last_item {
                                                     download_path.push(p);
-        
+
                                                     if !Path::new(&download_path).exists() {
                                                         match std::fs::create_dir_all(&download_path) {
                                                             _ => (),
@@ -136,7 +136,7 @@ async fn main() {
                                                             )
                                                         }))
                                                         .expect("Unable to open file");
-        
+
                                                     match page.get_bytes() {
                                                         Some(b) => {
                                                             file.write_all(b).unwrap_or_default();
@@ -165,23 +165,23 @@ async fn main() {
                     let mut page_objects: Vec<_> = vec![];
 
                     let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
-        
+
                     if selectors.is_some() {
                         let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-        
+
                         match website.get_pages() {
                             Some(pages) => {
                                 for page in pages.iter() {
                                     let mut links: Vec<String> = vec![];
-        
+
                                     if output_links {
                                         let page_links = page.links(&*selectors).await;
-        
+
                                         for link in page_links {
                                             links.push(link.as_ref().to_string());
                                         }
                                     }
-        
+
                                     let page_json = json!({
                                         "url": page.get_url(),
                                         "links": links,
@@ -191,17 +191,25 @@ async fn main() {
                                             Default::default()
                                         },
                                     });
-        
                                     page_objects.push(page_json);
                                 }
                             }
                             _ => (),
                         }
                     }
-        
-                    let j = serde_json::to_string_pretty(&page_objects).unwrap();
-        
-                    io::stdout().write_all(j.as_bytes()).unwrap();
+
+                    match serde_json::to_string_pretty(&page_objects) {
+                        Ok(j) => {
+                            match io::stdout().write_all(j.as_bytes()) {
+                                Err(e) => {
+                                    println!("{:?}", e)
+                                }
+                                _ => ()
+                            }
+                            io::stdout().write_all(j.as_bytes()).unwrap();
+                        }
+                        Err(e) =>  println!("{:?}", e)
+                    }
                 }
                 None => ()
             }

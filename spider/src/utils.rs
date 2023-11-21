@@ -19,12 +19,12 @@ pub struct PageResponse {
 pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide_fork::Page,
+    page: &chromiumoxide::Page,
 ) -> PageResponse {
     match page.goto(target_url).await {
         Ok(page) => {
             let p = page.wait_for_navigation_response().await;
-            let res = page.content().await;
+            let res = page.content_bytes().await;
             let ok = res.is_ok();
 
             PageResponse {
@@ -54,7 +54,7 @@ pub async fn fetch_page_html(
 /// Check if url matches the last item in a redirect chain for chrome CDP
 pub fn get_last_redirect(
     target_url: &str,
-    u: &Option<std::sync::Arc<chromiumoxide_fork::handler::http::HttpRequest>>,
+    u: &Option<std::sync::Arc<chromiumoxide::handler::http::HttpRequest>>,
 ) -> Option<String> {
     match u {
         Some(u) => match u.redirect_chain.last()? {
@@ -105,12 +105,10 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
                 ..Default::default()
             }
         }
-        Ok(res) => {
-            PageResponse {
-                status_code: res.status(),
-                ..Default::default()
-            }
-        }
+        Ok(res) => PageResponse {
+            status_code: res.status(),
+            ..Default::default()
+        },
         Err(_) => {
             log("- error parsing html text {}", &target_url);
             Default::default()
@@ -272,12 +270,12 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide_fork::Page,
+    page: &chromiumoxide::Page,
 ) -> PageResponse {
     match &page {
         page => match page.goto(target_url).await {
             Ok(page) => {
-                let res = page.content().await;
+                let res = page.content_bytes().await;
                 // let _ = page.close().await;
 
                 PageResponse {
