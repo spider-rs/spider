@@ -1126,7 +1126,7 @@ impl Website {
                                                 _ => (link, None),
                                             };
                                             let mut page =
-                                                Page::new(&link_result.0.as_ref(), &shared.0).await;
+                                                Page::new_page(&link_result.0.as_ref(), &shared.0).await;
                                             page.set_external(shared.3.to_owned());
 
                                             let page_links = page.links(&shared.1).await;

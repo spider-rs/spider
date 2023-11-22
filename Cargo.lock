@@ -3570,7 +3570,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.49.9"
+version = "1.49.10"
 dependencies = [
  "ahash",
  "bytes",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.49.9"
+version = "1.49.10"
 dependencies = [
  "clap 4.4.4",
  "env_logger 0.9.3",
@@ -3617,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.49.9"
+version = "1.49.10"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
@@ -3638,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.49.9"
+version = "1.49.10"
 dependencies = [
  "env_logger 0.10.0",
  "lazy_static",
