@@ -10,7 +10,7 @@ use compact_str::CompactString;
 use hashbrown::HashMap;
 
 use hashbrown::HashSet;
-use reqwest::Client;
+use reqwest::{Client, ClientBuilder};
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -154,6 +154,9 @@ pub struct Website {
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<HashMap<CaseInsensitiveString, u32>>,
+    #[cfg(feature = "cookies")]
+    /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
+    pub cookie_str: String,
 }
 
 impl Website {
@@ -459,9 +462,8 @@ impl Website {
         client
     }
 
-    /// configure http client
-    #[cfg(not(feature = "decentralized"))]
-    pub fn configure_http_client(&mut self) -> Client {
+    /// build the http client
+    fn configure_http_client_builder(&mut self) -> ClientBuilder {
         let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
         let policy = match host_str {
@@ -511,6 +513,40 @@ impl Website {
                 client
             }
             _ => client,
+        };
+
+        client
+    }
+
+    /// configure http client
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
+    pub fn configure_http_client(&mut self) -> Client {
+        let client = self.configure_http_client_builder();
+
+        // should unwrap using native-tls-alpn
+        unsafe { client.build().unwrap_unchecked() }
+    }
+
+    /// build the client with cookie configurations
+    #[cfg(all(not(feature = "decentralized"), feature = "cookies"))]
+    pub fn configure_http_client(&mut self) -> Client {
+        let client = self.configure_http_client_builder();
+        let client = client.cookie_store(true);
+
+        let client = if !self.cookie_str.is_empty() && self.domain_parsed.is_some() {
+            let client = match self.domain_parsed.clone() {
+                Some(p) => {
+                    let cookie_store = reqwest::cookie::Jar::default();
+                    cookie_store.add_cookie_str(&self.cookie_str, &p);
+                    let client = client.cookie_provider(cookie_store.into());
+                    client
+                }
+                _ => client,
+            };
+
+            client
+        } else {
+            client
         };
 
         // should unwrap using native-tls-alpn
