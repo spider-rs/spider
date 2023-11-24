@@ -63,6 +63,7 @@
 //! - `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 //! - `chrome_cpu`: Disable gpu usage for chrome browser.
 //! - `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
+//! - `cookies`: Enables cookies storing and setting to use for request.
 
 pub extern crate bytes;
 pub extern crate compact_str;
