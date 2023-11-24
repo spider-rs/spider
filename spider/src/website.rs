@@ -641,7 +641,7 @@ impl Website {
 
     /// setup config for crawl
     #[cfg(feature = "control")]
-    pub async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
+    async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
         let client = self.configure_http_client();
 
         // allow fresh crawls to run fully
@@ -657,7 +657,7 @@ impl Website {
 
     /// setup config for crawl
     #[cfg(not(feature = "control"))]
-    pub async fn setup<T>(&mut self) -> (Client, Option<T>) {
+    async fn setup<T>(&mut self) -> (Client, Option<T>) {
         let client = self.configure_http_client();
 
         // allow fresh crawls to run fully
