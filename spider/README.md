@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.49.13"
+spider = "1.50.1"
 ```
 
 And then the code:
@@ -30,7 +30,7 @@ use spider::tokio;
 #[tokio::main]
 async fn main() {
     let url = "https://choosealicense.com";
-    let mut website: Website = Website::new(&url);
+    let mut website = Website::new(&url);
     website.crawl().await;
 
     for link in website.get_links() {
@@ -43,7 +43,7 @@ You can use `Configuration` object to configure your crawler:
 
 ```rust
 // ..
-let mut website: Website = Website::new("https://choosealicense.com");
+let mut website = Website::new("https://choosealicense.com");
 
 website.configuration.respect_robots_txt = true;
 website.configuration.subdomains = true;
@@ -52,10 +52,12 @@ website.configuration.delay = 0; // Defaults to 0 ms due to concurrency handling
 website.configuration.request_timeout = None; // Defaults to 15000 ms
 website.configuration.http2_prior_knowledge = false; // Enable if you know the webserver supports http2
 website.configuration.user_agent = Some("myapp/version".into()); // Defaults to using a random agent
-website.on_link_find_callback = Some(|s, html| { println!("link target: {}", s); (s, html)}); // Callback to run on each link find
+website.on_link_find_callback = Some(|s, html| { println!("link target: {}", s); (s, html)}); // Callback to run on each link find - useful for mutating the url, ex: convert the top level domain from `.fr` to `.es`.
 website.configuration.blacklist_url.get_or_insert(Default::default()).push("https://choosealicense.com/licenses/".into());
 website.configuration.proxies.get_or_insert(Default::default()).push("socks5://10.1.1.1:12345".into()); // Defaults to None - proxy list.
 website.budget = Some(spider::hashbrown::HashMap::from([(spider::CaseInsensitiveString::new("*"), 300), (spider::CaseInsensitiveString::new("/licenses"), 10)])); // Defaults to None - Requires the `budget` feature flag
+website.cron_str = "1/5 * * * * *".into(); // Defaults to empty string - Requires the `cron` feature flag
+website.cron_type = spider::website::CronType::Crawl; // Defaults to CronType::Crawl - Requires the `cron` feature flag
 
 website.crawl().await;
 ```
@@ -78,6 +80,8 @@ website
     .with_external_domains(Some(Vec::from(["https://creativecommons.org/licenses/by/3.0/"].map(|d| d.to_string())).into_iter()))
     .with_headers(None)
     .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
+    // requires the `cron` feature flag
+    .with_cron("1/5 * * * * *", Default::Default());
     .with_proxies(None);
 ```
 
@@ -87,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["regex", "ua_generator"] }
+spider = { version = "1.50.1", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -97,7 +101,7 @@ spider = { version = "1.49.13", features = ["regex", "ua_generator"] }
 1. `sync`: Subscribe to changes for Page data processing async. [Enabled by default]
 1. `budget`: Allows setting a crawl budget per path with depth.
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
-1. `full_resources`: Enables gathering all content that relates to the domain like css,jss, and etc.
+1. `full_resources`: Enables gathering all content that relates to the domain like CSS, JS, and etc.
 1. `serde`: Enables serde serialization support.
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
@@ -105,11 +109,12 @@ spider = { version = "1.49.13", features = ["regex", "ua_generator"] }
 1. `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 1. `sitemap`: Include sitemap pages in results.
 1. `time`: Enables duration tracking per page.
-1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely [experimental].
+1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
 1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 1. `cookies`: Enables cookies storing and setting to use for request.
+1. `cron`: Enables the ability to start cron jobs for the website.
 
 ### Decentralization
 
@@ -117,7 +122,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["decentralized"] }
+spider = { version = "1.50.1", features = ["decentralized"] }
 ```
 
 ```sh
@@ -137,7 +142,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["sync"] }
+spider = { version = "1.50.1", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -148,7 +153,7 @@ use spider::tokio;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let mut website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(16).unwrap();
 
     let join_handle = tokio::spawn(async move {
@@ -167,7 +172,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["regex"] }
+spider = { version = "1.50.1", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -178,7 +183,7 @@ use spider::tokio;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://choosealicense.com");
+    let mut website = Website::new("https://choosealicense.com");
     website.configuration.blacklist_url.push("/licenses/".into());
     website.crawl().await;
 
@@ -194,7 +199,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["control"] }
+spider = { version = "1.50.1", features = ["control"] }
 ```
 
 ```rust
@@ -236,7 +241,7 @@ async fn main() {
     use std::io::{Write, stdout};
 
     let url = "https://choosealicense.com/";
-    let mut website: Website = Website::new(&url);
+    let mut website = Website::new(&url);
 
     website.scrape().await;
 
@@ -258,11 +263,49 @@ async fn main() {
 }
 ```
 
+### Cron Jobs
+
+Use cron jobs to run crawls continuously at anytime.
+
+```toml
+[dependencies]
+spider = { version = "1.50.1", features = ["sync", "cron"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::website::{Website, run_cron};
+use spider::tokio;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://choosealicense.com");
+    // set the cron to run or use the builder pattern `website.with_cron`.
+    website.cron_str = "1/5 * * * * *".into();
+
+    let mut rx2 = website.subscribe(16).unwrap();
+
+    let join_handle = tokio::spawn(async move {
+        while let Ok(res) = rx2.recv().await {
+            println!("{:?}", res.get_url());
+        }
+    });
+
+    // take ownership of the website. You can also use website.run_cron, except you need to perform abort manually on handles created.
+    let runner = run_cron(website).await;
+
+    println!("Starting the Runner for 10 seconds");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let _ = tokio::join!(runner.stop(), join_handle);
+}
+```
+
 ### Chrome
 
 ```toml
 [dependencies]
-spider = { version = "1.49.13", features = ["chrome"] }
+spider = { version = "1.50.1", features = ["chrome"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.

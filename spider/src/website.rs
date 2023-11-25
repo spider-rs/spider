@@ -1,16 +1,21 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
+use crate::features::cron::Job;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
 use crate::CaseInsensitiveString;
+
+#[cfg(feature = "cron")]
+use async_trait::async_trait;
+
 use compact_str::CompactString;
 
 #[cfg(feature = "budget")]
 use hashbrown::HashMap;
 
 use hashbrown::HashSet;
-use reqwest::{Client, ClientBuilder};
+use reqwest::Client;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -115,6 +120,17 @@ pub enum CrawlStatus {
     Paused,
 }
 
+#[cfg(feature = "cron")]
+/// The type of cron job to run
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CronType {
+    #[default]
+    /// Crawl collecting links, page data, and etc.
+    Crawl,
+    /// Scrape collecting links, page data as bytes to store, and etc.
+    Scrape,
+}
+
 /// Represents a website to crawl and gather all links.
 /// ```rust
 /// use spider::website::Website;
@@ -157,6 +173,12 @@ pub struct Website {
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: String,
+    #[cfg(feature = "cron")]
+    /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
+    pub cron_str: String,
+    #[cfg(feature = "cron")]
+    /// The type of cron to run either crawl or scrape
+    pub cron_type: CronType,
 }
 
 impl Website {
@@ -463,7 +485,8 @@ impl Website {
     }
 
     /// build the http client
-    fn configure_http_client_builder(&mut self) -> ClientBuilder {
+    #[cfg(not(feature = "decentralized"))]
+    fn configure_http_client_builder(&mut self) -> reqwest::ClientBuilder {
         let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
         let policy = match host_str {
@@ -2122,6 +2145,14 @@ impl Website {
         self
     }
 
+    #[cfg(feature = "cron")]
+    /// Setup cron jobs to run
+    pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
+        self.cron_str = cron_str.into();
+        self.cron_type = cron_type;
+        self
+    }
+
     /// Build the website configuration when using with_builder
     pub fn build(&self) -> Result<Self, Error> {
         if self.domain_parsed.is_none() {
@@ -2152,6 +2183,50 @@ impl Website {
 
         Some(rx2)
     }
+
+    #[cfg(feature = "cron")]
+    /// Start a cron job - if you use subscribe on another thread you need to abort the handle in conjuction with runner.stop.
+    pub async fn run_cron(&self) -> crate::features::cron::Runner {
+        crate::features::cron::Runner::new()
+            .add(Box::new(self.clone()))
+            .run()
+            .await
+    }
+}
+
+#[cfg(feature = "cron")]
+/// Start a cron job taking ownership of the website
+pub async fn run_cron(website: Website) -> crate::features::cron::Runner {
+    crate::features::cron::Runner::new()
+        .add(Box::new(website))
+        .run()
+        .await
+}
+
+#[cfg(feature = "cron")]
+#[async_trait]
+impl Job for Website {
+    fn schedule(&self) -> Option<cron::Schedule> {
+        match self.cron_str.parse() {
+            Ok(schedule) => Some(schedule),
+            Err(e) => {
+                log::error!("{:?}", e);
+                None
+            }
+        }
+    }
+    async fn handle(&mut self) {
+        log::info!(
+            "CRON: {} - cron job running {}",
+            self.get_domain().as_ref(),
+            self.now()
+        );
+        if self.cron_type == CronType::Crawl {
+            self.crawl().await;
+        } else {
+            self.scrape().await;
+        }
+    }
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -2167,6 +2242,70 @@ async fn crawl() {
         "{:?}",
         website.links_visited
     );
+}
+
+#[cfg(feature = "cron")]
+#[tokio::test]
+async fn crawl_cron() {
+    let url = "https://choosealicense.com";
+    let mut website: Website = Website::new(&url)
+        .with_cron("1/5 * * * * *", Default::default())
+        .build()
+        .unwrap();
+    let mut rx2 = website.subscribe(16).unwrap();
+
+    // handle an event on every cron
+    let join_handle = tokio::spawn(async move {
+        let mut links_visited = HashSet::new();
+        while let Ok(res) = rx2.recv().await {
+            let url = res.get_url();
+            links_visited.insert(CaseInsensitiveString::new(url));
+        }
+        assert!(
+            links_visited
+                .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            "{:?}",
+            links_visited
+        );
+    });
+
+    let runner = website.run_cron().await;
+    log::debug!("Starting the Runner for 10 seconds");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    runner.stop().await;
+    join_handle.abort();
+    let _ = join_handle.await;
+}
+
+#[cfg(feature = "cron")]
+#[tokio::test]
+async fn crawl_cron_own() {
+    let url = "https://choosealicense.com";
+    let mut website: Website = Website::new(&url)
+        .with_cron("1/5 * * * * *", Default::default())
+        .build()
+        .unwrap();
+    let mut rx2 = website.subscribe(16).unwrap();
+
+    // handle an event on every cron
+    let join_handle = tokio::spawn(async move {
+        let mut links_visited = HashSet::new();
+        while let Ok(res) = rx2.recv().await {
+            let url = res.get_url();
+            links_visited.insert(CaseInsensitiveString::new(url));
+        }
+        assert!(
+            links_visited
+                .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            "{:?}",
+            links_visited
+        );
+    });
+
+    let runner = run_cron(website).await;
+    log::debug!("Starting the Runner for 10 seconds");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let _ = tokio::join!(runner.stop(), join_handle);
 }
 
 #[cfg(not(feature = "decentralized"))]
