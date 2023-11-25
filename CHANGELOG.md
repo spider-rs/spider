@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.50.1
+
+1. feat(cron): add cron feature flag [#153]
+
 ## v1.36.0
 
 1. feat(sync): subscribe to page updates to perform async handling of data
@@ -12,7 +16,7 @@
 
 ## v1.30.5
 
-1. "feat(worker): add tls support"
+1. feat(worker): add tls support
 
 ## v1.30.3
 

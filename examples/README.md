@@ -39,3 +39,7 @@ Crawl the page and output the links via [Serde](./serde.rs).
 Crawl links with a budget of amount of pages allowed [Budget](./budget.rs).
 
 - `cargo run --example budget`
+
+Crawl links at a given cron time [Cron](./cron.rs).
+
+- `cargo run --example cron`

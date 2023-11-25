@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.49.13"
+version = "1.50.1"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -22,7 +22,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "1.49.13"
+version = "1.50.1"
 path = "../spider"
 features = ["serde"]
 
@@ -71,3 +71,8 @@ path = "configuration.rs"
 name = "budget"
 path = "budget.rs"
 required-features = ["spider/budget", "spider/sync"]
+
+[[example]]
+name = "cron"
+path = "cron.rs"
+required-features = ["spider/sync", "spider/cron"]

@@ -1103,6 +1103,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cron"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ff76b51e4c068c52bfd2866e1567bee7c567ae8f24ada09fd4307019e25eab7"
+dependencies = [
+ "chrono",
+ "nom",
+ "once_cell",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3740,13 +3751,16 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.49.13"
+version = "1.50.1"
 dependencies = [
  "ahash",
+ "async-trait",
  "bytes",
  "case_insensitive_string",
  "chromiumoxide",
+ "chrono",
  "compact_str",
+ "cron",
  "cssparser",
  "ego-tree",
  "fast_html5ever",
@@ -3775,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.49.13"
+version = "1.50.1"
 dependencies = [
  "clap 4.4.8",
  "env_logger 0.9.3",
@@ -3787,7 +3801,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.49.13"
+version = "1.50.1"
 dependencies = [
  "convert_case",
  "env_logger 0.9.3",
@@ -3808,7 +3822,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.49.13"
+version = "1.50.1"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",

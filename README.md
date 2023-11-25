@@ -7,6 +7,16 @@
 
 The fastest web crawler and indexer. Foundational building blocks for data curation workloads.
 
+- Concurrent
+- Streaming
+- Decentralization
+- Headless Chrome Rendering
+- HTTP Proxies
+- Cron Jobs
+- Subscriptions
+- Blacklisting and Budgeting Depth
+- [Changelog](CHANGELOG.md)
+
 ## Getting Started
 
 The simplest way to get started is to use the [Spider Cloud](https://spiderwebai.xyz) for a pain free hosted service. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations.
