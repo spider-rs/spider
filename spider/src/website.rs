@@ -1,6 +1,5 @@
 use crate::black_list::contains;
 use crate::configuration::{get_ua, Configuration};
-use crate::features::cron::Job;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
@@ -2205,7 +2204,7 @@ pub async fn run_cron(website: Website) -> crate::features::cron::Runner {
 
 #[cfg(feature = "cron")]
 #[async_trait]
-impl Job for Website {
+impl crate::features::cron::Job for Website {
     fn schedule(&self) -> Option<cron::Schedule> {
         match self.cron_str.parse() {
             Ok(schedule) => Some(schedule),

@@ -118,6 +118,9 @@ pub mod website;
 
 pub use case_insensitive_string::CaseInsensitiveString;
 
+#[cfg(feature = "chrome")]
+pub use chromiumoxide;
+
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
 pub mod black_list {

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.50.1"
+version = "1.50.2"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -51,7 +51,7 @@ async-trait = { version = "0.1.74", optional = true }
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync", "cron"]
+default = ["sync"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]

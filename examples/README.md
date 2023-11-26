@@ -43,3 +43,7 @@ Crawl links with a budget of amount of pages allowed [Budget](./budget.rs).
 Crawl links at a given cron time [Cron](./cron.rs).
 
 - `cargo run --example cron`
+
+Crawl links with chrome headed rendering [Chrome](./chrome.rs).
+
+- `cargo run --example chrome --features chrome_headed`
