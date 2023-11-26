@@ -14,7 +14,8 @@ async fn main() -> Result<(), Error> {
             ("en", 11),
             ("fr", 3),
         ])))
-        .build()?;
+        .build()
+        .unwrap();
 
     let start = Instant::now();
     website.crawl().await;

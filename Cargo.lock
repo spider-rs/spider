@@ -2119,6 +2119,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-rustls"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
+dependencies = [
+ "futures-util",
+ "http",
+ "hyper",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "hyper-tls"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3353,6 +3367,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
  "ipnet",
  "js-sys",
@@ -3362,12 +3377,15 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
+ "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "system-configuration",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls",
  "tokio-socks",
  "tokio-util",
  "tower-service",
@@ -3376,6 +3394,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+ "webpki-roots",
  "winreg 0.50.0",
 ]
 
@@ -3819,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.50.3"
+version = "1.50.6"
 dependencies = [
  "ahash",
  "async-trait",
@@ -3858,7 +3877,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.50.3"
+version = "1.50.6"
 dependencies = [
  "clap 4.4.8",
  "env_logger 0.9.3",
@@ -3870,7 +3889,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.50.3"
+version = "1.50.6"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -3891,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.50.3"
+version = "1.50.6"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",

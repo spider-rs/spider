@@ -2245,6 +2245,7 @@ impl crate::features::cron::Job for Website {
 
 /// builder pattern error handling
 #[cfg(feature = "napi")]
+#[derive(Debug)]
 pub enum WebsiteBuilderError {
     /// Uninitialized field
     UninitializedField(&'static str),

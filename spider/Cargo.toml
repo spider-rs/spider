@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.50.3"
+version = "1.50.6"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -15,7 +15,7 @@ edition = "2018"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = { version = "0.11.22", features = [ "brotli", "gzip", "deflate", "native-tls-alpn", "stream" ] }
+reqwest = { version = "0.11.22", features = [ "brotli", "gzip", "deflate", "stream" ] }
 url = "2.4.0"
 tokio = { version = "1.34.0", features = [ "rt-multi-thread", "macros", "time", "parking_lot" ] }
 tokio-stream = "0.1.14"
@@ -52,7 +52,7 @@ napi = { version = "2", features = ["async", "tokio_rt", "napi4"], optional = tr
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync"]
+default = ["sync", "reqwest/native-tls-alpn"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
@@ -77,3 +77,4 @@ chrome_stealth = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:chrono", "dep:cron", "dep:async-trait"]
 napi = ["dep:napi"]
+napi_rustls_tls = ["napi", "reqwest/rustls-tls"]

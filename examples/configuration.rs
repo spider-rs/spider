@@ -17,7 +17,8 @@ async fn main() -> Result<(), Error> {
         .with_external_domains(Some(
             Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter(),
         ))
-        .build()?;
+        .build()
+        .unwrap();
 
     let start = Instant::now();
     website.crawl().await;
