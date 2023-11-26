@@ -15,6 +15,7 @@ use hashbrown::HashMap;
 
 use hashbrown::HashSet;
 use reqwest::Client;
+#[cfg(not(feature = "napi"))]
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
@@ -25,6 +26,9 @@ use tokio::task;
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use url::Url;
+
+#[cfg(feature = "napi")]
+use napi::bindgen_prelude::*;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome::launch_browser;
@@ -2153,9 +2157,20 @@ impl Website {
     }
 
     /// Build the website configuration when using with_builder
+    #[cfg(not(feature = "napi"))]
     pub fn build(&self) -> Result<Self, Error> {
         if self.domain_parsed.is_none() {
             Err(ErrorKind::NotFound.into())
+        } else {
+            Ok(self.to_owned())
+        }
+    }
+
+    /// Build the website configuration when using with_builder with napi error handling
+    #[cfg(feature = "napi")]
+    pub fn build(&self) -> Result<Self, WebsiteBuilderError> {
+        if self.domain_parsed.is_none() {
+            Err(napi::Error::new(WebsiteBuilderError::ValidationError("domain cannot parse"),  "incorrect domain name" ))
         } else {
             Ok(self.to_owned())
         }
@@ -2227,6 +2242,35 @@ impl crate::features::cron::Job for Website {
         }
     }
 }
+
+/// builder pattern error handling
+#[cfg(feature = "napi")]
+pub enum WebsiteBuilderError {
+    /// Uninitialized field
+    UninitializedField(&'static str),
+    /// Custom validation error
+    ValidationError(&'static str),
+}
+
+#[cfg(feature = "napi")]
+impl AsRef<str> for WebsiteBuilderError {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::UninitializedField( s) => s,
+            Self::ValidationError( s) => s,
+        }
+    }
+}
+
+#[cfg(feature = "napi")]
+impl std::fmt::Display for Website {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "`{}`", self)
+    }
+}
+
+#[cfg(feature = "napi")]
+impl std::error::Error for Website {}
 
 #[cfg(not(feature = "decentralized"))]
 #[tokio::test]
