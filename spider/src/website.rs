@@ -2313,7 +2313,7 @@ async fn crawl_cron() {
         );
     });
 
-    let runner = website.run_cron().await;
+    let mut runner = website.run_cron().await;
     log::debug!("Starting the Runner for 10 seconds");
     tokio::time::sleep(Duration::from_secs(10)).await;
     runner.stop().await;
@@ -2346,7 +2346,7 @@ async fn crawl_cron_own() {
         );
     });
 
-    let runner = run_cron(website).await;
+    let mut runner = run_cron(website).await;
     log::debug!("Starting the Runner for 10 seconds");
     tokio::time::sleep(Duration::from_secs(10)).await;
     let _ = tokio::join!(runner.stop(), join_handle);

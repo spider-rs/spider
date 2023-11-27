@@ -17,7 +17,7 @@ async fn main() {
         }
     });
 
-    let runner = run_cron(website).await;
+    let mut runner = run_cron(website).await;
 
     println!("Starting the Runner for 20 seconds");
     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;

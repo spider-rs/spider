@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.50.7"
+spider = "1.50.8"
 ```
 
 And then the code:
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["regex", "ua_generator"] }
+spider = { version = "1.50.8", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -122,7 +122,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["decentralized"] }
+spider = { version = "1.50.8", features = ["decentralized"] }
 ```
 
 ```sh
@@ -142,7 +142,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["sync"] }
+spider = { version = "1.50.8", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -172,7 +172,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["regex"] }
+spider = { version = "1.50.8", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -199,7 +199,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["control"] }
+spider = { version = "1.50.8", features = ["control"] }
 ```
 
 ```rust
@@ -269,7 +269,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["sync", "cron"] }
+spider = { version = "1.50.8", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -293,7 +293,7 @@ async fn main() {
     });
 
     // take ownership of the website. You can also use website.run_cron, except you need to perform abort manually on handles created.
-    let runner = run_cron(website).await;
+    let mut runner = run_cron(website).await;
 
     println!("Starting the Runner for 10 seconds");
     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -305,7 +305,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.50.7", features = ["chrome"] }
+spider = { version = "1.50.8", features = ["chrome"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.

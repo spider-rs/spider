@@ -195,12 +195,12 @@ impl Runner {
     }
 
     /// Stop the spawned runner
-    pub async fn stop(mut self) {
+    pub async fn stop(&mut self) {
         if !self.running {
             return;
         }
         if let Some(thread) = self.thread.take() {
-            if let Some(tx) = self.tx {
+            if let Some(tx) = &self.tx {
                 match tx.send(Ok(())) {
                     Ok(_) => (),
                     Err(e) => error!("Could not send stop signal to cron runner thread: {}", e),
@@ -335,7 +335,7 @@ mod tests {
         let some_job = SomeJob;
         let another_job = AnotherJob;
 
-        let runner = Runner::new()
+        let mut runner = Runner::new()
             .add(Box::new(some_job))
             .add(Box::new(another_job))
             .run()
