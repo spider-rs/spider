@@ -106,7 +106,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 /// Configuration structure for `Website`.
 pub mod configuration;
 /// Optional features to use.
-mod features;
+pub mod features;
 /// Internal packages customized.
 pub mod packages;
 /// A page scraped.
