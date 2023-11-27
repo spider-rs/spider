@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.50.8"
+version = "1.50.9"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -78,3 +78,4 @@ cookies = ["reqwest/cookies"]
 cron = ["dep:chrono", "dep:cron", "dep:async-trait"]
 napi = ["dep:napi"]
 napi_rustls_tls = ["napi", "reqwest/rustls-tls"]
+http3 = ["reqwest/http3"]

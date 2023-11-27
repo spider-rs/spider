@@ -30,6 +30,7 @@ lazy_static! {
 }
 
 #[async_trait]
+/// A cron job that runs for a website.
 pub trait Job: Send + Sync {
     /// Default implementation of is_active method will
     /// make this job always active

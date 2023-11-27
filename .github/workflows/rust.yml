@@ -24,6 +24,6 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --verbose --release
       - name: Run tests
-        run: ./target/debug/spider_worker & cargo test --verbose --all-features
+        run: ./target/release/spider_worker & RUSTFLAGS='--cfg reqwest_unstable' cargo test --verbose --all-features

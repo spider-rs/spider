@@ -1,6 +1,7 @@
 use crate::CaseInsensitiveString;
 
 #[cfg(feature = "glob")]
+/// expand a website url to a glob pattern set
 pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
     use regex::Regex;

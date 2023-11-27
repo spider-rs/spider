@@ -65,6 +65,7 @@
 //! - `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 //! - `cookies`: Enables cookies storing and setting to use for request.
 //! - `cron`: Enables the ability to start cron jobs for the website.
+//! - `http3`: Enables experimental HTTP/3 client.
 
 pub extern crate bytes;
 pub extern crate compact_str;
