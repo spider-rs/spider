@@ -115,6 +115,8 @@ pub enum CrawlStatus {
     Blocked,
     /// The initial request ran without returning html.
     Empty,
+    /// The URL of the website is invalid. Crawl cannot commence.
+    Invalid,
     #[cfg(feature = "control")]
     /// The crawl shutdown manually.
     Shutdown,
@@ -1077,11 +1079,21 @@ impl Website {
         links
     }
 
+    /// Set the crawl status depending on crawl state
+    fn set_crawl_status(&mut self) {
+        if !self.domain_parsed.is_some() {
+            self.status = CrawlStatus::Invalid;
+        } else {
+            self.status = CrawlStatus::Idle;
+        }
+    }
+
     #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency
     pub async fn crawl(&mut self) {
         let (client, handle) = self.setup().await;
         self.crawl_concurrent(&client, &handle).await;
+        self.set_crawl_status();
     }
 
     #[cfg(not(feature = "sitemap"))]
@@ -1089,6 +1101,7 @@ impl Website {
     pub async fn crawl_raw(&mut self) {
         let (client, handle) = self.setup().await;
         self.crawl_concurrent_raw(&client, &handle).await;
+        self.set_crawl_status();
     }
 
     #[cfg(not(feature = "sitemap"))]
@@ -1096,6 +1109,7 @@ impl Website {
     pub async fn scrape(&mut self) {
         let (client, handle) = self.setup().await;
         self.scrape_concurrent(&client, &handle).await;
+        self.set_crawl_status();
     }
 
     #[cfg(feature = "sitemap")]
@@ -1104,6 +1118,7 @@ impl Website {
         let (client, handle) = self.setup().await;
         self.crawl_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
+        self.set_crawl_status();
     }
 
     #[cfg(feature = "sitemap")]
@@ -1112,6 +1127,7 @@ impl Website {
         let (client, handle) = self.setup().await;
         self.crawl_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
+        self.set_crawl_status();
     }
 
     #[cfg(feature = "sitemap")]
@@ -1120,6 +1136,7 @@ impl Website {
         let (client, handle) = self.setup().await;
         self.scrape_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, true).await;
+        self.set_crawl_status();
     }
 
     /// Start to crawl website concurrently
@@ -1224,8 +1241,6 @@ impl Website {
                         }
                     }
                 }
-
-                self.status = CrawlStatus::Idle;
             }
             _ => log("", "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>."),
         }
@@ -1363,7 +1378,6 @@ impl Website {
                                 }
                             }
 
-                            self.status = CrawlStatus::Idle;
                             if !std::env::var("CHROME_URL").is_ok() {
                                 let _ = browser.close().await;
                                 let _ = browser_handle.await;
@@ -1484,8 +1498,6 @@ impl Website {
                         }
                     }
                 }
-
-                self.status = CrawlStatus::Idle;
             }
             _ => log("", "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>."),
         }
@@ -1709,8 +1721,6 @@ impl Website {
                     break;
                 }
             }
-
-            self.status = CrawlStatus::Idle;
         }
     }
 
@@ -1848,8 +1858,6 @@ impl Website {
                                     break;
                                 }
                             }
-
-                            self.status = CrawlStatus::Idle;
 
                             if !std::env::var("CHROME_URL").is_ok() {
                                 let _ = browser.close().await;
@@ -2170,7 +2178,10 @@ impl Website {
     #[cfg(feature = "napi")]
     pub fn build(&self) -> Result<Self, WebsiteBuilderError> {
         if self.domain_parsed.is_none() {
-            Err(napi::Error::new(WebsiteBuilderError::ValidationError("domain cannot parse"),  "incorrect domain name" ))
+            Err(napi::Error::new(
+                WebsiteBuilderError::ValidationError("domain cannot parse"),
+                "incorrect domain name",
+            ))
         } else {
             Ok(self.to_owned())
         }
@@ -2257,8 +2268,8 @@ pub enum WebsiteBuilderError {
 impl AsRef<str> for WebsiteBuilderError {
     fn as_ref(&self) -> &str {
         match self {
-            Self::UninitializedField( s) => s,
-            Self::ValidationError( s) => s,
+            Self::UninitializedField(s) => s,
+            Self::ValidationError(s) => s,
         }
     }
 }

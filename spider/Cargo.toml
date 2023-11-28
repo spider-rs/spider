@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.50.9"
+version = "1.50.10"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -38,7 +38,7 @@ num_cpus = "1.16.0"
 bytes = { version = "1.5.0", features = ["serde"] }
 serde = { version = "1.0.167", optional = true, features = ["derive"] }
 flexbuffers = { version = "2.0.0", optional = true }
-itertools = { version = "0.10.5", optional = true }
+itertools = { version = "0.12.0", optional = true }
 case_insensitive_string = { version = "0.1.7", features = [ "compact", "serde" ]}
 jsdom = { version = "0.0.11-alpha.1", optional = true, features = [ "hashbrown", "tokio" ] }
 chromiumoxide = { version = "0.5.6", optional = true, features = ["tokio-runtime", "bytes"], default-features = false }

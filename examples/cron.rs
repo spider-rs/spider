@@ -2,7 +2,7 @@
 extern crate spider;
 
 use spider::tokio;
-use spider::website::{Website, run_cron};
+use spider::website::{run_cron, Website};
 
 #[tokio::main]
 async fn main() {
@@ -11,7 +11,7 @@ async fn main() {
 
     let mut rx2 = website.subscribe(16).unwrap();
 
-   let join_handle = tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {
             println!("{:?}", res.get_url());
         }

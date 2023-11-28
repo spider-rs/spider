@@ -1085,7 +1085,7 @@ dependencies = [
  "criterion-plot",
  "csv",
  "futures",
- "itertools",
+ "itertools 0.10.5",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -1108,7 +1108,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2673cc8207403546f45f5fd319a974b1e6983ad1a3ee7e6041650013be041876"
 dependencies = [
  "cast",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -2293,6 +2293,15 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
@@ -3938,7 +3947,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.50.9"
+version = "1.50.10"
 dependencies = [
  "ahash",
  "async-trait",
@@ -3953,7 +3962,7 @@ dependencies = [
  "fast_html5ever",
  "flexbuffers",
  "hashbrown 0.14.3",
- "itertools",
+ "itertools 0.12.0",
  "jsdom",
  "lazy_static",
  "log",
@@ -3977,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.50.9"
+version = "1.50.10"
 dependencies = [
  "clap 4.4.8",
  "env_logger 0.9.3",
@@ -3989,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.50.9"
+version = "1.50.10"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4010,7 +4019,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.50.9"
+version = "1.50.10"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",

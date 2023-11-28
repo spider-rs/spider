@@ -234,7 +234,7 @@ impl RobotFileParser {
                 self.allow_all = true;
             }
             StatusCode::OK => self.from_response(res).await,
-            _ => {}
+            _ => ()
         }
     }
 
