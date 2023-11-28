@@ -19,7 +19,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 
 ## Getting Started
 
-The simplest way to get started is to use the [Spider Cloud](https://spiderwebai.xyz) for a pain free hosted service. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations.
+The simplest way to get started is to use the [Spider Cloud](https://spiderwebai.xyz) for a pain free hosted service. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations. You can also use the spider with node.js using the [spider-nodejs project](https://github.com/spider-rs/spider-nodejs).
 
 ## Benchmarks
 
