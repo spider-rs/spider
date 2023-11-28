@@ -105,7 +105,7 @@ spider = { version = "1.50.10", features = ["regex", "ua_generator"] }
 1. `serde`: Enables serde serialization support.
 1. `socks`: Enables socks5 proxy support.
 1. `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
-1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). [Enabled by default]
+1. `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage).
 1. `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 1. `sitemap`: Include sitemap pages in results.
 1. `time`: Enables duration tracking per page.
