@@ -1096,7 +1096,7 @@ impl Website {
         self.set_crawl_status();
     }
 
-    #[cfg(not(feature = "sitemap"))]
+    #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
         let (client, handle) = self.setup().await;
@@ -1112,6 +1112,14 @@ impl Website {
         self.set_crawl_status();
     }
 
+    #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
+    /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
+    pub async fn scrape_raw(&mut self) {
+        let (client, handle) = self.setup().await;
+        self.scrape_concurrent_raw(&client, &handle).await;
+        self.set_crawl_status();
+    }
+
     #[cfg(feature = "sitemap")]
     /// Start to crawl website and include sitemap links
     pub async fn crawl(&mut self) {
@@ -1121,11 +1129,20 @@ impl Website {
         self.set_crawl_status();
     }
 
-    #[cfg(feature = "sitemap")]
+    #[cfg(all(feature = "sitemap", feature = "chrome"))]
     /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
         let (client, handle) = self.setup().await;
         self.crawl_concurrent_raw(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, false).await;
+        self.set_crawl_status();
+    }
+
+    #[cfg(all(feature = "sitemap", feature = "chrome"))]
+    /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
+    pub async fn scrape_raw(&mut self) {
+        let (client, handle) = self.setup().await;
+        self.scrape_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
     }
@@ -1139,7 +1156,8 @@ impl Website {
         self.set_crawl_status();
     }
 
-    /// Start to crawl website concurrently
+    /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP
+    #[cfg(feature = "chrome")]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match self.setup_selectors() {
             Some(selector) => {
@@ -1243,6 +1261,122 @@ impl Website {
                 }
             }
             _ => log("", "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>."),
+        }
+    }
+
+    /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP
+    #[cfg(feature = "chrome")]
+    async fn scrape_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        let selectors = get_page_selectors(
+            &self.domain.inner(),
+            self.configuration.subdomains,
+            self.configuration.tld,
+        );
+
+        if selectors.is_some() {
+            self.status = CrawlStatus::Active;
+            let blacklist_url = self.configuration.get_blacklist();
+            self.pages = Some(Box::new(Vec::new()));
+            let delay = self.configuration.delay;
+            let on_link_find_callback = self.on_link_find_callback;
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+            let throttle = Duration::from_millis(delay);
+
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
+            let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
+                JoinSet::new();
+
+            // crawl while links exists
+            loop {
+                let stream =
+                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                        .throttle(throttle);
+                tokio::pin!(stream);
+
+                while let Some(link) = stream.next().await {
+                    match handle.as_ref() {
+                        Some(handle) => {
+                            while handle.load(Ordering::Relaxed) == 1 {
+                                interval.tick().await;
+                            }
+                            if handle.load(Ordering::Relaxed) == 2 {
+                                set.shutdown().await;
+                                break;
+                            }
+                        }
+                        None => (),
+                    }
+                    if !self.is_allowed(&link, &blacklist_url) {
+                        continue;
+                    }
+                    self.links_visited.insert(link.clone());
+                    log("fetch", &link);
+                    let permit = SEM.acquire().await.unwrap();
+                    // these clones should move into a single arc
+                    let client = client.clone();
+                    let channel = self.channel.clone();
+                    let selectors = selectors.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
+
+                    set.spawn(async move {
+                        drop(permit);
+                        let page_resource =
+                            crate::utils::fetch_page_html_raw(&link.as_ref(), &client).await;
+                        let mut page = build(&link.as_ref(), page_resource);
+
+                        let (link, _) = match on_link_find_callback {
+                            Some(cb) => {
+                                let c = cb(link, Some(page.get_html()));
+
+                                c
+                            }
+                            _ => (link, None),
+                        };
+
+                        match &channel {
+                            Some(c) => {
+                                match c.0.send(page.clone()) {
+                                    _ => (),
+                                };
+                            }
+                            _ => (),
+                        };
+
+                        page.set_external(external_domains_caseless);
+
+                        let page_links = page.links(&*selectors).await;
+
+                        (link, page, page_links)
+                    });
+                }
+
+                task::yield_now().await;
+
+                if links.capacity() >= 1500 {
+                    links.shrink_to_fit();
+                }
+
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Ok(msg) => {
+                            let page = msg.1;
+                            links.extend(&msg.2 - &self.links_visited);
+                            task::yield_now().await;
+                            match self.pages.as_mut() {
+                                Some(p) => p.push(page.clone()),
+                                _ => (),
+                            };
+                        }
+                        _ => (),
+                    };
+                }
+
+                task::yield_now().await;
+                if links.is_empty() {
+                    break;
+                }
+            }
         }
     }
 
@@ -1609,7 +1743,7 @@ impl Website {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Start to scape website concurrently and store html
+    /// Start to scape website concurrently and store resources
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
@@ -1725,7 +1859,7 @@ impl Website {
     }
 
     #[cfg(feature = "chrome")]
-    /// Start to scape website concurrently and store html
+    /// Start to scape website concurrently and store resources
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let selectors = get_page_selectors(
             &self.domain.inner(),
