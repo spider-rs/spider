@@ -86,6 +86,7 @@ pub extern crate serde;
 
 pub extern crate case_insensitive_string;
 pub extern crate url;
+pub extern crate smallvec;
 
 #[macro_use]
 pub extern crate string_concat;
