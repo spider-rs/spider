@@ -102,7 +102,7 @@ lazy_static! {
 }
 
 /// the active status of the crawl.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CrawlStatus {
     /// The crawl did not start yet.
     #[default]
@@ -127,7 +127,7 @@ pub enum CrawlStatus {
 
 #[cfg(feature = "cron")]
 /// The type of cron job to run
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CronType {
     #[default]
     /// Crawl collecting links, page data, and etc.
