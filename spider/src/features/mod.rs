@@ -1,9 +1,6 @@
 /// Chrome utils
 #[cfg(feature = "chrome")]
 pub mod chrome;
-/// Cron jobs
-#[cfg(feature = "cron")]
-pub mod cron;
 /// URL globbing
 #[cfg(feature = "glob")]
 pub mod glob;

@@ -2345,8 +2345,8 @@ impl Website {
 
     #[cfg(feature = "cron")]
     /// Start a cron job - if you use subscribe on another thread you need to abort the handle in conjuction with runner.stop.
-    pub async fn run_cron(&self) -> crate::features::cron::Runner {
-        crate::features::cron::Runner::new()
+    pub async fn run_cron(&self) -> async_job::Runner {
+        async_job::Runner::new()
             .add(Box::new(self.clone()))
             .run()
             .await
@@ -2355,8 +2355,8 @@ impl Website {
 
 #[cfg(feature = "cron")]
 /// Start a cron job taking ownership of the website
-pub async fn run_cron(website: Website) -> crate::features::cron::Runner {
-    crate::features::cron::Runner::new()
+pub async fn run_cron(website: Website) -> async_job::Runner {
+    async_job::Runner::new()
         .add(Box::new(website))
         .run()
         .await
@@ -2364,8 +2364,8 @@ pub async fn run_cron(website: Website) -> crate::features::cron::Runner {
 
 #[cfg(feature = "cron")]
 #[async_trait]
-impl crate::features::cron::Job for Website {
-    fn schedule(&self) -> Option<cron::Schedule> {
+impl async_job::Job for Website {
+    fn schedule(&self) -> Option<async_job::Schedule> {
         match self.cron_str.parse() {
             Ok(schedule) => Some(schedule),
             Err(e) => {

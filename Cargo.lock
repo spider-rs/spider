@@ -483,6 +483,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_job"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d954d0086cb4e419000a57429f69e56806513962594ec46b2a8f64c809cad11a"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cron",
+ "lazy_static",
+ "log",
+ "tokio",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3951,6 +3965,7 @@ version = "1.50.14"
 dependencies = [
  "ahash",
  "async-trait",
+ "async_job",
  "bytes",
  "case_insensitive_string",
  "chromiumoxide",
