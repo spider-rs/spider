@@ -423,6 +423,17 @@ impl Website {
         self.pages.as_ref()
     }
 
+    /// drain the links visited.
+    pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
+        self.links_visited.drain()
+    }
+
+    /// clear all pages and links stored
+    pub fn clear(&mut self) {
+        self.links_visited.clear();
+        self.pages.take();
+    }
+
     /// links visited getter
     pub fn get_links(&self) -> &HashSet<CaseInsensitiveString> {
         &self.links_visited
@@ -703,6 +714,9 @@ impl Website {
     /// setup config for crawl
     #[cfg(feature = "control")]
     async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
+        if self.status == CrawlStatus::Idle {
+            self.clear();
+        }
         let client = self.configure_http_client();
 
         // allow fresh crawls to run fully
@@ -719,6 +733,9 @@ impl Website {
     /// setup config for crawl
     #[cfg(not(feature = "control"))]
     async fn setup<T>(&mut self) -> (Client, Option<T>) {
+        if self.status == CrawlStatus::Idle {
+            self.clear();
+        }
         let client = self.configure_http_client();
 
         // allow fresh crawls to run fully
