@@ -6,7 +6,7 @@ use crate::utils::log;
 use crate::CaseInsensitiveString;
 
 #[cfg(feature = "cron")]
-use async_trait::async_trait;
+use async_job::{async_trait, Job, Runner};
 
 use compact_str::CompactString;
 
@@ -2362,7 +2362,7 @@ impl Website {
 
     #[cfg(feature = "cron")]
     /// Start a cron job - if you use subscribe on another thread you need to abort the handle in conjuction with runner.stop.
-    pub async fn run_cron(&self) -> async_job::Runner {
+    pub async fn run_cron(&self) -> Runner {
         async_job::Runner::new()
             .add(Box::new(self.clone()))
             .run()
@@ -2372,7 +2372,7 @@ impl Website {
 
 #[cfg(feature = "cron")]
 /// Start a cron job taking ownership of the website
-pub async fn run_cron(website: Website) -> async_job::Runner {
+pub async fn run_cron(website: Website) -> Runner {
     async_job::Runner::new()
         .add(Box::new(website))
         .run()
@@ -2381,7 +2381,7 @@ pub async fn run_cron(website: Website) -> async_job::Runner {
 
 #[cfg(feature = "cron")]
 #[async_trait]
-impl async_job::Job for Website {
+impl Job for Website {
     fn schedule(&self) -> Option<async_job::Schedule> {
         match self.cron_str.parse() {
             Ok(schedule) => Some(schedule),

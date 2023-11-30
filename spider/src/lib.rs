@@ -76,7 +76,10 @@ pub extern crate tokio;
 pub extern crate tokio_stream;
 
 #[cfg(feature = "ua_generator")]
-extern crate ua_generator;
+pub extern crate ua_generator;
+
+#[cfg(feature = "cron")]
+pub extern crate async_job;
 
 #[cfg(feature = "flexbuffers")]
 pub extern crate flexbuffers;
