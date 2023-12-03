@@ -184,6 +184,8 @@ pub struct Website {
     #[cfg(feature = "cron")]
     /// The type of cron to run either crawl or scrape
     pub cron_type: CronType,
+    /// The website was manually stopped.
+    shutdown: bool
 }
 
 impl Website {
@@ -202,6 +204,7 @@ impl Website {
             on_link_find_callback: None,
             channel: None,
             status: CrawlStatus::Start,
+            shutdown: false,
             ..Default::default()
         }
     }
@@ -418,6 +421,11 @@ impl Website {
         }
     }
 
+    /// amount of pages crawled
+    pub fn size(&self) -> usize {
+        self.links_visited.len()
+    }
+
     /// page getter
     pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
         self.pages.as_ref()
@@ -469,6 +477,16 @@ impl Website {
         } else {
             self.domain_parsed.as_deref().cloned()
         }
+    }
+
+    /// Stop all crawls for the website.
+    pub fn stop(&mut self) {
+        self.shutdown = true;
+    }
+
+    /// Crawls commenced from fresh run.
+    fn start(&mut self) {
+        self.shutdown = false;
     }
 
     /// configure the robots parser on initial crawl attempt and run.
@@ -1108,6 +1126,7 @@ impl Website {
     #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency
     pub async fn crawl(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.crawl_concurrent(&client, &handle).await;
         self.set_crawl_status();
@@ -1116,6 +1135,7 @@ impl Website {
     #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.crawl_concurrent_raw(&client, &handle).await;
         self.set_crawl_status();
@@ -1124,6 +1144,7 @@ impl Website {
     #[cfg(not(feature = "sitemap"))]
     /// Start to scrape/download website with async concurrency
     pub async fn scrape(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.scrape_concurrent(&client, &handle).await;
         self.set_crawl_status();
@@ -1132,6 +1153,7 @@ impl Website {
     #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn scrape_raw(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.scrape_concurrent_raw(&client, &handle).await;
         self.set_crawl_status();
@@ -1140,6 +1162,7 @@ impl Website {
     #[cfg(feature = "sitemap")]
     /// Start to crawl website and include sitemap links
     pub async fn crawl(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.crawl_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
@@ -1149,6 +1172,7 @@ impl Website {
     #[cfg(all(feature = "sitemap", feature = "chrome"))]
     /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.crawl_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
@@ -1158,6 +1182,7 @@ impl Website {
     #[cfg(all(feature = "sitemap", feature = "chrome"))]
     /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn scrape_raw(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.scrape_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
@@ -1167,6 +1192,7 @@ impl Website {
     #[cfg(feature = "sitemap")]
     /// Start to scrape/download website with async concurrency
     pub async fn scrape(&mut self) {
+        self.start();
         let (client, handle) = self.setup().await;
         self.scrape_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, true).await;
@@ -1176,6 +1202,7 @@ impl Website {
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP
     #[cfg(feature = "chrome")]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         match self.setup_selectors() {
             Some(selector) => {
                 let (mut interval, throttle) = self.setup_crawl();
@@ -1212,7 +1239,7 @@ impl Website {
                                             while handle.load(Ordering::Relaxed) == 1 {
                                                 interval.tick().await;
                                             }
-                                            if handle.load(Ordering::Relaxed) == 2 {
+                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                                 set.shutdown().await;
                                                 break;
                                             }
@@ -1284,6 +1311,7 @@ impl Website {
     /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP
     #[cfg(feature = "chrome")]
     async fn scrape_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,
@@ -1317,7 +1345,7 @@ impl Website {
                             while handle.load(Ordering::Relaxed) == 1 {
                                 interval.tick().await;
                             }
-                            if handle.load(Ordering::Relaxed) == 2 {
+                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                 set.shutdown().await;
                                 break;
                             }
@@ -1400,6 +1428,7 @@ impl Website {
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         let selectors = self.setup_selectors();
 
         // crawl if valid selector
@@ -1459,7 +1488,7 @@ impl Website {
                                                         while handle.load(Ordering::Relaxed) == 1 {
                                                             interval.tick().await;
                                                         }
-                                                        if handle.load(Ordering::Relaxed) == 2 {
+                                                        if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                                             set.shutdown().await;
                                                             break;
                                                         }
@@ -1547,6 +1576,7 @@ impl Website {
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         // crawl if valid selector
         match self.setup_selectors() {
             Some(selector) => {
@@ -1585,7 +1615,7 @@ impl Website {
                                             while handle.load(Ordering::Relaxed) == 1 {
                                                 interval.tick().await;
                                             }
-                                            if handle.load(Ordering::Relaxed) == 2 {
+                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                                 set.shutdown().await;
                                                 break;
                                             }
@@ -1692,7 +1722,7 @@ impl Website {
                                         while handle.load(Ordering::Relaxed) == 1 {
                                             interval.tick().await;
                                         }
-                                        if handle.load(Ordering::Relaxed) == 2 {
+                                        if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                             set.shutdown().await;
                                             break;
                                         }
@@ -1762,6 +1792,7 @@ impl Website {
     #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store resources
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,
@@ -1795,7 +1826,7 @@ impl Website {
                             while handle.load(Ordering::Relaxed) == 1 {
                                 interval.tick().await;
                             }
-                            if handle.load(Ordering::Relaxed) == 2 {
+                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                 set.shutdown().await;
                                 break;
                             }
@@ -1878,6 +1909,7 @@ impl Website {
     #[cfg(feature = "chrome")]
     /// Start to scape website concurrently and store resources
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
         let selectors = get_page_selectors(
             &self.domain.inner(),
             self.configuration.subdomains,
@@ -1928,7 +1960,7 @@ impl Website {
                                             while handle.load(Ordering::Relaxed) == 1 {
                                                 interval.tick().await;
                                             }
-                                            if handle.load(Ordering::Relaxed) == 2 {
+                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                                 set.shutdown().await;
                                                 break;
                                             }
@@ -2063,7 +2095,7 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         while let Some(site) = &self.configuration.sitemap_url {
-            if !handle.load(Ordering::Relaxed) == 2 {
+            if !handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                 break;
             }
 
@@ -2106,7 +2138,7 @@ impl Website {
                                     interval.tick().await;
                                 }
                                 // shutdown all links
-                                if handle.load(Ordering::Relaxed) == 2 {
+                                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
                                     break;
                                 }
 
