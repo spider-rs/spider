@@ -698,14 +698,15 @@ impl Website {
 
     /// setup atomic controller
     #[cfg(feature = "control")]
-    fn configure_handler(&self) -> Arc<AtomicI8> {
+    fn configure_handler(&self) -> (Arc<AtomicI8>, tokio::task::JoinHandle<()>) {
         use crate::utils::{Handler, CONTROLLER};
-
-        let paused = Arc::new(AtomicI8::new(0));
-        let handle = paused.clone();
+        let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
+        let handle = c.clone();
         let domain = self.domain.inner().clone();
 
-        tokio::spawn(async move {
+        // we should probally assign a temp-uid with domain name to control spawns easier
+
+        let join_handle = tokio::spawn(async move {
             let mut l = CONTROLLER.lock().await.1.to_owned();
 
             while l.changed().await.is_ok() {
@@ -714,24 +715,24 @@ impl Website {
 
                 if domain.eq_ignore_ascii_case(&target) {
                     if rest == &Handler::Resume {
-                        paused.store(0, Ordering::Relaxed);
+                        c.store(0, Ordering::Relaxed);
                     }
                     if rest == &Handler::Pause {
-                        paused.store(1, Ordering::Relaxed);
+                        c.store(1, Ordering::Relaxed);
                     }
                     if rest == &Handler::Shutdown {
-                        paused.store(2, Ordering::Relaxed);
+                        c.store(2, Ordering::Relaxed);
                     }
                 }
             }
         });
 
-        handle
+        (handle, join_handle)
     }
 
     /// setup config for crawl
     #[cfg(feature = "control")]
-    async fn setup(&mut self) -> (Client, Option<Arc<AtomicI8>>) {
+    async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         if self.status == CrawlStatus::Idle {
             self.clear();
         }
@@ -750,7 +751,7 @@ impl Website {
 
     /// setup config for crawl
     #[cfg(not(feature = "control"))]
-    async fn setup<T>(&mut self) -> (Client, Option<T>) {
+    async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         if self.status == CrawlStatus::Idle {
             self.clear();
         }
@@ -1128,8 +1129,16 @@ impl Website {
     pub async fn crawl(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.crawl_concurrent(&client, &handle).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
@@ -1137,8 +1146,16 @@ impl Website {
     pub async fn crawl_raw(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.crawl_concurrent_raw(&client, &handle).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(not(feature = "sitemap"))]
@@ -1146,8 +1163,16 @@ impl Website {
     pub async fn scrape(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.scrape_concurrent(&client, &handle).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
@@ -1155,8 +1180,16 @@ impl Website {
     pub async fn scrape_raw(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.scrape_concurrent_raw(&client, &handle).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(feature = "sitemap")]
@@ -1164,9 +1197,17 @@ impl Website {
     pub async fn crawl(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.crawl_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(all(feature = "sitemap", feature = "chrome"))]
@@ -1174,9 +1215,17 @@ impl Website {
     pub async fn crawl_raw(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.crawl_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(all(feature = "sitemap", feature = "chrome"))]
@@ -1184,9 +1233,17 @@ impl Website {
     pub async fn scrape_raw(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.scrape_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     #[cfg(feature = "sitemap")]
@@ -1194,9 +1251,17 @@ impl Website {
     pub async fn scrape(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
         self.scrape_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, true).await;
         self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP
@@ -2621,7 +2686,8 @@ async fn test_respect_robots_txt() {
     website.configuration.respect_robots_txt = true;
     website.configuration.user_agent = Some(Box::new("*".into()));
 
-    let (client, _): (Client, Option<Arc<AtomicI8>>) = website.setup().await;
+    let (client, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
+        website.setup().await;
 
     website.configure_robots_parser(client).await;
 
@@ -2637,7 +2703,8 @@ async fn test_respect_robots_txt() {
     website_second.configuration.respect_robots_txt = true;
     website_second.configuration.user_agent = Some(Box::new("bingbot".into()));
 
-    let (client_second, _): (Client, Option<Arc<AtomicI8>>) = website_second.setup().await;
+    let (client_second, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
+        website_second.setup().await;
     website_second.configure_robots_parser(client_second).await;
 
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
@@ -2645,7 +2712,8 @@ async fn test_respect_robots_txt() {
     // test crawl delay with wildcard agent [DOES not work when using set agent]
     let mut website_third: Website = Website::new("https://www.mongodb.com");
     website_third.configuration.respect_robots_txt = true;
-    let (client_third, _): (Client, Option<Arc<AtomicI8>>) = website_third.setup().await;
+    let (client_third, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
+        website_third.setup().await;
 
     website_third.configure_robots_parser(client_third).await;
 
@@ -2802,8 +2870,8 @@ async fn test_crawl_budget() {
     assert!(website.links_visited.len() <= 1);
 }
 
-#[cfg(feature = "control")]
 #[tokio::test]
+#[cfg(feature = "control")]
 #[ignore]
 async fn test_crawl_pause_resume() {
     use crate::utils::{pause, resume};
@@ -2824,7 +2892,7 @@ async fn test_crawl_pause_resume() {
 
     let duration = start.elapsed();
 
-    assert!(duration.as_secs() > 5, "{:?}", duration);
+    assert!(duration.as_secs() >= 5, "{:?}", duration);
 
     assert!(
         website
