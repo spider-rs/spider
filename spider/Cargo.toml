@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.50.18"
+version = "1.50.19"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -76,6 +76,7 @@ chrome = ["dep:chromiumoxide"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]
+chrome_screenshot = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 napi = ["dep:napi"]

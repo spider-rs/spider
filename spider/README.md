@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.50.18"
+spider = "1.50.19"
 ```
 
 And then the code:
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["regex", "ua_generator"] }
+spider = { version = "1.50.19", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -110,6 +110,7 @@ spider = { version = "1.50.18", features = ["regex", "ua_generator"] }
 1. `sitemap`: Include sitemap pages in results.
 1. `time`: Enables duration tracking per page.
 1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
+1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env var `SCREENSHOT_OMIT_BACKGROUND` to false.
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
 1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
@@ -122,7 +123,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["decentralized"] }
+spider = { version = "1.50.19", features = ["decentralized"] }
 ```
 
 ```sh
@@ -142,7 +143,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["sync"] }
+spider = { version = "1.50.19", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -172,7 +173,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["regex"] }
+spider = { version = "1.50.19", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -199,7 +200,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["control"] }
+spider = { version = "1.50.19", features = ["control"] }
 ```
 
 ```rust
@@ -269,7 +270,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["sync", "cron"] }
+spider = { version = "1.50.19", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -305,7 +306,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-spider = { version = "1.50.18", features = ["chrome"] }
+spider = { version = "1.50.19", features = ["chrome"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.

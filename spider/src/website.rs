@@ -185,7 +185,7 @@ pub struct Website {
     /// The type of cron to run either crawl or scrape
     pub cron_type: CronType,
     /// The website was manually stopped.
-    shutdown: bool
+    shutdown: bool,
 }
 
 impl Website {
@@ -1488,7 +1488,9 @@ impl Website {
                                                         while handle.load(Ordering::Relaxed) == 1 {
                                                             interval.tick().await;
                                                         }
-                                                        if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                                                        if handle.load(Ordering::Relaxed) == 2
+                                                            || self.shutdown
+                                                        {
                                                             set.shutdown().await;
                                                             break;
                                                         }
@@ -1960,7 +1962,8 @@ impl Website {
                                             while handle.load(Ordering::Relaxed) == 1 {
                                                 interval.tick().await;
                                             }
-                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown
+                                            {
                                                 set.shutdown().await;
                                                 break;
                                             }
@@ -2405,10 +2408,7 @@ impl Website {
 #[cfg(feature = "cron")]
 /// Start a cron job taking ownership of the website
 pub async fn run_cron(website: Website) -> Runner {
-    async_job::Runner::new()
-        .add(Box::new(website))
-        .run()
-        .await
+    async_job::Runner::new().add(Box::new(website)).run().await
 }
 
 #[cfg(feature = "cron")]
