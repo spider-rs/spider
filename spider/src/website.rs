@@ -1141,7 +1141,7 @@ impl Website {
         };
     }
 
-    #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
+    #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
         self.start();
@@ -1175,7 +1175,7 @@ impl Website {
         };
     }
 
-    #[cfg(all(not(feature = "sitemap"), feature = "chrome"))]
+    #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn scrape_raw(&mut self) {
         self.start();
@@ -1265,7 +1265,6 @@ impl Website {
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP
-    #[cfg(feature = "chrome")]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -1374,7 +1373,6 @@ impl Website {
     }
 
     /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP
-    #[cfg(feature = "chrome")]
     async fn scrape_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let selectors = get_page_selectors(
