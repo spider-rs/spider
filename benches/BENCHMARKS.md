@@ -24,12 +24,12 @@ Test url: `https://rsseau.fr`
 185 pages
 ```
 
-|                                          | `libraries`           |
-| :--------------------------------------- | :-------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `73ms` (✅ **1.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `32s`  (✅ **1.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `15s`  (✅ **1.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `70s`  (✅ **1.00x**) |
+|                                          | `libraries` |
+| :--------------------------------------- | :---------- |
+| **`Rust[spider]: crawl 10 samples`**     | `73ms`      |
+| **`Go[crolly]: crawl 10 samples`**       | `32s`       |
+| **`Node.js[crawler]: crawl 10 samples`** | `15s`       |
+| **`C[wget]: crawl 10 samples`**          | `70s`       |
 
 ### linux
 
@@ -46,12 +46,12 @@ Test url: `https://rsseau.fr`
 185 pages
 ```
 
-|                                          | `libraries`           |
-| :--------------------------------------- | :-------------------- |
-| **`Rust[spider]: crawl 10 samples`**     | `50ms` (✅ **1.00x**) |
-| **`Go[crolly]: crawl 10 samples`**       | `30s`  (✅ **1.00x**) |
-| **`Node.js[crawler]: crawl 10 samples`** | `3.4s` (✅ **1.00x**) |
-| **`C[wget]: crawl 10 samples`**          | `60s`  (✅ **1.00x**) |
+|                                          | `libraries` |
+| :--------------------------------------- | :---------- |
+| **`Rust[spider]: crawl 10 samples`**     | `50ms`      |
+| **`Go[crolly]: crawl 10 samples`**       | `30s`       |
+| **`Node.js[crawler]: crawl 10 samples`** | `3.4s`      |
+| **`C[wget]: crawl 10 samples`**          | `60s`       |
 
 The concurrent benchmarks are averaged across 10 individual runs for 10 concurrent crawls with 10 sample counts.
 
