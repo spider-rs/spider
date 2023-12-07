@@ -190,23 +190,30 @@ pub struct Website {
 
 impl Website {
     /// Initialize Website object with a start link to crawl.
-    pub fn new(domain: &str) -> Self {
-        Self {
+    pub fn new(url: &str) -> Self {
+        let mut website = Self {
             configuration: Configuration::new().into(),
             links_visited: Box::new(HashSet::new()),
             pages: None,
             robot_file_parser: None,
-            domain: CaseInsensitiveString::new(domain).into(),
-            domain_parsed: match url::Url::parse(domain) {
-                Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                _ => None,
-            },
             on_link_find_callback: None,
             channel: None,
             status: CrawlStatus::Start,
             shutdown: false,
+            domain: if url.starts_with("http") {
+                CaseInsensitiveString::new(&url).into()
+            } else {
+                CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+            },
             ..Default::default()
-        }
+        };
+
+        website.domain_parsed = match url::Url::parse(&website.domain.inner()) {
+            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+            _ => None,
+        };
+
+        website
     }
 
     /// return `true` if URL:
