@@ -23,6 +23,23 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
 }
 
+#[cfg(feature = "js")]
+#[cfg(feature = "smart")]
+lazy_static! {
+    /// include only list of resources
+    static ref IGNORE_ASSETS: HashSet<&'static str> = {
+        let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
+
+        m.extend::<[&'static str; 23]>([
+            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
+            "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
+        ].map(|s| s.into()));
+
+        m
+    };
+}
+
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
@@ -44,6 +61,9 @@ pub struct Page {
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
     duration: Instant,
+    #[cfg(feature = "smart")]
+    /// The chrome page to use incase of Javascript Rendering.
+    pub chrome_page: Option<chromiumoxide::Page>
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -62,6 +82,9 @@ pub struct Page {
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Unused].
     pub final_redirect_destination: Option<String>,
+    #[cfg(feature = "smart")]
+    /// The chrome page to use incase of Javascript Rendering.
+    pub chrome_page: Option<chromiumoxide::Page>
 }
 
 lazy_static! {
@@ -170,6 +193,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
+        #[cfg(feature = "smart")]
+        chrome_page: None
     }
 }
 
@@ -182,8 +207,6 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         } else {
             None
         },
-        links: Default::default(),
-        external_domains_caseless: Default::default(),
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         error_status: match res.error_for_status {
@@ -193,6 +216,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
+        ..Default::default()
     }
 }
 
@@ -210,8 +234,16 @@ impl Page {
         build(url, page_resource)
     }
 
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome", not(feature = "smart")))]
     /// Instantiate a new page and gather the html.
+    pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
+        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+        self.chrome_page = page.clone();
+        build(url, page_resource)
+    }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    /// Instantiate a new page and gather the html and run pure HTTP first unless JavaScript rendering is required.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
         build(url, page_resource)
@@ -236,10 +268,7 @@ impl Page {
         Page {
             html: None,
             links,
-            external_domains_caseless: Default::default(),
-            final_redirect_destination: Default::default(),
-            status_code: Default::default(),
-            error_status: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -398,12 +427,12 @@ impl Page {
     }
 
     /// Find the links as a stream using string resource validation
-    #[inline(always)]
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
         feature = "js"
     ))]
+    #[inline(always)]
     pub async fn links_stream<
         A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
     >(
@@ -411,21 +440,6 @@ impl Page {
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
         use jsdom::extract::extract_links;
-
-        lazy_static! {
-            /// include only list of resources
-            static ref IGNORE_ASSETS: HashSet<&'static str> = {
-                let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
-
-                m.extend::<[&'static str; 23]>([
-                    "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
-                    "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-                    "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
-                ].map(|s| s.into()));
-
-                m
-            };
-        }
 
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -573,9 +587,7 @@ impl Page {
                     }
                 }
             }
-        }
-
-        map
+        } map
     }
 
     /// Find the links as a stream using string resource validation

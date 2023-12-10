@@ -67,6 +67,7 @@
 //! - `cookies`: Enables cookies storing and setting to use for request.
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `http3`: Enables experimental HTTP/3 client.
+//! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 
 pub extern crate bytes;
 pub extern crate compact_str;
