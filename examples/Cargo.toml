@@ -81,3 +81,9 @@ required-features = ["spider/sync", "spider/cron"]
 name = "chrome"
 path = "chrome.rs"
 required-features = ["spider/sync", "spider/chrome_headed"]
+
+
+[[example]]
+name = "smart"
+path = "smart.rs"
+required-features = ["spider/sync", "spider/smart"]

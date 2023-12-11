@@ -60,9 +60,6 @@ pub struct Page {
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
     duration: Instant,
-    #[cfg(feature = "smart")]
-    /// The chrome page to use incase of Javascript Rendering.
-    pub chrome_page: Option<chromiumoxide::Page>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -81,9 +78,6 @@ pub struct Page {
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Unused].
     pub final_redirect_destination: Option<String>,
-    #[cfg(feature = "smart")]
-    /// The chrome page to use incase of Javascript Rendering.
-    pub chrome_page: Option<chromiumoxide::Page>,
 }
 
 lazy_static! {
@@ -131,6 +125,24 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
             // todo: we may want to repair the url being passed in.
             base.clone()
         }
+    }
+}
+
+/// validation to match a domain to parent host
+pub fn parent_host_match(
+    host_name: Option<&str>,
+    base_domain: &str,
+    parent_host: &CompactString,
+) -> bool {
+    match host_name {
+        Some(host) => {
+            if base_domain.is_empty() {
+                parent_host.eq(&host)
+            } else {
+                parent_host.ends_with(host)
+            }
+        }
+        _ => false,
     }
 }
 
@@ -192,8 +204,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
-        #[cfg(feature = "smart")]
-        chrome_page: None,
     }
 }
 
@@ -233,26 +243,11 @@ impl Page {
         build(url, page_resource)
     }
 
-    #[cfg(all(
-        not(feature = "decentralized"),
-        feature = "chrome",
-        not(feature = "smart")
-    ))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
         build(url, page_resource)
-    }
-
-    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
-    /// Instantiate a new page and gather the html and run pure HTTP first unless JavaScript rendering is required.
-    pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
-        let mut p = build(url, page_resource);
-
-        p.chrome_page = Some(page.clone());
-
-        p
     }
 
     /// Instantiate a new page and gather the links.
@@ -347,17 +342,13 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(
-        not(feature = "decentralized"),
-        not(feature = "full_resources"),
-        not(feature = "js"),
-        not(feature = "smart")
-    ))]
-    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    #[cfg(all(not(feature = "decentralized")))]
+    pub async fn links_stream_base<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        html: &str,
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_fragment(&self.get_html()));
+        let html = Box::new(Html::parse_fragment(&html));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -375,16 +366,9 @@ impl Page {
                         Some(href) => {
                             let mut abs = self.abs_path(href);
                             let host_name = abs.host_str();
-                            let mut can_process = match host_name {
-                                Some(host) => {
-                                    if base_domain.is_empty() {
-                                        parent_host.eq(&host)
-                                    } else {
-                                        parent_host.ends_with(host)
-                                    }
-                                }
-                                _ => false,
-                            };
+                            let mut can_process =
+                                parent_host_match(host_name, &base_domain, parent_host);
+
                             if !can_process
                                 && host_name.is_some()
                                 && !self.external_domains_caseless.is_empty()
@@ -434,6 +418,20 @@ impl Page {
     }
 
     /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        not(feature = "js"),
+    ))]
+    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        self.links_stream_base(selectors, &self.get_html()).await
+    }
+
+    /// Find the links as a stream using string resource validation
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
@@ -441,11 +439,12 @@ impl Page {
         feature = "smart"
     ))]
     #[inline(always)]
-    pub async fn links_stream<
+    pub async fn links_stream_smart<
         A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
     >(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        browser: &chromiumoxide::Page,
     ) -> HashSet<A> {
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -455,8 +454,12 @@ impl Page {
         let mut map = HashSet::new();
         let html = Box::new(self.get_html());
         let html = Box::new(Html::parse_document(&html));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
         tokio::task::yield_now().await;
+
         let mut stream = tokio_stream::iter(html.tree);
+        let mut rerender = false;
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
@@ -468,13 +471,13 @@ impl Page {
                             if src.starts_with("/")
                                 && element.attr("id") != Some("gatsby-chunk-mapping")
                             {
+                                // rerender = true;
                                 // check special framework paths todo: customize path segments to build for framework
                                 // IGNORE: next.js pre-rendering pages since html is already rendered
                                 if !src.starts_with("/_next/static/chunks/pages/")
                                     && !src.starts_with("/webpack-runtime-")
                                 {
                                     let abs = self.abs_path(src);
-                                    let mut rerender = true;
 
                                     match abs.path_segments().ok_or_else(|| "cannot be base") {
                                         Ok(mut paths) => {
@@ -490,20 +493,38 @@ impl Page {
                                     };
 
                                     if rerender {
-                                        match self.chrome_page {
-                                            Some(ref browser) => {
-                                                // let page_resource = crate::utils::fetch_page_html(
-                                                //     &self.get_url(),
-                                                //     &client,
-                                                //     &browser,
-                                                // )
-                                                // .await;
-                                                // build(url, page_resource)
+                                        // we should re-use the html content instead with events.
+                                        let uu = self.get_html();
+                                        let browser = browser.to_owned();
+
+                                        tokio::task::spawn(async move {
+                                            let page = browser.activate().await;
+
+                                            match page {
+                                                Ok(p) => {
+                                                    let page_resource =
+                                                        crate::utils::fetch_page_html_chrome_base(
+                                                            &uu, &p, true, false,
+                                                        )
+                                                        .await;
+
+                                                    match page_resource {
+                                                        Ok(resource) => {
+                                                            if let Err(_) = tx.send(resource) {
+                                                                crate::utils::log(
+                                                                    "the receiver dropped",
+                                                                    "",
+                                                                );
+                                                            }
+                                                        }
+                                                        _ => (),
+                                                    };
+                                                }
+                                                _ => (),
                                             }
-                                            _ => (),
-                                        }
-                                        // we need to execute the js now that we found a script in the headless engine.
-                                        // fetch new page html and update the stream pip
+                                        });
+
+                                        break;
                                     }
                                 }
                             }
@@ -516,18 +537,9 @@ impl Page {
                     match element.attr("href") {
                         Some(href) => {
                             let mut abs = self.abs_path(href);
-
-                            // determine if the crawl can continue based on host match
-                            let mut can_process = match abs.host_str() {
-                                Some(host) => {
-                                    if base_domain.is_empty() {
-                                        parent_host.eq(&host)
-                                    } else {
-                                        parent_host.ends_with(host)
-                                    }
-                                }
-                                _ => false,
-                            };
+                            let host_name = abs.host_str();
+                            let mut can_process =
+                                parent_host_match(host_name, &base_domain, parent_host);
 
                             if can_process {
                                 if abs.scheme() != parent_host_scheme.as_str() {
@@ -535,7 +547,7 @@ impl Page {
                                 }
                                 let hchars = abs.path();
 
-                                if let Some(position) = hchars.find('.') {
+                                if let Some(position) = hchars.rfind('.') {
                                     let resource_ext = &hchars[position + 1..hchars.len()];
 
                                     if !ONLY_RESOURCES
@@ -558,6 +570,27 @@ impl Page {
                 }
             }
         }
+
+        if rerender {
+            match rx.await {
+                Ok(v) => {
+                    let extended_map = self
+                        .links_stream_base::<A>(
+                            selectors,
+                            &match v.content {
+                                Some(h) => String::from_utf8_lossy(&h).to_string(),
+                                _ => Default::default(),
+                            },
+                        )
+                        .await;
+                    map.extend(extended_map)
+                }
+                Err(e) => {
+                    crate::utils::log("receiver error", e.to_string());
+                }
+            };
+        }
+
         map
     }
 
@@ -592,16 +625,8 @@ impl Page {
             while let Some(href) = stream.next().await {
                 let mut abs = self.abs_path(href.inner());
                 let host_name = abs.host_str();
-                let mut can_process = match host_name {
-                    Some(host) => {
-                        if base_domain.is_empty() {
-                            parent_host.eq(&host)
-                        } else {
-                            parent_host.ends_with(host)
-                        }
-                    }
-                    _ => false,
-                };
+                let mut can_process = parent_host_match(host_name, &base_domain, parent_host);
+
                 if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
                 {
                     can_process = self
@@ -681,18 +706,8 @@ impl Page {
                         match element.attr("href") {
                             Some(href) => {
                                 let mut abs = self.abs_path(href);
-
-                                // determine if the crawl can continue based on host match
-                                let mut can_process = match abs.host_str() {
-                                    Some(host) => {
-                                        if base_domain.is_empty() {
-                                            parent_host.eq(&host)
-                                        } else {
-                                            parent_host.ends_with(host)
-                                        }
-                                    }
-                                    _ => false,
-                                };
+                                let mut can_process =
+                                    parent_host_match(abs.host_str(), &base_domain, parent_host);
 
                                 if can_process {
                                     if abs.scheme() != parent_host_scheme.as_str() {
@@ -700,7 +715,7 @@ impl Page {
                                     }
                                     let hchars = abs.path();
 
-                                    if let Some(position) = hchars.find('.') {
+                                    if let Some(position) = hchars.rfind('.') {
                                         let resource_ext = &hchars[position + 1..hchars.len()];
 
                                         if !ONLY_RESOURCES
@@ -761,16 +776,8 @@ impl Page {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
 
-                        let can_process = match abs.host_str() {
-                            Some(host) => {
-                                if base_domain.is_empty() {
-                                    parent_host.eq(&host)
-                                } else {
-                                    parent_host.ends_with(host)
-                                }
-                            }
-                            _ => false,
-                        };
+                        let mut can_process =
+                            parent_host_match(abs.host_str(), &base_domain, parent_host);
 
                         if can_process {
                             if abs.scheme() != parent_host_scheme.as_str() {
@@ -806,7 +813,7 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    #[cfg(not(feature = "decentralized"))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     #[inline(never)]
     pub async fn links(
         &self,
@@ -817,6 +824,42 @@ impl Page {
             true => {
                 self.links_stream::<CaseInsensitiveString>(&(&selectors.0, &selectors.1))
                     .await
+            }
+        }
+    }
+
+    /// Find all href links and return them using CSS selectors.
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[inline(never)]
+    pub async fn links(
+        &self,
+        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
+    ) -> HashSet<CaseInsensitiveString> {
+        match self.html.is_some() {
+            false => Default::default(),
+            true => {
+                self.links_stream::<CaseInsensitiveString>(&(&selectors.0, &selectors.1))
+                    .await
+            }
+        }
+    }
+
+    /// Find all href links and return them using CSS selectors.
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    #[inline(never)]
+    pub async fn smart_links(
+        &self,
+        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
+        page: &chromiumoxide::Page,
+    ) -> HashSet<CaseInsensitiveString> {
+        match self.html.is_some() {
+            false => Default::default(),
+            true => {
+                self.links_stream_smart::<CaseInsensitiveString>(
+                    &(&selectors.0, &selectors.1),
+                    page,
+                )
+                .await
             }
         }
     }

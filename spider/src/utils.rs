@@ -19,10 +19,24 @@ pub struct PageResponse {
 pub async fn fetch_page_html_chrome_base(
     target_url: &str,
     page: &chromiumoxide::Page,
+    content: bool,
+    wait: bool,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    let page = page.goto(target_url).await?;
+    let page = if content {
+        page.set_content(target_url).await?
+    } else {
+        page.goto(target_url).await?
+    };
 
-    let p = page.wait_for_navigation_response().await;
+    let final_url = if wait {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&target_url, &u),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let res = page.content_bytes().await;
     let ok = res.is_ok();
 
@@ -38,10 +52,7 @@ pub async fn fetch_page_html_chrome_base(
         } else {
             Default::default()
         },
-        final_url: match p {
-            Ok(u) => get_last_redirect(&target_url, &u),
-            _ => None,
-        },
+        final_url,
         ..Default::default()
     })
 }
@@ -57,7 +68,7 @@ pub async fn fetch_page_html(
     client: &Client,
     page: &chromiumoxide::Page,
 ) -> PageResponse {
-    match fetch_page_html_chrome_base(&target_url, &page).await {
+    match fetch_page_html_chrome_base(&target_url, &page, false, true).await {
         Ok(page) => page,
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -356,7 +367,7 @@ pub async fn fetch_page_html_chrome(
     page: &chromiumoxide::Page,
 ) -> PageResponse {
     match &page {
-        page => match fetch_page_html_chrome_base(&target_url, &page).await {
+        page => match fetch_page_html_chrome_base(&target_url, &page, false, true).await {
             Ok(page) => page,
             _ => {
                 log(

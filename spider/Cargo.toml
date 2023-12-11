@@ -54,7 +54,7 @@ async_job = { version = "0.1.0", optional = true }
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync", "reqwest/native-tls-alpn", "smart"]
+default = ["sync", "reqwest/native-tls-alpn"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
