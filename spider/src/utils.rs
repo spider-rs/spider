@@ -14,6 +14,38 @@ pub struct PageResponse {
     pub error_for_status: Option<Result<Response, Error>>,
 }
 
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html_chrome_base(
+    target_url: &str,
+    page: &chromiumoxide::Page,
+) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    let page = page.goto(target_url).await?;
+
+    let p = page.wait_for_navigation_response().await;
+    let res = page.content_bytes().await;
+    let ok = res.is_ok();
+
+    Ok(PageResponse {
+        content: if ok {
+            Some(res.unwrap_or_default())
+        } else {
+            None
+        },
+        // todo: get the cdp error to status code.
+        status_code: if ok {
+            StatusCode::OK
+        } else {
+            Default::default()
+        },
+        final_url: match p {
+            Ok(u) => get_last_redirect(&target_url, &u),
+            _ => None,
+        },
+        ..Default::default()
+    })
+}
+
 #[cfg(all(
     not(feature = "fs"),
     feature = "chrome",
@@ -25,31 +57,8 @@ pub async fn fetch_page_html(
     client: &Client,
     page: &chromiumoxide::Page,
 ) -> PageResponse {
-    match page.goto(target_url).await {
-        Ok(page) => {
-            let p = page.wait_for_navigation_response().await;
-            let res = page.content_bytes().await;
-            let ok = res.is_ok();
-
-            PageResponse {
-                content: if ok {
-                    Some(res.unwrap_or_default())
-                } else {
-                    None
-                },
-                // todo: get the cdp error to status code.
-                status_code: if ok {
-                    StatusCode::OK
-                } else {
-                    Default::default()
-                },
-                final_url: match p {
-                    Ok(u) => get_last_redirect(&target_url, &u),
-                    _ => None,
-                },
-                ..Default::default()
-            }
-        }
+    match fetch_page_html_chrome_base(&target_url, &page).await {
+        Ok(page) => page,
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
 }
@@ -124,7 +133,7 @@ pub async fn fetch_page_html(
     }
 }
 
-#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+#[cfg(feature = "chrome")]
 /// Check if url matches the last item in a redirect chain for chrome CDP
 pub fn get_last_redirect(
     target_url: &str,
@@ -347,20 +356,8 @@ pub async fn fetch_page_html_chrome(
     page: &chromiumoxide::Page,
 ) -> PageResponse {
     match &page {
-        page => match page.goto(target_url).await {
-            Ok(page) => {
-                let res = page.content_bytes().await;
-                // let _ = page.close().await;
-
-                PageResponse {
-                    content: if res.is_ok() {
-                        Some(res.unwrap_or_default())
-                    } else {
-                        None
-                    },
-                    ..Default::default()
-                }
-            }
+        page => match fetch_page_html_chrome_base(&target_url, &page).await {
+            Ok(page) => page,
             _ => {
                 log(
                     "- error parsing html text defaulting to raw http request {}",

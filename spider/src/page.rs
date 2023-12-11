@@ -240,14 +240,14 @@ impl Page {
     ))]
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
         build(url, page_resource)
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     /// Instantiate a new page and gather the html and run pure HTTP first unless JavaScript rendering is required.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
+        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
         let mut p = build(url, page_resource);
 
         p.chrome_page = Some(page.clone());
@@ -474,7 +474,6 @@ impl Page {
                                     && !src.starts_with("/webpack-runtime-")
                                 {
                                     let abs = self.abs_path(src);
-                                    // determine if script can run
                                     let mut rerender = true;
 
                                     match abs.path_segments().ok_or_else(|| "cannot be base") {
@@ -491,6 +490,18 @@ impl Page {
                                     };
 
                                     if rerender {
+                                        match self.chrome_page {
+                                            Some(ref browser) => {
+                                                // let page_resource = crate::utils::fetch_page_html(
+                                                //     &self.get_url(),
+                                                //     &client,
+                                                //     &browser,
+                                                // )
+                                                // .await;
+                                                // build(url, page_resource)
+                                            }
+                                            _ => (),
+                                        }
                                         // we need to execute the js now that we found a script in the headless engine.
                                         // fetch new page html and update the stream pip
                                     }
