@@ -2412,6 +2412,13 @@ impl Website {
         self
     }
 
+    #[cfg(feature = "cookies")]
+    /// Cookie string to use in request
+    pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
+        self.cookie_str = cookie_str.into();
+        self
+    }
+
     #[cfg(feature = "cron")]
     /// Setup cron jobs to run
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {

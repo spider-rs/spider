@@ -68,7 +68,7 @@ pub struct Page {
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[cfg(feature = "decentralized")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Page {
     /// The bytes of the resource.
     html: Option<Bytes>,
