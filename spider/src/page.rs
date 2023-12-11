@@ -23,8 +23,7 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
 }
 
-#[cfg(feature = "js")]
-#[cfg(feature = "smart")]
+#[cfg(any(feature = "smart", feature = "js"))]
 lazy_static! {
     /// include only list of resources
     static ref IGNORE_ASSETS: HashSet<&'static str> = {
@@ -63,7 +62,7 @@ pub struct Page {
     duration: Instant,
     #[cfg(feature = "smart")]
     /// The chrome page to use incase of Javascript Rendering.
-    pub chrome_page: Option<chromiumoxide::Page>
+    pub chrome_page: Option<chromiumoxide::Page>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -84,7 +83,7 @@ pub struct Page {
     pub final_redirect_destination: Option<String>,
     #[cfg(feature = "smart")]
     /// The chrome page to use incase of Javascript Rendering.
-    pub chrome_page: Option<chromiumoxide::Page>
+    pub chrome_page: Option<chromiumoxide::Page>,
 }
 
 lazy_static! {
@@ -194,7 +193,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             _ => None,
         },
         #[cfg(feature = "smart")]
-        chrome_page: None
+        chrome_page: None,
     }
 }
 
@@ -234,11 +233,14 @@ impl Page {
         build(url, page_resource)
     }
 
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome", not(feature = "smart")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        feature = "chrome",
+        not(feature = "smart")
+    ))]
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
-        self.chrome_page = page.clone();
         build(url, page_resource)
     }
 
@@ -246,7 +248,11 @@ impl Page {
     /// Instantiate a new page and gather the html and run pure HTTP first unless JavaScript rendering is required.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
-        build(url, page_resource)
+        let mut p = build(url, page_resource);
+
+        p.chrome_page = Some(page.clone());
+
+        p
     }
 
     /// Instantiate a new page and gather the links.
@@ -344,7 +350,8 @@ impl Page {
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
-        not(feature = "js")
+        not(feature = "js"),
+        not(feature = "smart")
     ))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
@@ -430,6 +437,124 @@ impl Page {
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
+        not(feature = "js"),
+        feature = "smart"
+    ))]
+    #[inline(always)]
+    pub async fn links_stream<
+        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
+    >(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        let base_domain = &selectors.0;
+        let parent_frags = &selectors.1; // todo: allow mix match tpt
+        let parent_host = &parent_frags[0];
+        let parent_host_scheme = &parent_frags[1];
+
+        let mut map = HashSet::new();
+        let html = Box::new(self.get_html());
+        let html = Box::new(Html::parse_document(&html));
+        tokio::task::yield_now().await;
+        let mut stream = tokio_stream::iter(html.tree);
+
+        while let Some(node) = stream.next().await {
+            if let Some(element) = node.as_element() {
+                let element_name = element.name();
+
+                if element_name == "script" {
+                    match element.attr("src") {
+                        Some(src) => {
+                            if src.starts_with("/")
+                                && element.attr("id") != Some("gatsby-chunk-mapping")
+                            {
+                                // check special framework paths todo: customize path segments to build for framework
+                                // IGNORE: next.js pre-rendering pages since html is already rendered
+                                if !src.starts_with("/_next/static/chunks/pages/")
+                                    && !src.starts_with("/webpack-runtime-")
+                                {
+                                    let abs = self.abs_path(src);
+                                    // determine if script can run
+                                    let mut rerender = true;
+
+                                    match abs.path_segments().ok_or_else(|| "cannot be base") {
+                                        Ok(mut paths) => {
+                                            while let Some(p) = paths.next() {
+                                                // todo: get the path last before None instead of checking for ends_with
+                                                if p.ends_with(".js") && IGNORE_ASSETS.contains(&p)
+                                                {
+                                                    rerender = false;
+                                                }
+                                            }
+                                        }
+                                        _ => (),
+                                    };
+
+                                    if rerender {
+                                        // we need to execute the js now that we found a script in the headless engine.
+                                        // fetch new page html and update the stream pip
+                                    }
+                                }
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+
+                if element_name == "a" {
+                    match element.attr("href") {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
+
+                            // determine if the crawl can continue based on host match
+                            let mut can_process = match abs.host_str() {
+                                Some(host) => {
+                                    if base_domain.is_empty() {
+                                        parent_host.eq(&host)
+                                    } else {
+                                        parent_host.ends_with(host)
+                                    }
+                                }
+                                _ => false,
+                            };
+
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
+                                let hchars = abs.path();
+
+                                if let Some(position) = hchars.find('.') {
+                                    let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                    if !ONLY_RESOURCES
+                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                    {
+                                        can_process = false;
+                                    }
+                                }
+
+                                if can_process
+                                    && (base_domain.is_empty()
+                                        || base_domain.as_str() == domain_name(&abs))
+                                {
+                                    map.insert(abs.as_str().to_string().into());
+                                }
+                            }
+                        }
+                        _ => (),
+                    };
+                }
+            }
+        }
+        map
+    }
+
+    /// Find the links as a stream using string resource validation
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        not(feature = "smart"),
         feature = "js"
     ))]
     #[inline(always)]
@@ -587,7 +712,8 @@ impl Page {
                     }
                 }
             }
-        } map
+        }
+        map
     }
 
     /// Find the links as a stream using string resource validation
