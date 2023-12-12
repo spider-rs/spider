@@ -1165,6 +1165,14 @@ impl Website {
         };
     }
 
+
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
+    /// Start to crawl website with async concurrency smart. This has no effect without smart mode enabled.
+    pub async fn crawl_smart(&mut self) {
+        self.crawl().await
+    }
+
     #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
