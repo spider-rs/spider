@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.60.0
+
+1. feat(smart): add smart mode feature flag.
+
 ## v1.50.1
 
 1. feat(cron): add cron feature flag [#153]

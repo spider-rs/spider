@@ -1148,6 +1148,23 @@ impl Website {
         };
     }
 
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed.
+    pub async fn crawl_smart(&mut self) {
+        self.start();
+        let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
+        self.crawl_concurrent_smart(&client, &handle).await;
+        self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
+    }
+
     #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
@@ -1536,6 +1553,8 @@ impl Website {
                                 .crawl_establish(&shared.0, &shared.1, false, &shared.3)
                                 .await;
 
+                            let add_external = shared.4.len() > 0;
+
                             if !links.is_empty() {
                                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
                                     JoinSet::new();
@@ -1592,10 +1611,167 @@ impl Website {
                                                         )
                                                         .await;
 
-                                                        page.set_external(shared.4.clone());
+                                                        if add_external {
+                                                            page.set_external(shared.4.clone());
+                                                        }
 
                                                         let page_links =
                                                             page.links(&shared.1).await;
+
+                                                        match &shared.2 {
+                                                            Some(c) => {
+                                                                match c.0.send(page) {
+                                                                    _ => (),
+                                                                };
+                                                            }
+                                                            _ => (),
+                                                        };
+
+                                                        drop(permit);
+
+                                                        page_links
+                                                    },
+                                                    &chandle,
+                                                );
+                                            }
+                                            _ => break,
+                                        }
+                                    }
+
+                                    while let Some(res) = set.join_next().await {
+                                        match res {
+                                            Ok(msg) => links.extend(&msg - &self.links_visited),
+                                            _ => (),
+                                        };
+                                    }
+
+                                    if links.is_empty() {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if !std::env::var("CHROME_URL").is_ok() {
+                                let _ = browser.close().await;
+                                let _ = browser_handle.await;
+                            } else {
+                                let _ = new_page.close().await;
+                            }
+                        }
+                        _ => log("", "Chrome failed to open page."),
+                    }
+                }
+                _ => log("", "Chrome failed to start."),
+            }
+        }
+    }
+
+    /// Start to crawl website concurrently
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
+        let selectors = self.setup_selectors();
+
+        // crawl if valid selector
+        if selectors.is_some() {
+            let (mut interval, throttle) = self.setup_crawl();
+            let blacklist_url = self.configuration.get_blacklist();
+
+            let on_link_find_callback = self.on_link_find_callback;
+
+            match launch_browser(&self.configuration.proxies).await {
+                Some((mut browser, browser_handle)) => {
+                    match browser.new_page("about:blank").await {
+                        Ok(new_page) => {
+                            if cfg!(feature = "chrome_stealth") {
+                                let _ = new_page.enable_stealth_mode_with_agent(&if self
+                                    .configuration
+                                    .user_agent
+                                    .is_some()
+                                {
+                                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                                } else {
+                                    ""
+                                });
+                            }
+
+                            let shared = Arc::new((
+                                client.to_owned(),
+                                unsafe { selectors.unwrap_unchecked() },
+                                self.channel.clone(),
+                                new_page.clone(),
+                                self.external_domains_caseless.clone(),
+                            ));
+
+                            let mut links: HashSet<CaseInsensitiveString> = self
+                                .crawl_establish(&shared.0, &shared.1, false, &shared.3)
+                                .await;
+
+                            let add_external = shared.4.len() > 0;
+
+                            if !links.is_empty() {
+                                let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
+                                    JoinSet::new();
+                                let chandle = Handle::current();
+
+                                // crawl while links exists
+                                loop {
+                                    let stream =
+                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                            links.drain().collect(),
+                                        )
+                                        .throttle(*throttle);
+                                    tokio::pin!(stream);
+
+                                    loop {
+                                        match stream.next().await {
+                                            Some(link) => {
+                                                match handle.as_ref() {
+                                                    Some(handle) => {
+                                                        while handle.load(Ordering::Relaxed) == 1 {
+                                                            interval.tick().await;
+                                                        }
+                                                        if handle.load(Ordering::Relaxed) == 2
+                                                            || self.shutdown
+                                                        {
+                                                            set.shutdown().await;
+                                                            break;
+                                                        }
+                                                    }
+                                                    None => (),
+                                                }
+
+                                                if !self.is_allowed(&link, &blacklist_url) {
+                                                    continue;
+                                                }
+
+                                                log("fetch", &link);
+                                                self.links_visited.insert(link.clone());
+                                                let permit = SEM.acquire().await.unwrap();
+                                                let shared = shared.clone();
+                                                task::yield_now().await;
+
+                                                set.spawn_on(
+                                                    async move {
+                                                        let link_result =
+                                                            match on_link_find_callback {
+                                                                Some(cb) => cb(link, None),
+                                                                _ => (link, None),
+                                                            };
+                                                        let mut page = Page::new(
+                                                            &link_result.0.as_ref(),
+                                                            &shared.0,
+                                                            &shared.3,
+                                                        )
+                                                        .await;
+
+                                                        if add_external {
+                                                            page.set_external(shared.4.clone());
+                                                        }
+
+                                                        let page_links = page
+                                                            .smart_links(&shared.1, &shared.3)
+                                                            .await;
 
                                                         match &shared.2 {
                                                             Some(c) => {
@@ -1667,6 +1843,8 @@ impl Website {
                 let mut links: HashSet<CaseInsensitiveString> =
                     self.crawl_establish(&shared.0, &shared.1, false).await;
 
+                let add_external = shared.3.len() > 0;
+
                 if !links.is_empty() {
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                     let chandle = Handle::current();
@@ -1713,7 +1891,10 @@ impl Website {
                                             };
                                             let mut page =
                                                 Page::new(&link_result.0.as_ref(), &shared.0).await;
-                                            page.set_external(shared.3.to_owned());
+
+                                            if add_external {
+                                                page.set_external(shared.3.to_owned());
+                                            }
 
                                             let page_links = page.links(&shared.1).await;
 

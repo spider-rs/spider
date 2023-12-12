@@ -47,3 +47,8 @@ Crawl links at a given cron time [Cron](./cron.rs).
 Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 
 - `cargo run --example chrome --features chrome_headed`
+
+
+Crawl links with smart mode detection. Runs HTTP by default until Chrome Rendering is needed. [Smart](./smart.rs).
+
+- `cargo run --example smart --features smart`

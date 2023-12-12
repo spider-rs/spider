@@ -14,6 +14,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 - HTTP Proxies
 - Cron Jobs
 - Subscriptions
+- Smart Mode
 - Blacklisting and Budgeting Depth
 - [Changelog](CHANGELOG.md)
 
