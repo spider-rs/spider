@@ -1540,7 +1540,7 @@ impl Website {
                                     ""
                                 });
                             }
-                            
+
                             let shared = Arc::new((
                                 client.to_owned(),
                                 unsafe { selectors.unwrap_unchecked() },

@@ -460,65 +460,93 @@ impl Page {
 
         let mut stream = tokio_stream::iter(html.tree);
         let mut rerender = false;
+        let mut static_app = false;
 
         while let Some(node) = stream.next().await {
             if let Some(element) = node.as_element() {
                 let element_name = element.name();
 
-                if element_name == "script" {
+                // check scripts for non SSR/SSG pages.
+                if !static_app && element_name == "script" {
                     match element.attr("src") {
                         Some(src) => {
-                            if src.starts_with("/")
-                                && element.attr("id") != Some("gatsby-chunk-mapping")
-                            {
-                                rerender = true;
-                                // check special framework paths todo: customize path segments to build for framework
-                                // IGNORE: next.js pre-rendering pages since html is already rendered
-                                if !src.starts_with("/_next/static/chunks/pages/")
-                                    && !src.starts_with("/webpack-runtime-")
+                            if src.starts_with("/") {
+                                if src.starts_with("/_next/static/chunks/pages/")
+                                    || src.starts_with("/webpack-runtime-")
+                                    || element.attr("id") == Some("gatsby-chunk-mapping")
                                 {
-                                    let abs = self.abs_path(src);
+                                    static_app = true;
+                                    continue;
+                                }
+                                match self
+                                    .abs_path(src)
+                                    .path_segments()
+                                    .ok_or_else(|| "cannot be base")
+                                {
+                                    Ok(mut paths) => {
+                                        while let Some(p) = paths.next() {
+                                            // todo: get the path last before None instead of checking for ends_with
+                                            if p.ends_with(".js")
+                                                && JS_FRAMEWORK_ASSETS.contains(&p)
+                                            {
+                                                rerender = true;
+                                            } else {
+                                                match node.as_text() {
+                                                    Some(text) => {
+                                                        lazy_static! {
+                                                            static ref DOM_WATCH_METHODS: regex::RegexSet = {
+                                                                let set = unsafe {
+                                                                    regex::RegexSet::new(&[
+                                                                        r"/.createElementNS/gm",
+                                                                        r"/.removeChild/gm",
+                                                                        r"/.insertBefore/gm",
+                                                                        r"/.createElement/gm",
+                                                                        r"/.setAttribute/gm",
+                                                                        r"/.createTextNode/gm",
+                                                                        r"/.append/gm",
+                                                                        r"/.appendChild/gm",
+                                                                        r"/.write/gm",
+                                                                    ])
+                                                                    .unwrap_unchecked()
+                                                                };
 
-                                    match abs.path_segments().ok_or_else(|| "cannot be base") {
-                                        Ok(mut paths) => {
-                                            while let Some(p) = paths.next() {
-                                                // todo: get the path last before None instead of checking for ends_with
-                                                if p.ends_with(".js") && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                {
-                                                    rerender = false;
+                                                                set
+                                                            };
+                                                        }
+                                                        rerender = DOM_WATCH_METHODS
+                                                            .is_match(text);
+                                                    }
+                                                    _ => (),
                                                 }
                                             }
                                         }
-                                        _ => (),
-                                    };
+                                    }
+                                    _ => (),
+                                };
 
-                                    if rerender {
-                                        // we should re-use the html content instead with events.
-                                        let uu = self.get_html();
-                                        let browser = browser.to_owned();
+                                if rerender {
+                                    // we should re-use the html content instead with events.
+                                    let uu = self.get_html();
+                                    let browser = browser.to_owned();
 
-                                        tokio::task::spawn(async move {
-                                            let page_resource =
+                                    tokio::task::spawn(async move {
+                                        let page_resource =
                                             crate::utils::fetch_page_html_chrome_base(
                                                 &uu, &browser, true, false,
                                             )
                                             .await;
 
-                                            match page_resource {
-                                                Ok(resource) => {
-                                                    if let Err(_) = tx.send(resource) {
-                                                        crate::utils::log(
-                                                            "the receiver dropped",
-                                                            "",
-                                                        );
-                                                    }
+                                        match page_resource {
+                                            Ok(resource) => {
+                                                if let Err(_) = tx.send(resource) {
+                                                    crate::utils::log("the receiver dropped", "");
                                                 }
-                                                _ => (),
-                                            };
-                                        });
+                                            }
+                                            _ => (),
+                                        };
+                                    });
 
-                                        break;
-                                    }
+                                    break;
                                 }
                             }
                         }

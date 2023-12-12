@@ -83,7 +83,6 @@ pub async fn fetch_page_html(
     client: &Client,
     page: &chromiumoxide::Page,
 ) -> PageResponse {
-
     let page = page.activate().await;
 
     match page {
@@ -93,22 +92,23 @@ pub async fn fetch_page_html(
                     let p = page.wait_for_navigation_response().await;
                     let res = page.content_bytes().await;
                     let ok = res.is_ok();
-        
+
                     let output_path = string_concat!(
-                        std::env::var("SCREENSHOT_DIRECTORY").unwrap_or_else(|_| "./storage/".to_string()),
+                        std::env::var("SCREENSHOT_DIRECTORY")
+                            .unwrap_or_else(|_| "./storage/".to_string()),
                         &target_url,
                         ".png"
                     );
-        
+
                     let output_path = std::path::Path::new(&output_path);
-        
+
                     match output_path.parent() {
                         Some(p) => {
                             let _ = tokio::fs::create_dir_all(&p).await;
                         }
                         _ => (),
                     }
-        
+
                     match page.save_screenshot(
                         chromiumoxide::page::ScreenshotParams::builder()
                             .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
@@ -127,7 +127,7 @@ pub async fn fetch_page_html(
                         Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
                         Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path)
                     };
-        
+
                     PageResponse {
                         content: if ok {
                             Some(res.unwrap_or_default())
@@ -150,7 +150,7 @@ pub async fn fetch_page_html(
                 _ => fetch_page_html_raw(&target_url, &client).await,
             }
         }
-        _ => fetch_page_html_raw(&target_url, &client).await
+        _ => fetch_page_html_raw(&target_url, &client).await,
     }
 }
 

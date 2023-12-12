@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.60.3"
+spider = "1.60.5"
 ```
 
 And then the code:
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["regex", "ua_generator"] }
+spider = { version = "1.60.5", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -124,7 +124,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["decentralized"] }
+spider = { version = "1.60.5", features = ["decentralized"] }
 ```
 
 ```sh
@@ -144,7 +144,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["sync"] }
+spider = { version = "1.60.5", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -174,7 +174,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["regex"] }
+spider = { version = "1.60.5", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -201,7 +201,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["control"] }
+spider = { version = "1.60.5", features = ["control"] }
 ```
 
 ```rust
@@ -271,7 +271,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["sync", "cron"] }
+spider = { version = "1.60.5", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -309,7 +309,7 @@ Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no conn
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["chrome"] }
+spider = { version = "1.60.5", features = ["chrome"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
@@ -321,7 +321,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.60.3", features = ["smart"] }
+spider = { version = "1.60.5", features = ["smart"] }
 ```
 
 ```rust,no_run
