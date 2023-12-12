@@ -1,6 +1,6 @@
 # Examples
 
-First `git clone https://github.com/spider-rs/spider.git` and `cd spider`.
+First `git clone https://github.com/spider-rs/spider.git` and `cd spider`. Use the release flag for the best performance `--release` when running the examples below.
 
 ## Basic
 

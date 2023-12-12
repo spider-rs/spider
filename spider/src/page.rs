@@ -498,30 +498,23 @@ impl Page {
                                         let browser = browser.to_owned();
 
                                         tokio::task::spawn(async move {
-                                            let page = browser.activate().await;
+                                            let page_resource =
+                                            crate::utils::fetch_page_html_chrome_base(
+                                                &uu, &browser, true, false,
+                                            )
+                                            .await;
 
-                                            match page {
-                                                Ok(p) => {
-                                                    let page_resource =
-                                                        crate::utils::fetch_page_html_chrome_base(
-                                                            &uu, &p, true, false,
-                                                        )
-                                                        .await;
-
-                                                    match page_resource {
-                                                        Ok(resource) => {
-                                                            if let Err(_) = tx.send(resource) {
-                                                                crate::utils::log(
-                                                                    "the receiver dropped",
-                                                                    "",
-                                                                );
-                                                            }
-                                                        }
-                                                        _ => (),
-                                                    };
+                                            match page_resource {
+                                                Ok(resource) => {
+                                                    if let Err(_) = tx.send(resource) {
+                                                        crate::utils::log(
+                                                            "the receiver dropped",
+                                                            "",
+                                                        );
+                                                    }
                                                 }
                                                 _ => (),
-                                            }
+                                            };
                                         });
 
                                         break;

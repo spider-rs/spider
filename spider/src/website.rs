@@ -1540,12 +1540,12 @@ impl Website {
                                     ""
                                 });
                             }
-
+                            
                             let shared = Arc::new((
                                 client.to_owned(),
                                 unsafe { selectors.unwrap_unchecked() },
                                 self.channel.clone(),
-                                new_page.clone(),
+                                Arc::new(new_page.clone()),
                                 self.external_domains_caseless.clone(),
                             ));
 
@@ -1656,6 +1656,9 @@ impl Website {
                                 let _ = browser_handle.await;
                             } else {
                                 let _ = new_page.close().await;
+                                if !browser_handle.is_finished() {
+                                    browser_handle.abort();
+                                }
                             }
                         }
                         _ => log("", "Chrome failed to open page."),
@@ -1699,7 +1702,7 @@ impl Website {
                                 client.to_owned(),
                                 unsafe { selectors.unwrap_unchecked() },
                                 self.channel.clone(),
-                                new_page.clone(),
+                                Arc::new(new_page.clone()),
                                 self.external_domains_caseless.clone(),
                             ));
 
@@ -1811,6 +1814,9 @@ impl Website {
                                 let _ = browser_handle.await;
                             } else {
                                 let _ = new_page.close().await;
+                                if !browser_handle.is_finished() {
+                                    browser_handle.abort();
+                                }
                             }
                         }
                         _ => log("", "Chrome failed to open page."),
