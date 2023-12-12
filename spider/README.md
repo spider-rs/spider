@@ -305,12 +305,41 @@ async fn main() {
 
 ### Chrome
 
+Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely.
+
 ```toml
 [dependencies]
 spider = { version = "1.60.0", features = ["chrome"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
+
+
+### Smart Mode
+
+Intelligently run crawls using HTTP and JavaScript Rendering when needed. The best of both worlds to maintain speed and extract every page. This requires a chrome connection or browser installed on the system.
+
+```toml
+[dependencies]
+spider = { version = "1.60.0", features = ["smart"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::website::Website;
+use spider::tokio;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://choosealicense.com");
+    website.crawl_smart().await;
+
+    for link in website.get_links() {
+        println!("- {:?}", link.as_ref());
+    }
+}
+```
 
 ### Blocking
 

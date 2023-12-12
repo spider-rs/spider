@@ -4,7 +4,7 @@
 
 ## v1.60.0
 
-1. feat(smart): add smart mode feature flag.
+1. feat(smart): add smart mode feature flag (HTTP until JS Rendering is needed per page)
 
 ## v1.50.1
 
