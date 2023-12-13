@@ -452,8 +452,7 @@ impl Page {
         let parent_host_scheme = &parent_frags[1];
 
         let mut map = HashSet::new();
-        let html = Box::new(self.get_html());
-        let html = Box::new(Html::parse_document(&html));
+        let html = Box::new(Html::parse_document(&self.get_html()));
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         tokio::task::yield_now().await;
@@ -466,12 +465,12 @@ impl Page {
             if let Some(element) = node.as_element() {
                 let element_name = element.name();
 
-                // check scripts for non SSR/SSG pages.
+                // check scripts for non SSR/SSG pages. We need to check for lazy loading elements done by the static app for re-rendering.
                 if !static_app && element_name == "script" {
                     match element.attr("src") {
                         Some(src) => {
                             if src.starts_with("/") {
-                                if src.starts_with("/_next/static/chunks/pages/")
+                                if !src.starts_with("/_next/static/chunks/pages/")
                                     || src.starts_with("/webpack-runtime-")
                                     || element.attr("id") == Some("gatsby-chunk-mapping")
                                 {
@@ -503,6 +502,8 @@ impl Page {
                                                                         r"/.createElement/gm",
                                                                         r"/.setAttribute/gm",
                                                                         r"/.createTextNode/gm",
+                                                                        r"/.replaceChildren/gm",
+                                                                        r"/.prepend/gm",
                                                                         r"/.append/gm",
                                                                         r"/.appendChild/gm",
                                                                         r"/.write/gm",
@@ -593,6 +594,7 @@ impl Page {
         }
 
         if rerender {
+            drop(stream);
             match rx.await {
                 Ok(v) => {
                     let extended_map = self

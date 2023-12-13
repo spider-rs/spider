@@ -1165,8 +1165,6 @@ impl Website {
         };
     }
 
-
-
     #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
     /// Start to crawl website with async concurrency smart. This has no effect without smart mode enabled.
     pub async fn crawl_smart(&mut self) {
