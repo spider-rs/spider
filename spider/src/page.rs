@@ -470,7 +470,7 @@ impl Page {
                     match element.attr("src") {
                         Some(src) => {
                             if src.starts_with("/") {
-                                if !src.starts_with("/_next/static/chunks/pages/")
+                                if src.starts_with("/_next/static/chunks/pages/")
                                     || src.starts_with("/webpack-runtime-")
                                     || element.attr("id") == Some("gatsby-chunk-mapping")
                                 {
