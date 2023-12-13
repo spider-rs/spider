@@ -60,6 +60,9 @@ pub struct Page {
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
     duration: Instant,
+    #[cfg(feature = "chrome")]
+    /// Page object for chrome.
+    chrome_page: Option<chromiumoxide::Page>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -204,6 +207,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
+        #[cfg(feature = "chrome")]
+        chrome_page: None,
     }
 }
 
@@ -247,7 +252,46 @@ impl Page {
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
-        build(url, page_resource)
+        let mut p = build(url, page_resource);
+
+        // store the chrome page to perform actions like screenshots etc.
+        if cfg!(feature = "chrome_store_page") {
+            p.chrome_page = Some(page.clone());
+        }
+
+        p
+    }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    /// Take a screenshot of the page. The feature flag [chrome_store_page] is required.
+    pub async fn screenshot(&self, full_page: bool, omit_background: bool) {
+        match &self.chrome_page {
+            Some(page) => {
+                let output_path: String = string_concat!(
+                    std::env::var("SCREENSHOT_DIRECTORY")
+                        .unwrap_or_else(|_| "./storage/".to_string()),
+                    &self.url,
+                    ".png"
+                );
+                match page
+                    .save_screenshot(
+                        chromiumoxide::page::ScreenshotParams::builder()
+                            .format(
+                                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                            )
+                            .full_page(full_page)
+                            .omit_background(omit_background)
+                            .build(),
+                        &output_path,
+                    )
+                    .await
+                {
+                    Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
+                    Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path),
+                };
+            }
+            _ => (),
+        }
     }
 
     /// Instantiate a new page and gather the links.
@@ -514,8 +558,7 @@ impl Page {
                                                                 set
                                                             };
                                                         }
-                                                        rerender = DOM_WATCH_METHODS
-                                                            .is_match(text);
+                                                        rerender = DOM_WATCH_METHODS.is_match(text);
                                                     }
                                                     _ => (),
                                                 }

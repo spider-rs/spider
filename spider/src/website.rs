@@ -186,6 +186,9 @@ pub struct Website {
     pub cron_type: CronType,
     /// The website was manually stopped.
     shutdown: bool,
+    #[cfg(feature = "chrome")]
+    /// Use stealth mode for requests.
+    pub stealth_mode: bool,
 }
 
 impl Website {
@@ -1535,7 +1538,7 @@ impl Website {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
-                            if cfg!(feature = "chrome_stealth") {
+                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
                                 let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
@@ -1692,7 +1695,7 @@ impl Website {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
-                            if cfg!(feature = "chrome_stealth") {
+                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
                                 let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
@@ -2617,6 +2620,13 @@ impl Website {
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.cron_str = cron_str.into();
         self.cron_type = cron_type;
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Use stealth mode for the request.
+    pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
+        self.stealth_mode = stealth_mode;
         self
     }
 
