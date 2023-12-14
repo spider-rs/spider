@@ -529,16 +529,52 @@ impl Website {
     /// build the http client
     #[cfg(not(feature = "decentralized"))]
     fn configure_http_client_builder(&mut self) -> reqwest::ClientBuilder {
+        use crate::page::domain_name;
+        use reqwest::redirect::Attempt;
+        use std::sync::atomic::AtomicU8;
+
         let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
+
         let policy = match host_str {
-            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
-                if attempt.url().host_str() != host_s.host_str() {
-                    attempt.stop()
+            Some(host_s) => {
+                let initial_redirect = Arc::new(AtomicU8::new(0));
+                let initial_redirect_limit = if self.configuration.respect_robots_txt {
+                    2
                 } else {
-                    default_policy.redirect(attempt)
-                }
-            }),
+                    1
+                };
+
+                let subdomains = self.configuration.subdomains;
+                let tld = self.configuration.tld;
+                let host_domain_name = if tld {
+                    domain_name(&host_s).to_string()
+                } else {
+                    Default::default()
+                };
+
+                let custom_policy = {
+                    move |attempt: Attempt| {
+                        if tld && domain_name(attempt.url()).ends_with(&host_domain_name)
+                            || subdomains && attempt.url().as_str().ends_with(host_s.as_str())
+                            || attempt.url().host() == host_s.host()
+                        {
+                            default_policy.redirect(attempt)
+                        } else if attempt.previous().len() > 7 {
+                            attempt.error("too many redirects")
+                        } else if attempt.status().is_redirection()
+                            && (0..initial_redirect_limit)
+                                .contains(&initial_redirect.load(Ordering::Relaxed))
+                        {
+                            initial_redirect.fetch_add(1, Ordering::Relaxed);
+                            default_policy.redirect(attempt)
+                        } else {
+                            attempt.stop()
+                        }
+                    }
+                };
+                reqwest::redirect::Policy::custom(custom_policy)
+            }
             _ => default_policy,
         };
 
@@ -812,13 +848,34 @@ impl Website {
     async fn _crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             let page = Page::new_page(&self.domain.inner(), &client).await;
+
+            // allow initial page mutation
+            match page.final_redirect_destination {
+                Some(ref domain) => {
+                    let domain: Box<CaseInsensitiveString> =
+                        CaseInsensitiveString::new(&domain).into();
+                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                        _ => None,
+                    };
+                    self.domain = domain;
+                    match self.setup_selectors() {
+                        Some(s) => {
+                            base.0 = s.0;
+                            base.1 = s.1;
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            };
 
             if !self.external_domains.is_empty() {
                 self.external_domains_caseless = self
@@ -875,10 +932,10 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         selector: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        self._crawl_establish(&client, &base, selector).await
+        self._crawl_establish(&client, base, selector).await
     }
 
     /// expand links for crawl
@@ -890,7 +947,7 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
         page: &chromiumoxide::Page,
     ) -> HashSet<CaseInsensitiveString> {
@@ -898,6 +955,26 @@ impl Website {
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             let page = Page::new(&self.domain.inner(), &client, &page).await;
+
+            match page.final_redirect_destination {
+                Some(ref domain) => {
+                    let domain: Box<CaseInsensitiveString> =
+                        CaseInsensitiveString::new(&domain).into();
+                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                        _ => None,
+                    };
+                    self.domain = domain;
+                    match self.setup_selectors() {
+                        Some(s) => {
+                            base.0 = s.0;
+                            base.1 = s.1;
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            }
 
             if !self.external_domains.is_empty() {
                 self.external_domains_caseless = self
@@ -971,7 +1048,7 @@ impl Website {
                 }
                 _ => *self.domain.to_owned(),
             });
-            
+
             let page_links = HashSet::from(page.links.clone());
 
             channel_send_page(&self.channel, page);
@@ -1028,11 +1105,10 @@ impl Website {
                 };
 
                 self.links_visited.insert(link_result.0);
-                
+
                 channel_send_page(&self.channel, page.clone());
 
                 let page_links = HashSet::from(page.links);
-
 
                 links.extend(page_links);
             }
@@ -1046,7 +1122,7 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -1067,6 +1143,26 @@ impl Website {
         for link in expanded {
             if self.is_allowed_default(&link.inner(), &blacklist_url) {
                 let page = Page::new(&link.inner(), &client).await;
+
+                match page.final_redirect_destination {
+                    Some(ref domain) => {
+                        let domain: Box<CaseInsensitiveString> =
+                            CaseInsensitiveString::new(&domain).into();
+                        self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                            _ => None,
+                        };
+                        self.domain = domain;
+                        match self.setup_selectors() {
+                            Some(s) => {
+                                base.0 = s.0;
+                                base.1 = s.1;
+                            }
+                            _ => (),
+                        }
+                    }
+                    _ => (),
+                }
 
                 if !page.is_empty() {
                     let u = page.get_url().into();
@@ -1266,20 +1362,20 @@ impl Website {
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
-            Some(selector) => {
+            Some(mut selector) => {
                 let (mut interval, throttle) = self.setup_crawl();
                 let blacklist_url = self.configuration.get_blacklist();
-
                 let on_link_find_callback = self.on_link_find_callback;
+
+                let mut links: HashSet<CaseInsensitiveString> =
+                    self._crawl_establish(&client, &mut selector, false).await;
+                    
                 let shared = Arc::new((
                     client.to_owned(),
                     selector,
                     self.channel.clone(),
                     self.external_domains_caseless.clone(),
                 ));
-
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self._crawl_establish(&shared.0, &shared.1, false).await;
 
                 if !links.is_empty() {
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -1381,6 +1477,7 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
@@ -1502,17 +1599,21 @@ impl Website {
                                 });
                             }
 
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                unsafe { selectors.unwrap_unchecked() },
-                                self.channel.clone(),
-                                Arc::new(new_page.clone()),
-                                self.external_domains_caseless.clone(),
-                            ));
+                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
+
+                            let chrome_page = Arc::new(new_page.clone());
 
                             let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&shared.0, &shared.1, false, &shared.3)
+                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
                                 .await;
+
+                            let shared = Arc::new((
+                                client.to_owned(),
+                                selectors,
+                                self.channel.clone(),
+                                chrome_page,
+                                self.external_domains_caseless.clone(),
+                            ));
 
                             let add_external = shared.4.len() > 0;
 
@@ -1652,17 +1753,21 @@ impl Website {
                                 });
                             }
 
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                unsafe { selectors.unwrap_unchecked() },
-                                self.channel.clone(),
-                                Arc::new(new_page.clone()),
-                                self.external_domains_caseless.clone(),
-                            ));
+                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
+
+                            let chrome_page = Arc::new(new_page.clone());
 
                             let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&shared.0, &shared.1, false, &shared.3)
+                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
                                 .await;
+
+                            let shared = Arc::new((
+                                client.to_owned(),
+                                selectors,
+                                self.channel.clone(),
+                                chrome_page,
+                                self.external_domains_caseless.clone(),
+                            ));
 
                             let add_external = shared.4.len() > 0;
 
@@ -1780,11 +1885,14 @@ impl Website {
         self.start();
         // crawl if valid selector
         match self.setup_selectors() {
-            Some(selector) => {
+            Some(mut selector) => {
                 let (mut interval, throttle) = self.setup_crawl();
                 let blacklist_url = self.configuration.get_blacklist();
-
                 let on_link_find_callback = self.on_link_find_callback;
+
+                let mut links: HashSet<CaseInsensitiveString> =
+                    self.crawl_establish(&client, &mut selector, false).await;
+
 
                 let shared = Arc::new((
                     client.to_owned(),
@@ -1792,9 +1900,6 @@ impl Website {
                     self.channel.clone(),
                     self.external_domains_caseless.clone(),
                 ));
-
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self.crawl_establish(&shared.0, &shared.1, false).await;
 
                 let add_external = shared.3.len() > 0;
 
@@ -1899,7 +2004,11 @@ impl Website {
                     .starts_with("http:");
 
                 let mut links: HashSet<CaseInsensitiveString> = self
-                    .crawl_establish(&client, &(domain.into(), Default::default()), http_worker)
+                    .crawl_establish(
+                        &client,
+                        &mut (domain.into(), Default::default()),
+                        http_worker,
+                    )
                     .await;
 
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
