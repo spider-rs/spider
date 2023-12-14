@@ -194,7 +194,12 @@ pub struct Website {
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
-        let mut website = Self {
+        let domain: Box<CaseInsensitiveString> = if url.starts_with("http") {
+            CaseInsensitiveString::new(&url).into()
+        } else {
+            CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+        };
+        Self {
             configuration: Configuration::new().into(),
             links_visited: Box::new(HashSet::new()),
             pages: None,
@@ -203,20 +208,13 @@ impl Website {
             channel: None,
             status: CrawlStatus::Start,
             shutdown: false,
-            domain: if url.starts_with("http") {
-                CaseInsensitiveString::new(&url).into()
-            } else {
-                CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+            domain_parsed: match url::Url::parse(&domain.inner()) {
+                Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                _ => None,
             },
+            domain,
             ..Default::default()
-        };
-
-        website.domain_parsed = match url::Url::parse(&website.domain.inner()) {
-            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-            _ => None,
-        };
-
-        website
+        }
     }
 
     /// return `true` if URL:
@@ -1475,14 +1473,7 @@ impl Website {
                             _ => (link, None),
                         };
 
-                        match &channel {
-                            Some(c) => {
-                                match c.0.send(page.clone()) {
-                                    _ => (),
-                                };
-                            }
-                            _ => (),
-                        };
+                        channel_send_page(&channel, page.clone());
 
                         page.set_external(external_domains_caseless);
 
@@ -1505,7 +1496,7 @@ impl Website {
                             links.extend(&msg.2 - &self.links_visited);
                             task::yield_now().await;
                             match self.pages.as_mut() {
-                                Some(p) => p.push(page.clone()),
+                                Some(p) => p.push(page),
                                 _ => (),
                             };
                         }
@@ -1627,14 +1618,7 @@ impl Website {
                                                         let page_links =
                                                             page.links(&shared.1).await;
 
-                                                        match &shared.2 {
-                                                            Some(c) => {
-                                                                match c.0.send(page) {
-                                                                    _ => (),
-                                                                };
-                                                            }
-                                                            _ => (),
-                                                        };
+                                                        channel_send_page(&shared.2, page);
 
                                                         drop(permit);
 
@@ -1785,14 +1769,7 @@ impl Website {
                                                             .smart_links(&shared.1, &shared.3)
                                                             .await;
 
-                                                        match &shared.2 {
-                                                            Some(c) => {
-                                                                match c.0.send(page) {
-                                                                    _ => (),
-                                                                };
-                                                            }
-                                                            _ => (),
-                                                        };
+                                                        channel_send_page(&shared.2, page);
 
                                                         drop(permit);
 
@@ -1913,14 +1890,7 @@ impl Website {
 
                                             let page_links = page.links(&shared.1).await;
 
-                                            match &shared.2 {
-                                                Some(c) => {
-                                                    match c.0.send(page) {
-                                                        _ => (),
-                                                    };
-                                                }
-                                                _ => (),
-                                            };
+                                            channel_send_page(&shared.2, page);
 
                                             drop(permit);
 
@@ -2128,14 +2098,7 @@ impl Website {
                             _ => (link, None),
                         };
 
-                        match &channel {
-                            Some(c) => {
-                                match c.0.send(page.clone()) {
-                                    _ => (),
-                                };
-                            }
-                            _ => (),
-                        };
+                        channel_send_page(&channel, page.clone());
 
                         page.set_external(external_domains_caseless);
 
@@ -2158,7 +2121,7 @@ impl Website {
                             links.extend(&msg.2 - &self.links_visited);
                             task::yield_now().await;
                             match self.pages.as_mut() {
-                                Some(p) => p.push(page.clone()),
+                                Some(p) => p.push(page),
                                 _ => (),
                             };
                         }
@@ -2268,14 +2231,7 @@ impl Website {
                                             _ => (link, None),
                                         };
 
-                                        match &channel {
-                                            Some(c) => {
-                                                match c.0.send(page.clone()) {
-                                                    _ => (),
-                                                };
-                                            }
-                                            _ => (),
-                                        };
+                                        channel_send_page(&channel, page.clone());
 
                                         page.set_external(external_domains_caseless);
                                         let page_links = page.links(&*selectors).await;
@@ -2297,7 +2253,7 @@ impl Website {
                                             links.extend(&msg.2 - &self.links_visited);
                                             task::yield_now().await;
                                             match self.pages.as_mut() {
-                                                Some(p) => p.push(page.clone()),
+                                                Some(p) => p.push(page),
                                                 _ => (),
                                             };
                                         }
@@ -2378,17 +2334,15 @@ impl Website {
                 let mut pages = Vec::new();
 
                 while let Some(page) = rx.recv().await {
-                    if scrape {
-                        pages.push(page.clone());
-                    };
-                    match &channel {
-                        Some(c) => {
-                            match c.0.send(page) {
-                                _ => (),
-                            };
-                        }
-                        _ => (),
-                    };
+                    if channel.is_some() {
+                        if scrape {
+                            pages.push(page.clone());
+                        };
+
+                        channel_send_page(&channel, page);
+                    } else {
+                        pages.push(page);
+                    }
                 }
 
                 pages
@@ -2683,6 +2637,26 @@ impl Website {
             .run()
             .await
     }
+}
+
+/// Channel broadcast send the Page to receivers.
+fn channel_send_page(
+    channel: &Option<
+        std::sync::Arc<(
+            tokio::sync::broadcast::Sender<Page>,
+            tokio::sync::broadcast::Receiver<Page>,
+        )>,
+    >,
+    page: Page,
+) {
+    match channel {
+        Some(c) => {
+            match c.0.send(page) {
+                _ => (),
+            };
+        }
+        _ => (),
+    };
 }
 
 #[cfg(feature = "cron")]
