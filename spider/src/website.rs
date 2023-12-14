@@ -856,14 +856,7 @@ impl Website {
                 Default::default()
             };
 
-            match &self.channel {
-                Some(c) => {
-                    match c.0.send(page) {
-                        _ => (),
-                    };
-                }
-                _ => (),
-            };
+            channel_send_page(&self.channel, page);
 
             links
         } else {
@@ -936,14 +929,7 @@ impl Website {
                 Default::default()
             };
 
-            match &self.channel {
-                Some(c) => {
-                    match c.0.send(page) {
-                        _ => (),
-                    };
-                }
-                _ => (),
-            };
+            channel_send_page(&self.channel, page);
 
             links
         } else {
@@ -985,17 +971,10 @@ impl Website {
                 }
                 _ => *self.domain.to_owned(),
             });
+            
+            let page_links = HashSet::from(page.links.clone());
 
-            match &self.channel {
-                Some(c) => {
-                    match c.0.send(page.clone()) {
-                        _ => (),
-                    };
-                }
-                _ => (),
-            };
-
-            let page_links = HashSet::from(page.links);
+            channel_send_page(&self.channel, page);
 
             page_links
         } else {
@@ -1029,7 +1008,7 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
-            if self.is_allowed_default(&link, &blacklist_url) {
+            if self.is_allowed(&link, &blacklist_url) {
                 let page = Page::new(
                     &if http_worker && link.as_ref().starts_with("https") {
                         link.inner().replacen("https", "http", 1).to_string()
@@ -1049,16 +1028,11 @@ impl Website {
                 };
 
                 self.links_visited.insert(link_result.0);
-                match &self.channel {
-                    Some(c) => {
-                        match c.0.send(page.clone()) {
-                            _ => (),
-                        };
-                    }
-                    _ => (),
-                };
+                
+                channel_send_page(&self.channel, page.clone());
 
                 let page_links = HashSet::from(page.links);
+
 
                 links.extend(page_links);
             }
@@ -1109,14 +1083,7 @@ impl Website {
                     self.status = CrawlStatus::Empty;
                 };
 
-                match &self.channel {
-                    Some(c) => {
-                        match c.0.send(page) {
-                            _ => (),
-                        };
-                    }
-                    _ => (),
-                };
+                channel_send_page(&self.channel, page);
             }
         }
 
@@ -1364,14 +1331,8 @@ impl Website {
 
                                             let page_links = page.links(&shared.1).await;
 
-                                            match &shared.2 {
-                                                Some(c) => {
-                                                    match c.0.send(page) {
-                                                        _ => (),
-                                                    };
-                                                }
-                                                _ => (),
-                                            };
+
+                                            channel_send_page(&shared.2, page);
 
                                             drop(permit);
 
