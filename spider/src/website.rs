@@ -189,6 +189,12 @@ pub struct Website {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
+    /// Setup network interception for request.
+    #[cfg(feature = "chrome_intercept")]
+    pub chrome_intercept: bool,
+    /// Block all images from rendering in Chrome.
+    #[cfg(feature = "chrome_intercept")]
+    pub chrome_intercept_block_images: bool,
 }
 
 impl Website {
@@ -1570,6 +1576,75 @@ impl Website {
         }
     }
 
+    /// Setup interception for chrome request
+    #[cfg(all(
+        feature = "chrome",
+        feature = "chrome_intercept"
+    ))]
+    async fn setup_chrome_interception(
+        &self,
+        chrome_page: &Arc<chromiumoxide::Page>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        if self.chrome_intercept {
+            use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+
+            match chrome_page
+                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                .await
+            {
+                Ok(mut rp) => {
+                    let host_name = self.domain.inner().to_string();
+                    let intercept_page = chrome_page.clone();
+                    let ignore_images = self.chrome_intercept_block_images;
+
+                    let ih = task::spawn(async move {
+                        while let Some(event) = rp.next().await {
+                            let u = &event.request.url;
+                            if ignore_images && ResourceType::Image == event.resource_type || !u.contains(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
+                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                .request_id(event.request_id.clone())
+                                .response_code(200)
+                                .build() {
+                                    Ok(c) => {
+                                        if let Err(e) = intercept_page.execute(c).await
+                                        {
+                                            log("Failed to fullfill request: ", e.to_string());
+                                        }
+                                    }
+                                    _ => {
+                                        log("Failed to get request handle ", &host_name);
+                                    }
+                                }
+                        } else if let Err(e) = intercept_page
+                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                            .await
+                            {
+                                log("Failed to continue request: ", e.to_string());
+                            }
+                        }
+                    });
+
+                    Some(ih)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Setup interception for chrome request
+    #[cfg(all(
+        feature = "chrome",
+        not(feature = "chrome_intercept")
+    ))]
+    async fn setup_chrome_interception(
+        &self,
+        _chrome_page: &Arc<chromiumoxide::Page>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        None
+    }
+
     /// Start to crawl website concurrently
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
@@ -1583,7 +1658,7 @@ impl Website {
 
             let on_link_find_callback = self.on_link_find_callback;
 
-            match launch_browser(&self.configuration.proxies).await {
+            match launch_browser(&self.configuration).await {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
@@ -1602,6 +1677,9 @@ impl Website {
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
 
                             let chrome_page = Arc::new(new_page.clone());
+
+                            let intercept_handle =
+                                self.setup_chrome_interception(&chrome_page).await;
 
                             let mut links: HashSet<CaseInsensitiveString> = self
                                 .crawl_establish(&client, &mut selectors, false, &chrome_page)
@@ -1715,6 +1793,12 @@ impl Website {
                                     browser_handle.abort();
                                 }
                             }
+                            match intercept_handle {
+                                Some(intercept_handle) => {
+                                    let _ = intercept_handle.await;
+                                }
+                                _ => (),
+                            }
                         }
                         _ => log("", "Chrome failed to open page."),
                     }
@@ -1737,7 +1821,7 @@ impl Website {
 
             let on_link_find_callback = self.on_link_find_callback;
 
-            match launch_browser(&self.configuration.proxies).await {
+            match launch_browser(&self.configuration).await {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
@@ -1756,6 +1840,9 @@ impl Website {
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
 
                             let chrome_page = Arc::new(new_page.clone());
+
+                            let intercept_handle =
+                                self.setup_chrome_interception(&chrome_page).await;
 
                             let mut links: HashSet<CaseInsensitiveString> = self
                                 .crawl_establish(&client, &mut selectors, false, &chrome_page)
@@ -1869,6 +1956,13 @@ impl Website {
                                 if !browser_handle.is_finished() {
                                     browser_handle.abort();
                                 }
+                            }
+
+                            match intercept_handle {
+                                Some(intercept_handle) => {
+                                    let _ = intercept_handle.await;
+                                }
+                                _ => (),
                             }
                         }
                         _ => log("", "Chrome failed to open page."),
@@ -2231,7 +2325,7 @@ impl Website {
             let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
                 JoinSet::new();
 
-            match launch_browser(&self.configuration.proxies).await {
+            match launch_browser(&self.configuration).await {
                 Some((mut browser, _)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
@@ -2247,6 +2341,9 @@ impl Website {
                                 });
                             }
                             let page = Arc::new(new_page.clone());
+
+                            let intercept_handle = self.setup_chrome_interception(&page).await;
+
                             // crawl while links exists
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2341,6 +2438,13 @@ impl Website {
                                 let _ = browser.close().await;
                             } else {
                                 let _ = new_page.close().await;
+                            }
+
+                            match intercept_handle {
+                                Some(intercept_handle) => {
+                                    let _ = intercept_handle.await;
+                                }
+                                _ => (),
                             }
                         }
                         _ => log("", "Chrome failed to open page."),
@@ -2651,6 +2755,28 @@ impl Website {
     /// Use stealth mode for the request.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.stealth_mode = stealth_mode;
+        self
+    }
+
+    #[cfg(feature = "chrome_intercept")]
+    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    pub fn with_chrome_intercept(
+        &mut self,
+        chrome_intercept: bool,
+        block_images: bool,
+    ) -> &mut Self {
+        self.chrome_intercept = chrome_intercept;
+        self.chrome_intercept_block_images = block_images;
+        self
+    }
+
+    #[cfg(not(feature = "chrome_intercept"))]
+    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    pub fn with_chrome_intercept(
+        &mut self,
+        _chrome_intercept: bool,
+        _block_images: bool,
+    ) -> &mut Self {
         self
     }
 

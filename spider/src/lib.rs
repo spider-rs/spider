@@ -65,6 +65,7 @@
 //! - `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 //! - `chrome_store_page`: Store the page object to perform other actions like taking screenshots conditionally.
 //! - `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory.
+//! - `chrome_intercept`: Allows intercepting network request to speed up processing.
 //! - `cookies`: Enables cookies storing and setting to use for request.
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `http3`: Enables experimental HTTP/3 client.

@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.60.13"
+spider = "1.70.3"
 ```
 
 And then the code:
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["regex", "ua_generator"] }
+spider = { version = "1.70.3", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -115,6 +115,7 @@ spider = { version = "1.60.13", features = ["regex", "ua_generator"] }
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
 1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
+1. `chrome_intercept`: Allows intercepting network request to speed up processing.
 1. `cookies`: Enables cookies storing and setting to use for request.
 1. `cron`: Enables the ability to start cron jobs for the website.
 1. `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
@@ -125,7 +126,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["decentralized"] }
+spider = { version = "1.70.3", features = ["decentralized"] }
 ```
 
 ```sh
@@ -145,7 +146,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["sync"] }
+spider = { version = "1.70.3", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -175,7 +176,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["regex"] }
+spider = { version = "1.70.3", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -202,7 +203,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["control"] }
+spider = { version = "1.70.3", features = ["control"] }
 ```
 
 ```rust
@@ -272,7 +273,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["sync", "cron"] }
+spider = { version = "1.70.3", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -306,15 +307,35 @@ async fn main() {
 
 ### Chrome
 
-Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely.
+Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely. If you are not scraping content for downloading use 
+the feature flag [`chrome_intercept`] to possibly speed up request using Network Interception.
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["chrome"] }
+spider = { version = "1.70.3", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
 
+
+```rust
+extern crate spider;
+
+use spider::tokio;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website: Website = Website::new("https://rsseau.fr")
+        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+
+    println!("Links found {:?}", website.get_links().len());
+}
+```
 
 ### Smart Mode
 
@@ -322,7 +343,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.60.13", features = ["smart"] }
+spider = { version = "1.70.3", features = ["smart"] }
 ```
 
 ```rust,no_run

@@ -1,4 +1,4 @@
-//! `cargo run --example chrome --features chrome_headed`
+//! `cargo run --example chrome --features chrome`
 extern crate spider;
 
 use spider::tokio;
@@ -6,7 +6,10 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr");
+    let mut website: Website = Website::new("https://rsseau.fr")
+        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .build()
+        .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
 
     tokio::spawn(async move {

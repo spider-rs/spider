@@ -1,6 +1,6 @@
-use crate::tokio_stream::StreamExt;
 use crate::utils::log;
-use chromiumoxide::{Browser, BrowserConfig};
+use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use tokio::task;
 
 /// get chrome configuration
@@ -12,6 +12,12 @@ pub fn get_browser_config(
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .request_timeout(Duration::from_secs(30));
+
+    let builder = if cfg!(feature = "chrome_intercept") {
+        builder.enable_request_intercept()
+    } else {
+        builder
+    };
 
     let builder = match proxies {
         Some(proxies) => {
@@ -56,6 +62,12 @@ pub fn get_browser_config(
         .no_sandbox()
         .with_head();
 
+    let builder = if cfg!(feature = "chrome_intercept") {
+        builder.enable_request_intercept()
+    } else {
+        builder
+    };
+
     let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| {
         if e == "--headless" {
             "".to_string()
@@ -95,10 +107,24 @@ pub fn get_browser_config(
 
 /// launch a chromium browser and wait until the instance is up.
 pub async fn launch_browser(
-    proxies: &Option<Box<Vec<string_concat::String>>>,
+    config: &Configuration,
 ) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
+    let proxies = &config.proxies;
+
     let b_conf = match std::env::var("CHROME_URL") {
-        Ok(v) => match Browser::connect(&v).await {
+        Ok(v) => match Browser::connect_with_config(
+            &v,
+            HandlerConfig {
+                request_timeout: match config.request_timeout.as_ref() {
+                    Some(timeout) => **timeout,
+                    _ => Default::default(),
+                },
+                request_intercept: cfg!(feature = "chrome_intercept"),
+                ..HandlerConfig::default()
+            },
+        )
+        .await
+        {
             Ok(browser) => Some(browser),
             _ => None,
         },
@@ -114,6 +140,7 @@ pub async fn launch_browser(
     match b_conf {
         Some(c) => {
             let (browser, mut handler) = c;
+
             // spawn a new task that continuously polls the handler
             let handle = task::spawn(async move {
                 while let Some(h) = handler.next().await {
