@@ -38,4 +38,7 @@ pub struct Cli {
     /// Set external domains to group with crawl.
     #[clap(short = 'E', long)]
     pub external_domains: Option<Vec<String>>,
+    #[clap(short = 'b', long)]
+    /// Block Images from rendering when using Chrome. Requires the [chrome_intercept] flag enabled.
+    pub block_images: bool
 }

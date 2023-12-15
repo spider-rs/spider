@@ -23,10 +23,10 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
 }
 
-#[cfg(any(feature = "smart", feature = "js"))]
+#[cfg(any(feature = "smart", feature = "js", feature = "chrome_intercept"))]
 lazy_static! {
     /// popular js frameworks and libs
-    static ref JS_FRAMEWORK_ASSETS: HashSet<&'static str> = {
+    pub static ref JS_FRAMEWORK_ASSETS: HashSet<&'static str> = {
         let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
 
         m.extend::<[&'static str; 23]>([
@@ -34,6 +34,24 @@ lazy_static! {
             "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
             "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
         ].map(|s| s.into()));
+
+        m
+    };
+}
+
+#[cfg(any(feature = "chrome_intercept"))]
+lazy_static! {
+    /// popular js frameworks and libs
+    pub static ref JS_FRAMEWORK_ALLOW: HashSet<&'static str> = {
+        let mut m: HashSet<&'static str> = HashSet::with_capacity(17);
+
+        m.extend(JS_FRAMEWORK_ASSETS.iter().filter_map(|v| {
+            if vec!["material-components-web.min.js", "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js"].contains(v) {
+                None
+            } else {
+                Some(v)
+            }
+        }));
 
         m
     };
@@ -842,7 +860,7 @@ impl Page {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
 
-                        let mut can_process =
+                        let can_process =
                             parent_host_match(abs.host_str(), &base_domain, parent_host);
 
                         if can_process {
