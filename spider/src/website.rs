@@ -1601,7 +1601,7 @@ impl Website {
                     let ih = task::spawn(async move {
                         while let Some(event) = rp.next().await {
                             let u = &event.request.url;
-                            if ignore_images && ResourceType::Image == event.resource_type || !u.contains(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
+                            if ignore_images && ResourceType::Image == event.resource_type || !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
                                 match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
                                 .request_id(event.request_id.clone())
                                 .response_code(200)
