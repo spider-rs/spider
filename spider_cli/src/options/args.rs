@@ -40,5 +40,5 @@ pub struct Cli {
     pub external_domains: Option<Vec<String>>,
     #[clap(short = 'b', long)]
     /// Block Images from rendering when using Chrome. Requires the [chrome_intercept] flag enabled.
-    pub block_images: bool
+    pub block_images: bool,
 }

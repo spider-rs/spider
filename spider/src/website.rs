@@ -550,7 +550,6 @@ impl Website {
                 } else {
                     1
                 };
-
                 let subdomains = self.configuration.subdomains;
                 let tld = self.configuration.tld;
                 let host_domain_name = if tld {
@@ -561,8 +560,13 @@ impl Website {
 
                 let custom_policy = {
                     move |attempt: Attempt| {
-                        if tld && domain_name(attempt.url()).ends_with(&host_domain_name)
-                            || subdomains && attempt.url().as_str().ends_with(host_s.as_str())
+                        if tld && domain_name(attempt.url()) == host_domain_name
+                            || subdomains
+                                && attempt
+                                    .url()
+                                    .host_str()
+                                    .unwrap_or_default()
+                                    .ends_with(host_s.host_str().unwrap_or_default())
                             || attempt.url().host() == host_s.host()
                         {
                             default_policy.redirect(attempt)
@@ -1577,10 +1581,7 @@ impl Website {
     }
 
     /// Setup interception for chrome request
-    #[cfg(all(
-        feature = "chrome",
-        feature = "chrome_intercept"
-    ))]
+    #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
     async fn setup_chrome_interception(
         &self,
         chrome_page: &Arc<chromiumoxide::Page>,
@@ -1634,10 +1635,7 @@ impl Website {
     }
 
     /// Setup interception for chrome request
-    #[cfg(all(
-        feature = "chrome",
-        not(feature = "chrome_intercept")
-    ))]
+    #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
     async fn setup_chrome_interception(
         &self,
         _chrome_page: &Arc<chromiumoxide::Page>,
