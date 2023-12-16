@@ -1,5 +1,6 @@
+use crate::Client;
 use log::{info, log_enabled, Level};
-use reqwest::{Client, Error, Response, StatusCode};
+use reqwest::{Error, Response, StatusCode};
 
 /// The response of a web page.
 #[derive(Debug, Default)]

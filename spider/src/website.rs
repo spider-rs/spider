@@ -4,6 +4,7 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
 use crate::CaseInsensitiveString;
+use crate::Client;
 
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
@@ -14,7 +15,6 @@ use compact_str::CompactString;
 use hashbrown::HashMap;
 
 use hashbrown::HashSet;
-use reqwest::Client;
 #[cfg(not(feature = "napi"))]
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
@@ -195,6 +195,9 @@ pub struct Website {
     /// Block all images from rendering in Chrome.
     #[cfg(feature = "chrome_intercept")]
     pub chrome_intercept_block_images: bool,
+    /// Cache the page following HTTP Caching rules.
+    #[cfg(feature = "cache")]
+    pub cache: bool,
 }
 
 impl Website {
@@ -533,8 +536,8 @@ impl Website {
     }
 
     /// build the http client
-    #[cfg(not(feature = "decentralized"))]
-    fn configure_http_client_builder(&mut self) -> reqwest::ClientBuilder {
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
         use crate::page::domain_name;
         use reqwest::redirect::Attempt;
         use std::sync::atomic::AtomicU8;
@@ -626,24 +629,128 @@ impl Website {
             _ => client,
         };
 
+        let client = self.configure_http_client_cookies(client);
+
         client
     }
 
-    /// configure http client
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
-    pub fn configure_http_client(&mut self) -> Client {
-        let client = self.configure_http_client_builder();
+    /// build the http client with caching enabled.
+    #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
+    fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
+        use crate::page::domain_name;
+        use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+        use reqwest::redirect::Attempt;
+        use reqwest_middleware::ClientBuilder;
+        use std::sync::atomic::AtomicU8;
 
-        // should unwrap using native-tls-alpn
-        unsafe { client.build().unwrap_unchecked() }
+        let host_str = self.domain_parsed.as_deref().cloned();
+        let default_policy = reqwest::redirect::Policy::default();
+
+        let policy = match host_str {
+            Some(host_s) => {
+                let initial_redirect = Arc::new(AtomicU8::new(0));
+                let initial_redirect_limit = if self.configuration.respect_robots_txt {
+                    2
+                } else {
+                    1
+                };
+                let subdomains = self.configuration.subdomains;
+                let tld = self.configuration.tld;
+                let host_domain_name = if tld {
+                    domain_name(&host_s).to_string()
+                } else {
+                    Default::default()
+                };
+
+                let custom_policy = {
+                    move |attempt: Attempt| {
+                        if tld && domain_name(attempt.url()) == host_domain_name
+                            || subdomains
+                                && attempt
+                                    .url()
+                                    .host_str()
+                                    .unwrap_or_default()
+                                    .ends_with(host_s.host_str().unwrap_or_default())
+                            || attempt.url().host() == host_s.host()
+                        {
+                            default_policy.redirect(attempt)
+                        } else if attempt.previous().len() > 7 {
+                            attempt.error("too many redirects")
+                        } else if attempt.status().is_redirection()
+                            && (0..initial_redirect_limit)
+                                .contains(&initial_redirect.load(Ordering::Relaxed))
+                        {
+                            initial_redirect.fetch_add(1, Ordering::Relaxed);
+                            default_policy.redirect(attempt)
+                        } else {
+                            attempt.stop()
+                        }
+                    }
+                };
+                reqwest::redirect::Policy::custom(custom_policy)
+            }
+            _ => default_policy,
+        };
+
+        let client = reqwest::Client::builder()
+            .user_agent(match &self.configuration.user_agent {
+                Some(ua) => ua.as_str(),
+                _ => &get_ua(),
+            })
+            .redirect(policy)
+            .tcp_keepalive(Duration::from_millis(500))
+            .pool_idle_timeout(None);
+
+        let client = if self.configuration.http2_prior_knowledge {
+            client.http2_prior_knowledge()
+        } else {
+            client
+        };
+
+        let client = match &self.configuration.headers {
+            Some(headers) => client.default_headers(*headers.to_owned()),
+            _ => client,
+        };
+
+        let mut client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
+            _ => client,
+        };
+
+        let client = match &self.configuration.proxies {
+            Some(proxies) => {
+                for proxie in proxies.iter() {
+                    match reqwest::Proxy::all(proxie) {
+                        Ok(proxy) => client = client.proxy(proxy),
+                        _ => (),
+                    }
+                }
+                client
+            }
+            _ => client,
+        };
+
+        let client = self.configure_http_client_cookies(client);
+        let client = ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
+
+        if self.cache {
+            client.with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACacheManager::default(),
+                options: HttpCacheOptions::default(),
+            }))
+        } else {
+            client
+        }
     }
 
-    /// build the client with cookie configurations
+    /// build the client with cookie configurations.
     #[cfg(all(not(feature = "decentralized"), feature = "cookies"))]
-    pub fn configure_http_client(&mut self) -> Client {
-        let client = self.configure_http_client_builder();
+    fn configure_http_client_cookies(
+        &mut self,
+        client: reqwest::ClientBuilder,
+    ) -> reqwest::ClientBuilder {
         let client = client.cookie_store(true);
-
         let client = if !self.cookie_str.is_empty() && self.domain_parsed.is_some() {
             match self.domain_parsed.clone() {
                 Some(p) => {
@@ -656,13 +763,35 @@ impl Website {
         } else {
             client
         };
+        client
+    }
 
+    /// build the client with cookie configurations. This does nothing with [cookies] flag enabled.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
+    fn configure_http_client_cookies(
+        &mut self,
+        client: reqwest::ClientBuilder,
+    ) -> reqwest::ClientBuilder {
+        client
+    }
+
+    /// configure http client
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    pub fn configure_http_client(&mut self) -> Client {
+        let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn
         unsafe { client.build().unwrap_unchecked() }
     }
 
+    /// configure http client
+    #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
+    pub fn configure_http_client(&mut self) -> Client {
+        let client = self.configure_http_client_builder();
+        client.build()
+    }
+
     /// configure http client for decentralization
-    #[cfg(feature = "decentralized")]
+    #[cfg(all(feature = "decentralized", not(feature = "cache")))]
     pub fn configure_http_client(&mut self) -> Client {
         use reqwest::header::HeaderMap;
         use reqwest::header::HeaderValue;
@@ -750,6 +879,103 @@ impl Website {
         }
     }
 
+    /// configure http client for decentralization
+    #[cfg(all(feature = "decentralized", feature = "cache"))]
+    pub fn configure_http_client(&mut self) -> Client {
+        use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+        use reqwest::header::HeaderMap;
+        use reqwest::header::HeaderValue;
+        use reqwest_middleware::ClientBuilder;
+
+        let mut headers = HeaderMap::new();
+
+        let host_str = self.domain_parsed.take();
+        let default_policy = reqwest::redirect::Policy::default();
+        let policy = match host_str {
+            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
+                if attempt.url().host_str() != host_s.host_str() {
+                    attempt.stop()
+                } else {
+                    default_policy.redirect(attempt)
+                }
+            }),
+            _ => default_policy,
+        };
+
+        let mut client = reqwest::Client::builder()
+            .user_agent(match &self.configuration.user_agent {
+                Some(ua) => ua.as_str(),
+                _ => &get_ua(),
+            })
+            .redirect(policy)
+            .tcp_keepalive(Duration::from_millis(500))
+            .pool_idle_timeout(None);
+
+        let referer = if self.configuration.tld && self.configuration.subdomains {
+            2
+        } else if self.configuration.tld {
+            2
+        } else if self.configuration.subdomains {
+            1
+        } else {
+            0
+        };
+
+        if referer > 0 {
+            // use expected http headers for providers that drop invalid headers
+            headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
+        }
+
+        match &self.configuration.headers {
+            Some(h) => headers.extend(*h.to_owned()),
+            _ => (),
+        };
+
+        match self.get_absolute_path(None) {
+            Some(domain_url) => {
+                let domain_url = domain_url.as_str();
+                let domain_host = if domain_url.ends_with("/") {
+                    &domain_url[0..domain_url.len() - 1]
+                } else {
+                    domain_url
+                };
+                match HeaderValue::from_str(domain_host) {
+                    Ok(value) => {
+                        headers.insert(reqwest::header::HOST, value);
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+
+        for worker in WORKERS.iter() {
+            match reqwest::Proxy::all(worker) {
+                Ok(worker) => {
+                    client = client.proxy(worker);
+                }
+                _ => (),
+            }
+        }
+
+        let client = ClientBuilder::new(unsafe {
+            match &self.configuration.request_timeout {
+                Some(t) => client.timeout(**t),
+                _ => client,
+            }
+            .default_headers(headers)
+            .build()
+            .unwrap_unchecked()
+        })
+        .with(Cache(HttpCache {
+            mode: CacheMode::Default,
+            manager: CACacheManager::default(),
+            options: HttpCacheOptions::default(),
+        }));
+
+        client.build()
+    }
+
     /// setup atomic controller
     #[cfg(feature = "control")]
     fn configure_handler(&self) -> (Arc<AtomicI8>, tokio::task::JoinHandle<()>) {
@@ -782,6 +1008,78 @@ impl Website {
         });
 
         (handle, join_handle)
+    }
+
+    /// Setup interception for chrome request
+    #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
+    async fn setup_chrome_interception(
+        &self,
+        chrome_page: &Arc<chromiumoxide::Page>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        if self.chrome_intercept {
+            use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+
+            match chrome_page
+                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                .await
+            {
+                Ok(mut rp) => {
+                    let host_name = self.domain.inner().to_string();
+                    let intercept_page = chrome_page.clone();
+                    let ignore_images = self.chrome_intercept_block_images;
+
+                    let ih = task::spawn(async move {
+                        while let Some(event) = rp.next().await {
+                            let u = &event.request.url;
+                            if ignore_images && ResourceType::Image == event.resource_type || !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
+                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                .request_id(event.request_id.clone())
+                                .response_code(200)
+                                .build() {
+                                    Ok(c) => {
+                                        if let Err(e) = intercept_page.execute(c).await
+                                        {
+                                            log("Failed to fullfill request: ", e.to_string());
+                                        }
+                                    }
+                                    _ => {
+                                        log("Failed to get request handle ", &host_name);
+                                    }
+                                }
+                        } else if let Err(e) = intercept_page
+                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                            .await
+                            {
+                                log("Failed to continue request: ", e.to_string());
+                            }
+                        }
+                    });
+
+                    Some(ih)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Setup interception for chrome request
+    #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
+    async fn setup_chrome_interception(
+        &self,
+        _chrome_page: &Arc<chromiumoxide::Page>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        None
+    }
+
+    /// setup selectors for handling link targets
+    fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
+        get_page_selectors(
+            &self.domain.inner(),
+            self.configuration.subdomains,
+            self.configuration.tld,
+        )
     }
 
     /// setup config for crawl
@@ -819,15 +1117,6 @@ impl Website {
         (self.configure_robots_parser(client).await, None)
     }
 
-    /// setup selectors for handling link targets
-    fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
-        get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        )
-    }
-
     /// setup shared concurrent configs
     fn setup_crawl(
         &mut self,
@@ -840,18 +1129,6 @@ impl Website {
         let throttle = Box::pin(self.get_delay());
 
         (interval, throttle)
-    }
-
-    /// get base link for crawl establishing
-    #[cfg(feature = "regex")]
-    fn get_base_link(&self) -> &CaseInsensitiveString {
-        &self.domain
-    }
-
-    /// get base link for crawl establishing
-    #[cfg(not(feature = "regex"))]
-    fn get_base_link(&self) -> &CompactString {
-        self.domain.inner()
     }
 
     /// expand links for crawl
@@ -1580,71 +1857,8 @@ impl Website {
         }
     }
 
-    /// Setup interception for chrome request
-    #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
-    async fn setup_chrome_interception(
-        &self,
-        chrome_page: &Arc<chromiumoxide::Page>,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        if self.chrome_intercept {
-            use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-
-            match chrome_page
-                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
-                .await
-            {
-                Ok(mut rp) => {
-                    let host_name = self.domain.inner().to_string();
-                    let intercept_page = chrome_page.clone();
-                    let ignore_images = self.chrome_intercept_block_images;
-
-                    let ih = task::spawn(async move {
-                        while let Some(event) = rp.next().await {
-                            let u = &event.request.url;
-                            if ignore_images && ResourceType::Image == event.resource_type || !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
-                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
-                                .request_id(event.request_id.clone())
-                                .response_code(200)
-                                .build() {
-                                    Ok(c) => {
-                                        if let Err(e) = intercept_page.execute(c).await
-                                        {
-                                            log("Failed to fullfill request: ", e.to_string());
-                                        }
-                                    }
-                                    _ => {
-                                        log("Failed to get request handle ", &host_name);
-                                    }
-                                }
-                        } else if let Err(e) = intercept_page
-                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
-                            .await
-                            {
-                                log("Failed to continue request: ", e.to_string());
-                            }
-                        }
-                    });
-
-                    Some(ih)
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Setup interception for chrome request
-    #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
-    async fn setup_chrome_interception(
-        &self,
-        _chrome_page: &Arc<chromiumoxide::Page>,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        None
-    }
-
     /// Start to crawl website concurrently
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let selectors = self.setup_selectors();
@@ -1807,172 +2021,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently
-    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
-    async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
-        self.start();
-        let selectors = self.setup_selectors();
-
-        // crawl if valid selector
-        if selectors.is_some() {
-            let (mut interval, throttle) = self.setup_crawl();
-            let blacklist_url = self.configuration.get_blacklist();
-
-            let on_link_find_callback = self.on_link_find_callback;
-
-            match launch_browser(&self.configuration).await {
-                Some((mut browser, browser_handle)) => {
-                    match browser.new_page("about:blank").await {
-                        Ok(new_page) => {
-                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
-                                let _ = new_page.enable_stealth_mode_with_agent(&if self
-                                    .configuration
-                                    .user_agent
-                                    .is_some()
-                                {
-                                    &self.configuration.user_agent.as_ref().unwrap().as_str()
-                                } else {
-                                    ""
-                                });
-                            }
-
-                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
-
-                            let chrome_page = Arc::new(new_page.clone());
-
-                            let intercept_handle =
-                                self.setup_chrome_interception(&chrome_page).await;
-
-                            let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
-                                .await;
-
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                selectors,
-                                self.channel.clone(),
-                                chrome_page,
-                                self.external_domains_caseless.clone(),
-                            ));
-
-                            let add_external = shared.4.len() > 0;
-
-                            if !links.is_empty() {
-                                let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
-                                    JoinSet::new();
-                                let chandle = Handle::current();
-
-                                // crawl while links exists
-                                loop {
-                                    let stream =
-                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                            links.drain().collect(),
-                                        )
-                                        .throttle(*throttle);
-                                    tokio::pin!(stream);
-
-                                    loop {
-                                        match stream.next().await {
-                                            Some(link) => {
-                                                match handle.as_ref() {
-                                                    Some(handle) => {
-                                                        while handle.load(Ordering::Relaxed) == 1 {
-                                                            interval.tick().await;
-                                                        }
-                                                        if handle.load(Ordering::Relaxed) == 2
-                                                            || self.shutdown
-                                                        {
-                                                            set.shutdown().await;
-                                                            break;
-                                                        }
-                                                    }
-                                                    None => (),
-                                                }
-
-                                                if !self.is_allowed(&link, &blacklist_url) {
-                                                    continue;
-                                                }
-
-                                                log("fetch", &link);
-                                                self.links_visited.insert(link.clone());
-                                                let permit = SEM.acquire().await.unwrap();
-                                                let shared = shared.clone();
-                                                task::yield_now().await;
-
-                                                set.spawn_on(
-                                                    async move {
-                                                        let link_result =
-                                                            match on_link_find_callback {
-                                                                Some(cb) => cb(link, None),
-                                                                _ => (link, None),
-                                                            };
-                                                        let mut page = Page::new(
-                                                            &link_result.0.as_ref(),
-                                                            &shared.0,
-                                                            &shared.3,
-                                                        )
-                                                        .await;
-
-                                                        if add_external {
-                                                            page.set_external(shared.4.clone());
-                                                        }
-
-                                                        let page_links = page
-                                                            .smart_links(&shared.1, &shared.3)
-                                                            .await;
-
-                                                        channel_send_page(&shared.2, page);
-
-                                                        drop(permit);
-
-                                                        page_links
-                                                    },
-                                                    &chandle,
-                                                );
-                                            }
-                                            _ => break,
-                                        }
-                                    }
-
-                                    while let Some(res) = set.join_next().await {
-                                        match res {
-                                            Ok(msg) => links.extend(&msg - &self.links_visited),
-                                            _ => (),
-                                        };
-                                    }
-
-                                    if links.is_empty() {
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if !std::env::var("CHROME_URL").is_ok() {
-                                let _ = browser.close().await;
-                                let _ = browser_handle.await;
-                            } else {
-                                let _ = new_page.close().await;
-                                if !browser_handle.is_finished() {
-                                    browser_handle.abort();
-                                }
-                            }
-
-                            match intercept_handle {
-                                Some(intercept_handle) => {
-                                    let _ = intercept_handle.await;
-                                }
-                                _ => (),
-                            }
-                        }
-                        _ => log("", "Chrome failed to open page."),
-                    }
-                }
-                _ => log("", "Chrome failed to start."),
-            }
-        }
-    }
-
-    /// Start to crawl website concurrently
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"),))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         // crawl if valid selector
@@ -2186,6 +2235,171 @@ impl Website {
                 }
             }
             _ => (),
+        }
+    }
+
+    /// Start to crawl website concurrently
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
+        let selectors = self.setup_selectors();
+
+        // crawl if valid selector
+        if selectors.is_some() {
+            let (mut interval, throttle) = self.setup_crawl();
+            let blacklist_url = self.configuration.get_blacklist();
+
+            let on_link_find_callback = self.on_link_find_callback;
+
+            match launch_browser(&self.configuration).await {
+                Some((mut browser, browser_handle)) => {
+                    match browser.new_page("about:blank").await {
+                        Ok(new_page) => {
+                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
+                                let _ = new_page.enable_stealth_mode_with_agent(&if self
+                                    .configuration
+                                    .user_agent
+                                    .is_some()
+                                {
+                                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                                } else {
+                                    ""
+                                });
+                            }
+
+                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
+
+                            let chrome_page = Arc::new(new_page.clone());
+
+                            let intercept_handle =
+                                self.setup_chrome_interception(&chrome_page).await;
+
+                            let mut links: HashSet<CaseInsensitiveString> = self
+                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
+                                .await;
+
+                            let shared = Arc::new((
+                                client.to_owned(),
+                                selectors,
+                                self.channel.clone(),
+                                chrome_page,
+                                self.external_domains_caseless.clone(),
+                            ));
+
+                            let add_external = shared.4.len() > 0;
+
+                            if !links.is_empty() {
+                                let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
+                                    JoinSet::new();
+                                let chandle = Handle::current();
+
+                                // crawl while links exists
+                                loop {
+                                    let stream =
+                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                            links.drain().collect(),
+                                        )
+                                        .throttle(*throttle);
+                                    tokio::pin!(stream);
+
+                                    loop {
+                                        match stream.next().await {
+                                            Some(link) => {
+                                                match handle.as_ref() {
+                                                    Some(handle) => {
+                                                        while handle.load(Ordering::Relaxed) == 1 {
+                                                            interval.tick().await;
+                                                        }
+                                                        if handle.load(Ordering::Relaxed) == 2
+                                                            || self.shutdown
+                                                        {
+                                                            set.shutdown().await;
+                                                            break;
+                                                        }
+                                                    }
+                                                    None => (),
+                                                }
+
+                                                if !self.is_allowed(&link, &blacklist_url) {
+                                                    continue;
+                                                }
+
+                                                log("fetch", &link);
+                                                self.links_visited.insert(link.clone());
+                                                let permit = SEM.acquire().await.unwrap();
+                                                let shared = shared.clone();
+                                                task::yield_now().await;
+
+                                                set.spawn_on(
+                                                    async move {
+                                                        let link_result =
+                                                            match on_link_find_callback {
+                                                                Some(cb) => cb(link, None),
+                                                                _ => (link, None),
+                                                            };
+                                                        let mut page = Page::new(
+                                                            &link_result.0.as_ref(),
+                                                            &shared.0,
+                                                            &shared.3,
+                                                        )
+                                                        .await;
+
+                                                        if add_external {
+                                                            page.set_external(shared.4.clone());
+                                                        }
+
+                                                        let page_links = page
+                                                            .smart_links(&shared.1, &shared.3)
+                                                            .await;
+
+                                                        channel_send_page(&shared.2, page);
+
+                                                        drop(permit);
+
+                                                        page_links
+                                                    },
+                                                    &chandle,
+                                                );
+                                            }
+                                            _ => break,
+                                        }
+                                    }
+
+                                    while let Some(res) = set.join_next().await {
+                                        match res {
+                                            Ok(msg) => links.extend(&msg - &self.links_visited),
+                                            _ => (),
+                                        };
+                                    }
+
+                                    if links.is_empty() {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if !std::env::var("CHROME_URL").is_ok() {
+                                let _ = browser.close().await;
+                                let _ = browser_handle.await;
+                            } else {
+                                let _ = new_page.close().await;
+                                if !browser_handle.is_finished() {
+                                    browser_handle.abort();
+                                }
+                            }
+
+                            match intercept_handle {
+                                Some(intercept_handle) => {
+                                    let _ = intercept_handle.await;
+                                }
+                                _ => (),
+                            }
+                        }
+                        _ => log("", "Chrome failed to open page."),
+                    }
+                }
+                _ => log("", "Chrome failed to start."),
+            }
         }
     }
 
@@ -2602,6 +2816,18 @@ impl Website {
         }
     }
 
+    /// get base link for crawl establishing
+    #[cfg(feature = "regex")]
+    fn get_base_link(&self) -> &CaseInsensitiveString {
+        &self.domain
+    }
+
+    /// get base link for crawl establishing
+    #[cfg(not(feature = "regex"))]
+    fn get_base_link(&self) -> &CompactString {
+        self.domain.inner()
+    }
+
     /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.configuration
@@ -2753,6 +2979,19 @@ impl Website {
     /// Use stealth mode for the request.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.stealth_mode = stealth_mode;
+        self
+    }
+
+    #[cfg(feature = "cache")]
+    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    pub fn with_caching(&mut self, cache: bool) -> &mut Self {
+        self.cache = cache;
+        self
+    }
+
+    #[cfg(not(feature = "cache"))]
+    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
         self
     }
 
@@ -3303,4 +3542,27 @@ async fn test_crawl_shutdown() {
     website.crawl().await;
 
     assert_eq!(website.links_visited.len(), 1);
+}
+
+#[tokio::test]
+#[cfg(all(feature = "cache", not(feature = "decentralized")))]
+async fn test_cache() {
+    let domain = "https://choosealicense.com/";
+    let mut website: Website = Website::new(&domain);
+    website.cache = true;
+
+    let fresh_start = tokio::time::Instant::now();
+    website.crawl().await;
+    let fresh_duration = fresh_start.elapsed();
+
+    let cached_start = tokio::time::Instant::now();
+    website.crawl().await;
+    let cached_duration = cached_start.elapsed();
+
+    // cache should be faster at least 5x.
+    assert!(
+        fresh_duration.as_millis() > cached_duration.as_millis() * 5,
+        "{:?}",
+        cached_duration
+    );
 }

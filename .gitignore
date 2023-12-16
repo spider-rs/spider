@@ -4,3 +4,4 @@ target
 .DS_Store
 _temp_spider_downloads
 storage
+http-cacache

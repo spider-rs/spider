@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.70.5"
+version = "1.80.1"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -49,6 +49,8 @@ async-trait = { version = "0.1.74", optional = true }
 napi = { version = "2", features = ["async", "tokio_rt", "napi4"], optional = true }
 strum = { version = "0.25", features = ["derive"] }
 async_job = { version = "0.1.0", optional = true }
+reqwest-middleware = { version = "0.2.4", optional = true }
+http-cache-reqwest = { version = "0.12.0", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -72,6 +74,8 @@ reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
 js = ["dep:jsdom"]
 budget = []
+cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
+cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
 chrome = ["dep:chromiumoxide"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
