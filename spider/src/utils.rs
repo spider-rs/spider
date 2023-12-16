@@ -1,5 +1,6 @@
+use crate::Client;
 use log::{info, log_enabled, Level};
-use reqwest::{Client, Error, Response, StatusCode};
+use reqwest::{Error, Response, StatusCode};
 
 /// The response of a web page.
 #[derive(Debug, Default)]
@@ -227,7 +228,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 }
 
 /// Perform a network request to a resource extracting all content as text.
-#[cfg(feature = "decentralized")]
+#[cfg(all(feature = "decentralized"))]
 pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => match res.bytes().await {
@@ -246,7 +247,7 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 }
 
 /// Perform a network request to a resource extracting all content as text streaming.
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs"))]
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
@@ -369,7 +370,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
     }
 }
 
-#[cfg(feature = "chrome")]
+#[cfg(all(feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome(
     target_url: &str,

@@ -8,7 +8,7 @@ extern crate lazy_static;
 
 lazy_static! {
     /// top level request client to re-use
-    static ref CLIENT: spider::reqwest::Client = {
+    static ref CLIENT: spider::Client = {
         let mut proxy_website = Website::new("proxy");
         let client = proxy_website.configure_http_client();
 

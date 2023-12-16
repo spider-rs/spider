@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.70.5"
+spider = "1.80.0"
 ```
 
 And then the code:
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["regex", "ua_generator"] }
+spider = { version = "1.80.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -109,6 +109,8 @@ spider = { version = "1.70.5", features = ["regex", "ua_generator"] }
 1. `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 1. `sitemap`: Include sitemap pages in results.
 1. `time`: Enables duration tracking per page.
+1. `cache`: Enables HTTP caching request to disk.
+1. `cache_mem`: Enables HTTP caching request to persist in memory.
 1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 1. `chrome_store_page`: Store the page object to perform other actions like taking screenshots conditionally.
 1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env var `SCREENSHOT_OMIT_BACKGROUND` to false.
@@ -126,7 +128,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["decentralized"] }
+spider = { version = "1.80.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -146,7 +148,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["sync"] }
+spider = { version = "1.80.0", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -176,7 +178,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["regex"] }
+spider = { version = "1.80.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -203,7 +205,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["control"] }
+spider = { version = "1.80.0", features = ["control"] }
 ```
 
 ```rust
@@ -273,7 +275,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["sync", "cron"] }
+spider = { version = "1.80.0", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -312,7 +314,7 @@ the feature flag [`chrome_intercept`] to possibly speed up request using Network
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["chrome", "chrome_intercept"] }
+spider = { version = "1.80.0", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
@@ -337,13 +339,45 @@ async fn main() {
 }
 ```
 
+
+### Caching
+
+Enabling HTTP cache can be done with the feature flag [`cache`] or [`cache_mem`].
+
+```toml
+[dependencies]
+spider = { version = "1.80.0", features = ["cache"] }
+```
+
+You need to set `website.cache` to true to enable as well.
+
+```rust
+extern crate spider;
+
+use spider::tokio;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website: Website = Website::new("https://rsseau.fr")
+        .with_caching(true)
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+
+    println!("Links found {:?}", website.get_links().len());
+    /// next run to website.crawl().await; will be faster since content is stored on disk.
+}
+```
+
 ### Smart Mode
 
 Intelligently run crawls using HTTP and JavaScript Rendering when needed. The best of both worlds to maintain speed and extract every page. This requires a chrome connection or browser installed on the system.
 
 ```toml
 [dependencies]
-spider = { version = "1.70.5", features = ["smart"] }
+spider = { version = "1.80.0", features = ["smart"] }
 ```
 
 ```rust,no_run
