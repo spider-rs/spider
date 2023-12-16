@@ -3,10 +3,11 @@ use crate::packages::scraper::Html;
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
+use crate::Client;
 use bytes::Bytes;
 use compact_str::CompactString;
 use hashbrown::HashSet;
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use smallvec::SmallVec;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
@@ -266,7 +267,7 @@ impl Page {
         build(url, page_resource)
     }
 
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
     /// Instantiate a new page and gather the html.
     pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
         let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
@@ -278,6 +279,29 @@ impl Page {
         }
 
         p
+    }
+
+    /// Instantiate a new page and gather the links.
+    #[cfg(feature = "decentralized")]
+    pub async fn new(url: &str, client: &Client) -> Self {
+        use crate::serde::Deserialize;
+        use bytes::Buf;
+        let links = match crate::utils::fetch_page(&url, &client).await {
+            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+                Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
+                    Ok(link) => link,
+                    _ => Default::default(),
+                },
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+
+        Page {
+            html: None,
+            links,
+            ..Default::default()
+        }
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
@@ -309,29 +333,6 @@ impl Page {
                 };
             }
             _ => (),
-        }
-    }
-
-    /// Instantiate a new page and gather the links.
-    #[cfg(feature = "decentralized")]
-    pub async fn new(url: &str, client: &Client) -> Self {
-        use crate::serde::Deserialize;
-        use bytes::Buf;
-        let links = match crate::utils::fetch_page(&url, &client).await {
-            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
-                Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
-                    Ok(link) => link,
-                    _ => Default::default(),
-                },
-                _ => Default::default(),
-            },
-            _ => Default::default(),
-        };
-
-        Page {
-            html: None,
-            links,
-            ..Default::default()
         }
     }
 
@@ -966,7 +967,11 @@ impl Page {
     }
 }
 
-#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache")
+))]
 #[tokio::test]
 async fn parse_links() {
     let client = Client::builder()
@@ -988,7 +993,11 @@ async fn parse_links() {
     );
 }
 
-#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache")
+))]
 #[tokio::test]
 async fn test_status_code() {
     let client = Client::builder()
@@ -1001,7 +1010,11 @@ async fn test_status_code() {
     assert_eq!(page.status_code.as_u16(), 404);
 }
 
-#[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache")
+))]
 #[tokio::test]
 async fn test_abs_path() {
     let client = Client::builder()

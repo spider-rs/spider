@@ -59,6 +59,8 @@
 //! - `sitemap`: Include sitemap pages in results.
 //! - `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 //! - `time`: Enables duration tracking per page.
+//! - `cache`: Enables HTTP caching request to disk.
+//! - `cache_mem`: Enables HTTP caching request to persist in memory.
 //! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely [experimental].
 //! - `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 //! - `chrome_cpu`: Disable gpu usage for chrome browser.
@@ -94,6 +96,11 @@ pub extern crate serde;
 pub extern crate case_insensitive_string;
 pub extern crate smallvec;
 pub extern crate url;
+
+#[cfg(feature = "cache")]
+pub extern crate http_cache_reqwest;
+#[cfg(feature = "cache")]
+pub extern crate reqwest_middleware;
 
 #[macro_use]
 pub extern crate string_concat;
@@ -150,3 +157,17 @@ pub mod black_list {
         blacklist_url.contains(&link)
     }
 }
+
+/// The asynchronous Client to make requests with.
+#[cfg(not(feature = "cache"))]
+pub type Client = reqwest::Client;
+#[cfg(not(feature = "cache"))]
+/// The asynchronous Client Builder.
+pub type ClientBuilder = reqwest::ClientBuilder;
+
+/// The asynchronous Client to make requests with HTTP Cache.
+#[cfg(feature = "cache")]
+pub type Client = reqwest_middleware::ClientWithMiddleware;
+#[cfg(feature = "cache")]
+/// The asynchronous Client Builder.
+pub type ClientBuilder = reqwest_middleware::ClientBuilder;
