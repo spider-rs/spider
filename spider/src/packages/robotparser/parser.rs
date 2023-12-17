@@ -25,8 +25,8 @@
 //! }
 //! ```
 
-use compact_str::CompactString;
 use crate::Client;
+use compact_str::CompactString;
 use reqwest::Response;
 use reqwest::StatusCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

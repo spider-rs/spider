@@ -194,7 +194,7 @@ pub struct Website {
     pub chrome_intercept: bool,
     /// Block all images from rendering in Chrome.
     #[cfg(feature = "chrome_intercept")]
-    pub chrome_intercept_block_images: bool,
+    pub chrome_intercept_block_visuals: bool,
     /// Cache the page following HTTP Caching rules.
     #[cfg(feature = "cache")]
     pub cache: bool,
@@ -1024,14 +1024,27 @@ impl Website {
                 .await
             {
                 Ok(mut rp) => {
-                    let host_name = self.domain.inner().to_string();
+                    let mut host_name = self.domain.inner().to_string();
                     let intercept_page = chrome_page.clone();
-                    let ignore_images = self.chrome_intercept_block_images;
+                    let ignore_visuals = self.chrome_intercept_block_visuals;
 
                     let ih = task::spawn(async move {
+                        let mut first_rq = true;
                         while let Some(event) = rp.next().await {
                             let u = &event.request.url;
-                            if ignore_images && ResourceType::Image == event.resource_type || !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) {
+
+                            if first_rq {
+                                if ResourceType::Document == event.resource_type {
+                                    host_name = u.into();
+                                }
+                                first_rq = false;
+                            }
+
+                            if ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) || 
+                                ResourceType::Script == event.resource_type && !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) ||
+                                ResourceType::Prefetch == event.resource_type || 
+                                ResourceType::Ping == event.resource_type
+                            {
                                 match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
                                 .request_id(event.request_id.clone())
                                 .response_code(200)
@@ -3003,7 +3016,7 @@ impl Website {
         block_images: bool,
     ) -> &mut Self {
         self.chrome_intercept = chrome_intercept;
-        self.chrome_intercept_block_images = block_images;
+        self.chrome_intercept_block_visuals = block_images;
         self
     }
 
