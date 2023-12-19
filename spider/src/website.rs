@@ -101,6 +101,11 @@ lazy_static! {
     };
 }
 
+#[cfg(feature = "budget")]
+lazy_static! {
+    static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
+}
+
 /// the active status of the crawl.
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CrawlStatus {
@@ -175,6 +180,15 @@ pub struct Website {
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<HashMap<CaseInsensitiveString, u32>>,
+    #[cfg(feature = "budget")]
+    /// If wild card budgeting is found for the website.
+    wild_card_budgeting: bool,
+    #[cfg(feature = "budget")]
+    /// The max depth to crawl for a website.
+    pub depth: usize,
+    #[cfg(feature = "budget")]
+    /// The depth to crawl pertaining to the root.
+    depth_distance: usize,
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: String,
@@ -363,72 +377,110 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        if self.budget.is_some() {
+        if self.budget.is_some() || self.depth_distance > 0 {
             match Url::parse(&link.inner()) {
                 Ok(r) => {
-                    match self.budget.as_mut() {
-                        Some(budget) => {
-                            let wild = CaseInsensitiveString::from("*");
-                            let has_wildpath = budget.contains_key(&wild);
+                    let has_depth_control = self.depth_distance > 0;
 
-                            let exceeded_wild_budget = if has_wildpath {
-                                match budget.get_mut(&wild) {
-                                    Some(budget) => {
-                                        if budget.abs_diff(0) == 1 {
-                                            true
-                                        } else {
-                                            *budget -= 1;
-                                            false
+                    if !self.budget.is_some() {
+                        match r.path_segments() {
+                            Some(mut segments) => {
+                                let mut joint_segment = String::new();
+                                let mut over = false;
+                                let mut depth: usize = 0;
+
+                                while let Some(_sef) = segments.next() {
+                                    if has_depth_control {
+                                        if depth != usize::MAX {
+                                            depth += 1;
+                                        }
+                                        if depth >= self.depth_distance {
+                                            over = true;
+                                            break;
                                         }
                                     }
-                                    _ => false,
+
+                                    joint_segment = joint_segment;
                                 }
-                            } else {
-                                false
-                            };
 
-                            // set this up prior to crawl to avoid checks per link
-                            let skip_paths = has_wildpath && budget.len() == 1;
+                                over
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        match self.budget.as_mut() {
+                            Some(budget) => {
+                                let exceeded_wild_budget = if self.wild_card_budgeting {
+                                    match budget.get_mut(&*WILD_CARD_PATH) {
+                                        Some(budget) => {
+                                            if budget.abs_diff(0) == 1 {
+                                                true
+                                            } else {
+                                                *budget -= 1;
+                                                false
+                                            }
+                                        }
+                                        _ => false,
+                                    }
+                                } else {
+                                    false
+                                };
 
-                            // check if paths pass
-                            if !skip_paths && !exceeded_wild_budget {
-                                match r.path_segments() {
-                                    Some(mut segments) => {
-                                        let mut joint_segment = String::new();
-                                        let mut over = false;
+                                // set this up prior to crawl to avoid checks per link
+                                let skip_paths = self.wild_card_budgeting && budget.len() == 1;
 
-                                        while let Some(seg) = segments.next() {
-                                            let next_segment = string_concat!(joint_segment, seg);
-                                            let caseless_segment =
-                                                CaseInsensitiveString::from(next_segment);
+                                // check if paths pass
+                                if !skip_paths && !exceeded_wild_budget {
+                                    match r.path_segments() {
+                                        Some(mut segments) => {
+                                            let mut joint_segment = String::new();
+                                            let mut over = false;
+                                            let mut depth: usize = 0;
 
-                                            if budget.contains_key(&caseless_segment) {
-                                                match budget.get_mut(&caseless_segment) {
-                                                    Some(budget) => {
-                                                        if budget.abs_diff(0) == 0 {
-                                                            over = true;
-                                                            break;
-                                                        } else {
-                                                            *budget -= 1;
-                                                            continue;
-                                                        }
+                                            while let Some(seg) = segments.next() {
+                                                if has_depth_control {
+                                                    if depth != usize::MAX {
+                                                        depth += 1;
                                                     }
-                                                    _ => (),
-                                                };
+                                                    if depth >= self.depth_distance {
+                                                        over = true;
+                                                        break;
+                                                    }
+                                                }
+                                                let caseless_segment = CaseInsensitiveString::from(
+                                                    string_concat!(joint_segment, seg),
+                                                );
+
+                                                if budget.contains_key(&caseless_segment) {
+                                                    match budget.get_mut(&caseless_segment) {
+                                                        Some(budget) => {
+                                                            if budget.abs_diff(0) == 0
+                                                                || *budget == 0
+                                                            {
+                                                                over = true;
+                                                                break;
+                                                            } else {
+                                                                *budget -= 1;
+                                                                continue;
+                                                            }
+                                                        }
+                                                        _ => (),
+                                                    };
+                                                }
+
+                                                joint_segment = joint_segment;
                                             }
 
-                                            joint_segment = joint_segment;
+                                            over
                                         }
-
-                                        over
+                                        _ => false,
                                     }
-                                    _ => false,
+                                } else {
+                                    exceeded_wild_budget
                                 }
-                            } else {
-                                exceeded_wild_budget
                             }
+                            _ => false,
                         }
-                        _ => false,
                     }
                 }
                 _ => false,
@@ -1098,6 +1150,7 @@ impl Website {
     /// setup config for crawl
     #[cfg(feature = "control")]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+        self.determine_limits();
         if self.status == CrawlStatus::Idle {
             self.clear();
         }
@@ -1117,6 +1170,7 @@ impl Website {
     /// setup config for crawl
     #[cfg(not(feature = "control"))]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+        self.determine_limits();
         if self.status == CrawlStatus::Idle {
             self.clear();
         }
@@ -2937,6 +2991,19 @@ impl Website {
         self.budget = budget;
     }
 
+    #[cfg(feature = "budget")]
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    pub fn with_depth(&mut self, depth: usize) -> &mut Self {
+        self.depth = depth;
+        self
+    }
+
+    #[cfg(not(feature = "budget"))]
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    pub fn with_depth(&mut self, depth: usize) -> &mut Self {
+        self
+    }
+
     /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
     pub fn with_external_domains<'a, 'b>(
         &mut self,
@@ -3052,6 +3119,39 @@ impl Website {
             Ok(self.to_owned())
         }
     }
+
+    #[cfg(feature = "budget")]
+    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the feat flag [budget] enabled.
+    fn determine_limits(&mut self) {
+        if self.budget.is_some() {
+            let wild_card_budget = match &self.budget {
+                Some(budget) => budget.contains_key(&*WILD_CARD_PATH),
+                _ => false,
+            };
+            self.wild_card_budgeting = wild_card_budget;
+        }
+        if self.depth > 0 && self.domain_parsed.is_some() {
+            match &self.domain_parsed {
+                Some(domain) => match domain.path_segments() {
+                    Some(segments) => {
+                        let segments_cnt = segments.count();
+
+                        if segments_cnt > self.depth {
+                            self.depth_distance = self.depth + self.depth.abs_diff(segments_cnt);
+                        } else {
+                            self.depth_distance = self.depth;
+                        }
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+    }
+
+    #[cfg(not(feature = "budget"))]
+    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the feat flag [budget] enabled.
+    fn determine_limits(&mut self) {}
 
     /// Setup subscription for data.
     #[cfg(not(feature = "sync"))]
