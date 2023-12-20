@@ -212,6 +212,9 @@ pub struct Website {
     /// Cache the page following HTTP Caching rules.
     #[cfg(feature = "cache")]
     pub cache: bool,
+    /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
+    #[cfg(feature = "control")]
+    pub crawl_id: String,
 }
 
 impl Website {
@@ -1034,9 +1037,7 @@ impl Website {
         use crate::utils::{Handler, CONTROLLER};
         let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
         let handle = c.clone();
-        let domain = self.domain.inner().clone();
-
-        // we should probally assign a temp-uid with domain name to control spawns easier
+        let target_id = string_concat!(self.crawl_id, self.domain.inner());
 
         let join_handle = tokio::spawn(async move {
             let mut l = CONTROLLER.lock().await.1.to_owned();
@@ -1045,7 +1046,7 @@ impl Website {
                 let n = &*l.borrow();
                 let (target, rest) = n;
 
-                if domain.eq_ignore_ascii_case(&target) {
+                if target_id.eq_ignore_ascii_case(&target) {
                     if rest == &Handler::Resume {
                         c.store(0, Ordering::Relaxed);
                     }
@@ -2949,6 +2950,19 @@ impl Website {
     /// Use proxies for request.
     pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
         self.configuration.with_proxies(proxies);
+        self
+    }
+
+    /// Set a crawl ID to use for tracking crawls. This does nothing without the [control] flag enabled.
+    #[cfg(not(feature = "control"))]
+    pub fn with_crawl_id(&mut self, _crawl_id: String) -> &mut Self {
+        self
+    }
+
+    /// Set a crawl ID to use for tracking crawls. This does nothing without the [control] flag enabled.
+    #[cfg(feature = "control")]
+    pub fn with_crawl_id(&mut self, crawl_id: String) -> &mut Self {
+        self.crawl_id = crawl_id;
         self
     }
 
