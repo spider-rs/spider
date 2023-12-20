@@ -41,4 +41,7 @@ pub struct Cli {
     #[clap(short = 'b', long)]
     /// Block Images from rendering when using Chrome. Requires the [chrome_intercept] flag enabled.
     pub block_images: bool,
+    /// The crawl depth limits.
+    #[clap(short, long)]
+    pub depth: usize,
 }

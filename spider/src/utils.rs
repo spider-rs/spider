@@ -420,7 +420,7 @@ pub async fn fetch_page_html_chrome(
     }
 }
 
-/// log to console if configuration verbose.
+/// Log to console if configuration verbose.
 pub fn log(message: &'static str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {
         info!("{message} - {}", data.as_ref());
@@ -431,13 +431,13 @@ pub fn log(message: &'static str, data: impl AsRef<str>) {
 /// determine action
 #[derive(PartialEq, Debug)]
 pub enum Handler {
-    /// crawl start state
+    /// Crawl start state
     Start,
-    /// crawl pause state
+    /// Crawl pause state
     Pause,
-    /// crawl resume
+    /// Crawl resume
     Resume,
-    /// crawl shutdown
+    /// Crawl shutdown
     Shutdown,
 }
 
@@ -448,41 +448,41 @@ lazy_static! {
 }
 
 #[cfg(feature = "control")]
-/// pause a target website running crawl
-pub async fn pause(domain: &str) {
+/// Pause a target website running crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
+pub async fn pause(target: &str) {
     let s = CONTROLLER.clone();
 
-    match s.lock().await.0.send((domain.into(), Handler::Pause)) {
+    match s.lock().await.0.send((target.into(), Handler::Pause)) {
         _ => (),
     };
 }
 
 #[cfg(feature = "control")]
-/// resume a target website crawl
-pub async fn resume(domain: &str) {
+/// Resume a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
+pub async fn resume(target: &str) {
     let s = CONTROLLER.clone();
 
-    match s.lock().await.0.send((domain.into(), Handler::Resume)) {
+    match s.lock().await.0.send((target.into(), Handler::Resume)) {
         _ => (),
     };
 }
 
 #[cfg(feature = "control")]
-/// shutdown a target website crawl
-pub async fn shutdown(domain: &str) {
+/// Shutdown a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
+pub async fn shutdown(target: &str) {
     let s = CONTROLLER.clone();
 
-    match s.lock().await.0.send((domain.into(), Handler::Shutdown)) {
+    match s.lock().await.0.send((target.into(), Handler::Shutdown)) {
         _ => (),
     };
 }
 
 #[cfg(feature = "control")]
-/// reset a target website crawl
-pub async fn reset(domain: &str) {
+/// Reset a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
+pub async fn reset(target: &str) {
     let s = CONTROLLER.clone();
 
-    match s.lock().await.0.send((domain.into(), Handler::Start)) {
+    match s.lock().await.0.send((target.into(), Handler::Start)) {
         _ => (),
     };
 }

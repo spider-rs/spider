@@ -43,6 +43,7 @@ async fn main() {
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(cli.block_images, true)
         .with_tld(cli.tld)
+        .with_depth(cli.depth)
         .with_user_agent(cli.user_agent.as_deref())
         .with_budget(match cli.budget {
             Some(ref budget) => Some(
