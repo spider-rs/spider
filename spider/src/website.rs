@@ -1,5 +1,5 @@
 use crate::black_list::contains;
-use crate::configuration::{get_ua, Configuration};
+use crate::configuration::{get_ua, Configuration, RedirectPolicy};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
@@ -15,6 +15,7 @@ use compact_str::CompactString;
 use hashbrown::HashMap;
 
 use hashbrown::HashSet;
+use reqwest::redirect::Policy;
 #[cfg(not(feature = "napi"))]
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
@@ -590,9 +591,8 @@ impl Website {
         client
     }
 
-    /// build the http client
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
-    fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
+    /// Setup strict a strict redirect policy for request.
+    fn setup_strict_policy(&self) -> Policy {
         use crate::page::domain_name;
         use reqwest::redirect::Attempt;
         use std::sync::atomic::AtomicU8;
@@ -600,7 +600,7 @@ impl Website {
         let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
 
-        let policy = match host_str {
+        match host_str {
             Some(host_s) => {
                 let initial_redirect = Arc::new(AtomicU8::new(0));
                 let initial_redirect_limit = if self.configuration.respect_robots_txt {
@@ -644,7 +644,23 @@ impl Website {
                 reqwest::redirect::Policy::custom(custom_policy)
             }
             _ => default_policy,
-        };
+        }
+    }
+
+    /// Setup redirect policy for reqwest.
+    fn setup_redirect_policy(&self) -> Policy {
+        match self.configuration.redirect_policy {
+            RedirectPolicy::Loose => {
+                reqwest::redirect::Policy::limited(*self.configuration.redirect_limit)
+            }
+            RedirectPolicy::Strict => self.setup_strict_policy(),
+        }
+    }
+
+    /// build the http client
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
+        let policy = self.setup_redirect_policy();
 
         let client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
@@ -701,51 +717,7 @@ impl Website {
         let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
 
-        let policy = match host_str {
-            Some(host_s) => {
-                let initial_redirect = Arc::new(AtomicU8::new(0));
-                let initial_redirect_limit = if self.configuration.respect_robots_txt {
-                    2
-                } else {
-                    1
-                };
-                let subdomains = self.configuration.subdomains;
-                let tld = self.configuration.tld;
-                let host_domain_name = if tld {
-                    domain_name(&host_s).to_string()
-                } else {
-                    Default::default()
-                };
-
-                let custom_policy = {
-                    move |attempt: Attempt| {
-                        if tld && domain_name(attempt.url()) == host_domain_name
-                            || subdomains
-                                && attempt
-                                    .url()
-                                    .host_str()
-                                    .unwrap_or_default()
-                                    .ends_with(host_s.host_str().unwrap_or_default())
-                            || attempt.url().host() == host_s.host()
-                        {
-                            default_policy.redirect(attempt)
-                        } else if attempt.previous().len() > 7 {
-                            attempt.error("too many redirects")
-                        } else if attempt.status().is_redirection()
-                            && (0..initial_redirect_limit)
-                                .contains(&initial_redirect.load(Ordering::Relaxed))
-                        {
-                            initial_redirect.fetch_add(1, Ordering::Relaxed);
-                            default_policy.redirect(attempt)
-                        } else {
-                            attempt.stop()
-                        }
-                    }
-                };
-                reqwest::redirect::Policy::custom(custom_policy)
-            }
-            _ => default_policy,
-        };
+        let policy = self.setup_redirect_policy();
 
         let client = reqwest::Client::builder()
             .user_agent(match &self.configuration.user_agent {
@@ -853,18 +825,7 @@ impl Website {
 
         let mut headers = HeaderMap::new();
 
-        let host_str = self.domain_parsed.take();
-        let default_policy = reqwest::redirect::Policy::default();
-        let policy = match host_str {
-            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
-                if attempt.url().host_str() != host_s.host_str() {
-                    attempt.stop()
-                } else {
-                    default_policy.redirect(attempt)
-                }
-            }),
-            _ => default_policy,
-        };
+        let policy = self.setup_redirect_policy();
 
         let mut client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
@@ -944,18 +905,7 @@ impl Website {
 
         let mut headers = HeaderMap::new();
 
-        let host_str = self.domain_parsed.take();
-        let default_policy = reqwest::redirect::Policy::default();
-        let policy = match host_str {
-            Some(host_s) => reqwest::redirect::Policy::custom(move |attempt| {
-                if attempt.url().host_str() != host_s.host_str() {
-                    attempt.stop()
-                } else {
-                    default_policy.redirect(attempt)
-                }
-            }),
-            _ => default_policy,
-        };
+        let policy = self.setup_redirect_policy();
 
         let mut client = reqwest::Client::builder()
             .user_agent(match &self.configuration.user_agent {
@@ -3089,6 +3039,18 @@ impl Website {
         self
     }
 
+    /// Set the max redirects allowed for request.
+    pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
+        self.configuration.with_redirect_limit(redirect_limit);
+        self
+    }
+
+    /// Set the redirect policy to use, either Strict or Loose by default.
+    pub fn with_redirect_policy(&mut self, policy: RedirectPolicy) -> &mut Self {
+        self.configuration.with_redirect_policy(policy);
+        self
+    }
+
     #[cfg(feature = "chrome_intercept")]
     /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
     pub fn with_chrome_intercept(
@@ -3210,11 +3172,9 @@ fn channel_send_page(
     page: Page,
 ) {
     match channel {
-        Some(c) => {
-            match c.0.send(page) {
-                _ => (),
-            };
-        }
+        Some(c) => match c.0.send(page) {
+            _ => (),
+        },
         _ => (),
     };
 }

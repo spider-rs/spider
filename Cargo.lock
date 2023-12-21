@@ -2050,29 +2050,31 @@ dependencies = [
 
 [[package]]
 name = "h3"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6de6ca43eed186fd055214af06967b0a7a68336cefec7e8a4004e96efeaccb9e"
+checksum = "b83e1915177ea624b5bbbdb16bc54f0c106c9664892c695f995e53f5c6793b80"
 dependencies = [
  "bytes",
- "fastrand 1.9.0",
+ "fastrand 2.0.1",
  "futures-util",
  "http",
+ "pin-project-lite",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "h3-quinn"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d4a1a1763e4f3e82ee9f1ecf2cf862b22cc7316ebe14684e42f94532b5ec64d"
+checksum = "ac9675014d703c3d516a121757bbc02e53f1ee838e0729fc7534b35024a81ae4"
 dependencies = [
  "bytes",
  "futures",
  "h3",
  "quinn",
  "quinn-proto",
+ "tokio",
  "tokio-util",
 ]
 
@@ -3523,6 +3525,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cc2c5017e4b43d5995dcea317bc46c1e09404c0a9664d2908f7f02dfe943d75"
 dependencies = [
  "bytes",
+ "futures-io",
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
@@ -3697,9 +3700,9 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
 name = "reqwest"
-version = "0.11.22"
+version = "0.11.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046cd98826c46c2ac8ddecae268eb5c2e58628688a5fc7a2643704a73faba95b"
+checksum = "37b1ae8d9ac08420c66222fb9096fc5de435c3c48542bc5336c51892cffafb41"
 dependencies = [
  "async-compression",
  "base64",
@@ -4280,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.80.6"
+version = "1.80.9"
 dependencies = [
  "ahash",
  "async-trait",
@@ -4323,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.80.6"
+version = "1.80.9"
 dependencies = [
  "clap 4.4.11",
  "env_logger 0.9.3",
@@ -4335,7 +4338,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.80.6"
+version = "1.80.9"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4356,7 +4359,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.80.6"
+version = "1.80.9"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",
