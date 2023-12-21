@@ -1,6 +1,16 @@
 use compact_str::CompactString;
 use std::time::Duration;
 
+/// Redirect policy configuration for request
+#[derive(Debug, Default, Clone)]
+pub enum RedirectPolicy {
+    #[default]
+    /// A loose policy that allows all request up to the redirect limit.
+    Loose,
+    /// A strict policy only allowing request that match the domain set for crawling.
+    Strict,
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -35,6 +45,10 @@ pub struct Configuration {
     #[cfg(feature = "sitemap")]
     /// Include a sitemap in response of the crawl
     pub sitemap_url: Option<Box<CompactString>>,
+    /// The max redirections allowed for request.
+    pub redirect_limit: Box<usize>,
+    /// The redirect policy type to use.
+    pub redirect_policy: RedirectPolicy,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -61,6 +75,7 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
+            redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_millis(15000))),
             ..Default::default()
         }
@@ -179,6 +194,18 @@ impl Configuration {
             Some(m) => self.headers = Some(m.into()),
             _ => self.headers = None,
         };
+        self
+    }
+
+    /// Set the max redirects allowed for request.
+    pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
+        self.redirect_limit = redirect_limit.into();
+        self
+    }
+
+    /// Set the redirect policy to use.
+    pub fn with_redirect_policy(&mut self, policy: RedirectPolicy) -> &mut Self {
+        self.redirect_policy = policy;
         self
     }
 }
