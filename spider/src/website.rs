@@ -3021,9 +3021,15 @@ impl Website {
     }
 
     #[cfg(feature = "chrome")]
-    /// Use stealth mode for the request.
+    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.stealth_mode = stealth_mode;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    pub fn with_stealth(&mut self, _stealth_mode: bool) -> &mut Self {
         self
     }
 
