@@ -989,9 +989,10 @@ impl Website {
         let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
         let handle = c.clone();
         let target_id = string_concat!(self.crawl_id, self.domain.inner());
+        let c_lock = CONTROLLER.clone();
 
         let join_handle = tokio::spawn(async move {
-            let mut l = CONTROLLER.lock().await.1.to_owned();
+            let mut l = c_lock.read().await.1.to_owned();
 
             while l.changed().await.is_ok() {
                 let n = &*l.borrow();

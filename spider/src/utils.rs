@@ -444,15 +444,20 @@ pub enum Handler {
 #[cfg(feature = "control")]
 lazy_static! {
     /// control handle for crawls
-    pub static ref CONTROLLER: std::sync::Arc<tokio::sync::Mutex<(tokio::sync::watch::Sender<(String, Handler)>, tokio::sync::watch::Receiver<(String, Handler)>)>> = std::sync::Arc::new(tokio::sync::Mutex::new(tokio::sync::watch::channel(("handles".to_string(), Handler::Start))));
+    pub static ref CONTROLLER: std::sync::Arc<tokio::sync::RwLock<(tokio::sync::watch::Sender<(String, Handler)>,
+        tokio::sync::watch::Receiver<(String, Handler)>)>> =
+            std::sync::Arc::new(tokio::sync::RwLock::new(tokio::sync::watch::channel(("handles".to_string(), Handler::Start))));
 }
 
 #[cfg(feature = "control")]
 /// Pause a target website running crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn pause(target: &str) {
-    let s = CONTROLLER.clone();
-
-    match s.lock().await.0.send((target.into(), Handler::Pause)) {
+    match CONTROLLER
+        .write()
+        .await
+        .0
+        .send((target.into(), Handler::Pause))
+    {
         _ => (),
     };
 }
@@ -460,9 +465,12 @@ pub async fn pause(target: &str) {
 #[cfg(feature = "control")]
 /// Resume a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn resume(target: &str) {
-    let s = CONTROLLER.clone();
-
-    match s.lock().await.0.send((target.into(), Handler::Resume)) {
+    match CONTROLLER
+        .write()
+        .await
+        .0
+        .send((target.into(), Handler::Resume))
+    {
         _ => (),
     };
 }
@@ -470,9 +478,12 @@ pub async fn resume(target: &str) {
 #[cfg(feature = "control")]
 /// Shutdown a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn shutdown(target: &str) {
-    let s = CONTROLLER.clone();
-
-    match s.lock().await.0.send((target.into(), Handler::Shutdown)) {
+    match CONTROLLER
+        .write()
+        .await
+        .0
+        .send((target.into(), Handler::Shutdown))
+    {
         _ => (),
     };
 }
@@ -480,9 +491,12 @@ pub async fn shutdown(target: &str) {
 #[cfg(feature = "control")]
 /// Reset a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn reset(target: &str) {
-    let s = CONTROLLER.clone();
-
-    match s.lock().await.0.send((target.into(), Handler::Start)) {
+    match CONTROLLER
+        .write()
+        .await
+        .0
+        .send((target.into(), Handler::Start))
+    {
         _ => (),
     };
 }
