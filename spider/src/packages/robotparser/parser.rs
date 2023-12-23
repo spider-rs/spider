@@ -368,8 +368,6 @@ impl RobotFileParser {
     pub fn can_fetch<T: AsRef<str>>(&self, useragent: T, url: &str) -> bool {
         use percent_encoding::percent_decode;
 
-        let useragent = useragent.as_ref();
-
         if self.disallow_all {
             return false;
         }
@@ -386,7 +384,7 @@ impl RobotFileParser {
         // search for given user agent matches
         // the first match counts
         let decoded_url =
-            String::from_utf8(percent_decode(url.trim().as_bytes()).collect()).unwrap_or_default();
+            percent_decode(url.trim().as_bytes()).decode_utf8_lossy();
 
         let url_str = match decoded_url {
             ref u if !u.is_empty() => u,
@@ -394,7 +392,7 @@ impl RobotFileParser {
         };
 
         for entry in &self.entries {
-            if entry.applies_to(useragent) {
+            if entry.applies_to(useragent.as_ref()) {
                 return entry.allowance(&url_str);
             }
         }
