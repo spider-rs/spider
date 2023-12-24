@@ -799,9 +799,9 @@ dependencies = [
 
 [[package]]
 name = "case_insensitive_string"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71187929cea36b892f163fb6d9268b2373ec044a28c44664bad4fc22696ff78e"
+checksum = "293b5d495adcc973dbab354c941290dfd3b1ef6d373aaea12ca21cbc451269ae"
 dependencies = [
  "compact_str",
  "serde",
@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.80.14"
+version = "1.80.15"
 dependencies = [
  "ahash",
  "async-trait",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.80.14"
+version = "1.80.15"
 dependencies = [
  "clap 4.4.11",
  "env_logger 0.9.3",
@@ -4338,7 +4338,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.80.14"
+version = "1.80.15"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4359,7 +4359,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.80.14"
+version = "1.80.15"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",

@@ -383,8 +383,7 @@ impl RobotFileParser {
         }
         // search for given user agent matches
         // the first match counts
-        let decoded_url =
-            percent_decode(url.trim().as_bytes()).decode_utf8_lossy();
+        let decoded_url = percent_decode(url.trim().as_bytes()).decode_utf8_lossy();
 
         let url_str = match decoded_url {
             ref u if !u.is_empty() => u,

@@ -389,11 +389,10 @@ impl Website {
                     if !self.budget.is_some() {
                         match r.path_segments() {
                             Some(mut segments) => {
-                                let mut joint_segment = String::new();
                                 let mut over = false;
                                 let mut depth: usize = 0;
 
-                                while let Some(_sef) = segments.next() {
+                                while let Some(_) = segments.next() {
                                     if has_depth_control {
                                         if depth != usize::MAX {
                                             depth += 1;
@@ -403,8 +402,6 @@ impl Website {
                                             break;
                                         }
                                     }
-
-                                    joint_segment = joint_segment;
                                 }
 
                                 over
@@ -437,7 +434,8 @@ impl Website {
                                 if !skip_paths && !exceeded_wild_budget {
                                     match r.path_segments() {
                                         Some(mut segments) => {
-                                            let mut joint_segment = String::new();
+                                            let mut joint_segment =
+                                                CaseInsensitiveString::default();
                                             let mut over = false;
                                             let mut depth: usize = 0;
 
@@ -451,12 +449,11 @@ impl Website {
                                                         break;
                                                     }
                                                 }
-                                                let caseless_segment = CaseInsensitiveString::from(
-                                                    string_concat!(joint_segment, seg),
-                                                );
 
-                                                if budget.contains_key(&caseless_segment) {
-                                                    match budget.get_mut(&caseless_segment) {
+                                                joint_segment.push_str(seg);
+
+                                                if budget.contains_key(&joint_segment) {
+                                                    match budget.get_mut(&joint_segment) {
                                                         Some(budget) => {
                                                             if budget.abs_diff(0) == 0
                                                                 || *budget == 0
@@ -471,8 +468,6 @@ impl Website {
                                                         _ => (),
                                                     };
                                                 }
-
-                                                joint_segment = joint_segment;
                                             }
 
                                             over
