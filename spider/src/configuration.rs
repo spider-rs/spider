@@ -1,3 +1,4 @@
+use crate::website::CronType;
 use compact_str::CompactString;
 use std::time::Duration;
 
@@ -45,10 +46,40 @@ pub struct Configuration {
     #[cfg(feature = "sitemap")]
     /// Include a sitemap in response of the crawl
     pub sitemap_url: Option<Box<CompactString>>,
+    #[cfg(feature = "sitemap")]
+    /// Prevent including the sitemap links with the crawl.
+    pub ignore_sitemap: bool,
     /// The max redirections allowed for request.
     pub redirect_limit: Box<usize>,
     /// The redirect policy type to use.
     pub redirect_policy: RedirectPolicy,
+    #[cfg(feature = "cookies")]
+    /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
+    pub cookie_str: Box<String>,
+    #[cfg(feature = "cron")]
+    /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
+    pub cron_str: String,
+    #[cfg(feature = "cron")]
+    /// The type of cron to run either crawl or scrape
+    pub cron_type: CronType,
+    #[cfg(feature = "budget")]
+    /// The max depth to crawl for a website.
+    pub depth: usize,
+    #[cfg(feature = "budget")]
+    /// The depth to crawl pertaining to the root.
+    pub depth_distance: usize,
+    /// Cache the page following HTTP Caching rules.
+    #[cfg(feature = "cache")]
+    pub cache: bool,
+    #[cfg(feature = "chrome")]
+    /// Use stealth mode for requests.
+    pub stealth_mode: bool,
+    /// Setup network interception for request.
+    #[cfg(feature = "chrome_intercept")]
+    pub chrome_intercept: bool,
+    /// Block all images from rendering in Chrome.
+    #[cfg(feature = "chrome_intercept")]
+    pub chrome_intercept_block_visuals: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -164,12 +195,38 @@ impl Configuration {
         self
     }
 
+    #[cfg(feature = "sitemap")]
+    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
+        self.ignore_sitemap = ignore_sitemap;
+        self
+    }
+
+    #[cfg(not(feature = "sitemap"))]
+    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    pub fn with_ignore_sitemap(&mut self, _ignore_sitemap: bool) -> &mut Self {
+        self
+    }
+
     /// Add user agent to request.
     pub fn with_user_agent(&mut self, user_agent: Option<&str>) -> &mut Self {
         match user_agent {
             Some(agent) => self.user_agent = Some(CompactString::new(agent.to_string()).into()),
             _ => self.user_agent = None,
         };
+        self
+    }
+
+    #[cfg(feature = "cookies")]
+    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
+        self.cookie_str = Box::new(cookie_str.into());
+        self
+    }
+
+    #[cfg(not(feature = "cookies"))]
+    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
         self
     }
 
@@ -212,6 +269,81 @@ impl Configuration {
     /// Set the redirect policy to use.
     pub fn with_redirect_policy(&mut self, policy: RedirectPolicy) -> &mut Self {
         self.redirect_policy = policy;
+        self
+    }
+
+    #[cfg(feature = "cron")]
+    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
+        self.cron_str = cron_str.into();
+        self.cron_type = cron_type;
+        self
+    }
+
+    #[cfg(not(feature = "cron"))]
+    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    pub fn with_cron(&mut self, _cron_str: &str, _cron_type: CronType) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "budget")]
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    pub fn with_depth(&mut self, depth: usize) -> &mut Self {
+        self.depth = depth;
+        self
+    }
+
+    #[cfg(not(feature = "budget"))]
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    pub fn with_depth(&mut self, _depth: usize) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "cache")]
+    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    pub fn with_caching(&mut self, cache: bool) -> &mut Self {
+        self.cache = cache;
+        self
+    }
+
+    #[cfg(not(feature = "cache"))]
+    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
+        self.stealth_mode = stealth_mode;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    pub fn with_stealth(&mut self, _stealth_mode: bool) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome_intercept")]
+    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    pub fn with_chrome_intercept(
+        &mut self,
+        chrome_intercept: bool,
+        block_images: bool,
+    ) -> &mut Self {
+        self.chrome_intercept = chrome_intercept;
+        self.chrome_intercept_block_visuals = block_images;
+        self
+    }
+
+    #[cfg(not(feature = "chrome_intercept"))]
+    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    pub fn with_chrome_intercept(
+        &mut self,
+        _chrome_intercept: bool,
+        _block_images: bool,
+    ) -> &mut Self {
         self
     }
 }

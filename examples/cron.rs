@@ -7,7 +7,7 @@ use spider::website::{run_cron, Website};
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr");
-    website.cron_str = "1/5 * * * * *".into();
+    website.configuration.cron_str = "1/5 * * * * *".into();
 
     let mut rx2 = website.subscribe(16).unwrap();
 

@@ -180,38 +180,11 @@ pub struct Website {
     #[cfg(feature = "budget")]
     /// If wild card budgeting is found for the website.
     wild_card_budgeting: bool,
-    #[cfg(feature = "budget")]
-    /// The max depth to crawl for a website.
-    pub depth: usize,
-    #[cfg(feature = "budget")]
-    /// The depth to crawl pertaining to the root.
-    depth_distance: usize,
-    #[cfg(feature = "cookies")]
-    /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
-    pub cookie_str: Box<String>,
-    #[cfg(feature = "cron")]
-    /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
-    pub cron_str: String,
-    #[cfg(feature = "cron")]
-    /// The type of cron to run either crawl or scrape
-    pub cron_type: CronType,
-    /// The website was manually stopped.
-    shutdown: bool,
-    #[cfg(feature = "chrome")]
-    /// Use stealth mode for requests.
-    pub stealth_mode: bool,
-    /// Setup network interception for request.
-    #[cfg(feature = "chrome_intercept")]
-    pub chrome_intercept: bool,
-    /// Block all images from rendering in Chrome.
-    #[cfg(feature = "chrome_intercept")]
-    pub chrome_intercept_block_visuals: bool,
-    /// Cache the page following HTTP Caching rules.
-    #[cfg(feature = "cache")]
-    pub cache: bool,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     #[cfg(feature = "control")]
     pub crawl_id: Box<String>,
+    /// The website was manually stopped.
+    shutdown: bool,
 }
 
 impl Website {
@@ -377,10 +350,10 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        if self.budget.is_some() || self.depth_distance > 0 {
+        if self.budget.is_some() || self.configuration.depth_distance > 0 {
             match Url::parse(&link.inner()) {
                 Ok(r) => {
-                    let has_depth_control = self.depth_distance > 0;
+                    let has_depth_control = self.configuration.depth_distance > 0;
 
                     if !self.budget.is_some() {
                         match r.path_segments() {
@@ -393,7 +366,7 @@ impl Website {
                                         if depth != usize::MAX {
                                             depth += 1;
                                         }
-                                        if depth >= self.depth_distance {
+                                        if depth >= self.configuration.depth_distance {
                                             over = true;
                                             break;
                                         }
@@ -440,7 +413,7 @@ impl Website {
                                                     if depth != usize::MAX {
                                                         depth += 1;
                                                     }
-                                                    if depth >= self.depth_distance {
+                                                    if depth >= self.configuration.depth_distance {
                                                         over = true;
                                                         break;
                                                     }
@@ -752,7 +725,7 @@ impl Website {
         let client = self.configure_http_client_cookies(client);
         let client = ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
 
-        if self.cache {
+        if self.configuration.cache {
             client.with(Cache(HttpCache {
                 mode: CacheMode::Default,
                 manager: CACacheManager::default(),
@@ -770,11 +743,11 @@ impl Website {
         client: reqwest::ClientBuilder,
     ) -> reqwest::ClientBuilder {
         let client = client.cookie_store(true);
-        let client = if !self.cookie_str.is_empty() && self.domain_parsed.is_some() {
+        let client = if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
             match self.domain_parsed.clone() {
                 Some(p) => {
                     let cookie_store = reqwest::cookie::Jar::default();
-                    cookie_store.add_cookie_str(&self.cookie_str, &p);
+                    cookie_store.add_cookie_str(&self.configuration.cookie_str, &p);
                     client.cookie_provider(cookie_store.into())
                 }
                 _ => client,
@@ -1012,7 +985,7 @@ impl Website {
         &self,
         chrome_page: &Arc<chromiumoxide::Page>,
     ) -> Option<tokio::task::JoinHandle<()>> {
-        if self.chrome_intercept {
+        if self.configuration.chrome_intercept {
             use chromiumoxide::cdp::browser_protocol::network::ResourceType;
 
             match chrome_page
@@ -1022,7 +995,7 @@ impl Website {
                 Ok(mut rp) => {
                     let mut host_name = self.domain.inner().to_string();
                     let intercept_page = chrome_page.clone();
-                    let ignore_visuals = self.chrome_intercept_block_visuals;
+                    let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
 
                     let ih = task::spawn(async move {
                         let mut first_rq = true;
@@ -1493,7 +1466,6 @@ impl Website {
         }
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency
     pub async fn crawl(&mut self) {
         self.start();
@@ -1503,6 +1475,7 @@ impl Website {
             _ => (None, None),
         };
         self.crawl_concurrent(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
         match join_handle {
             Some(h) => h.abort(),
@@ -1533,7 +1506,6 @@ impl Website {
         self.crawl().await
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
         self.start();
@@ -1543,6 +1515,7 @@ impl Website {
             _ => (None, None),
         };
         self.crawl_concurrent_raw(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
         match join_handle {
             Some(h) => h.abort(),
@@ -1550,7 +1523,6 @@ impl Website {
         };
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Start to scrape/download website with async concurrency
     pub async fn scrape(&mut self) {
         self.start();
@@ -1560,6 +1532,7 @@ impl Website {
             _ => (None, None),
         };
         self.scrape_concurrent(&client, &handle).await;
+        self.sitemap_crawl(&client, &handle, true).await;
         self.set_crawl_status();
         match join_handle {
             Some(h) => h.abort(),
@@ -1567,7 +1540,6 @@ impl Website {
         };
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn scrape_raw(&mut self) {
         self.start();
@@ -1577,77 +1549,6 @@ impl Website {
             _ => (None, None),
         };
         self.scrape_concurrent_raw(&client, &handle).await;
-        self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
-    }
-
-    #[cfg(feature = "sitemap")]
-    /// Start to crawl website and include sitemap links
-    pub async fn crawl(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent(&client, &handle).await;
-        self.sitemap_crawl(&client, &handle, false).await;
-        self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
-    }
-
-    #[cfg(all(feature = "sitemap", feature = "chrome"))]
-    /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
-    pub async fn crawl_raw(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent_raw(&client, &handle).await;
-        self.sitemap_crawl(&client, &handle, false).await;
-        self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
-    }
-
-    #[cfg(all(feature = "sitemap", feature = "chrome"))]
-    /// Start to crawl website  and include sitemap links with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
-    pub async fn scrape_raw(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.scrape_concurrent_raw(&client, &handle).await;
-        self.sitemap_crawl(&client, &handle, false).await;
-        self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
-    }
-
-    #[cfg(feature = "sitemap")]
-    /// Start to scrape/download website with async concurrency
-    pub async fn scrape(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.scrape_concurrent(&client, &handle).await;
         self.sitemap_crawl(&client, &handle, true).await;
         self.set_crawl_status();
         match join_handle {
@@ -1885,7 +1786,7 @@ impl Website {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
-                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
+                            if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
                                 let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
@@ -2265,7 +2166,7 @@ impl Website {
                 Some((mut browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
-                            if cfg!(feature = "chrome_stealth") || self.stealth_mode {
+                            if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
                                 let _ = new_page.enable_stealth_mode_with_agent(&if self
                                     .configuration
                                     .user_agent
@@ -2676,7 +2577,17 @@ impl Website {
         }
     }
 
-    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap.
+    #[cfg(not(feature = "sitemap"))]
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    pub async fn sitemap_crawl(
+        &mut self,
+        _client: &Client,
+        _handle: &Option<Arc<AtomicI8>>,
+        _scrape: bool,
+    ) {
+    }
+
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
     #[cfg(feature = "sitemap")]
     pub async fn sitemap_crawl(
         &mut self,
@@ -2684,144 +2595,148 @@ impl Website {
         handle: &Option<Arc<AtomicI8>>,
         scrape: bool,
     ) {
-        use sitemap::reader::{SiteMapEntity, SiteMapReader};
-        use sitemap::structs::Location;
-        let domain = self.domain.inner().as_str();
-        let handle = handle.clone().unwrap_or_default();
+        if !self.configuration.ignore_sitemap {
+            use sitemap::reader::{SiteMapEntity, SiteMapReader};
+            use sitemap::structs::Location;
+            let domain = self.domain.inner().as_str();
+            let handle = handle.clone().unwrap_or_default();
 
-        let mut interval = tokio::time::interval(Duration::from_millis(15));
+            let mut interval = tokio::time::interval(Duration::from_millis(15));
 
-        let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
-            Some(sitemap_path) => {
-                let sitemap_path = sitemap_path.as_str();
-                if domain.ends_with('/') && sitemap_path.starts_with('/') {
-                    (&sitemap_path[1..], false)
-                } else if !domain.ends_with('/')
-                    && !sitemap_path.is_empty()
-                    && !sitemap_path.starts_with('/')
-                {
-                    (sitemap_path, true)
-                } else {
-                    (sitemap_path, false)
-                }
-            }
-            _ => ("sitemap.xml", !domain.ends_with("/")),
-        };
-
-        self.configuration.sitemap_url = Some(Box::new(
-            string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path).into(),
-        ));
-
-        let blacklist_url = self.configuration.get_blacklist();
-
-        while let Some(site) = &self.configuration.sitemap_url {
-            if !handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                break;
-            }
-
-            let mut sitemap_added = false;
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
-            let client = client.clone();
-
-            let channel = self.channel.clone();
-
-            let handles = tokio::spawn(async move {
-                let mut pages = Vec::new();
-
-                while let Some(page) = rx.recv().await {
-                    if channel.is_some() {
-                        if scrape {
-                            pages.push(page.clone());
-                        };
-
-                        channel_send_page(&channel, page);
+            let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
+                Some(sitemap_path) => {
+                    let sitemap_path = sitemap_path.as_str();
+                    if domain.ends_with('/') && sitemap_path.starts_with('/') {
+                        (&sitemap_path[1..], false)
+                    } else if !domain.ends_with('/')
+                        && !sitemap_path.is_empty()
+                        && !sitemap_path.starts_with('/')
+                    {
+                        (sitemap_path, true)
                     } else {
-                        pages.push(page);
+                        (sitemap_path, false)
                     }
                 }
+                _ => ("sitemap.xml", !domain.ends_with("/")),
+            };
 
-                pages
-            });
+            self.configuration.sitemap_url = Some(Box::new(
+                string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path).into(),
+            ));
 
-            match client.get(site.as_str()).send().await {
-                Ok(response) => {
-                    match response.text().await {
-                        Ok(text) => {
-                            // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
-                            let mut stream =
-                                tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
+            let blacklist_url = self.configuration.get_blacklist();
 
-                            while let Some(entity) = stream.next().await {
-                                while handle.load(Ordering::Relaxed) == 1 {
-                                    interval.tick().await;
-                                }
-                                // shutdown all links
-                                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                                    break;
-                                }
+            while let Some(site) = &self.configuration.sitemap_url {
+                if !handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                    break;
+                }
 
-                                match entity {
-                                    SiteMapEntity::Url(url_entry) => match url_entry.loc {
-                                        Location::Url(url) => {
-                                            let link: CaseInsensitiveString = url.as_str().into();
+                let mut sitemap_added = false;
+                let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
+                let client = client.clone();
 
-                                            if !self.is_allowed(&link, &blacklist_url) {
-                                                continue;
-                                            }
+                let channel = self.channel.clone();
 
-                                            self.links_visited.insert(link.clone());
+                let handles = tokio::spawn(async move {
+                    let mut pages = Vec::new();
 
-                                            let client = client.clone();
-                                            let tx = tx.clone();
+                    while let Some(page) = rx.recv().await {
+                        if channel.is_some() {
+                            if scrape {
+                                pages.push(page.clone());
+                            };
 
-                                            tokio::spawn(async move {
-                                                let page = Page::new(&link.inner(), &client).await;
+                            channel_send_page(&channel, page);
+                        } else {
+                            pages.push(page);
+                        }
+                    }
 
-                                                match tx.reserve().await {
-                                                    Ok(permit) => {
-                                                        permit.send(page);
-                                                    }
-                                                    _ => (),
-                                                }
-                                            });
-                                        }
-                                        Location::None | Location::ParseErr(_) => (),
-                                    },
-                                    SiteMapEntity::SiteMap(sitemap_entry) => {
-                                        match sitemap_entry.loc {
+                    pages
+                });
+
+                match client.get(site.as_str()).send().await {
+                    Ok(response) => {
+                        match response.text().await {
+                            Ok(text) => {
+                                // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
+                                let mut stream =
+                                    tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
+
+                                while let Some(entity) = stream.next().await {
+                                    while handle.load(Ordering::Relaxed) == 1 {
+                                        interval.tick().await;
+                                    }
+                                    // shutdown all links
+                                    if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                                        break;
+                                    }
+
+                                    match entity {
+                                        SiteMapEntity::Url(url_entry) => match url_entry.loc {
                                             Location::Url(url) => {
-                                                self.configuration
-                                                    .sitemap_url
-                                                    .replace(Box::new(url.as_str().into()));
-                                                sitemap_added = true;
+                                                let link: CaseInsensitiveString =
+                                                    url.as_str().into();
+
+                                                if !self.is_allowed(&link, &blacklist_url) {
+                                                    continue;
+                                                }
+
+                                                self.links_visited.insert(link.clone());
+
+                                                let client = client.clone();
+                                                let tx = tx.clone();
+
+                                                tokio::spawn(async move {
+                                                    let page =
+                                                        Page::new(&link.inner(), &client).await;
+
+                                                    match tx.reserve().await {
+                                                        Ok(permit) => {
+                                                            permit.send(page);
+                                                        }
+                                                        _ => (),
+                                                    }
+                                                });
                                             }
                                             Location::None | Location::ParseErr(_) => (),
+                                        },
+                                        SiteMapEntity::SiteMap(sitemap_entry) => {
+                                            match sitemap_entry.loc {
+                                                Location::Url(url) => {
+                                                    self.configuration
+                                                        .sitemap_url
+                                                        .replace(Box::new(url.as_str().into()));
+                                                    sitemap_added = true;
+                                                }
+                                                Location::None | Location::ParseErr(_) => (),
+                                            }
                                         }
-                                    }
-                                    SiteMapEntity::Err(err) => {
-                                        log("incorrect sitemap error: ", err.msg())
-                                    }
-                                };
+                                        SiteMapEntity::Err(err) => {
+                                            log("incorrect sitemap error: ", err.msg())
+                                        }
+                                    };
+                                }
                             }
-                        }
-                        Err(err) => log("http parse error: ", err.to_string()),
+                            Err(err) => log("http parse error: ", err.to_string()),
+                        };
+                    }
+                    Err(err) => log("http network error: ", err.to_string()),
+                };
+
+                drop(tx);
+
+                if let Ok(handle) = handles.await {
+                    match self.pages.as_mut() {
+                        Some(p) => p.extend(handle),
+                        _ => (),
                     };
                 }
-                Err(err) => log("http network error: ", err.to_string()),
-            };
 
-            drop(tx);
-
-            if let Ok(handle) = handles.await {
-                match self.pages.as_mut() {
-                    Some(p) => p.extend(handle),
-                    _ => (),
+                if !sitemap_added {
+                    self.configuration.sitemap_url = None;
                 };
             }
-
-            if !sitemap_added {
-                self.configuration.sitemap_url = None;
-            };
         }
     }
 
@@ -2965,13 +2880,14 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
-        self.depth = depth;
+        self.configuration.with_depth(depth);
         self
     }
 
     #[cfg(not(feature = "budget"))]
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
-    pub fn with_depth(&mut self, _depth: usize) -> &mut Self {
+    pub fn with_depth(&mut self, depth: usize) -> &mut Self {
+        self.configuration.with_depth(depth);
         self
     }
 
@@ -3014,53 +2930,56 @@ impl Website {
     #[cfg(feature = "cookies")]
     /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
-        self.cookie_str = Box::new(cookie_str.into());
+        self.configuration.with_cookies(cookie_str);
         self
     }
 
     #[cfg(not(feature = "cookies"))]
     /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
-    pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
+    pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
+        self.configuration.with_cookies(cookie_str);
         self
     }
 
     #[cfg(feature = "cron")]
     /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
-        self.cron_str = cron_str.into();
-        self.cron_type = cron_type;
+        self.configuration.with_cron(cron_str, cron_type);
         self
     }
 
     #[cfg(not(feature = "cron"))]
     /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
-    pub fn with_cron(&mut self, _cron_str: &str, _cron_type: CronType) -> &mut Self {
+    pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
+        self.configuration.with_cron(cron_str, cron_type);
         self
     }
 
     #[cfg(feature = "chrome")]
     /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
-        self.stealth_mode = stealth_mode;
+        self.configuration.with_stealth(stealth_mode);
         self
     }
 
     #[cfg(not(feature = "chrome"))]
     /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
-    pub fn with_stealth(&mut self, _stealth_mode: bool) -> &mut Self {
+    pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
+        self.configuration.with_stealth(stealth_mode);
         self
     }
 
     #[cfg(feature = "cache")]
     /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
-        self.cache = cache;
+        self.configuration.with_caching(cache);
         self
     }
 
     #[cfg(not(feature = "cache"))]
     /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
-    pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
+    pub fn with_caching(&mut self, cache: bool) -> &mut Self {
+        self.configuration.with_caching(cache);
         self
     }
 
@@ -3083,8 +3002,8 @@ impl Website {
         chrome_intercept: bool,
         block_images: bool,
     ) -> &mut Self {
-        self.chrome_intercept = chrome_intercept;
-        self.chrome_intercept_block_visuals = block_images;
+        self.configuration
+            .with_chrome_intercept(chrome_intercept, block_images);
         self
     }
 
@@ -3092,9 +3011,25 @@ impl Website {
     /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
-        _chrome_intercept: bool,
-        _block_images: bool,
+        chrome_intercept: bool,
+        block_images: bool,
     ) -> &mut Self {
+        self.configuration
+            .with_chrome_intercept(chrome_intercept, block_images);
+        self
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
+        self.configuration.with_ignore_sitemap(ignore_sitemap);
+        self
+    }
+
+    #[cfg(not(feature = "sitemap"))]
+    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
+        self.configuration.with_ignore_sitemap(ignore_sitemap);
         self
     }
 
@@ -3131,16 +3066,17 @@ impl Website {
             };
             self.wild_card_budgeting = wild_card_budget;
         }
-        if self.depth > 0 && self.domain_parsed.is_some() {
+        if self.configuration.depth > 0 && self.domain_parsed.is_some() {
             match &self.domain_parsed {
                 Some(domain) => match domain.path_segments() {
                     Some(segments) => {
                         let segments_cnt = segments.count();
 
-                        if segments_cnt > self.depth {
-                            self.depth_distance = self.depth + self.depth.abs_diff(segments_cnt);
+                        if segments_cnt > self.configuration.depth {
+                            self.configuration.depth_distance = self.configuration.depth
+                                + self.configuration.depth.abs_diff(segments_cnt);
                         } else {
-                            self.depth_distance = self.depth;
+                            self.configuration.depth_distance = self.configuration.depth;
                         }
                     }
                     _ => (),
@@ -3214,7 +3150,7 @@ pub async fn run_cron(website: Website) -> Runner {
 #[async_trait]
 impl Job for Website {
     fn schedule(&self) -> Option<async_job::Schedule> {
-        match self.cron_str.parse() {
+        match self.configuration.cron_str.parse() {
             Ok(schedule) => Some(schedule),
             Err(e) => {
                 log::error!("{:?}", e);
@@ -3228,7 +3164,7 @@ impl Job for Website {
             self.get_domain().as_ref(),
             self.now()
         );
-        if self.cron_type == CronType::Crawl {
+        if self.configuration.cron_type == CronType::Crawl {
             self.crawl().await;
         } else {
             self.scrape().await;
@@ -3480,6 +3416,7 @@ async fn test_with_configuration() {
         .with_delay(0)
         .with_request_timeout(None)
         .with_http2_prior_knowledge(false)
+        .with_ignore_sitemap(true)
         .with_user_agent(Some("myapp/version".into()))
         .with_headers(None)
         .with_proxies(None);
