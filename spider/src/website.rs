@@ -365,7 +365,8 @@ impl Website {
                     } else {
                         match self.configuration.budget.as_mut() {
                             Some(budget) => {
-                                let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
+                                let exceeded_wild_budget = if self.configuration.wild_card_budgeting
+                                {
                                     match budget.get_mut(&*WILD_CARD_PATH) {
                                         Some(budget) => {
                                             if budget.abs_diff(0) == 1 {
@@ -382,7 +383,8 @@ impl Website {
                                 };
 
                                 // set this up prior to crawl to avoid checks per link
-                                let skip_paths = self.configuration.wild_card_budgeting && budget.len() == 1;
+                                let skip_paths =
+                                    self.configuration.wild_card_budgeting && budget.len() == 1;
 
                                 // check if paths pass
                                 if !skip_paths && !exceeded_wild_budget {

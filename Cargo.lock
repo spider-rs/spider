@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.80.18"
+version = "1.80.19"
 dependencies = [
  "ahash",
  "async-trait",
@@ -4296,6 +4296,7 @@ dependencies = [
  "cron",
  "cssparser",
  "ego-tree",
+ "encoding_rs",
  "fast_html5ever",
  "flexbuffers",
  "hashbrown 0.14.3",
@@ -4326,7 +4327,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.80.18"
+version = "1.80.19"
 dependencies = [
  "clap 4.4.11",
  "env_logger 0.9.3",
@@ -4338,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.80.18"
+version = "1.80.19"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4359,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.80.18"
+version = "1.80.19"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",

@@ -72,6 +72,7 @@
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `http3`: Enables experimental HTTP/3 client.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
+//! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
 
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(

@@ -51,3 +51,7 @@ Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 Crawl links with smart mode detection. Runs HTTP by default until Chrome Rendering is needed. [Smart](./smart.rs).
 
 - `cargo run --example smart --features smart`
+
+Use different encodings for the page. [Encoding](./encoding.rs).
+
+- `cargo run --example encoding --features encoding`
