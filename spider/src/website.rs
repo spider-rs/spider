@@ -491,6 +491,13 @@ impl Website {
         &self.status
     }
 
+    /// Set the crawl status to persist between the run.
+    /// Example crawling a sitemap and all links after - website.crawl_sitemap().await.persist_links().crawl().await
+    pub fn persist_links(&mut self) -> &mut Self {
+        self.status = CrawlStatus::Active;
+        self
+    }
+
     /// absolute base url of crawl
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
@@ -1438,6 +1445,23 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
+    }
+
+    /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the [sitemap] flag enabled.
+    pub async fn crawl_sitemap(&mut self) -> &mut Self {
+        self.start();
+        let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
+        self.sitemap_crawl(&client, &handle, false).await;
+        self.set_crawl_status();
+        match join_handle {
+            Some(h) => h.abort(),
+            _ => (),
+        };
+        self
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]

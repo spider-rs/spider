@@ -13,13 +13,15 @@ async fn main() {
         .blacklist_url
         .insert(Default::default())
         .push("https://rsseau.fr/resume".into());
-    website.configuration.respect_robots_txt = true;
-    website.configuration.subdomains = false;
-    website.configuration.delay = 0; // Defaults to 0 ms
-    website.configuration.user_agent = Some(Box::new("SpiderBot".into())); // Defaults to spider/x.y.z, where x.y.z is the library version
-
+    website
+        .configuration
+        .with_respect_robots_txt(true)
+        .with_user_agent(Some("SpiderBot"))
+        .with_ignore_sitemap(true) // the default website.crawl will not run the sitemap
+        .with_sitemap(Some("/sitemap/sitemap-0.xml"));
     let start = Instant::now();
-    website.crawl().await;
+    // crawl all the links on the sitemap and links after.
+    website.crawl_sitemap().await.persist_links().crawl().await;
     let duration = start.elapsed();
 
     let links = website.get_links();
