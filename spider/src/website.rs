@@ -6,15 +6,9 @@ use crate::utils::log;
 use crate::CaseInsensitiveString;
 use crate::Client;
 
-#[cfg(feature = "cron")]
-use async_job::{async_trait, Job, Runner};
-
 use compact_str::CompactString;
-
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
-#[cfg(not(feature = "napi"))]
-use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,11 +19,12 @@ use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use url::Url;
 
-#[cfg(feature = "napi")]
-use napi::bindgen_prelude::*;
-
 #[cfg(feature = "chrome")]
 use crate::features::chrome::launch_browser;
+#[cfg(feature = "cron")]
+use async_job::{async_trait, Job, Runner};
+#[cfg(feature = "napi")]
+use napi::bindgen_prelude::*;
 
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
@@ -170,16 +165,6 @@ pub struct Website {
     channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
     /// The status of the active crawl.
     status: CrawlStatus,
-    /// External domains to include in the crawl if found.
-    pub external_domains: Box<HashSet<String>>,
-    /// External domains to include case-insensitive.
-    external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
-    #[cfg(feature = "budget")]
-    /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
-    pub budget: Option<HashMap<CaseInsensitiveString, u32>>,
-    #[cfg(feature = "budget")]
-    /// If wild card budgeting is found for the website.
-    wild_card_budgeting: bool,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     #[cfg(feature = "control")]
     pub crawl_id: Box<String>,
@@ -350,12 +335,12 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        if self.budget.is_some() || self.configuration.depth_distance > 0 {
+        if self.configuration.budget.is_some() || self.configuration.depth_distance > 0 {
             match Url::parse(&link.inner()) {
                 Ok(r) => {
                     let has_depth_control = self.configuration.depth_distance > 0;
 
-                    if !self.budget.is_some() {
+                    if !self.configuration.budget.is_some() {
                         match r.path_segments() {
                             Some(mut segments) => {
                                 let mut over = false;
@@ -378,9 +363,9 @@ impl Website {
                             _ => false,
                         }
                     } else {
-                        match self.budget.as_mut() {
+                        match self.configuration.budget.as_mut() {
                             Some(budget) => {
-                                let exceeded_wild_budget = if self.wild_card_budgeting {
+                                let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
                                     match budget.get_mut(&*WILD_CARD_PATH) {
                                         Some(budget) => {
                                             if budget.abs_diff(0) == 1 {
@@ -397,7 +382,7 @@ impl Website {
                                 };
 
                                 // set this up prior to crawl to avoid checks per link
-                                let skip_paths = self.wild_card_budgeting && budget.len() == 1;
+                                let skip_paths = self.configuration.wild_card_budgeting && budget.len() == 1;
 
                                 // check if paths pass
                                 if !skip_paths && !exceeded_wild_budget {
@@ -1148,24 +1133,6 @@ impl Website {
                 _ => (),
             };
 
-            if !self.external_domains.is_empty() {
-                self.external_domains_caseless = self
-                    .external_domains
-                    .iter()
-                    .filter_map(|d| {
-                        if d == "*" {
-                            Some("*".into())
-                        } else {
-                            match Url::parse(d) {
-                                Ok(d) => Some(d.host_str().unwrap_or_default().into()),
-                                _ => None,
-                            }
-                        }
-                    })
-                    .collect::<HashSet<CaseInsensitiveString>>()
-                    .into();
-            }
-
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
@@ -1245,18 +1212,6 @@ impl Website {
                     }
                 }
                 _ => (),
-            }
-
-            if !self.external_domains.is_empty() {
-                self.external_domains_caseless = self
-                    .external_domains
-                    .iter()
-                    .filter_map(|d| match Url::parse(d) {
-                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
-                        _ => None,
-                    })
-                    .collect::<HashSet<CaseInsensitiveString>>()
-                    .into();
             }
 
             let links = if !page.is_empty() {
@@ -1573,7 +1528,7 @@ impl Website {
                     client.to_owned(),
                     selector,
                     self.channel.clone(),
-                    self.external_domains_caseless.clone(),
+                    self.configuration.external_domains_caseless.clone(),
                 ));
 
                 if !links.is_empty() {
@@ -1713,7 +1668,8 @@ impl Website {
                     let client = client.clone();
                     let channel = self.channel.clone();
                     let selectors = selectors.clone();
-                    let external_domains_caseless = self.external_domains_caseless.clone();
+                    let external_domains_caseless =
+                        self.configuration.external_domains_caseless.clone();
 
                     set.spawn(async move {
                         drop(permit);
@@ -1814,7 +1770,7 @@ impl Website {
                                 selectors,
                                 self.channel.clone(),
                                 chrome_page,
-                                self.external_domains_caseless.clone(),
+                                self.configuration.external_domains_caseless.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -1950,7 +1906,7 @@ impl Website {
                     client.to_owned(),
                     selector,
                     self.channel.clone(),
-                    self.external_domains_caseless.clone(),
+                    self.configuration.external_domains_caseless.clone(),
                 ));
 
                 let add_external = shared.3.len() > 0;
@@ -2194,7 +2150,7 @@ impl Website {
                                 selectors,
                                 self.channel.clone(),
                                 chrome_page,
-                                self.external_domains_caseless.clone(),
+                                self.configuration.external_domains_caseless.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -2367,7 +2323,8 @@ impl Website {
                     let client = client.clone();
                     let channel = self.channel.clone();
                     let selectors = selectors.clone();
-                    let external_domains_caseless = self.external_domains_caseless.clone();
+                    let external_domains_caseless =
+                        self.configuration.external_domains_caseless.clone();
 
                     set.spawn(async move {
                         drop(permit);
@@ -2499,7 +2456,7 @@ impl Website {
                                     let selectors = selectors.clone();
                                     let page = page.clone();
                                     let external_domains_caseless =
-                                        self.external_domains_caseless.clone();
+                                        self.configuration.external_domains_caseless.clone();
 
                                     set.spawn(async move {
                                         drop(permit);
@@ -2846,31 +2803,21 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
-        self.budget = match budget {
-            Some(budget) => {
-                let mut crawl_budget: HashMap<CaseInsensitiveString, u32> = HashMap::new();
-
-                for b in budget.into_iter() {
-                    crawl_budget.insert(CaseInsensitiveString::from(b.0), b.1);
-                }
-
-                Some(crawl_budget)
-            }
-            _ => None,
-        };
+        self.configuration.with_budget(budget);
         self
     }
 
     #[cfg(not(feature = "budget"))]
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
-    pub fn with_budget(&mut self, _budget: Option<HashMap<&str, u32>>) -> &mut Self {
+    pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
+        self.configuration.with_budget(budget);
         self
     }
 
     #[cfg(feature = "budget")]
     /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
-        self.budget = budget;
+        self.configuration.budget = budget;
     }
 
     #[cfg(not(feature = "budget"))]
@@ -2896,20 +2843,7 @@ impl Website {
         &mut self,
         external_domains: Option<impl Iterator<Item = String> + 'a>,
     ) -> &mut Self {
-        match external_domains {
-            Some(external_domains) => {
-                self.external_domains_caseless = external_domains
-                    .into_iter()
-                    .filter_map(|d| match Url::parse(&d) {
-                        Ok(d) => Some(d.host_str().unwrap_or_default().into()),
-                        _ => None,
-                    })
-                    .collect::<HashSet<CaseInsensitiveString>>()
-                    .into();
-            }
-            _ => self.external_domains_caseless.clear(),
-        }
-
+        self.configuration.with_external_domains(external_domains);
         self
     }
 
@@ -3035,9 +2969,9 @@ impl Website {
 
     /// Build the website configuration when using with_builder
     #[cfg(not(feature = "napi"))]
-    pub fn build(&self) -> Result<Self, Error> {
+    pub fn build(&self) -> Result<Self, std::io::Error> {
         if self.domain_parsed.is_none() {
-            Err(ErrorKind::NotFound.into())
+            Err(std::io::ErrorKind::NotFound.into())
         } else {
             Ok(self.to_owned())
         }
@@ -3059,12 +2993,12 @@ impl Website {
     #[cfg(feature = "budget")]
     /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the feat flag [budget] enabled.
     fn determine_limits(&mut self) {
-        if self.budget.is_some() {
-            let wild_card_budget = match &self.budget {
+        if self.configuration.budget.is_some() {
+            let wild_card_budget = match &self.configuration.budget {
                 Some(budget) => budget.contains_key(&*WILD_CARD_PATH),
                 _ => false,
             };
-            self.wild_card_budgeting = wild_card_budget;
+            self.configuration.wild_card_budgeting = wild_card_budget;
         }
         if self.configuration.depth > 0 && self.domain_parsed.is_some() {
             match &self.domain_parsed {

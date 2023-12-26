@@ -80,6 +80,15 @@ pub struct Configuration {
     /// Block all images from rendering in Chrome.
     #[cfg(feature = "chrome_intercept")]
     pub chrome_intercept_block_visuals: bool,
+    #[cfg(feature = "budget")]
+    /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
+    pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
+    #[cfg(feature = "budget")]
+    /// If wild card budgeting is found for the website.
+    pub wild_card_budgeting: bool,
+    /// External domains to include case-insensitive.
+    pub external_domains_caseless:
+        Box<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -344,6 +353,64 @@ impl Configuration {
         _chrome_intercept: bool,
         _block_images: bool,
     ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "budget")]
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    pub fn with_budget(&mut self, budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
+        self.budget = match budget {
+            Some(budget) => {
+                let mut crawl_budget: hashbrown::HashMap<
+                    case_insensitive_string::CaseInsensitiveString,
+                    u32,
+                > = hashbrown::HashMap::new();
+
+                for b in budget.into_iter() {
+                    crawl_budget.insert(
+                        case_insensitive_string::CaseInsensitiveString::from(b.0),
+                        b.1,
+                    );
+                }
+
+                Some(crawl_budget)
+            }
+            _ => None,
+        };
+        self
+    }
+
+    #[cfg(not(feature = "budget"))]
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    pub fn with_budget(&mut self, _budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
+        self
+    }
+
+    /// Group external domains to treat the crawl as one. If None is passed this will clear all prior domains.
+    pub fn with_external_domains<'a, 'b>(
+        &mut self,
+        external_domains: Option<impl Iterator<Item = String> + 'a>,
+    ) -> &mut Self {
+        match external_domains {
+            Some(external_domains) => {
+                self.external_domains_caseless = external_domains
+                    .into_iter()
+                    .filter_map(|d| {
+                        if d == "*" {
+                            Some("*".into())
+                        } else {
+                            match url::Url::parse(&d) {
+                                Ok(d) => Some(d.host_str().unwrap_or_default().into()),
+                                _ => None,
+                            }
+                        }
+                    })
+                    .collect::<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>()
+                    .into();
+            }
+            _ => self.external_domains_caseless.clear(),
+        }
+
         self
     }
 }
