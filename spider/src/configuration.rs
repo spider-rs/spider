@@ -147,7 +147,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "sitemap")]
-    /// Set the sitemap url.
+    /// Set the sitemap url. This does nothing without the [sitemap] feature flag.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
         match sitemap_url {
             Some(sitemap_url) => {
@@ -155,6 +155,12 @@ impl Configuration {
             }
             _ => self.sitemap_url = None,
         };
+        self
+    }
+
+    #[cfg(not(feature = "sitemap"))]
+    /// Set the sitemap url. This does nothing without the [sitemap] feature flag.
+    pub fn with_sitemap(&mut self, _sitemap_url: Option<&str>) -> &mut Self {
         self
     }
 

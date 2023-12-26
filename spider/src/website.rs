@@ -11,10 +11,7 @@ use async_job::{async_trait, Job, Runner};
 
 use compact_str::CompactString;
 
-#[cfg(feature = "budget")]
-use hashbrown::HashMap;
-
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
 #[cfg(not(feature = "napi"))]
 use std::io::{Error, ErrorKind};
@@ -131,7 +128,6 @@ pub enum CrawlStatus {
     Paused,
 }
 
-#[cfg(feature = "cron")]
 /// The type of cron job to run
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CronType {
@@ -2049,7 +2045,6 @@ impl Website {
                 let mut links: HashSet<CaseInsensitiveString> =
                     self.crawl_establish(&client, &mut selector, false).await;
 
-
                 let shared = Arc::new((
                     client.to_owned(),
                     selector,
@@ -2432,11 +2427,10 @@ impl Website {
             self.status = CrawlStatus::Active;
             let blacklist_url = self.configuration.get_blacklist();
             self.pages = Some(Box::new(Vec::new()));
-            let delay = self.configuration.delay;
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-            let throttle = Duration::from_millis(delay);
+            let throttle = Duration::from_millis(self.configuration.delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
             let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
@@ -2888,9 +2882,15 @@ impl Website {
     }
 
     #[cfg(feature = "sitemap")]
-    /// Add user agent to request.
+    /// Add user agent to request. This does nothing without the [sitemap] flag enabled.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
         self.configuration.with_sitemap(sitemap_url);
+        self
+    }
+
+    #[cfg(not(feature = "sitemap"))]
+    /// Add user agent to request. This does nothing without the [sitemap] flag enabled.
+    pub fn with_sitemap(&mut self, _sitemap_url: Option<&str>) -> &mut Self {
         self
     }
 
@@ -2929,7 +2929,7 @@ impl Website {
     }
 
     #[cfg(feature = "budget")]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*".
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.budget = match budget {
             Some(budget) => {
@@ -2946,11 +2946,21 @@ impl Website {
         self
     }
 
+    #[cfg(not(feature = "budget"))]
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    pub fn with_budget(&mut self, _budget: Option<HashMap<&str, u32>>) -> &mut Self {
+        self
+    }
+
     #[cfg(feature = "budget")]
-    /// Set the crawl budget directly.
+    /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
         self.budget = budget;
     }
+
+    #[cfg(not(feature = "budget"))]
+    /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
+    pub fn set_crawl_budget(&mut self, _budget: Option<HashMap<CaseInsensitiveString, u32>>) {}
 
     #[cfg(feature = "budget")]
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
@@ -3002,17 +3012,29 @@ impl Website {
     }
 
     #[cfg(feature = "cookies")]
-    /// Cookie string to use in request
+    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
         self.cookie_str = Box::new(cookie_str.into());
         self
     }
 
+    #[cfg(not(feature = "cookies"))]
+    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
+        self
+    }
+
     #[cfg(feature = "cron")]
-    /// Setup cron jobs to run
+    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.cron_str = cron_str.into();
         self.cron_type = cron_type;
+        self
+    }
+
+    #[cfg(not(feature = "cron"))]
+    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    pub fn with_cron(&mut self, _cron_str: &str, _cron_type: CronType) -> &mut Self {
         self
     }
 

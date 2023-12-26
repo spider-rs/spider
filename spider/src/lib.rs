@@ -73,42 +73,6 @@
 //! - `http3`: Enables experimental HTTP/3 client.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 
-pub extern crate bytes;
-pub extern crate compact_str;
-pub extern crate hashbrown;
-extern crate log;
-pub extern crate reqwest;
-pub extern crate tokio;
-pub extern crate tokio_stream;
-
-#[cfg(feature = "ua_generator")]
-pub extern crate ua_generator;
-
-#[cfg(feature = "cron")]
-pub extern crate async_job;
-
-#[cfg(feature = "flexbuffers")]
-pub extern crate flexbuffers;
-
-#[cfg(feature = "serde")]
-pub extern crate serde;
-
-pub extern crate case_insensitive_string;
-pub extern crate smallvec;
-pub extern crate url;
-
-#[cfg(feature = "cache")]
-pub extern crate http_cache_reqwest;
-#[cfg(feature = "cache")]
-pub extern crate reqwest_middleware;
-
-#[macro_use]
-pub extern crate string_concat;
-#[macro_use]
-pub extern crate lazy_static;
-#[macro_use]
-pub extern crate fast_html5ever;
-
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
     not(windows),
@@ -118,6 +82,36 @@ pub extern crate fast_html5ever;
 ))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+pub extern crate bytes;
+pub extern crate case_insensitive_string;
+pub extern crate compact_str;
+pub extern crate hashbrown;
+extern crate log;
+pub extern crate reqwest;
+pub extern crate smallvec;
+pub extern crate tokio;
+pub extern crate tokio_stream;
+pub extern crate url;
+
+#[cfg(feature = "cron")]
+pub extern crate async_job;
+#[cfg(feature = "flexbuffers")]
+pub extern crate flexbuffers;
+#[cfg(feature = "cache")]
+pub extern crate http_cache_reqwest;
+#[cfg(feature = "cache")]
+pub extern crate reqwest_middleware;
+#[cfg(feature = "serde")]
+pub extern crate serde;
+#[cfg(feature = "ua_generator")]
+pub extern crate ua_generator;
+#[macro_use]
+pub extern crate string_concat;
+#[macro_use]
+pub extern crate lazy_static;
+#[macro_use]
+pub extern crate fast_html5ever;
 
 /// Configuration structure for `Website`.
 pub mod configuration;
@@ -151,7 +145,6 @@ pub mod black_list {
 /// Black list checking url exist.
 pub mod black_list {
     use compact_str::CompactString;
-
     /// check if link exist in blacklists.
     pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
         blacklist_url.contains(&link)
