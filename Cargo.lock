@@ -459,9 +459,9 @@ checksum = "b4eb2cdb97421e01129ccb49169d8279ed21e829929144f4a22a6e54ac549ca1"
 
 [[package]]
 name = "async-trait"
-version = "0.1.74"
+version = "0.1.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a66537f1bb974b254c98ed142ff995236e81b9d0fe4db0575f46612cb15eb0f9"
+checksum = "fdf6721fb0140e4f897002dd086c06f6c27775df19cfe1fccb21181a48fd2c98"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -484,9 +484,9 @@ dependencies = [
 
 [[package]]
 name = "async_job"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "462864d870f390b50083a5a0a7bb00a13ad5bb742feefc9caa8cdb88df943678"
+checksum = "2fd41e96e08fa3a013a23d060976ff8beb68c0b58ad410321d3477043f361eee"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.80.24"
+version = "1.80.25"
 dependencies = [
  "ahash",
  "async-trait",
@@ -4327,7 +4327,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.80.24"
+version = "1.80.25"
 dependencies = [
  "clap 4.4.11",
  "env_logger 0.9.3",
@@ -4339,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.80.24"
+version = "1.80.25"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4360,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.80.24"
+version = "1.80.25"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",
