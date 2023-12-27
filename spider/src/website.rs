@@ -3034,6 +3034,12 @@ impl Website {
         self
     }
 
+    /// Set the configuration for the website directly.
+    pub fn with_config(&mut self, config: Configuration) -> &mut Self {
+        self.configuration = config.into();
+        self
+    }
+
     /// Build the website configuration when using with_builder
     #[cfg(not(feature = "napi"))]
     pub fn build(&self) -> Result<Self, std::io::Error> {

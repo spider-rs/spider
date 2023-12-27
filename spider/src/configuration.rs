@@ -413,4 +413,9 @@ impl Configuration {
 
         self
     }
+
+    /// Build the website configuration when using with_builder
+    pub fn build(&self) -> Self {
+        self.to_owned()
+    }
 }
