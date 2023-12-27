@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.80.26"
+spider = "1.80.27"
 ```
 
 And then the code:
@@ -62,7 +62,7 @@ website.cron_type = spider::website::CronType::Crawl; // Defaults to CronType::C
 website.crawl().await;
 ```
 
-The builder pattern is also available v1.33.0 and up: 
+The builder pattern is also available v1.33.0 and up:
 
 ```rust
 let mut website = Website::new("https://choosealicense.com");
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["regex", "ua_generator"] }
+spider = { version = "1.80.27", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -129,7 +129,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["decentralized"] }
+spider = { version = "1.80.27", features = ["decentralized"] }
 ```
 
 ```sh
@@ -149,7 +149,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["sync"] }
+spider = { version = "1.80.27", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -179,7 +179,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["regex"] }
+spider = { version = "1.80.27", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -206,7 +206,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["control"] }
+spider = { version = "1.80.27", features = ["control"] }
 ```
 
 ```rust
@@ -276,7 +276,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["sync", "cron"] }
+spider = { version = "1.80.27", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -310,16 +310,15 @@ async fn main() {
 
 ### Chrome
 
-Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely. If you are not scraping content for downloading use 
+Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely. If you are not scraping content for downloading use
 the feature flag [`chrome_intercept`] to possibly speed up request using Network Interception.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["chrome", "chrome_intercept"] }
+spider = { version = "1.80.27", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
-
 
 ```rust
 extern crate spider;
@@ -340,14 +339,13 @@ async fn main() {
 }
 ```
 
-
 ### Caching
 
 Enabling HTTP cache can be done with the feature flag [`cache`] or [`cache_mem`].
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["cache"] }
+spider = { version = "1.80.27", features = ["cache"] }
 ```
 
 You need to set `website.cache` to true to enable as well.
@@ -378,7 +376,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.80.26", features = ["smart"] }
+spider = { version = "1.80.27", features = ["smart"] }
 ```
 
 ```rust,no_run
@@ -396,6 +394,110 @@ async fn main() {
         println!("- {:?}", link.as_ref());
     }
 }
+```
+
+### Depth
+
+Set a depth limit to prevent forwarding.
+
+```toml
+[dependencies]
+spider = { version = "1.80.27", features = ["budget"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::{tokio, website::Website};
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://choosealicense.com").with_depth(3).build().unwrap();
+    website.crawl().await;
+
+    for link in website.get_links() {
+        println!("- {:?}", link.as_ref());
+    }
+}
+```
+
+### Reusable Configuration
+
+It is possible to re-use the same configuration for a crawl list.
+
+```rust
+extern crate spider;
+
+use spider::configuration::Configuration;
+use spider::{tokio, website::Website};
+use std::io::Error;
+use std::time::Instant;
+
+const CAPACITY: usize = 5;
+const CRAWL_LIST: [&str; CAPACITY] = [
+    "https://rsseau.fr",
+    "https://choosealicense.com",
+    "https://jeffmendez.com",
+    "https://spider-rs.github.io/spider-nodejs/",
+    "https://spider-rs.github.io/spider-py/",
+];
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let config = Configuration::new()
+        .with_user_agent(Some("SpiderBot"))
+        .with_blacklist_url(Some(Vec::from(["https://rsseau.fr/resume".into()])))
+        .with_subdomains(false)
+        .with_tld(false)
+        .with_redirect_limit(3)
+        .with_respect_robots_txt(true)
+        .with_external_domains(Some(
+            Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter(),
+        ))
+        .build();
+
+    let mut handles = Vec::with_capacity(CAPACITY);
+
+    for website_url in CRAWL_LIST {
+        match Website::new(website_url)
+            .with_config(config.to_owned())
+            .build()
+        {
+            Ok(mut website) => {
+                let handle = tokio::spawn(async move {
+                    println!("Starting Crawl - {:?}", website.get_domain().inner());
+
+                    let start = Instant::now();
+                    website.crawl().await;
+                    let duration = start.elapsed();
+
+                    let links = website.get_links();
+
+                    for link in links {
+                        println!("- {:?}", link.as_ref());
+                    }
+
+                    println!(
+                        "{:?} - Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+                        website.get_domain().inner(),
+                        duration,
+                        links.len()
+                    );
+                });
+
+                handles.push(handle);
+            }
+            Err(e) => println!("{:?}", e)
+        }
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
 ```
 
 ### Blocking

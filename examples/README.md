@@ -55,3 +55,8 @@ Crawl links with smart mode detection. Runs HTTP by default until Chrome Renderi
 Use different encodings for the page. [Encoding](./encoding.rs).
 
 - `cargo run --example encoding --features encoding`
+
+
+Use advanced configuration re-use. [Advanced Configuration](./advanced_configuration.rs).
+
+- `cargo run --example advanced_configuration`
