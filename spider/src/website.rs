@@ -1005,10 +1005,11 @@ impl Website {
                                 first_rq = false;
                             }
 
-                            if ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) || 
-                                ResourceType::Script == event.resource_type && !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) ||
+                            if 
+                                ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
                                 ResourceType::Prefetch == event.resource_type || 
-                                ResourceType::Ping == event.resource_type
+                                ResourceType::Ping == event.resource_type ||
+                                ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
                             {
                                 match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
                                 .request_id(event.request_id.clone())
