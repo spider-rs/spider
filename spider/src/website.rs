@@ -1006,7 +1006,7 @@ impl Website {
                             }
 
                             if ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) || 
-                                ResourceType::Script == event.resource_type && !u.starts_with(&host_name) && !crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) ||
+                                ResourceType::Script == event.resource_type && (u.starts_with('/') || !u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str())) ||
                                 ResourceType::Prefetch == event.resource_type || 
                                 ResourceType::Ping == event.resource_type
                             {

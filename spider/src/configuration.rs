@@ -74,11 +74,11 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Setup network interception for request.
-    #[cfg(feature = "chrome_intercept")]
+    /// Setup network interception for request. This does nothing without the flag [chrome_intercept] enabled.
+    #[cfg(feature = "chrome")]
     pub chrome_intercept: bool,
-    /// Block all images from rendering in Chrome.
-    #[cfg(feature = "chrome_intercept")]
+    /// Block all images from rendering in Chrome. This does nothing without the flag [chrome_intercept] enabled
+    #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
