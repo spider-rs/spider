@@ -1,8 +1,8 @@
 //! `cargo run --example advanced_configuration`
 extern crate spider;
 
-use spider::{tokio, website::Website, configuration::Configuration};
-use std::{time::Instant, io::Error};
+use spider::{configuration::Configuration, tokio, website::Website};
+use std::{io::Error, time::Instant};
 
 const CAPACITY: usize = 5;
 const CRAWL_LIST: [&str; CAPACITY] = [

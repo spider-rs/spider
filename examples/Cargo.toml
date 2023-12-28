@@ -102,3 +102,13 @@ required-features = ["spider/sync", "spider/encoding"]
 name = "advanced_configuration"
 path = "advanced_configuration.rs"
 required-features = ["spider/sync"]
+
+[[example]]
+name = "url_glob"
+path = "url_glob.rs"
+required-features = ["spider/sync", "spider/glob"]
+
+[[example]]
+name = "url_glob_subdomains"
+path = "url_glob_subdomains.rs"
+required-features = ["spider/sync", "spider/glob"]

@@ -56,7 +56,14 @@ Use different encodings for the page. [Encoding](./encoding.rs).
 
 - `cargo run --example encoding --features encoding`
 
-
 Use advanced configuration re-use. [Advanced Configuration](./advanced_configuration.rs).
 
 - `cargo run --example advanced_configuration`
+
+Use URL globbing for a domain. [URL Globbing](./glob.rs).
+
+- `cargo run --example glob --features glob`
+
+Use URL globbing for a domain and subdomains. [URL Globbing Subdomains](./url_glob_subdomains.rs).
+
+- `cargo run --example url_glob_subdomains --features glob`
