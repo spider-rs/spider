@@ -7,13 +7,14 @@ use tokio::task;
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
+    intercept: bool,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .request_timeout(Duration::from_secs(30));
 
-    let builder = if cfg!(feature = "chrome_intercept") {
+    let builder = if cfg!(feature = "chrome_intercept") && intercept {
         builder.enable_request_intercept()
     } else {
         builder
@@ -54,6 +55,7 @@ pub fn get_browser_config(
 #[cfg(feature = "chrome_headed")]
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
+    intercept: bool,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
@@ -62,7 +64,7 @@ pub fn get_browser_config(
         .no_sandbox()
         .with_head();
 
-    let builder = if cfg!(feature = "chrome_intercept") {
+    let builder = if cfg!(feature = "chrome_intercept") && intercept {
         builder.enable_request_intercept()
     } else {
         builder
@@ -119,7 +121,7 @@ pub async fn launch_browser(
                     Some(timeout) => **timeout,
                     _ => Default::default(),
                 },
-                request_intercept: cfg!(feature = "chrome_intercept"),
+                request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
                 ..HandlerConfig::default()
             },
         )
@@ -128,7 +130,7 @@ pub async fn launch_browser(
             Ok(browser) => Some(browser),
             _ => None,
         },
-        _ => match get_browser_config(&proxies) {
+        _ => match get_browser_config(&proxies, config.chrome_intercept) {
             Some(browser_config) => match Browser::launch(browser_config).await {
                 Ok(browser) => Some(browser),
                 _ => None,

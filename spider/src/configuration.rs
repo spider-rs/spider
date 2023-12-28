@@ -74,11 +74,11 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Setup network interception for request.
-    #[cfg(feature = "chrome_intercept")]
+    /// Setup network interception for request. This does nothing without the flag [chrome_intercept] enabled.
+    #[cfg(feature = "chrome")]
     pub chrome_intercept: bool,
-    /// Block all images from rendering in Chrome.
-    #[cfg(feature = "chrome_intercept")]
+    /// Block all images from rendering in Chrome. This does nothing without the flag [chrome_intercept] enabled
+    #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
@@ -112,11 +112,24 @@ pub fn get_ua() -> &'static str {
 
 impl Configuration {
     /// Represents crawl configuration for a website.
+    #[cfg(not(feature = "chrome"))]
     pub fn new() -> Self {
         Self {
             delay: 0,
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_millis(15000))),
+            ..Default::default()
+        }
+    }
+
+    /// Represents crawl configuration for a website.
+    #[cfg(feature = "chrome")]
+    pub fn new() -> Self {
+        Self {
+            delay: 0,
+            redirect_limit: Box::new(7),
+            request_timeout: Some(Box::new(Duration::from_millis(15000))),
+            chrome_intercept: cfg!(feature = "chrome_intercept"),
             ..Default::default()
         }
     }
