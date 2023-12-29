@@ -3077,12 +3077,6 @@ impl Website {
                 _ => (),
             }
         }
-        if self.configuration.limit > 0 {
-            self.configuration
-                .budget
-                .get_or_insert(Default::default())
-                .insert(WILD_CARD_PATH.to_owned(), self.configuration.limit);
-        }
     }
 
     #[cfg(not(feature = "budget"))]

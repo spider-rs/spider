@@ -68,9 +68,6 @@ pub struct Configuration {
     #[cfg(feature = "budget")]
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
-    #[cfg(feature = "budget")]
-    /// The max limit of pages allowed for the crawl.
-    pub limit: u32,
     /// Cache the page following HTTP Caching rules.
     #[cfg(feature = "cache")]
     pub cache: bool,
@@ -320,7 +317,9 @@ impl Configuration {
     #[cfg(feature = "budget")]
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
-        self.limit = limit;
+        self.with_budget(Some(hashbrown::HashMap::from([
+            ("*", limit),
+        ])));
         self
     }
 
