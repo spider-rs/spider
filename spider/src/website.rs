@@ -3591,7 +3591,7 @@ async fn test_crawl_shutdown() {
 async fn test_cache() {
     let domain = "https://choosealicense.com/";
     let mut website: Website = Website::new(&domain);
-    website.cache = true;
+    website.configuration.cache = true;
 
     let fresh_start = tokio::time::Instant::now();
     website.crawl().await;
