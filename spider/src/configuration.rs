@@ -80,6 +80,9 @@ pub struct Configuration {
     /// Block all images from rendering in Chrome. This does nothing without the flag [chrome_intercept] enabled
     #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
+    /// Overrides default host system timezone with the specified one. This does nothing without the flag [chrome] enabled.
+    #[cfg(feature = "chrome")]
+    pub timezone_id: Option<Box<String>>,
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
@@ -424,6 +427,22 @@ impl Configuration {
             _ => self.external_domains_caseless.clear(),
         }
 
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_timezone_id(&mut self, _timezone_id: Option<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
+        self.timezone_id = match timezone_id {
+            Some(timezone_id) => Some(timezone_id.into()),
+            _ => None,
+        };
         self
     }
 

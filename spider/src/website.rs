@@ -1763,7 +1763,6 @@ impl Website {
         if selectors.is_some() {
             let (mut interval, throttle) = self.setup_crawl();
             let blacklist_url = self.configuration.get_blacklist();
-
             let on_link_find_callback = self.on_link_find_callback;
 
             match launch_browser(&self.configuration).await {
@@ -1781,6 +1780,16 @@ impl Website {
                                     ""
                                 });
                             }
+
+                            let new_page = match self.configuration.timezone_id.as_deref() {
+                                Some(timezone_id) => {
+                                    match new_page.emulate_timezone(chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(timezone_id)).await {
+                                        Ok(np) => np.to_owned(),
+                                        _ => new_page
+                                    }
+                                }
+                                _ => new_page,
+                            };
 
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
 
@@ -2457,6 +2466,17 @@ impl Website {
                                     ""
                                 });
                             }
+
+                            let new_page = match self.configuration.timezone_id.as_deref() {
+                                Some(timezone_id) => {
+                                    match new_page.emulate_timezone(chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(timezone_id)).await {
+                                        Ok(np) => np.to_owned(),
+                                        _ => new_page
+                                    }
+                                }
+                                _ => new_page,
+                            };
+
                             let page = Arc::new(new_page.clone());
 
                             let intercept_handle = self.setup_chrome_interception(&page).await;
@@ -3032,6 +3052,12 @@ impl Website {
     /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
     pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
         self.configuration.with_ignore_sitemap(ignore_sitemap);
+        self
+    }
+
+    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
+        self.configuration.with_timezone_id(timezone_id);
         self
     }
 
