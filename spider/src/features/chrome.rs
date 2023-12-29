@@ -9,11 +9,18 @@ use tokio::task;
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
     intercept: bool,
+    cache_enabled: bool,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .request_timeout(Duration::from_secs(30));
+
+    let builder = if cache_enabled {
+        builder.enable_cache()
+    } else {
+        builder.disable_cache()
+    };
 
     let builder = if cfg!(feature = "chrome_intercept") && intercept {
         builder.enable_request_intercept()
@@ -57,6 +64,7 @@ pub fn get_browser_config(
 pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
     intercept: bool,
+    cache_enabled: bool,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
@@ -64,6 +72,12 @@ pub fn get_browser_config(
         .request_timeout(Duration::from_secs(30))
         .no_sandbox()
         .with_head();
+
+    let builder = if cache_enabled {
+        builder.enable_cache()
+    } else {
+        builder.disable_cache()
+    };
 
     let builder = if cfg!(feature = "chrome_intercept") && intercept {
         builder.enable_request_intercept()
@@ -123,6 +137,7 @@ pub async fn launch_browser(
                     _ => Default::default(),
                 },
                 request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
+                cache_enabled: config.cache,
                 ..HandlerConfig::default()
             },
         )
@@ -131,7 +146,7 @@ pub async fn launch_browser(
             Ok(browser) => Some(browser),
             _ => None,
         },
-        _ => match get_browser_config(&proxies, config.chrome_intercept) {
+        _ => match get_browser_config(&proxies, config.chrome_intercept, config.cache) {
             Some(browser_config) => match Browser::launch(browser_config).await {
                 Ok(browser) => Some(browser),
                 _ => None,

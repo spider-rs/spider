@@ -8,6 +8,7 @@ use spider::website::Website;
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr")
         .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .with_caching(cfg!(feature = "cache"))
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
@@ -18,7 +19,19 @@ async fn main() {
         }
     });
 
+    let start = crate::tokio::time::Instant::now();
     website.crawl().await;
+    let duration = start.elapsed();
 
-    println!("Links found {:?}", website.get_links().len());
+    let links = website.get_links();
+
+    for link in links {
+        println!("- {:?}", link.as_ref());
+    }
+
+    println!(
+        "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+        duration,
+        links.len()
+    )
 }
