@@ -14,6 +14,7 @@ async fn main() -> Result<(), Error> {
             ("en", 11),
             ("fr", 3),
         ])))
+        .with_limit(15) // this does the same as the above "*", 15. Setting a limit to the amount of pages gathered.
         .build()
         .unwrap();
 

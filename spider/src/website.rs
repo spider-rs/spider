@@ -3020,6 +3020,12 @@ impl Website {
         self
     }
 
+    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    pub fn with_limit(&mut self, limit: u32) -> &mut Self {
+        self.configuration.with_limit(limit);
+        self
+    }
+
     /// Build the website configuration when using with_builder
     #[cfg(not(feature = "napi"))]
     pub fn build(&self) -> Result<Self, std::io::Error> {
@@ -3070,6 +3076,12 @@ impl Website {
                 },
                 _ => (),
             }
+        }
+        if self.configuration.limit > 0 {
+            self.configuration
+                .budget
+                .get_or_insert(Default::default())
+                .insert(WILD_CARD_PATH.to_owned(), self.configuration.limit);
         }
     }
 

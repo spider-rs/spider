@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.80.32"
+spider = "1.80.33"
 ```
 
 And then the code:
@@ -58,6 +58,7 @@ website.configuration.proxies.get_or_insert(Default::default()).push("socks5://1
 website.budget = Some(spider::hashbrown::HashMap::from([(spider::CaseInsensitiveString::new("*"), 300), (spider::CaseInsensitiveString::new("/licenses"), 10)])); // Defaults to None - Requires the `budget` feature flag
 website.cron_str = "1/5 * * * * *".into(); // Defaults to empty string - Requires the `cron` feature flag
 website.cron_type = spider::website::CronType::Crawl; // Defaults to CronType::Crawl - Requires the `cron` feature flag
+website.configuration.limit = 300; // The limit of pages crawled. By default there is no limit.
 
 website.crawl().await;
 ```
@@ -75,12 +76,11 @@ website
     .with_request_timeout(None)
     .with_http2_prior_knowledge(false)
     .with_user_agent(Some("myapp/version".into()))
-    // requires the `budget` feature flag
     .with_budget(Some(spider::hashbrown::HashMap::from([("*", 300), ("/licenses", 10)])))
+    .with_limit(300)
     .with_external_domains(Some(Vec::from(["https://creativecommons.org/licenses/by/3.0/"].map(|d| d.to_string())).into_iter()))
     .with_headers(None)
     .with_blacklist_url(Some(Vec::from(["https://choosealicense.com/licenses/".into()])))
-    // requires the `cron` feature flag
     .with_cron("1/5 * * * * *", Default::Default());
     .with_proxies(None);
 ```
@@ -91,7 +91,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["regex", "ua_generator"] }
+spider = { version = "1.80.33", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -129,7 +129,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["decentralized"] }
+spider = { version = "1.80.33", features = ["decentralized"] }
 ```
 
 ```sh
@@ -149,7 +149,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["sync"] }
+spider = { version = "1.80.33", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -179,7 +179,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["regex"] }
+spider = { version = "1.80.33", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -206,7 +206,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["control"] }
+spider = { version = "1.80.33", features = ["control"] }
 ```
 
 ```rust
@@ -276,7 +276,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["sync", "cron"] }
+spider = { version = "1.80.33", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -315,7 +315,7 @@ the feature flag [`chrome_intercept`] to possibly speed up request using Network
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["chrome", "chrome_intercept"] }
+spider = { version = "1.80.33", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
@@ -345,7 +345,7 @@ Enabling HTTP cache can be done with the feature flag [`cache`] or [`cache_mem`]
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["cache"] }
+spider = { version = "1.80.33", features = ["cache"] }
 ```
 
 You need to set `website.cache` to true to enable as well.
@@ -376,7 +376,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["smart"] }
+spider = { version = "1.80.33", features = ["smart"] }
 ```
 
 ```rust,no_run
@@ -402,7 +402,7 @@ Set a depth limit to prevent forwarding.
 
 ```toml
 [dependencies]
-spider = { version = "1.80.32", features = ["budget"] }
+spider = { version = "1.80.33", features = ["budget"] }
 ```
 
 ```rust,no_run
