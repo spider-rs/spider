@@ -83,6 +83,9 @@ pub struct Configuration {
     /// Overrides default host system timezone with the specified one. This does nothing without the flag [chrome] enabled.
     #[cfg(feature = "chrome")]
     pub timezone_id: Option<Box<String>>,
+    /// Overrides default host system locale with the specified one. This does nothing without the flag [chrome] enabled.
+    #[cfg(feature = "chrome")]
+    pub locale: Option<Box<String>>,
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
@@ -441,6 +444,22 @@ impl Configuration {
     pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
         self.timezone_id = match timezone_id {
             Some(timezone_id) => Some(timezone_id.into()),
+            _ => None,
+        };
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_locale(&mut self, _locale: Option<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_locale(&mut self, locale: Option<String>) -> &mut Self {
+        self.locale = match locale {
+            Some(locale) => Some(locale.into()),
             _ => None,
         };
         self

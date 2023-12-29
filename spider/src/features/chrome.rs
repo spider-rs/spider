@@ -1,5 +1,6 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use tokio::task;
 
@@ -156,6 +157,43 @@ pub async fn launch_browser(
         }
         _ => None,
     }
+}
+
+/// configure the browser
+pub async fn configure_browser(new_page: Page, configuration: &Configuration) -> Page {
+    let new_page = match configuration.timezone_id.as_deref() {
+        Some(timezone_id) => {
+            match new_page
+                .emulate_timezone(
+                    chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                        timezone_id,
+                    ),
+                )
+                .await
+            {
+                Ok(np) => np.to_owned(),
+                _ => new_page,
+            }
+        }
+        _ => new_page,
+    };
+    let new_page = match configuration.locale.as_deref() {
+        Some(locale) => {
+            match new_page
+                .emulate_locale(
+                    chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                        locale: Some(locale.into()),
+                    },
+                )
+                .await
+            {
+                Ok(np) => np.to_owned(),
+                _ => new_page,
+            }
+        }
+        _ => new_page,
+    };
+    new_page
 }
 
 #[cfg(not(feature = "chrome_cpu"))]

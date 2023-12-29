@@ -20,7 +20,8 @@ use tokio_stream::StreamExt;
 use url::Url;
 
 #[cfg(feature = "chrome")]
-use crate::features::chrome::launch_browser;
+use crate::features::chrome::{configure_browser, launch_browser};
+
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
 #[cfg(feature = "napi")]
@@ -1781,15 +1782,7 @@ impl Website {
                                 });
                             }
 
-                            let new_page = match self.configuration.timezone_id.as_deref() {
-                                Some(timezone_id) => {
-                                    match new_page.emulate_timezone(chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(timezone_id)).await {
-                                        Ok(np) => np.to_owned(),
-                                        _ => new_page
-                                    }
-                                }
-                                _ => new_page,
-                            };
+                            let new_page = configure_browser(new_page, &self.configuration).await;
 
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
 
@@ -2177,6 +2170,8 @@ impl Website {
 
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
 
+                            let new_page = configure_browser(new_page, &self.configuration).await;
+
                             let chrome_page = Arc::new(new_page.clone());
 
                             let intercept_handle =
@@ -2467,15 +2462,7 @@ impl Website {
                                 });
                             }
 
-                            let new_page = match self.configuration.timezone_id.as_deref() {
-                                Some(timezone_id) => {
-                                    match new_page.emulate_timezone(chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(timezone_id)).await {
-                                        Ok(np) => np.to_owned(),
-                                        _ => new_page
-                                    }
-                                }
-                                _ => new_page,
-                            };
+                            let new_page = configure_browser(new_page, &self.configuration).await;
 
                             let page = Arc::new(new_page.clone());
 
@@ -2912,14 +2899,6 @@ impl Website {
     /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
     pub fn set_crawl_budget(&mut self, _budget: Option<HashMap<CaseInsensitiveString, u32>>) {}
 
-    #[cfg(feature = "budget")]
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
-    pub fn with_depth(&mut self, depth: usize) -> &mut Self {
-        self.configuration.with_depth(depth);
-        self
-    }
-
-    #[cfg(not(feature = "budget"))]
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.configuration.with_depth(depth);
@@ -2949,56 +2928,30 @@ impl Website {
         self
     }
 
-    #[cfg(feature = "cookies")]
     /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
         self.configuration.with_cookies(cookie_str);
         self
     }
 
-    #[cfg(not(feature = "cookies"))]
-    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
-    pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
-        self.configuration.with_cookies(cookie_str);
-        self
-    }
-
-    #[cfg(feature = "cron")]
     /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.configuration.with_cron(cron_str, cron_type);
         self
     }
 
-    #[cfg(not(feature = "cron"))]
-    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
-    pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
-        self.configuration.with_cron(cron_str, cron_type);
+    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    pub fn with_locale(&mut self, locale: Option<String>) -> &mut Self {
+        self.configuration.with_locale(locale);
         self
     }
 
-    #[cfg(feature = "chrome")]
     /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.configuration.with_stealth(stealth_mode);
         self
     }
 
-    #[cfg(not(feature = "chrome"))]
-    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
-    pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
-        self.configuration.with_stealth(stealth_mode);
-        self
-    }
-
-    #[cfg(feature = "cache")]
-    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
-    pub fn with_caching(&mut self, cache: bool) -> &mut Self {
-        self.configuration.with_caching(cache);
-        self
-    }
-
-    #[cfg(not(feature = "cache"))]
     /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);

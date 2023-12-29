@@ -861,9 +861,9 @@ dependencies = [
 
 [[package]]
 name = "chromiumoxide"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdea2fa69adb96b3f503c4ae5a9b0ab17ae9b92a0f0702710485b12cc7758ff8"
+checksum = "b2abb1e644b7fcaa711fe4d3fca06c52bf18ebc5398711b2b11e8281c6107fbe"
 dependencies = [
  "async-tungstenite",
  "base64",
@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.80.31"
+version = "1.80.32"
 dependencies = [
  "ahash",
  "async-trait",
@@ -4327,7 +4327,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.80.31"
+version = "1.80.32"
 dependencies = [
  "clap 4.4.11",
  "env_logger 0.9.3",
@@ -4339,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.80.31"
+version = "1.80.32"
 dependencies = [
  "convert_case 0.5.0",
  "env_logger 0.9.3",
@@ -4360,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.80.31"
+version = "1.80.32"
 dependencies = [
  "env_logger 0.10.1",
  "lazy_static",
