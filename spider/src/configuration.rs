@@ -68,8 +68,8 @@ pub struct Configuration {
     #[cfg(feature = "budget")]
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
-    /// Cache the page following HTTP Caching rules.
-    #[cfg(feature = "chrome")]
+    /// Cache the page following HTTP caching rules.
+    #[cfg(any(feature = "cache", feature = "chrome"))]
     pub cache: bool,
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
