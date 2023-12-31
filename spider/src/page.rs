@@ -987,7 +987,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
-    #[inline(never)]
+    #[inline(always)]
     pub async fn links(
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
@@ -1003,7 +1003,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    #[inline(never)]
+    #[inline(always)]
     pub async fn links(
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
@@ -1019,7 +1019,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
-    #[inline(never)]
+    #[inline(always)]
     pub async fn smart_links(
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
@@ -1039,7 +1039,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     #[cfg(feature = "decentralized")]
-    #[inline(never)]
+    #[inline(always)]
     pub async fn links(
         &self,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
