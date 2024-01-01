@@ -1549,7 +1549,7 @@ impl Website {
                 let (mut interval, throttle) = self.setup_crawl();
                 let blacklist_url = self.configuration.get_blacklist();
                 let on_link_find_callback = self.on_link_find_callback;
-
+                let full_resources = self.configuration.full_resources;
                 let mut links: HashSet<CaseInsensitiveString> =
                     self._crawl_establish(&client, &mut selector, false).await;
                     
@@ -1608,8 +1608,11 @@ impl Website {
                                                 Page::new_page(&link_result.0.as_ref(), &shared.0).await;
                                             page.set_external(shared.3.to_owned());
 
-                                            let page_links = page.links(&shared.1).await;
-
+                                            let page_links = if full_resources {
+                                                page.links_full(&shared.1).await
+                                            } else {
+                                                page.links(&shared.1).await
+                                            };
 
                                             channel_send_page(&shared.2, page);
 
@@ -1660,7 +1663,7 @@ impl Website {
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-
+            let full_resources = self.configuration.full_resources;
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
@@ -1719,7 +1722,11 @@ impl Website {
 
                         page.set_external(external_domains_caseless);
 
-                        let page_links = page.links(&*selectors).await;
+                        let page_links = if full_resources {
+                            page.links_full(&*selectors).await
+                        } else {
+                            page.links(&*selectors).await
+                        };
 
                         (link, page, page_links)
                     });
@@ -1755,7 +1762,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let selectors = self.setup_selectors();
@@ -1765,6 +1772,7 @@ impl Website {
             let (mut interval, throttle) = self.setup_crawl();
             let blacklist_url = self.configuration.get_blacklist();
             let on_link_find_callback = self.on_link_find_callback;
+            let full_resources = self.configuration.full_resources;
 
             match launch_browser(&self.configuration).await {
                 Some((mut browser, browser_handle)) => {
@@ -1865,8 +1873,11 @@ impl Website {
                                                             page.set_external(shared.4.clone());
                                                         }
 
-                                                        let page_links =
-                                                            page.links(&shared.1).await;
+                                                        let page_links = if full_resources {
+                                                            page.links_full(&shared.1).await
+                                                        } else {
+                                                            page.links(&shared.1).await
+                                                        };
 
                                                         channel_send_page(&shared.2, page);
 
@@ -1928,7 +1939,7 @@ impl Website {
                 let (mut interval, throttle) = self.setup_crawl();
                 let blacklist_url = self.configuration.get_blacklist();
                 let on_link_find_callback = self.on_link_find_callback;
-
+                let full_resources = self.configuration.full_resources;
                 let mut links: HashSet<CaseInsensitiveString> =
                     self.crawl_establish(&client, &mut selector, false).await;
 
@@ -1994,8 +2005,12 @@ impl Website {
                                                 page.set_external(shared.3.to_owned());
                                             }
 
-                                            let page_links = page.links(&shared.1).await;
-
+                                            let page_links = if full_resources {
+                                                page.links_full(&shared.1).await
+                                            } else {
+                                                page.links(&shared.1).await
+                                            };
+                    
                                             channel_send_page(&shared.2, page);
 
                                             drop(permit);
@@ -2326,7 +2341,7 @@ impl Website {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
             let throttle = Duration::from_millis(self.configuration.delay);
-
+            let full_resources = self.configuration.full_resources;
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
             let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
                 JoinSet::new();
@@ -2385,7 +2400,11 @@ impl Website {
 
                         page.set_external(external_domains_caseless);
 
-                        let page_links = page.links(&*selectors).await;
+                        let page_links = if full_resources {
+                            page.links_full(&*selectors).await
+                        } else {
+                            page.links(&*selectors).await
+                        };
 
                         (link, page, page_links)
                     });
@@ -2991,6 +3010,12 @@ impl Website {
     ) -> &mut Self {
         self.configuration
             .with_chrome_intercept(chrome_intercept, block_images);
+        self
+    }
+
+    /// Determine whether to collect all the resources found on pages.
+    pub fn with_full_resources(&mut self, full_resources: bool) -> &mut Self {
+        self.configuration.with_full_resources(full_resources);
         self
     }
 

@@ -15,7 +15,6 @@ use std::time::Duration;
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
-#[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -706,6 +705,7 @@ impl Page {
                 }
 
                 if element_name == "a" {
+                    // add fullresources?
                     match element.attr("href") {
                         Some(href) => {
                             let mut abs = self.abs_path(href);
@@ -917,12 +917,13 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
-    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    pub async fn links_stream_full_resource<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_document(&self.get_html()));
+        let html = Box::new(crate::packages::scraper::Html::parse_document(
+            &self.get_html(),
+        ));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -975,6 +976,16 @@ impl Page {
         map
     }
 
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
+    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        self.links_stream_full_resource(selectors).await
+    }
+
     #[inline(always)]
     #[cfg(feature = "decentralized")]
     /// Find the links as a stream using string resource validation
@@ -986,7 +997,7 @@ impl Page {
     }
 
     /// Find all href links and return them using CSS selectors.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
     pub async fn links(
         &self,
@@ -1001,18 +1012,20 @@ impl Page {
         }
     }
 
-    /// Find all href links and return them using CSS selectors.
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    /// Find all href links and return them using CSS selectors gathering all resources.
     #[inline(always)]
-    pub async fn links(
+    pub async fn links_full(
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                self.links_stream::<CaseInsensitiveString>(&(&selectors.0, &selectors.1))
-                    .await
+                self.links_stream_full_resource::<CaseInsensitiveString>(&(
+                    &selectors.0,
+                    &selectors.1,
+                ))
+                .await
             }
         }
     }
@@ -1052,6 +1065,13 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     fn abs_path(&self, href: &str) -> Url {
         convert_abs_path(&self.base, href)
+    }
+
+    /// Convert a URL to its absolute path without any fragments or params. [unused in the worker atm by default all is returned]
+    #[inline(never)]
+    #[cfg(feature = "decentralized")]
+    fn abs_path(&self, href: &str) -> Url {
+        convert_abs_path(&Url::parse(&href).unwrap(), href)
     }
 }
 

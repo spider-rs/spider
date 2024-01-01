@@ -95,6 +95,8 @@ pub struct Configuration {
     /// External domains to include case-insensitive.
     pub external_domains_caseless:
         Box<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
+    /// Collect all the resources found on the page.
+    pub full_resources: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -297,6 +299,12 @@ impl Configuration {
     /// Set the redirect policy to use.
     pub fn with_redirect_policy(&mut self, policy: RedirectPolicy) -> &mut Self {
         self.redirect_policy = policy;
+        self
+    }
+
+    /// Determine whether to collect all the resources found on pages.
+    pub fn with_full_resources(&mut self, full_resources: bool) -> &mut Self {
+        self.full_resources = full_resources;
         self
     }
 
