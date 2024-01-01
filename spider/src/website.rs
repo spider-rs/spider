@@ -448,48 +448,48 @@ impl Website {
         }
     }
 
-    /// amount of pages crawled
+    /// Amount of pages crawled.
     pub fn size(&self) -> usize {
         self.links_visited.len()
     }
 
-    /// page getter
+    /// Page getter.
     pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
         self.pages.as_ref()
     }
 
-    /// drain the links visited.
+    /// Drain the links visited.
     pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
         self.links_visited.drain()
     }
 
-    /// clear all pages and links stored
+    /// Clear all pages and links stored.
     pub fn clear(&mut self) {
         self.links_visited.clear();
         self.pages.take();
     }
 
-    /// links visited getter
+    /// Links visited getter.
     pub fn get_links(&self) -> &HashSet<CaseInsensitiveString> {
         &self.links_visited
     }
 
-    /// domain parsed url getter
+    /// Domain parsed url getter.
     pub fn get_domain_parsed(&self) -> &Option<Box<Url>> {
         &self.domain_parsed
     }
 
-    /// domain name getter
+    /// Domain name getter.
     pub fn get_domain(&self) -> &CaseInsensitiveString {
         &self.domain
     }
 
-    /// crawl delay getter
+    /// Crawl delay getter.
     fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
     }
 
-    /// get the active crawl status
+    /// Get the active crawl status.
     pub fn get_status(&self) -> &CrawlStatus {
         &self.status
     }
@@ -501,7 +501,7 @@ impl Website {
         self
     }
 
-    /// absolute base url of crawl
+    /// Absolute base url of crawl.
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
             match url::Url::parse(domain.unwrap_or_default()) {
@@ -619,7 +619,7 @@ impl Website {
         }
     }
 
-    /// build the http client
+    /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -667,7 +667,7 @@ impl Website {
         client
     }
 
-    /// build the http client with caching enabled.
+    /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
         use crate::page::domain_name;
@@ -733,7 +733,7 @@ impl Website {
         }
     }
 
-    /// build the client with cookie configurations.
+    /// Build the HTTP client with cookie configurations.
     #[cfg(all(not(feature = "decentralized"), feature = "cookies"))]
     fn configure_http_client_cookies(
         &mut self,
@@ -755,7 +755,7 @@ impl Website {
         client
     }
 
-    /// build the client with cookie configurations. This does nothing with [cookies] flag enabled.
+    /// Build the client with cookie configurations. This does nothing with [cookies] flag enabled.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
     fn configure_http_client_cookies(
         &mut self,
@@ -764,7 +764,7 @@ impl Website {
         client
     }
 
-    /// configure http client
+    /// Configure http client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
@@ -772,14 +772,14 @@ impl Website {
         unsafe { client.build().unwrap_unchecked() }
     }
 
-    /// configure http client
+    /// Configure http client.
     #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         client.build()
     }
 
-    /// configure http client for decentralization
+    /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", not(feature = "cache")))]
     pub fn configure_http_client(&mut self) -> Client {
         use reqwest::header::HeaderMap;
@@ -857,7 +857,7 @@ impl Website {
         }
     }
 
-    /// configure http client for decentralization
+    /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", feature = "cache"))]
     pub fn configure_http_client(&mut self) -> Client {
         use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
@@ -943,7 +943,7 @@ impl Website {
         client.build()
     }
 
-    /// setup atomic controller
+    /// Setup atomic controller.
     #[cfg(feature = "control")]
     fn configure_handler(&self) -> (Arc<AtomicI8>, tokio::task::JoinHandle<()>) {
         use crate::utils::{Handler, CONTROLLER};
@@ -976,7 +976,7 @@ impl Website {
         (handle, join_handle)
     }
 
-    /// Setup interception for chrome request
+    /// Setup interception for chrome request.
     #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
     async fn setup_chrome_interception(
         &self,
@@ -1053,7 +1053,7 @@ impl Website {
         None
     }
 
-    /// setup selectors for handling link targets
+    /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
         get_page_selectors(
             &self.domain.inner(),
@@ -1062,7 +1062,7 @@ impl Website {
         )
     }
 
-    /// setup config for crawl
+    /// Setup config for crawl.
     #[cfg(feature = "control")]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
@@ -1077,7 +1077,7 @@ impl Website {
         )
     }
 
-    /// setup config for crawl
+    /// Setup config for crawl.
     #[cfg(not(feature = "control"))]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
@@ -1093,7 +1093,7 @@ impl Website {
         (self.configure_robots_parser(client).await, None)
     }
 
-    /// setup shared concurrent configs
+    /// Setup shared concurrent configs.
     fn setup_crawl(
         &mut self,
     ) -> (
@@ -1107,7 +1107,7 @@ impl Website {
         (interval, throttle)
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     async fn _crawl_establish(
         &mut self,
         client: &Client,
@@ -1168,7 +1168,7 @@ impl Website {
         links
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     #[cfg(all(
         not(feature = "glob"),
         not(feature = "decentralized"),
@@ -1183,7 +1183,7 @@ impl Website {
         self._crawl_establish(&client, base, selector).await
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     #[cfg(all(
         not(feature = "glob"),
         not(feature = "decentralized"),
@@ -1249,7 +1249,7 @@ impl Website {
         links
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
     async fn crawl_establish(
         &mut self,
@@ -1294,7 +1294,7 @@ impl Website {
         links
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     #[cfg(all(feature = "glob", feature = "decentralized"))]
     async fn crawl_establish(
         &mut self,
@@ -1350,7 +1350,7 @@ impl Website {
         links
     }
 
-    /// expand links for crawl
+    /// Expand links for crawl.
     #[cfg(all(feature = "glob", not(feature = "decentralized")))]
     async fn crawl_establish(
         &mut self,
@@ -1419,7 +1419,7 @@ impl Website {
         links
     }
 
-    /// Set the crawl status depending on crawl state
+    /// Set the crawl status depending on crawl state.
     fn set_crawl_status(&mut self) {
         if !self.domain_parsed.is_some() {
             self.status = CrawlStatus::Invalid;
@@ -1428,7 +1428,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website with async concurrency
+    /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
@@ -1446,7 +1446,7 @@ impl Website {
         self.client = Some(client);
     }
 
-    /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the [sitemap] flag enabled.
+    /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` flag enabled.
     pub async fn crawl_sitemap(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
@@ -1464,7 +1464,7 @@ impl Website {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
-    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed.
+    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
@@ -1482,12 +1482,12 @@ impl Website {
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
-    /// Start to crawl website with async concurrency smart. This has no effect without smart mode enabled.
+    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
         self.crawl().await
     }
 
-    /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
+    /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the `chrome` feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
@@ -1505,7 +1505,7 @@ impl Website {
         self.client = Some(client);
     }
 
-    /// Start to scrape/download website with async concurrency
+    /// Start to scrape/download website with async concurrency.
     pub async fn scrape(&mut self) {
         self.start();
         let (client, handle) = self.setup().await;
@@ -1541,7 +1541,7 @@ impl Website {
         self.client = Some(client);
     }
 
-    /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP
+    /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -1646,7 +1646,7 @@ impl Website {
         }
     }
 
-    /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP
+    /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP.
     async fn scrape_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let selectors = get_page_selectors(
@@ -1761,7 +1761,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website concurrently
+    /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -1929,7 +1929,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website concurrently
+    /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -2043,7 +2043,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website concurrently
+    /// Start to crawl website concurrently.
     #[cfg(feature = "decentralized")]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain.inner()) {
@@ -2154,7 +2154,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website concurrently
+    /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -2324,7 +2324,7 @@ impl Website {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Start to scape website concurrently and store resources
+    /// Start to scape website concurrently and store resources.
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let selectors = get_page_selectors(
@@ -2895,30 +2895,30 @@ impl Website {
     }
 
     #[cfg(feature = "budget")]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.configuration.with_budget(budget);
         self
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.configuration.with_budget(budget);
         self
     }
 
     #[cfg(feature = "budget")]
-    /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
+    /// Set the crawl budget directly. This does nothing without the `budget` flag enabled.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
         self.configuration.budget = budget;
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Set the crawl budget directly. This does nothing without the [budget] flag enabled.
+    /// Set the crawl budget directly. This does nothing without the `budget` flag enabled.
     pub fn set_crawl_budget(&mut self, _budget: Option<HashMap<CaseInsensitiveString, u32>>) {}
 
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.configuration.with_depth(depth);
         self
@@ -2959,13 +2959,13 @@ impl Website {
         self
     }
 
-    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system locale with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_locale(&mut self, locale: Option<String>) -> &mut Self {
         self.configuration.with_locale(locale);
         self
     }
 
-    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.configuration.with_stealth(stealth_mode);
         self
@@ -2990,7 +2990,7 @@ impl Website {
     }
 
     #[cfg(feature = "chrome_intercept")]
-    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: bool,
@@ -3002,7 +3002,7 @@ impl Website {
     }
 
     #[cfg(not(feature = "chrome_intercept"))]
-    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: bool,
@@ -3020,20 +3020,20 @@ impl Website {
     }
 
     #[cfg(feature = "sitemap")]
-    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` flag is not enabled.
     pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
         self.configuration.with_ignore_sitemap(ignore_sitemap);
         self
     }
 
     #[cfg(not(feature = "sitemap"))]
-    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` flag is not enabled.
     pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
         self.configuration.with_ignore_sitemap(ignore_sitemap);
         self
     }
 
-    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system timezone with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
         self.configuration.with_timezone_id(timezone_id);
         self
@@ -3045,13 +3045,13 @@ impl Website {
         self
     }
 
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.configuration.with_limit(limit);
         self
     }
 
-    /// Build the website configuration when using with_builder
+    /// Build the website configuration when using with_builder.
     #[cfg(not(feature = "napi"))]
     pub fn build(&self) -> Result<Self, std::io::Error> {
         if self.domain_parsed.is_none() {
@@ -3061,7 +3061,7 @@ impl Website {
         }
     }
 
-    /// Build the website configuration when using with_builder with napi error handling
+    /// Build the website configuration when using with_builder with napi error handling.
     #[cfg(feature = "napi")]
     pub fn build(&self) -> Result<Self, WebsiteBuilderError> {
         if self.domain_parsed.is_none() {
@@ -3075,7 +3075,7 @@ impl Website {
     }
 
     #[cfg(feature = "budget")]
-    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the feat flag [budget] enabled.
+    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the `budget` flag enabled.
     fn determine_limits(&mut self) {
         if self.configuration.budget.is_some() {
             let wild_card_budget = match &self.configuration.budget {
@@ -3105,7 +3105,7 @@ impl Website {
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the feat flag [budget] enabled.
+    /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the `budget` flag enabled.
     fn determine_limits(&mut self) {}
 
     /// Setup subscription for data.

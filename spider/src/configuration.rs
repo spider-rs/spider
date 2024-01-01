@@ -74,10 +74,10 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Setup network interception for request. This does nothing without the flag [chrome_intercept] enabled.
+    /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
     #[cfg(feature = "chrome")]
     pub chrome_intercept: bool,
-    /// Block all images from rendering in Chrome. This does nothing without the flag [chrome_intercept] enabled
+    /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
     #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
     /// Overrides default host system timezone with the specified one. This does nothing without the flag [chrome] enabled.
@@ -323,59 +323,59 @@ impl Configuration {
     }
 
     #[cfg(feature = "budget")]
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.with_budget(Some(hashbrown::HashMap::from([("*", limit)])));
         self
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, _limit: u32) -> &mut Self {
         self
     }
 
     #[cfg(feature = "budget")]
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.depth = depth;
         self
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag [budget] enabled.
+    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_depth(&mut self, _depth: usize) -> &mut Self {
         self
     }
 
     #[cfg(feature = "cache")]
-    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.cache = cache;
         self
     }
 
     #[cfg(not(feature = "cache"))]
-    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome")]
-    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.stealth_mode = stealth_mode;
         self
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Use stealth mode for the request. This does nothing without the [chrome] flag enabled.
+    /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, _stealth_mode: bool) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome_intercept")]
-    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: bool,
@@ -387,7 +387,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "chrome_intercept"))]
-    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the [chrome_intercept] is not enabled.
+    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
         _chrome_intercept: bool,
@@ -397,7 +397,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "budget")]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
         self.budget = match budget {
             Some(budget) => {
@@ -421,7 +421,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "budget"))]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the [budget] flag enabled.
+    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, _budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
         self
     }
@@ -455,13 +455,13 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system timezone with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_timezone_id(&mut self, _timezone_id: Option<String>) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome")]
-    /// Overrides default host system timezone with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system timezone with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
         self.timezone_id = match timezone_id {
             Some(timezone_id) => Some(timezone_id.into()),
@@ -471,13 +471,13 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system locale with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_locale(&mut self, _locale: Option<String>) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome")]
-    /// Overrides default host system locale with the specified one. This does nothing without the [chrome] flag enabled.
+    /// Overrides default host system locale with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_locale(&mut self, locale: Option<String>) -> &mut Self {
         self.locale = match locale {
             Some(locale) => Some(locale.into()),
@@ -486,7 +486,7 @@ impl Configuration {
         self
     }
 
-    /// Build the website configuration when using with_builder
+    /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Self {
         self.to_owned()
     }
