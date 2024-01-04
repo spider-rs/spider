@@ -305,34 +305,49 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    /// Take a screenshot of the page. The feature flag [chrome_store_page] is required.
-    pub async fn screenshot(&self, full_page: bool, omit_background: bool) {
+    /// Take a screenshot of the page. If the output path is omited the you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
+    pub async fn screenshot(
+        &self,
+        full_page: bool,
+        omit_background: bool,
+        format: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat,
+        quality: Option<i64>,
+        output_path: Option<impl AsRef<std::path::Path>>,
+    ) -> Vec<u8> {
         match &self.chrome_page {
             Some(page) => {
-                let output_path: String = string_concat!(
-                    std::env::var("SCREENSHOT_DIRECTORY")
-                        .unwrap_or_else(|_| "./storage/".to_string()),
-                    &self.url,
-                    ".png"
-                );
+                let output_path = match output_path {
+                    Some(out) => out.as_ref().to_path_buf(),
+                    _ => {
+                        let base_path = std::env::var("SCREENSHOT_DIRECTORY")
+                            .unwrap_or_else(|_| "./storage/".to_string());
+                        let path = std::path::Path::new(&base_path);
+                        path.join(string_concat!(self.url, ".", format.as_ref()))
+                    }
+                };
                 match page
                     .save_screenshot(
                         chromiumoxide::page::ScreenshotParams::builder()
-                            .format(
-                                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                            )
+                            .format(format)
                             .full_page(full_page)
                             .omit_background(omit_background)
+                            .quality(quality.unwrap_or(100))
                             .build(),
                         &output_path,
                     )
                     .await
                 {
-                    Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
-                    Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path),
-                };
+                    Ok(v) => {
+                        log::debug!("saved screenshot: {:?}", output_path);
+                        v
+                    }
+                    Err(e) => {
+                        log::error!("failed to save screenshot: {:?} - {:?}", e, output_path);
+                        Default::default()
+                    }
+                }
             }
-            _ => (),
+            _ => Default::default(),
         }
     }
 
