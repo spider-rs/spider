@@ -52,6 +52,10 @@ Crawl links with view port configuration [Chrome Viewport](./chrome_viewport.rs)
 
 - `cargo run --example chrome_viewport --features chrome`
 
+Take a screenshot of a page during crawl [Chrome Screenshot](./chrome_screenshot.rs).
+
+- `cargo run --example chrome_screenshot --features="spider/sync spider/chrome spider/chrome_store_page"`
+
 Crawl links with smart mode detection. Runs HTTP by default until Chrome Rendering is needed. [Smart](./smart.rs).
 
 - `cargo run --example smart --features smart`
