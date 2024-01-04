@@ -94,6 +94,7 @@ pub extern crate smallvec;
 pub extern crate tokio;
 pub extern crate tokio_stream;
 pub extern crate url;
+pub extern crate percent_encoding;
 
 #[cfg(feature = "cron")]
 pub extern crate async_job;

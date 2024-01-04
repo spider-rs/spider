@@ -97,7 +97,11 @@ pub async fn fetch_page_html(
                     let output_path = string_concat!(
                         std::env::var("SCREENSHOT_DIRECTORY")
                             .unwrap_or_else(|_| "./storage/".to_string()),
-                        &target_url,
+                        &percent_encoding::percent_encode(
+                            target_url.as_bytes(),
+                            percent_encoding::NON_ALPHANUMERIC
+                        )
+                        .to_string(),
                         ".png"
                     );
 

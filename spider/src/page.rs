@@ -80,7 +80,7 @@ pub struct Page {
     /// The duration from start of parsing to end of gathering links.
     duration: Instant,
     #[cfg(feature = "chrome")]
-    /// Page object for chrome.
+    /// Page object for chrome. The page may be closed when accessing it on another thread from concurrency.
     chrome_page: Option<chromiumoxide::Page>,
 }
 
@@ -322,7 +322,15 @@ impl Page {
                         let base_path = std::env::var("SCREENSHOT_DIRECTORY")
                             .unwrap_or_else(|_| "./storage/".to_string());
                         let path = std::path::Path::new(&base_path);
-                        path.join(string_concat!(self.url, ".", format.as_ref()))
+                        path.join(string_concat!(
+                            percent_encoding::percent_encode(
+                                self.url.as_bytes(),
+                                percent_encoding::NON_ALPHANUMERIC
+                            )
+                            .to_string(),
+                            ".",
+                            format.as_ref()
+                        ))
                     }
                 };
                 match page
