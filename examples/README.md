@@ -48,6 +48,10 @@ Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 
 - `cargo run --example chrome --features chrome_headed`
 
+Crawl links with view port configuration [Chrome Viewport](./chrome_viewport.rs).
+
+- `cargo run --example chrome_viewport --features chrome`
+
 Crawl links with smart mode detection. Runs HTTP by default until Chrome Rendering is needed. [Smart](./smart.rs).
 
 - `cargo run --example smart --features smart`

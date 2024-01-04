@@ -77,13 +77,16 @@ pub struct Configuration {
     /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
     #[cfg(feature = "chrome")]
     pub chrome_intercept: bool,
+    /// Configure the viewport for chrome. This does nothing without the flag `chrome` enabled.
+    #[cfg(feature = "chrome")]
+    pub viewport: Option<chromiumoxide::handler::viewport::Viewport>,
     /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
     #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
-    /// Overrides default host system timezone with the specified one. This does nothing without the flag [chrome] enabled.
+    /// Overrides default host system timezone with the specified one. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub timezone_id: Option<Box<String>>,
-    /// Overrides default host system locale with the specified one. This does nothing without the flag [chrome] enabled.
+    /// Overrides default host system locale with the specified one. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub locale: Option<Box<String>>,
     #[cfg(feature = "budget")]
@@ -361,6 +364,25 @@ impl Configuration {
         self
     }
 
+    /// Configures the view port for chrome. This method does nothing if the [chrome] feature is not enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_viewport(
+        &mut self,
+        _viewport: Option<crate::configuration::Viewport>,
+    ) -> &mut Self {
+        self
+    }
+
+    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
+        self.viewport = match viewport {
+            Some(vp) => Some(vp.into()),
+            _ => None,
+        };
+        self
+    }
+
     #[cfg(feature = "chrome")]
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
@@ -489,5 +511,77 @@ impl Configuration {
     /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Self {
         self.to_owned()
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// View port handling for chrome.
+pub struct Viewport {
+    /// Device screen Width
+    pub width: u32,
+    /// Device screen size
+    pub height: u32,
+    /// Device scale factor
+    pub device_scale_factor: Option<f64>,
+    /// Emulating Mobile?
+    pub emulating_mobile: bool,
+    /// Use landscape mode instead of portrait.
+    pub is_landscape: bool,
+    /// Touch screen device?
+    pub has_touch: bool,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            width: 800,
+            height: 600,
+            device_scale_factor: None,
+            emulating_mobile: false,
+            is_landscape: false,
+            has_touch: false,
+        }
+    }
+}
+
+impl Viewport {
+    /// Create a new viewport layout for chrome passing in the width.
+    pub fn new(width: u32, height: u32) -> Self {
+        Viewport {
+            width,
+            height,
+            ..Default::default()
+        }
+    }
+    /// Determine if the layout is a mobile device or not to emulate.
+    pub fn set_mobile(&mut self, emulating_mobile: bool) {
+        self.emulating_mobile = emulating_mobile;
+    }
+    /// Determine if the layout is in landscrape view or not to emulate.
+    pub fn set_landscape(&mut self, is_landscape: bool) {
+        self.is_landscape = is_landscape;
+    }
+    /// Determine if the device is a touch screen or not to emulate.
+    pub fn set_touch(&mut self, has_touch: bool) {
+        self.has_touch = has_touch;
+    }
+    /// The scale factor for the screen layout.
+    pub fn set_scale_factor(&mut self, device_scale_factor: Option<f64>) {
+        self.device_scale_factor = device_scale_factor;
+    }
+}
+
+#[cfg(feature = "chrome")]
+impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
+    fn from(viewport: Viewport) -> Self {
+        Self {
+            width: viewport.width,
+            height: viewport.height,
+            device_scale_factor: viewport.device_scale_factor,
+            emulating_mobile: viewport.emulating_mobile,
+            is_landscape: viewport.is_landscape,
+            has_touch: viewport.has_touch,
+        }
     }
 }

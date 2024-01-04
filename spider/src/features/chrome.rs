@@ -10,6 +10,7 @@ pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
     intercept: bool,
     cache_enabled: bool,
+    viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
@@ -50,7 +51,8 @@ pub fn get_browser_config(
     } else {
         builder
     };
-    match builder.build() {
+
+    match builder.viewport(viewport).build() {
         Ok(b) => Some(b),
         Err(error) => {
             log("", error);
@@ -65,6 +67,7 @@ pub fn get_browser_config(
     proxies: &Option<Box<Vec<string_concat::String>>>,
     intercept: bool,
     cache_enabled: bool,
+    viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
@@ -113,7 +116,7 @@ pub fn get_browser_config(
     } else {
         builder
     };
-    match builder.build() {
+    match builder.viewport(viewport).build() {
         Ok(b) => Some(b),
         Err(error) => {
             log("", error);
@@ -128,7 +131,7 @@ pub async fn launch_browser(
 ) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
     let proxies = &config.proxies;
 
-    let b_conf = match std::env::var("CHROME_URL") {
+    let browser_configuration = match std::env::var("CHROME_URL") {
         Ok(v) => match Browser::connect_with_config(
             &v,
             HandlerConfig {
@@ -138,6 +141,7 @@ pub async fn launch_browser(
                 },
                 request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
                 cache_enabled: config.cache,
+                viewport: config.viewport.clone(),
                 ..HandlerConfig::default()
             },
         )
@@ -146,7 +150,12 @@ pub async fn launch_browser(
             Ok(browser) => Some(browser),
             _ => None,
         },
-        _ => match get_browser_config(&proxies, config.chrome_intercept, config.cache) {
+        _ => match get_browser_config(
+            &proxies,
+            config.chrome_intercept,
+            config.cache,
+            config.viewport.clone(),
+        ) {
             Some(browser_config) => match Browser::launch(browser_config).await {
                 Ok(browser) => Some(browser),
                 _ => None,
@@ -155,7 +164,7 @@ pub async fn launch_browser(
         },
     };
 
-    match b_conf {
+    match browser_configuration {
         Some(c) => {
             let (browser, mut handler) = c;
 
@@ -208,6 +217,7 @@ pub async fn configure_browser(new_page: Page, configuration: &Configuration) ->
         }
         _ => new_page,
     };
+
     new_page
 }
 

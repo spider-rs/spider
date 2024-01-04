@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.80.41"
+version = "1.80.43"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -22,7 +22,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "1.80.41"
+version = "1.80.43"
 path = "../spider"
 features = ["serde"]
 
@@ -86,6 +86,11 @@ required-features = ["spider/sync", "spider/cron"]
 [[example]]
 name = "chrome"
 path = "chrome.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
+name = "chrome_viewport"
+path = "chrome_viewport.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]

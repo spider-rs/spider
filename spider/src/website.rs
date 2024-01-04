@@ -2977,6 +2977,12 @@ impl Website {
         self
     }
 
+    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
+        self.configuration.with_viewport(viewport);
+        self
+    }
+
     /// Set the max redirects allowed for request.
     pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
         self.configuration.with_redirect_limit(redirect_limit);
