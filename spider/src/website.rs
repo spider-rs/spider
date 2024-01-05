@@ -134,13 +134,14 @@ pub enum CronType {
     Scrape,
 }
 
-/// Represents a website to crawl and gather all links.
+/// Represents a website to crawl and gather all links or page content.
 /// ```rust
 /// use spider::website::Website;
 /// let mut website = Website::new("http://example.com");
 /// website.crawl();
-/// // `Website` will be filled with `Pages` when crawled. To get them, just use
-/// while let Some(page) = website.get_pages() {
+/// // `Website` will be filled with links or pages when crawled. If you need pages with the resource
+/// // call the `website.scrape` method with `website.get_pages` instead.
+/// for link in website.get_links() {
 ///     // do something
 /// }
 /// ```
@@ -163,7 +164,7 @@ pub struct Website {
         fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
     >,
     /// Subscribe and broadcast changes.
-    channel: Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>>,
+    channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
     /// The status of the active crawl.
     status: CrawlStatus,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
@@ -3126,9 +3127,12 @@ impl Website {
     /// Setup subscription for data. This will panic if capacity is equal to 0 or larger than usize::MAX / 2. This does nothing without the `sync` flag enabled.
     #[cfg(feature = "sync")]
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
-        let channel = self
-            .channel
-            .get_or_insert(Arc::new(broadcast::channel(capacity)));
+        let channel = self.channel.get_or_insert_with(|| {
+            let (tx, rx) = broadcast::channel(capacity);
+
+            (tx, Arc::new(rx))
+        });
+
         let rx2 = channel.0.subscribe();
 
         Some(rx2)
@@ -3156,12 +3160,10 @@ impl Website {
 
 /// Channel broadcast send the Page to receivers.
 fn channel_send_page(
-    channel: &Option<
-        std::sync::Arc<(
-            tokio::sync::broadcast::Sender<Page>,
-            tokio::sync::broadcast::Receiver<Page>,
-        )>,
-    >,
+    channel: &Option<(
+        tokio::sync::broadcast::Sender<Page>,
+        std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
+    )>,
     page: Page,
 ) {
     match channel {

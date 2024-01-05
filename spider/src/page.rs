@@ -304,18 +304,36 @@ impl Page {
         }
     }
 
+    #[cfg(not(all(not(feature = "decentralized"), feature = "chrome")))]
+    /// Take a screenshot of the page. If the output path is omitted you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
+    pub async fn screenshot(
+        &self,
+        _full_page: bool,
+        _omit_background: bool,
+        _format: crate::configuration::CaptureScreenshotFormat,
+        _quality: Option<i64>,
+        _output_path: Option<impl AsRef<std::path::Path>>,
+    ) -> Vec<u8> {
+        Default::default()
+    }
+
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    /// Take a screenshot of the page. If the output path is omited the you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
+    /// Take a screenshot of the page. If the output path is omitted you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
     pub async fn screenshot(
         &self,
         full_page: bool,
         omit_background: bool,
-        format: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat,
+        format: crate::configuration::CaptureScreenshotFormat,
         quality: Option<i64>,
         output_path: Option<impl AsRef<std::path::Path>>,
     ) -> Vec<u8> {
         match &self.chrome_page {
             Some(page) => {
+                let format =
+                    chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::from(
+                        format,
+                    );
+
                 let output_path = match output_path {
                     Some(out) => out.as_ref().to_path_buf(),
                     _ => {
