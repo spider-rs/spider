@@ -585,3 +585,38 @@ impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Capture screenshot options for chrome.
+pub enum CaptureScreenshotFormat {
+    #[cfg_attr(feature = "serde", serde(rename = "jpeg"))]
+    /// jpeg format
+    Jpeg,
+    #[cfg_attr(feature = "serde", serde(rename = "png"))]
+    #[default]
+    /// png format
+    Png,
+    #[cfg_attr(feature = "serde", serde(rename = "webp"))]
+    /// webp format
+    Webp,
+}
+
+#[cfg(feature = "chrome")]
+impl From<CaptureScreenshotFormat>
+    for chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat
+{
+    fn from(format: CaptureScreenshotFormat) -> Self {
+        match format {
+            CaptureScreenshotFormat::Jpeg => {
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Jpeg
+            }
+            CaptureScreenshotFormat::Png => {
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png
+            }
+            CaptureScreenshotFormat::Webp => {
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Webp
+            }
+        }
+    }
+}

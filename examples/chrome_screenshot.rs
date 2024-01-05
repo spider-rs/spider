@@ -1,26 +1,30 @@
 //! Make sure to create a storage directory locally.
 //! `cargo run --example chrome_screenshot --features="spider/sync spider/chrome spider/chrome_store_page"`
 extern crate spider;
+use spider::tokio;
+use spider::website::Website;
 
-#[cfg(feature = "chrome")]
 #[tokio::main]
 async fn main() {
-    use spider::tokio;
-    use spider::website::Website;
     use std::path::PathBuf;
     let mut website: Website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(18).unwrap();
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
-            page.screenshot(
-                true,
-                true,
-                spider::chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                Some(75),
-                None::<PathBuf>,
-            )
-            .await;
+            println!("📸 - {:?}", page.get_url());
+            let bytes = page
+                .screenshot(
+                    true,
+                    true,
+                    spider::configuration::CaptureScreenshotFormat::Png,
+                    Some(75),
+                    None::<PathBuf>,
+                )
+                .await;
+            if bytes.is_empty() {
+                println!("🚫 - {:?}", page.get_url());
+            }
         }
     });
 
@@ -35,9 +39,4 @@ async fn main() {
         duration,
         links.len()
     )
-}
-
-#[cfg(not(feature = "chrome"))]
-fn main() {
-    println!("Use the chrome flag for this!");
 }
