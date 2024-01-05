@@ -5,9 +5,9 @@ extern crate spider;
 #[cfg(feature = "chrome")]
 #[tokio::main]
 async fn main() {
-    use std::path::PathBuf;
     use spider::tokio;
     use spider::website::Website;
+    use std::path::PathBuf;
     let mut website: Website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(18).unwrap();
 
@@ -36,7 +36,6 @@ async fn main() {
         links.len()
     )
 }
-
 
 #[cfg(not(feature = "chrome"))]
 fn main() {

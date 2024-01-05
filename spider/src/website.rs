@@ -3123,17 +3123,25 @@ impl Website {
         None
     }
 
-    /// Setup subscription for data.
+    /// Setup subscription for data. This will panic if capacity is equal to 0 or larger than usize::MAX / 2. This does nothing without the `sync` flag enabled.
     #[cfg(feature = "sync")]
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         let channel = self
             .channel
-            .get_or_insert(Arc::new(broadcast::channel(capacity.max(1))));
-        let channel = channel.clone();
-
+            .get_or_insert(Arc::new(broadcast::channel(capacity)));
         let rx2 = channel.0.subscribe();
 
         Some(rx2)
+    }
+
+    /// Remove subscriptions for data. This is useful for auto droping subscriptions that are running on another thread. This does nothing without the `sync` flag enabled.
+    #[cfg(not(feature = "sync"))]
+    pub fn unsubscribe(&mut self) {}
+
+    /// Remove subscriptions for data. This is useful for auto droping subscriptions that are running on another thread. This does nothing without the `sync` flag enabled.
+    #[cfg(feature = "sync")]
+    pub fn unsubscribe(&mut self) {
+        self.channel.take();
     }
 
     #[cfg(feature = "cron")]
