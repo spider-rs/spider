@@ -9,7 +9,7 @@ use crate::Client;
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
-use std::sync::atomic::{AtomicI8, Ordering};
+use std::sync::atomic::{AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
@@ -165,6 +165,8 @@ pub struct Website {
     >,
     /// Subscribe and broadcast changes.
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
+    /// Guard counter for channel handling.
+    channel_guard: Option<ChannelGuard>,
     /// The status of the active crawl.
     status: CrawlStatus,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
@@ -981,7 +983,7 @@ impl Website {
     #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
     async fn setup_chrome_interception(
         &self,
-        chrome_page: &Arc<chromiumoxide::Page>,
+        chrome_page: &chromiumoxide::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
         if self.configuration.chrome_intercept {
             use chromiumoxide::cdp::browser_protocol::network::ResourceType;
@@ -1049,7 +1051,7 @@ impl Website {
     #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
     async fn setup_chrome_interception(
         &self,
-        _chrome_page: &Arc<chromiumoxide::Page>,
+        _chrome_page: &chromiumoxide::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
         None
     }
@@ -1159,7 +1161,7 @@ impl Website {
                 Default::default()
             };
 
-            channel_send_page(&self.channel, page);
+            channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
         } else {
@@ -1240,7 +1242,7 @@ impl Website {
                 Default::default()
             };
 
-            channel_send_page(&self.channel, page);
+            channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
         } else {
@@ -1285,7 +1287,7 @@ impl Website {
 
             let page_links = HashSet::from(page.links.clone());
 
-            channel_send_page(&self.channel, page);
+            channel_send_page(&self.channel, page, &self.channel_guard);
 
             page_links
         } else {
@@ -1340,7 +1342,7 @@ impl Website {
 
                 self.links_visited.insert(link_result.0);
 
-                channel_send_page(&self.channel, page.clone());
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
 
                 let page_links = HashSet::from(page.links);
 
@@ -1413,7 +1415,7 @@ impl Website {
                     self.status = CrawlStatus::Empty;
                 };
 
-                channel_send_page(&self.channel, page);
+                channel_send_page(&self.channel, page, &self.channel_guard);
             }
         }
 
@@ -1559,6 +1561,7 @@ impl Website {
                     selector,
                     self.channel.clone(),
                     self.configuration.external_domains_caseless.clone(),
+                    self.channel_guard.clone()
                 ));
 
                 if !links.is_empty() {
@@ -1615,7 +1618,7 @@ impl Website {
                                                 page.links(&shared.1).await
                                             };
 
-                                            channel_send_page(&shared.2, page);
+                                            channel_send_page(&shared.2, page, &shared.4);
 
                                             drop(permit);
 
@@ -1703,6 +1706,7 @@ impl Website {
                     let selectors = selectors.clone();
                     let external_domains_caseless =
                         self.configuration.external_domains_caseless.clone();
+                    let channel_guard = self.channel_guard.clone();
 
                     set.spawn(async move {
                         drop(permit);
@@ -1719,7 +1723,7 @@ impl Website {
                             _ => (link, None),
                         };
 
-                        channel_send_page(&channel, page.clone());
+                        channel_send_page(&channel, page.clone(), &channel_guard);
 
                         page.set_external(external_domains_caseless);
 
@@ -1776,7 +1780,7 @@ impl Website {
             let full_resources = self.configuration.full_resources;
 
             match launch_browser(&self.configuration).await {
-                Some((mut browser, browser_handle)) => {
+                Some((browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
@@ -1792,24 +1796,19 @@ impl Website {
                             }
 
                             let new_page = configure_browser(new_page, &self.configuration).await;
-
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
-
-                            let chrome_page = Arc::new(new_page.clone());
-
-                            let intercept_handle =
-                                self.setup_chrome_interception(&chrome_page).await;
-
+                            let intercept_handle = self.setup_chrome_interception(&new_page).await;
                             let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
+                                .crawl_establish(&client, &mut selectors, false, &new_page)
                                 .await;
 
                             let shared = Arc::new((
                                 client.to_owned(),
                                 selectors,
                                 self.channel.clone(),
-                                chrome_page,
+                                new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
+                                self.channel_guard.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -1880,7 +1879,9 @@ impl Website {
                                                             page.links(&shared.1).await
                                                         };
 
-                                                        channel_send_page(&shared.2, page);
+                                                        channel_send_page(
+                                                            &shared.2, page, &shared.5,
+                                                        );
 
                                                         drop(permit);
 
@@ -1906,15 +1907,17 @@ impl Website {
                                 }
                             }
 
-                            if !std::env::var("CHROME_URL").is_ok() {
-                                let _ = browser.close().await;
-                                let _ = browser_handle.await;
-                            } else {
-                                let _ = new_page.close().await;
-                                if !browser_handle.is_finished() {
-                                    browser_handle.abort();
-                                }
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
                             }
+
+                            crate::features::chrome::close_browser(
+                                browser,
+                                browser_handle,
+                                new_page,
+                            )
+                            .await;
+
                             match intercept_handle {
                                 Some(intercept_handle) => {
                                     let _ = intercept_handle.await;
@@ -1951,6 +1954,8 @@ impl Website {
                     selector,
                     self.channel.clone(),
                     self.configuration.external_domains_caseless.clone(),
+                    self.channel_guard.clone(),
+                    self.channel_guard.clone()
                 ));
 
                 let add_external = shared.3.len() > 0;
@@ -2012,7 +2017,7 @@ impl Website {
                                                 page.links(&shared.1).await
                                             };
                     
-                                            channel_send_page(&shared.2, page);
+                                            channel_send_page(&shared.2, page, &shared.5);
 
                                             drop(permit);
 
@@ -2185,16 +2190,10 @@ impl Website {
                             }
 
                             let mut selectors = unsafe { selectors.unwrap_unchecked() };
-
                             let new_page = configure_browser(new_page, &self.configuration).await;
-
-                            let chrome_page = Arc::new(new_page.clone());
-
-                            let intercept_handle =
-                                self.setup_chrome_interception(&chrome_page).await;
-
+                            let intercept_handle = self.setup_chrome_interception(&new_page).await;
                             let mut links: HashSet<CaseInsensitiveString> = self
-                                .crawl_establish(&client, &mut selectors, false, &chrome_page)
+                                .crawl_establish(&client, &mut selectors, false, &new_page)
                                 .await;
 
                             links.extend(self.links_visited.drain());
@@ -2203,8 +2202,9 @@ impl Website {
                                 client.to_owned(),
                                 selectors,
                                 self.channel.clone(),
-                                chrome_page,
+                                new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
+                                self.channel_guard.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -2273,7 +2273,9 @@ impl Website {
                                                             .smart_links(&shared.1, &shared.3)
                                                             .await;
 
-                                                        channel_send_page(&shared.2, page);
+                                                        channel_send_page(
+                                                            &shared.2, page, &shared.5,
+                                                        );
 
                                                         drop(permit);
 
@@ -2299,15 +2301,16 @@ impl Website {
                                 }
                             }
 
-                            if !std::env::var("CHROME_URL").is_ok() {
-                                let _ = browser.close().await;
-                                let _ = browser_handle.await;
-                            } else {
-                                let _ = new_page.close().await;
-                                if !browser_handle.is_finished() {
-                                    browser_handle.abort();
-                                }
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
                             }
+
+                            crate::features::chrome::close_browser(
+                                browser,
+                                browser_handle,
+                                new_page,
+                            )
+                            .await;
 
                             match intercept_handle {
                                 Some(intercept_handle) => {
@@ -2381,6 +2384,7 @@ impl Website {
                     let selectors = selectors.clone();
                     let external_domains_caseless =
                         self.configuration.external_domains_caseless.clone();
+                    let channel_guard = self.channel_guard.clone();
 
                     set.spawn(async move {
                         drop(permit);
@@ -2397,7 +2401,7 @@ impl Website {
                             _ => (link, None),
                         };
 
-                        channel_send_page(&channel, page.clone());
+                        channel_send_page(&channel, page.clone(), &channel_guard);
 
                         page.set_external(external_domains_caseless);
 
@@ -2467,7 +2471,7 @@ impl Website {
             links.extend(self.links_visited.drain());
 
             match launch_browser(&self.configuration).await {
-                Some((mut browser, _)) => {
+                Some((browser, browser_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             if cfg!(feature = "chrome_stealth") {
@@ -2483,10 +2487,8 @@ impl Website {
                             }
 
                             let new_page = configure_browser(new_page, &self.configuration).await;
-
+                            let intercept_handle = self.setup_chrome_interception(&new_page).await;
                             let page = Arc::new(new_page.clone());
-
-                            let intercept_handle = self.setup_chrome_interception(&page).await;
 
                             // crawl while links exists
                             loop {
@@ -2522,6 +2524,7 @@ impl Website {
                                     let page = page.clone();
                                     let external_domains_caseless =
                                         self.configuration.external_domains_caseless.clone();
+                                    let channel_guard = self.channel_guard.clone();
 
                                     set.spawn(async move {
                                         drop(permit);
@@ -2542,7 +2545,7 @@ impl Website {
                                             _ => (link, None),
                                         };
 
-                                        channel_send_page(&channel, page.clone());
+                                        channel_send_page(&channel, page.clone(), &channel_guard);
 
                                         page.set_external(external_domains_caseless);
                                         let page_links = page.links(&*selectors).await;
@@ -2578,11 +2581,16 @@ impl Website {
                                 }
                             }
 
-                            if !std::env::var("CHROME_URL").is_ok() {
-                                let _ = browser.close().await;
-                            } else {
-                                let _ = new_page.close().await;
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
                             }
+
+                            crate::features::chrome::close_browser(
+                                browser,
+                                browser_handle,
+                                new_page,
+                            )
+                            .await;
 
                             match intercept_handle {
                                 Some(intercept_handle) => {
@@ -2667,6 +2675,7 @@ impl Website {
             let client = client.clone();
 
             let channel = self.channel.clone();
+            let channel_guard = self.channel_guard.clone();
 
             let handles = tokio::spawn(async move {
                 let mut pages = Vec::new();
@@ -2677,7 +2686,7 @@ impl Website {
                             pages.push(page.clone());
                         };
 
-                        channel_send_page(&channel, page);
+                        channel_send_page(&channel, page, &channel_guard);
                     } else {
                         pages.push(page);
                     }
@@ -2802,6 +2811,22 @@ impl Website {
     #[cfg(not(feature = "regex"))]
     fn get_base_link(&self) -> &CompactString {
         self.domain.inner()
+    }
+
+    /// Guard the channel from closing until all subscription events complete.
+    #[cfg(feature = "chrome")]
+    async fn subscription_guard(&self) {
+        match &self.channel {
+            Some(channel) => {
+                if !channel.1.is_empty() {
+                    match &self.channel_guard {
+                        Some(guard_counter) => guard_counter.lock(self.get_links().len()),
+                        _ => (),
+                    }
+                }
+            }
+            _ => (),
+        }
     }
 
     /// Respect robots.txt file.
@@ -3129,7 +3154,6 @@ impl Website {
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         let channel = self.channel.get_or_insert_with(|| {
             let (tx, rx) = broadcast::channel(capacity);
-
             (tx, Arc::new(rx))
         });
 
@@ -3146,6 +3170,28 @@ impl Website {
     #[cfg(feature = "sync")]
     pub fn unsubscribe(&mut self) {
         self.channel.take();
+    }
+
+    /// Setup subscription counter to track concurrent operation completions.
+    /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
+    /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
+    /// This does nothing without the `sync` flag enabled.
+    #[cfg(not(feature = "sync"))]
+    pub fn subscribe_guard(&mut self) -> Option<ChannelGuard> {
+        None
+    }
+
+    /// Setup subscription counter to track concurrent operation completions.
+    /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
+    /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
+    /// This does nothing without the `sync` flag enabled.
+    #[cfg(feature = "sync")]
+    pub fn subscribe_guard(&mut self) -> Option<ChannelGuard> {
+        // *note*: it would be better to handle this on page drop if the subscription is used automatically. For now we add the API upfront.
+        let channel_guard = self
+            .channel_guard
+            .get_or_insert_with(|| ChannelGuard::new());
+        Some(channel_guard.clone())
     }
 
     #[cfg(feature = "cron")]
@@ -3165,13 +3211,49 @@ fn channel_send_page(
         std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
     )>,
     page: Page,
+    channel_guard: &Option<ChannelGuard>,
 ) {
     match channel {
         Some(c) => match c.0.send(page) {
+            Err(_) => match channel_guard {
+                Some(guard) => ChannelGuard::inc_guard(&guard.0),
+                _ => (),
+            },
             _ => (),
         },
         _ => (),
     };
+}
+
+/// Guard a channel from closing until all concurrent operations are done.
+#[derive(Debug, Clone)]
+pub struct ChannelGuard(Arc<AtomicUsize>);
+
+impl ChannelGuard {
+    /// Create a new channel guard.
+    pub(crate) fn new() -> ChannelGuard {
+        ChannelGuard {
+            0: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+    /// Lock the channel until complete.
+    #[cfg(feature = "chrome")]
+    pub(crate) fn lock(&self, current: usize) {
+        while self
+            .0
+            .compare_exchange_weak(current, 0, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {}
+        std::sync::atomic::fence(Ordering::Acquire);
+    }
+    /// Increment the guard channel completions.
+    pub fn inc(&mut self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+    /// Increment a guard channel completions.
+    pub(crate) fn inc_guard(guard: &Arc<AtomicUsize>) {
+        guard.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
 }
 
 #[cfg(feature = "cron")]

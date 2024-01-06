@@ -9,6 +9,7 @@ async fn main() {
     use std::path::PathBuf;
     let mut website: Website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(18).unwrap();
+    let mut rxg = website.subscribe_guard().unwrap();
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
@@ -25,6 +26,7 @@ async fn main() {
             if bytes.is_empty() {
                 println!("🚫 - {:?}", page.get_url());
             }
+            rxg.inc();
         }
     });
 

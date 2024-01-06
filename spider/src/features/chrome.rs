@@ -2,7 +2,7 @@ use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
-use tokio::task;
+use tokio::task::{self, JoinHandle};
 
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
@@ -219,6 +219,19 @@ pub async fn configure_browser(new_page: Page, configuration: &Configuration) ->
     };
 
     new_page
+}
+
+/// close the browser and open handles
+pub async fn close_browser(mut browser: Browser, browser_handle: JoinHandle<()>, new_page: Page) {
+    if !std::env::var("CHROME_URL").is_ok() {
+        let _ = browser.close().await;
+        let _ = browser_handle.await;
+    } else {
+        let _ = new_page.close().await;
+        if !browser_handle.is_finished() {
+            browser_handle.abort();
+        }
+    }
 }
 
 #[cfg(not(feature = "chrome_cpu"))]
