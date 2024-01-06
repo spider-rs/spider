@@ -313,6 +313,7 @@ impl Page {
         _format: crate::configuration::CaptureScreenshotFormat,
         _quality: Option<i64>,
         _output_path: Option<impl AsRef<std::path::Path>>,
+        _clip: Option<crate::configuration::ClipViewport>,
     ) -> Vec<u8> {
         Default::default()
     }
@@ -326,6 +327,7 @@ impl Page {
         format: crate::configuration::CaptureScreenshotFormat,
         quality: Option<i64>,
         output_path: Option<impl AsRef<std::path::Path>>,
+        clip: Option<crate::configuration::ClipViewport>,
     ) -> Vec<u8> {
         match &self.chrome_page {
             Some(page) => {
@@ -351,16 +353,26 @@ impl Page {
                         ))
                     }
                 };
+
+                let screenshot_configs = chromiumoxide::page::ScreenshotParams::builder()
+                    .format(format)
+                    .full_page(full_page)
+                    .omit_background(omit_background);
+
+                let screenshot_configs = match quality {
+                    Some(q) => screenshot_configs.quality(q),
+                    _ => screenshot_configs,
+                };
+
+                let screenshot_configs = match clip {
+                    Some(vp) => screenshot_configs.clip(
+                        chromiumoxide::cdp::browser_protocol::page::Viewport::from(vp),
+                    ),
+                    _ => screenshot_configs,
+                };
+
                 match page
-                    .save_screenshot(
-                        chromiumoxide::page::ScreenshotParams::builder()
-                            .format(format)
-                            .full_page(full_page)
-                            .omit_background(omit_background)
-                            .quality(quality.unwrap_or(100))
-                            .build(),
-                        &output_path,
-                    )
+                    .save_screenshot(screenshot_configs.build(), &output_path)
                     .await
                 {
                     Ok(v) => {

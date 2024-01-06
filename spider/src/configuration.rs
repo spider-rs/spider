@@ -620,3 +620,37 @@ impl From<CaptureScreenshotFormat>
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// The view port clip for screenshots.
+pub struct ClipViewport {
+    #[doc = "X offset in device independent pixels (dip)."]
+    #[cfg_attr(feature = "serde", serde(rename = "x"))]
+    pub x: f64,
+    #[doc = "Y offset in device independent pixels (dip)."]
+    #[cfg_attr(feature = "serde", serde(rename = "y"))]
+    pub y: f64,
+    #[doc = "Rectangle width in device independent pixels (dip)."]
+    #[cfg_attr(feature = "serde", serde(rename = "width"))]
+    pub width: f64,
+    #[doc = "Rectangle height in device independent pixels (dip)."]
+    #[cfg_attr(feature = "serde", serde(rename = "height"))]
+    pub height: f64,
+    #[doc = "Page scale factor."]
+    #[cfg_attr(feature = "serde", serde(rename = "scale"))]
+    pub scale: f64,
+}
+
+#[cfg(feature = "chrome")]
+impl From<ClipViewport> for chromiumoxide::cdp::browser_protocol::page::Viewport {
+    fn from(viewport: ClipViewport) -> Self {
+        Self {
+            x: viewport.x,
+            y: viewport.y,
+            height: viewport.height,
+            width: viewport.width,
+            scale: viewport.scale,
+        }
+    }
+}
