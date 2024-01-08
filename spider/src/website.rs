@@ -100,6 +100,8 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
+const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
+
 /// the active status of the crawl.
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CrawlStatus {
@@ -1424,11 +1426,7 @@ impl Website {
 
     /// Set the crawl status depending on crawl state.
     fn set_crawl_status(&mut self) {
-        if !self.domain_parsed.is_some() {
-            self.status = CrawlStatus::Invalid;
-        } else {
-            self.status = CrawlStatus::Idle;
-        }
+        self.status = if !self.domain_parsed.is_some() { CrawlStatus::Invalid } else { CrawlStatus::Idle };
     }
 
     /// Start to crawl website with async concurrency.
@@ -1646,123 +1644,120 @@ impl Website {
                     }
                 }
             }
-            _ => log("", "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>."),
+            _ => log("", INVALID_URL),
         }
     }
 
     /// Start to scape website concurrently and store html - used mainly for chrome instances to connect to default raw HTTP.
     async fn scrape_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-
-        if selectors.is_some() {
-            self.status = CrawlStatus::Active;
-            let blacklist_url = self.configuration.get_blacklist();
-            self.pages = Some(Box::new(Vec::new()));
-            let delay = self.configuration.delay;
-            let on_link_find_callback = self.on_link_find_callback;
-            let mut interval = tokio::time::interval(Duration::from_millis(10));
-            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-            let full_resources = self.configuration.full_resources;
-            let throttle = Duration::from_millis(delay);
-
-            let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
-            let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
-                JoinSet::new();
-
-            // crawl while links exists
-            loop {
-                let stream =
-                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
-                        .throttle(throttle);
-                tokio::pin!(stream);
-
-                while let Some(link) = stream.next().await {
-                    match handle.as_ref() {
-                        Some(handle) => {
-                            while handle.load(Ordering::Relaxed) == 1 {
-                                interval.tick().await;
+        match self.setup_selectors() {
+            Some(selectors) => {
+                self.status = CrawlStatus::Active;
+                let blacklist_url = self.configuration.get_blacklist();
+                self.pages = Some(Box::new(Vec::new()));
+                let delay = self.configuration.delay;
+                let on_link_find_callback = self.on_link_find_callback;
+                let mut interval = tokio::time::interval(Duration::from_millis(10));
+                let selectors = Arc::new(selectors);
+                let full_resources = self.configuration.full_resources;
+                let throttle = Duration::from_millis(delay);
+    
+                let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
+                let mut set: JoinSet<(CaseInsensitiveString, Page, HashSet<CaseInsensitiveString>)> =
+                    JoinSet::new();
+    
+                // crawl while links exists
+                loop {
+                    let stream =
+                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                            .throttle(throttle);
+                    tokio::pin!(stream);
+    
+                    while let Some(link) = stream.next().await {
+                        match handle.as_ref() {
+                            Some(handle) => {
+                                while handle.load(Ordering::Relaxed) == 1 {
+                                    interval.tick().await;
+                                }
+                                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                                    set.shutdown().await;
+                                    break;
+                                }
                             }
-                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                                set.shutdown().await;
-                                break;
-                            }
+                            None => (),
                         }
-                        None => (),
-                    }
-                    if !self.is_allowed(&link, &blacklist_url) {
-                        continue;
-                    }
-                    self.links_visited.insert(link.clone());
-                    log("fetch", &link);
-                    let permit = SEM.acquire().await.unwrap();
-                    // these clones should move into a single arc
-                    let client = client.clone();
-                    let channel = self.channel.clone();
-                    let selectors = selectors.clone();
-                    let external_domains_caseless =
-                        self.configuration.external_domains_caseless.clone();
-                    let channel_guard = self.channel_guard.clone();
-
-                    set.spawn(async move {
-                        drop(permit);
-                        let page_resource =
-                            crate::utils::fetch_page_html_raw(&link.as_ref(), &client).await;
-                        let mut page = build(&link.as_ref(), page_resource);
-
-                        let (link, _) = match on_link_find_callback {
-                            Some(cb) => {
-                                let c = cb(link, Some(page.get_html()));
-
-                                c
-                            }
-                            _ => (link, None),
-                        };
-
-                        channel_send_page(&channel, page.clone(), &channel_guard);
-
-                        page.set_external(external_domains_caseless);
-
-                        let page_links = if full_resources {
-                            page.links_full(&*selectors).await
-                        } else {
-                            page.links(&*selectors).await
-                        };
-
-                        (link, page, page_links)
-                    });
-                }
-
-                task::yield_now().await;
-
-                if links.capacity() >= 1500 {
-                    links.shrink_to_fit();
-                }
-
-                while let Some(res) = set.join_next().await {
-                    match res {
-                        Ok(msg) => {
-                            let page = msg.1;
-                            links.extend(&msg.2 - &self.links_visited);
-                            task::yield_now().await;
-                            match self.pages.as_mut() {
-                                Some(p) => p.push(page),
-                                _ => (),
+                        if !self.is_allowed(&link, &blacklist_url) {
+                            continue;
+                        }
+                        self.links_visited.insert(link.clone());
+                        log("fetch", &link);
+                        let permit = SEM.acquire().await.unwrap();
+                        // these clones should move into a single arc
+                        let client = client.clone();
+                        let channel = self.channel.clone();
+                        let selectors = selectors.clone();
+                        let external_domains_caseless =
+                            self.configuration.external_domains_caseless.clone();
+                        let channel_guard = self.channel_guard.clone();
+    
+                        set.spawn(async move {
+                            drop(permit);
+                            let page_resource =
+                                crate::utils::fetch_page_html_raw(&link.as_ref(), &client).await;
+                            let mut page = build(&link.as_ref(), page_resource);
+    
+                            let (link, _) = match on_link_find_callback {
+                                Some(cb) => {
+                                    let c = cb(link, Some(page.get_html()));
+    
+                                    c
+                                }
+                                _ => (link, None),
                             };
-                        }
-                        _ => (),
-                    };
-                }
-
-                task::yield_now().await;
-                if links.is_empty() {
-                    break;
+    
+                            channel_send_page(&channel, page.clone(), &channel_guard);
+    
+                            page.set_external(external_domains_caseless);
+    
+                            let page_links = if full_resources {
+                                page.links_full(&*selectors).await
+                            } else {
+                                page.links(&*selectors).await
+                            };
+    
+                            (link, page, page_links)
+                        });
+                    }
+    
+                    task::yield_now().await;
+    
+                    if links.capacity() >= 1500 {
+                        links.shrink_to_fit();
+                    }
+    
+                    while let Some(res) = set.join_next().await {
+                        match res {
+                            Ok(msg) => {
+                                let page = msg.1;
+                                links.extend(&msg.2 - &self.links_visited);
+                                task::yield_now().await;
+                                match self.pages.as_mut() {
+                                    Some(p) => p.push(page),
+                                    _ => (),
+                                };
+                            }
+                            _ => (),
+                        };
+                    }
+    
+                    task::yield_now().await;
+                    if links.is_empty() {
+                        break;
+                    }
                 }
             }
+            _ => log("", INVALID_URL),
         }
     }
 
@@ -1770,10 +1765,8 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        let selectors = self.setup_selectors();
-
-        // crawl if valid selector
-        if selectors.is_some() {
+        match self.setup_selectors() {
+            Some(mut selectors) => {
             let (mut interval, throttle) = self.setup_crawl();
             let blacklist_url = self.configuration.get_blacklist();
             let on_link_find_callback = self.on_link_find_callback;
@@ -1796,7 +1789,6 @@ impl Website {
                             }
 
                             let new_page = configure_browser(new_page, &self.configuration).await;
-                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
                             let intercept_handle = self.setup_chrome_interception(&new_page).await;
                             let mut links: HashSet<CaseInsensitiveString> = self
                                 .crawl_establish(&client, &mut selectors, false, &new_page)
@@ -1930,6 +1922,8 @@ impl Website {
                 }
                 _ => log("", "Chrome failed to start."),
             }
+            }
+            _ => log("", INVALID_URL)
         }
     }
 
@@ -1937,7 +1931,6 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        // crawl if valid selector
         match self.setup_selectors() {
             Some(mut selector) => {
                 let (mut interval, throttle) = self.setup_crawl();
@@ -2044,7 +2037,7 @@ impl Website {
                     }
                 }
             }
-            _ => log("", "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>."),
+            _ => log("", INVALID_URL),
         }
     }
 
@@ -2163,10 +2156,8 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        let selectors = self.setup_selectors();
-
-        // crawl if valid selector
-        if selectors.is_some() {
+        match self.setup_selectors() {
+            Some(mut selectors) => {
             let (mut interval, throttle) = self.setup_crawl();
             let blacklist_url = self.configuration.get_blacklist();
 
@@ -2188,7 +2179,6 @@ impl Website {
                                 });
                             }
 
-                            let mut selectors = unsafe { selectors.unwrap_unchecked() };
                             let new_page = configure_browser(new_page, &self.configuration).await;
                             let intercept_handle = self.setup_chrome_interception(&new_page).await;
                             let mut links: HashSet<CaseInsensitiveString> = self
@@ -2324,25 +2314,23 @@ impl Website {
                 _ => log("", "Chrome failed to start."),
             }
         }
+        _ => log("", INVALID_URL),
+
+        }
     }
 
     #[cfg(not(feature = "chrome"))]
     /// Start to scape website concurrently and store resources.
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-
-        if selectors.is_some() {
+        match self.setup_selectors() {
+            Some(selectors) => {
             self.status = CrawlStatus::Active;
             let blacklist_url = self.configuration.get_blacklist();
             self.pages = Some(Box::new(Vec::new()));
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
-            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+            let selectors = Arc::new(selectors);
             let throttle = Duration::from_millis(self.configuration.delay);
             let full_resources = self.configuration.full_resources;
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
@@ -2441,26 +2429,23 @@ impl Website {
                 }
             }
         }
+            _ => log("", INVALID_URL),
+        }
     }
 
     #[cfg(feature = "chrome")]
     /// Start to scape website concurrently and store resources
     async fn scrape_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
-        let selectors = get_page_selectors(
-            &self.domain.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        );
-
-        if selectors.is_some() {
+        match self.setup_selectors() {
+            Some(selectors) => {
             self.status = CrawlStatus::Active;
             let blacklist_url = self.configuration.get_blacklist();
             self.pages = Some(Box::new(Vec::new()));
             let delay = self.configuration.delay;
             let on_link_find_callback = self.on_link_find_callback;
             let mut interval = tokio::time::interval(Duration::from_millis(10));
-            let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
+            let selectors = Arc::new(selectors);
             let throttle = Duration::from_millis(delay);
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.domain.clone()]);
@@ -2604,6 +2589,8 @@ impl Website {
                 _ => log("", "Chrome failed to start."),
             };
         }
+        _ => log("", INVALID_URL),
+    }
     }
 
     #[cfg(not(feature = "sitemap"))]
