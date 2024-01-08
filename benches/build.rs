@@ -22,16 +22,19 @@ pub fn main() {
         .args(["get", "-u", "github.com/gocolly/colly/v2"])
         .output()
         .expect("go get colly failed");
-    Command::new("go").args(["mod", "tidy"]).output().expect(
-        "go tidy failed",
-    );
-    Command::new("go").arg("build").output().expect(
-        "go build failed",
-    );
+    Command::new("go")
+        .args(["mod", "tidy"])
+        .output()
+        .expect("go tidy failed");
+    Command::new("go")
+        .arg("build")
+        .output()
+        .expect("go build failed");
     // install node deps
-    Command::new("npm").args(["init", "-y"]).output().expect(
-        "npm init failed",
-    );
+    Command::new("npm")
+        .args(["init", "-y"])
+        .output()
+        .expect("npm init failed");
     Command::new("npm")
         .args(["i", "crawler", "--save"])
         .output()

@@ -37,9 +37,8 @@ pub fn gen_crawl() -> String {
     let file = File::create(&crawl_script).expect("create go crawl script");
     let mut file = BufWriter::new(file);
     let stub = crawl_stub();
-    file.write_all(stub.as_bytes()).expect(
-        "Unable to write data",
-    );
+    file.write_all(stub.as_bytes())
+        .expect("Unable to write data");
 
     crawl_script
 }
