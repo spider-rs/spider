@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.80.59"
+version = "1.80.60"
 authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
 description = "The fastest web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -19,7 +19,7 @@ reqwest = { version = "0.11.23", features = [ "brotli", "gzip", "deflate", "stre
 url = "2.5.0"
 tokio = { version = "1.35.1", features = [ "rt-multi-thread", "macros", "time", "parking_lot" ] }
 tokio-stream = "0.1.14"
-hashbrown = { version = "0.14.2", default-features = true }
+hashbrown = { version = "0.14.3", default-features = true }
 log = "0.4.20"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.2", optional = true }

@@ -1118,6 +1118,7 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
@@ -1157,6 +1158,13 @@ impl Website {
                 Default::default()
             };
 
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
@@ -1178,8 +1186,9 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         selector: bool,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        self._crawl_establish(&client, base, selector).await
+        self._crawl_establish(&client, base, selector, scrape).await
     }
 
     /// Expand links for crawl.
@@ -1194,6 +1203,7 @@ impl Website {
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
         page: &chromiumoxide::Page,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
@@ -1238,6 +1248,13 @@ impl Website {
                 Default::default()
             };
 
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
@@ -1255,6 +1272,7 @@ impl Website {
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let links: HashSet<CaseInsensitiveString> = if self
@@ -1283,6 +1301,13 @@ impl Website {
 
             let page_links = HashSet::from(page.links.clone());
 
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             page_links
@@ -1300,6 +1325,7 @@ impl Website {
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.domain.inner();
@@ -1338,6 +1364,13 @@ impl Website {
 
                 self.links_visited.insert(link_result.0);
 
+                if scrape {
+                    match self.pages.as_mut() {
+                        Some(p) => p.push(page.clone()),
+                        _ => (),
+                    };
+                }
+
                 channel_send_page(&self.channel, page.clone(), &self.channel_guard);
 
                 let page_links = HashSet::from(page.links);
@@ -1356,6 +1389,7 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
+        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.domain.inner();
@@ -1410,6 +1444,13 @@ impl Website {
                 } else {
                     self.status = CrawlStatus::Empty;
                 };
+
+                if scrape {
+                    match self.pages.as_mut() {
+                        Some(p) => p.push(page.clone()),
+                        _ => (),
+                    };
+                }
 
                 channel_send_page(&self.channel, page, &self.channel_guard);
             }
@@ -1549,8 +1590,9 @@ impl Website {
                 let blacklist_url = self.configuration.get_blacklist();
                 let on_link_find_callback = self.on_link_find_callback;
                 let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self._crawl_establish(&client, &mut selector, false).await;
+                let mut links: HashSet<CaseInsensitiveString> = self
+                    ._crawl_establish(&client, &mut selector, false, false)
+                    .await;
 
                 let shared = Arc::new((
                     client.to_owned(),
@@ -1800,7 +1842,13 @@ impl Website {
                                 let intercept_handle =
                                     self.setup_chrome_interception(&new_page).await;
                                 let mut links: HashSet<CaseInsensitiveString> = self
-                                    .crawl_establish(&client, &mut selectors, false, &new_page)
+                                    .crawl_establish(
+                                        &client,
+                                        &mut selectors,
+                                        false,
+                                        &new_page,
+                                        false,
+                                    )
                                     .await;
 
                                 let shared = Arc::new((
@@ -1948,8 +1996,9 @@ impl Website {
                 let blacklist_url = self.configuration.get_blacklist();
                 let on_link_find_callback = self.on_link_find_callback;
                 let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self.crawl_establish(&client, &mut selector, false).await;
+                let mut links: HashSet<CaseInsensitiveString> = self
+                    .crawl_establish(&client, &mut selector, false, false)
+                    .await;
 
                 links.extend(self.links_visited.drain());
 
@@ -2081,6 +2130,7 @@ impl Website {
                         &client,
                         &mut (domain.into(), Default::default()),
                         http_worker,
+                        false,
                     )
                     .await;
 
@@ -2206,7 +2256,13 @@ impl Website {
                                 let intercept_handle =
                                     self.setup_chrome_interception(&new_page).await;
                                 let mut links: HashSet<CaseInsensitiveString> = self
-                                    .crawl_establish(&client, &mut selectors, false, &new_page)
+                                    .crawl_establish(
+                                        &client,
+                                        &mut selectors,
+                                        false,
+                                        &new_page,
+                                        false,
+                                    )
                                     .await;
 
                                 links.extend(self.links_visited.drain());
@@ -2357,8 +2413,9 @@ impl Website {
                 let mut interval = tokio::time::interval(Duration::from_millis(10));
                 let throttle = Duration::from_millis(self.configuration.delay);
                 let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> =
-                    self.crawl_establish(&client, &mut selectors, false).await;
+                let mut links: HashSet<CaseInsensitiveString> = self
+                    .crawl_establish(&client, &mut selectors, false, true)
+                    .await;
 
                 links.extend(self.links_visited.drain());
 
