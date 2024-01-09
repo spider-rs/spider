@@ -1112,6 +1112,23 @@ impl Website {
         (interval, throttle)
     }
 
+    /// Get all the expanded links.
+    #[cfg(feature = "glob")]
+    fn get_expanded_links(&self, domain_name: &str) -> Vec<CaseInsensitiveString> {
+        let mut expanded = crate::features::glob::expand_url(&domain_name);
+
+        if expanded.len() == 0 {
+            match self.get_absolute_path(Some(domain_name)) {
+                Some(u) => {
+                    expanded.push(u.as_str().into());
+                }
+                _ => (),
+            };
+        };
+
+        expanded
+    }
+
     /// Expand links for crawl.
     async fn _crawl_establish(
         &mut self,
@@ -1328,18 +1345,7 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let domain_name = self.domain.inner();
-        let mut expanded = crate::features::glob::expand_url(&domain_name.as_str());
-
-        if expanded.len() == 0 {
-            match self.get_absolute_path(Some(domain_name)) {
-                Some(u) => {
-                    expanded.push(u.as_str().into());
-                }
-                _ => (),
-            };
-        };
-
+        let expanded = self.get_expanded_links(&self.domain.inner().as_str());
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
@@ -1383,7 +1389,56 @@ impl Website {
     }
 
     /// Expand links for crawl.
-    #[cfg(all(feature = "glob", not(feature = "decentralized")))]
+    #[cfg(all(feature = "glob", feature = "chrome", not(feature = "decentralized")))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        _: bool,
+        page: &chromiumoxide::Page,
+        scrape: bool,
+    ) -> HashSet<CaseInsensitiveString> {
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let expanded = self.get_expanded_links(&self.domain.inner().as_str());
+        let blacklist_url = self.configuration.get_blacklist();
+
+        for link in expanded {
+            if self.is_allowed(&link, &blacklist_url) {
+                let page = Page::new(&link.inner().as_str(), &client, &page).await;
+                let u = page.get_url();
+                let u = if u.is_empty() { link } else { u.into() };
+
+                let link_result = match self.on_link_find_callback {
+                    Some(cb) => cb(u, None),
+                    _ => (u, None),
+                };
+
+                self.links_visited.insert(link_result.0);
+
+                if scrape {
+                    match self.pages.as_mut() {
+                        Some(p) => p.push(page.clone()),
+                        _ => (),
+                    };
+                }
+
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+                let page_links = HashSet::from(page.links(&base).await);
+
+                links.extend(page_links);
+            }
+        }
+
+        links
+    }
+
+    /// Expand links for crawl.
+    #[cfg(all(
+        feature = "glob",
+        not(feature = "chrome"),
+        not(feature = "decentralized")
+    ))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -1393,16 +1448,7 @@ impl Website {
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.domain.inner();
-        let mut expanded = crate::features::glob::expand_url(&domain_name.as_str());
-
-        if expanded.len() == 0 {
-            match self.get_absolute_path(Some(domain_name)) {
-                Some(u) => {
-                    expanded.push(u.as_str().into());
-                }
-                _ => (),
-            };
-        };
+        let expanded = self.get_expanded_links(&domain_name.as_str());
 
         let blacklist_url = self.configuration.get_blacklist();
 
