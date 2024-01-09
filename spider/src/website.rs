@@ -563,10 +563,9 @@ impl Website {
         use reqwest::redirect::Attempt;
         use std::sync::atomic::AtomicU8;
 
-        let host_str = self.domain_parsed.as_deref().cloned();
         let default_policy = reqwest::redirect::Policy::default();
 
-        match host_str {
+        match self.domain_parsed.as_deref().cloned() {
             Some(host_s) => {
                 let initial_redirect = Arc::new(AtomicU8::new(0));
                 let initial_redirect_limit = if self.configuration.respect_robots_txt {
@@ -1529,7 +1528,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` flag enabled.
@@ -1546,7 +1545,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
@@ -1564,7 +1563,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
@@ -1588,7 +1587,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     /// Start to scrape/download website with async concurrency.
@@ -1606,7 +1605,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
@@ -1624,7 +1623,7 @@ impl Website {
             Some(h) => h.abort(),
             _ => (),
         };
-        self.client = Some(client);
+        self.client.replace(client);
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
@@ -1896,6 +1895,8 @@ impl Website {
                                         false,
                                     )
                                     .await;
+
+                                links.extend(self.links_visited.drain());
 
                                 let shared = Arc::new((
                                     client.to_owned(),
@@ -2582,24 +2583,6 @@ impl Website {
         match self.setup_selectors() {
             Some(selectors) => {
                 self.status = CrawlStatus::Active;
-                let blacklist_url = self.configuration.get_blacklist();
-                self.pages = Some(Box::new(Vec::new()));
-                let delay = self.configuration.delay;
-                let on_link_find_callback = self.on_link_find_callback;
-                let mut interval = tokio::time::interval(Duration::from_millis(10));
-                let selectors = Arc::new(selectors);
-                let throttle = Duration::from_millis(delay);
-
-                let mut links: HashSet<CaseInsensitiveString> =
-                    HashSet::from([*self.domain.clone()]);
-                let mut set: JoinSet<(
-                    CaseInsensitiveString,
-                    Page,
-                    HashSet<CaseInsensitiveString>,
-                )> = JoinSet::new();
-
-                links.extend(self.links_visited.drain());
-
                 match launch_browser(&self.configuration).await {
                     Some((browser, browser_handle)) => {
                         match browser.new_page("about:blank").await {
@@ -2616,13 +2599,38 @@ impl Website {
                                     });
                                 }
 
+                                let blacklist_url = self.configuration.get_blacklist();
+                                self.pages = Some(Box::new(Vec::new()));
+                                let delay = self.configuration.delay;
+                                let on_link_find_callback = self.on_link_find_callback;
+                                let mut interval = tokio::time::interval(Duration::from_millis(10));
+                                let throttle = Duration::from_millis(delay);
+
+                                let mut set: JoinSet<(
+                                    CaseInsensitiveString,
+                                    Page,
+                                    HashSet<CaseInsensitiveString>,
+                                )> = JoinSet::new();
+
                                 let new_page =
                                     configure_browser(new_page, &self.configuration).await;
                                 let intercept_handle =
                                     self.setup_chrome_interception(&new_page).await;
-                                let page = Arc::new(new_page.clone());
 
-                                // crawl while links exists
+                                let mut links: HashSet<CaseInsensitiveString> =
+                                    HashSet::from([*self.domain.clone()]);
+
+                                links.extend(self.links_visited.drain());
+
+                                let shared = Arc::new((
+                                    client.to_owned(),
+                                    selectors,
+                                    self.channel.clone(),
+                                    new_page.clone(),
+                                    self.configuration.external_domains_caseless.clone(),
+                                    self.channel_guard.clone(),
+                                ));
+
                                 loop {
                                     let stream =
                                         tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2651,21 +2659,15 @@ impl Website {
                                         }
                                         self.links_visited.insert(link.clone());
                                         log("fetch", &link);
-                                        let client = client.clone();
                                         let permit = SEM.acquire().await.unwrap();
-                                        let channel = self.channel.clone();
-                                        let selectors = selectors.clone();
-                                        let page = page.clone();
-                                        let external_domains_caseless =
-                                            self.configuration.external_domains_caseless.clone();
-                                        let channel_guard = self.channel_guard.clone();
+                                        let shared = shared.clone();
 
                                         set.spawn(async move {
                                             drop(permit);
                                             let page = crate::utils::fetch_page_html_chrome(
                                                 &link.as_ref(),
-                                                &client,
-                                                &page,
+                                                &shared.0,
+                                                &shared.3,
                                             )
                                             .await;
                                             let mut page = build(&link.as_ref(), page);
@@ -2679,14 +2681,10 @@ impl Website {
                                                 _ => (link, None),
                                             };
 
-                                            channel_send_page(
-                                                &channel,
-                                                page.clone(),
-                                                &channel_guard,
-                                            );
+                                            channel_send_page(&shared.2, page.clone(), &shared.5);
 
-                                            page.set_external(external_domains_caseless);
-                                            let page_links = page.links(&*selectors).await;
+                                            page.set_external(shared.4.clone());
+                                            let page_links = page.links(&shared.1).await;
 
                                             (link, page, page_links)
                                         });
