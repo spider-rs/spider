@@ -3312,6 +3312,36 @@ impl Website {
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
     /// This does nothing without the `sync` flag enabled.
+    /// 
+    /// # Example
+    ///
+    /// ```
+    /// use spider::tokio;
+    /// use spider::website::Website;
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut website: Website = Website::new("http://example.com");
+    ///     let mut rx2 = website.subscribe(18).unwrap();
+    ///     let mut rxg = website.subscribe_guard().unwrap();
+    ///     tokio::spawn(async move {
+    ///         while let Ok(page) = rx2.recv().await {
+    ///             println!("📸 - {:?}", page.get_url());
+    ///             page
+    ///                 .screenshot(
+    ///                     true,
+    ///                     true,
+    ///                     spider::configuration::CaptureScreenshotFormat::Png,
+    ///                     Some(75),
+    ///                     None::<std::path::PathBuf>,
+    ///                     None,
+    ///                 )
+    ///                 .await;
+    ///             rxg.inc();
+    ///         }
+    ///     });
+    ///     website.crawl().await;
+    /// }
+    /// ```
     #[cfg(not(feature = "sync"))]
     pub fn subscribe_guard(&mut self) -> Option<ChannelGuard> {
         None
@@ -3321,6 +3351,36 @@ impl Website {
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
     /// This does nothing without the `sync` flag enabled.
+    /// 
+    /// # Example
+    ///
+    /// ```
+    /// use spider::tokio;
+    /// use spider::website::Website;
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut website: Website = Website::new("http://example.com");
+    ///     let mut rx2 = website.subscribe(18).unwrap();
+    ///     let mut rxg = website.subscribe_guard().unwrap();
+    ///     tokio::spawn(async move {
+    ///         while let Ok(page) = rx2.recv().await {
+    ///             println!("📸 - {:?}", page.get_url());
+    ///             page
+    ///                 .screenshot(
+    ///                     true,
+    ///                     true,
+    ///                     spider::configuration::CaptureScreenshotFormat::Png,
+    ///                     Some(75),
+    ///                     None::<std::path::PathBuf>,
+    ///                     None,
+    ///                 )
+    ///                 .await;
+    ///             rxg.inc();
+    ///         }
+    ///     });
+    ///     website.crawl().await;
+    /// }
+    /// ```
     #[cfg(feature = "sync")]
     pub fn subscribe_guard(&mut self) -> Option<ChannelGuard> {
         // *note*: it would be better to handle this on page drop if the subscription is used automatically. For now we add the API upfront.
