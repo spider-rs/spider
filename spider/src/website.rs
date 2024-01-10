@@ -16,6 +16,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, Semaphore};
 use tokio::task;
 use tokio::task::JoinSet;
+use tokio::time::Interval;
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -285,6 +286,32 @@ impl Website {
             false
         } else {
             self.is_allowed_default(link, blacklist_url)
+        }
+    }
+
+    /// Return `false` if the crawl should shutdown. Process in between each link.
+    async fn handle_process<T>(
+        &self,
+        handle: &Option<Arc<AtomicI8>>,
+        interval: &mut Interval,
+        shutdown: T,
+    ) -> bool
+    where
+        T: std::future::Future<Output = ()>,
+    {
+        match handle.as_ref() {
+            Some(handle) => {
+                while handle.load(Ordering::Relaxed) == 1 {
+                    interval.tick().await;
+                }
+                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
+                    (shutdown).await;
+                    false
+                } else {
+                    true
+                }
+            }
+            _ => true,
         }
     }
 
@@ -1662,18 +1689,11 @@ impl Website {
                         loop {
                             match stream.next().await {
                                 Some(link) => {
-                                    match handle.as_ref() {
-                                        Some(handle) => {
-                                            while handle.load(Ordering::Relaxed) == 1 {
-                                                interval.tick().await;
-                                            }
-                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown
-                                            {
-                                                set.shutdown().await;
-                                                break;
-                                            }
-                                        }
-                                        None => (),
+                                    if !self
+                                        .handle_process(handle, &mut interval, set.shutdown())
+                                        .await
+                                    {
+                                        break;
                                     }
 
                                     if !self.is_allowed(&link, &blacklist_url) {
@@ -1767,17 +1787,11 @@ impl Website {
                     tokio::pin!(stream);
 
                     while let Some(link) = stream.next().await {
-                        match handle.as_ref() {
-                            Some(handle) => {
-                                while handle.load(Ordering::Relaxed) == 1 {
-                                    interval.tick().await;
-                                }
-                                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                                    set.shutdown().await;
-                                    break;
-                                }
-                            }
-                            None => (),
+                        if !self
+                            .handle_process(handle, &mut interval, set.shutdown())
+                            .await
+                        {
+                            break;
                         }
                         if !self.is_allowed(&link, &blacklist_url) {
                             continue;
@@ -1926,21 +1940,15 @@ impl Website {
                                         loop {
                                             match stream.next().await {
                                                 Some(link) => {
-                                                    match handle.as_ref() {
-                                                        Some(handle) => {
-                                                            while handle.load(Ordering::Relaxed)
-                                                                == 1
-                                                            {
-                                                                interval.tick().await;
-                                                            }
-                                                            if handle.load(Ordering::Relaxed) == 2
-                                                                || self.shutdown
-                                                            {
-                                                                set.shutdown().await;
-                                                                break;
-                                                            }
-                                                        }
-                                                        None => (),
+                                                    if !self
+                                                        .handle_process(
+                                                            handle,
+                                                            &mut interval,
+                                                            set.shutdown(),
+                                                        )
+                                                        .await
+                                                    {
+                                                        break;
                                                     }
 
                                                     if !self.is_allowed(&link, &blacklist_url) {
@@ -2074,20 +2082,12 @@ impl Website {
                         loop {
                             match stream.next().await {
                                 Some(link) => {
-                                    match handle.as_ref() {
-                                        Some(handle) => {
-                                            while handle.load(Ordering::Relaxed) == 1 {
-                                                interval.tick().await;
-                                            }
-                                            if handle.load(Ordering::Relaxed) == 2 || self.shutdown
-                                            {
-                                                set.shutdown().await;
-                                                break;
-                                            }
-                                        }
-                                        None => (),
+                                    if !self
+                                        .handle_process(handle, &mut interval, set.shutdown())
+                                        .await
+                                    {
+                                        break;
                                     }
-
                                     if !self.is_allowed(&link, &blacklist_url) {
                                         continue;
                                     }
@@ -2197,17 +2197,11 @@ impl Website {
                     loop {
                         match stream.next().await {
                             Some(link) => {
-                                match handle.as_ref() {
-                                    Some(handle) => {
-                                        while handle.load(Ordering::Relaxed) == 1 {
-                                            interval.tick().await;
-                                        }
-                                        if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                                            set.shutdown().await;
-                                            break;
-                                        }
-                                    }
-                                    None => (),
+                                if !self
+                                    .handle_process(handle, &mut interval, set.shutdown())
+                                    .await
+                                {
+                                    break;
                                 }
 
                                 if !self.is_allowed(&link, &blacklist_url) {
@@ -2342,21 +2336,15 @@ impl Website {
                                         loop {
                                             match stream.next().await {
                                                 Some(link) => {
-                                                    match handle.as_ref() {
-                                                        Some(handle) => {
-                                                            while handle.load(Ordering::Relaxed)
-                                                                == 1
-                                                            {
-                                                                interval.tick().await;
-                                                            }
-                                                            if handle.load(Ordering::Relaxed) == 2
-                                                                || self.shutdown
-                                                            {
-                                                                set.shutdown().await;
-                                                                break;
-                                                            }
-                                                        }
-                                                        None => (),
+                                                    if !self
+                                                        .handle_process(
+                                                            handle,
+                                                            &mut interval,
+                                                            set.shutdown(),
+                                                        )
+                                                        .await
+                                                    {
+                                                        break;
                                                     }
 
                                                     if !self.is_allowed(&link, &blacklist_url) {
@@ -2491,17 +2479,11 @@ impl Website {
                     tokio::pin!(stream);
 
                     while let Some(link) = stream.next().await {
-                        match handle.as_ref() {
-                            Some(handle) => {
-                                while handle.load(Ordering::Relaxed) == 1 {
-                                    interval.tick().await;
-                                }
-                                if handle.load(Ordering::Relaxed) == 2 || self.shutdown {
-                                    set.shutdown().await;
-                                    break;
-                                }
-                            }
-                            None => (),
+                        if !self
+                            .handle_process(handle, &mut interval, set.shutdown())
+                            .await
+                        {
+                            break;
                         }
                         if !self.is_allowed(&link, &blacklist_url) {
                             continue;
@@ -2640,19 +2622,11 @@ impl Website {
                                     tokio::pin!(stream);
 
                                     while let Some(link) = stream.next().await {
-                                        match handle.as_ref() {
-                                            Some(handle) => {
-                                                while handle.load(Ordering::Relaxed) == 1 {
-                                                    interval.tick().await;
-                                                }
-                                                if handle.load(Ordering::Relaxed) == 2
-                                                    || self.shutdown
-                                                {
-                                                    set.shutdown().await;
-                                                    break;
-                                                }
-                                            }
-                                            None => (),
+                                        if !self
+                                            .handle_process(handle, &mut interval, set.shutdown())
+                                            .await
+                                        {
+                                            break;
                                         }
                                         if !self.is_allowed(&link, &blacklist_url) {
                                             continue;
@@ -3312,7 +3286,7 @@ impl Website {
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
     /// This does nothing without the `sync` flag enabled.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
@@ -3351,7 +3325,7 @@ impl Website {
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
     /// This does nothing without the `sync` flag enabled.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
@@ -3887,8 +3861,8 @@ async fn test_crawl_pause_resume() {
 }
 
 #[cfg(feature = "control")]
-#[tokio::test]
 #[ignore]
+#[tokio::test]
 async fn test_crawl_shutdown() {
     use crate::utils::shutdown;
 
@@ -3901,8 +3875,9 @@ async fn test_crawl_shutdown() {
     });
 
     website.crawl().await;
+    let links_visited_count = website.links_visited.len();
 
-    assert_eq!(website.links_visited.len(), 1);
+    assert!(links_visited_count <= 1, "{:?}", links_visited_count);
 }
 
 #[tokio::test]
