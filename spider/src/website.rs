@@ -1037,9 +1037,9 @@ impl Website {
                                 first_rq = false;
                             }
 
-                            if 
+                            if
                                 ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
-                                ResourceType::Prefetch == event.resource_type || 
+                                ResourceType::Prefetch == event.resource_type ||
                                 ResourceType::Ping == event.resource_type ||
                                 ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
                             {
@@ -1658,32 +1658,40 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selector) => {
+                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+                if self.status == CrawlStatus::Active {
+                    links.extend(self.links_visited.drain());
+                }
+
                 let (mut interval, throttle) = self.setup_crawl();
+
+                links.extend(
+                    self._crawl_establish(&client, &mut selector, false, false)
+                        .await,
+                );
+
                 let blacklist_url = self.configuration.get_blacklist();
                 let on_link_find_callback = self.on_link_find_callback;
                 let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> = self
-                    ._crawl_establish(&client, &mut selector, false, false)
-                    .await;
-
-                let shared = Arc::new((
-                    client.to_owned(),
-                    selector,
-                    self.channel.clone(),
-                    self.configuration.external_domains_caseless.clone(),
-                    self.channel_guard.clone(),
-                ));
 
                 if !links.is_empty() {
+                    let shared = Arc::new((
+                        client.to_owned(),
+                        selector,
+                        self.channel.clone(),
+                        self.configuration.external_domains_caseless.clone(),
+                        self.channel_guard.clone(),
+                    ));
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                     let chandle = Handle::current();
 
-                    // crawl while links exists
                     loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
                         )
                         .throttle(*throttle);
+
                         tokio::pin!(stream);
 
                         loop {
@@ -1760,106 +1768,114 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(selectors) => {
-                self.status = CrawlStatus::Active;
-                let blacklist_url = self.configuration.get_blacklist();
-                self.pages = Some(Box::new(Vec::new()));
-                let delay = self.configuration.delay;
-                let on_link_find_callback = self.on_link_find_callback;
-                let mut interval = tokio::time::interval(Duration::from_millis(10));
-                let selectors = Arc::new(selectors);
-                let full_resources = self.configuration.full_resources;
-                let throttle = Duration::from_millis(delay);
-
+                if self.status != CrawlStatus::Active || self.pages.is_none() {
+                    self.pages.replace(Box::new(Vec::new()));
+                }
                 let mut links: HashSet<CaseInsensitiveString> =
                     HashSet::from([*self.domain.clone()]);
+
+                if self.status == CrawlStatus::Active {
+                    links.extend(self.links_visited.drain());
+                }
+
+                let (mut interval, throttle) = self.setup_crawl();
+
                 let mut set: JoinSet<(
                     CaseInsensitiveString,
                     Page,
                     HashSet<CaseInsensitiveString>,
                 )> = JoinSet::new();
 
-                // crawl while links exists
-                loop {
-                    let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                        links.drain().collect(),
-                    )
-                    .throttle(throttle);
-                    tokio::pin!(stream);
+                let shared = Arc::new((
+                    client.to_owned(),
+                    selectors,
+                    self.channel.clone(),
+                    self.configuration.external_domains_caseless.clone(),
+                    self.channel_guard.clone(),
+                ));
 
-                    while let Some(link) = stream.next().await {
-                        if !self
-                            .handle_process(handle, &mut interval, set.shutdown())
-                            .await
-                        {
+                let blacklist_url = self.configuration.get_blacklist();
+                let on_link_find_callback = self.on_link_find_callback;
+                let full_resources = self.configuration.full_resources;
+
+                if !links.is_empty() {
+                    // crawl while links exists
+                    loop {
+                        let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                            links.drain().collect(),
+                        )
+                        .throttle(*throttle);
+                        tokio::pin!(stream);
+
+                        while let Some(link) = stream.next().await {
+                            if !self
+                                .handle_process(handle, &mut interval, set.shutdown())
+                                .await
+                            {
+                                break;
+                            }
+                            if !self.is_allowed(&link, &blacklist_url) {
+                                continue;
+                            }
+                            self.links_visited.insert(link.clone());
+                            log("fetch", &link);
+                            let permit = SEM.acquire().await.unwrap();
+                            let shared = shared.clone();
+
+                            set.spawn(async move {
+                                drop(permit);
+                                let page_resource =
+                                    crate::utils::fetch_page_html_raw(&link.as_ref(), &shared.0)
+                                        .await;
+                                let mut page = build(&link.as_ref(), page_resource);
+
+                                let (link, _) = match on_link_find_callback {
+                                    Some(cb) => {
+                                        let c = cb(link, Some(page.get_html()));
+
+                                        c
+                                    }
+                                    _ => (link, None),
+                                };
+
+                                channel_send_page(&shared.2, page.clone(), &shared.4);
+
+                                page.set_external(shared.3.clone());
+
+                                let page_links = if full_resources {
+                                    page.links_full(&shared.1).await
+                                } else {
+                                    page.links(&shared.1).await
+                                };
+
+                                (link, page, page_links)
+                            });
+                        }
+
+                        task::yield_now().await;
+
+                        if links.capacity() >= 1500 {
+                            links.shrink_to_fit();
+                        }
+
+                        while let Some(res) = set.join_next().await {
+                            match res {
+                                Ok(msg) => {
+                                    let page = msg.1;
+                                    links.extend(&msg.2 - &self.links_visited);
+                                    task::yield_now().await;
+                                    match self.pages.as_mut() {
+                                        Some(p) => p.push(page),
+                                        _ => (),
+                                    };
+                                }
+                                _ => (),
+                            };
+                        }
+
+                        if links.is_empty() {
                             break;
                         }
-                        if !self.is_allowed(&link, &blacklist_url) {
-                            continue;
-                        }
-                        self.links_visited.insert(link.clone());
-                        log("fetch", &link);
-                        let permit = SEM.acquire().await.unwrap();
-                        // these clones should move into a single arc
-                        let client = client.clone();
-                        let channel = self.channel.clone();
-                        let selectors = selectors.clone();
-                        let external_domains_caseless =
-                            self.configuration.external_domains_caseless.clone();
-                        let channel_guard = self.channel_guard.clone();
-
-                        set.spawn(async move {
-                            drop(permit);
-                            let page_resource =
-                                crate::utils::fetch_page_html_raw(&link.as_ref(), &client).await;
-                            let mut page = build(&link.as_ref(), page_resource);
-
-                            let (link, _) = match on_link_find_callback {
-                                Some(cb) => {
-                                    let c = cb(link, Some(page.get_html()));
-
-                                    c
-                                }
-                                _ => (link, None),
-                            };
-
-                            channel_send_page(&channel, page.clone(), &channel_guard);
-
-                            page.set_external(external_domains_caseless);
-
-                            let page_links = if full_resources {
-                                page.links_full(&*selectors).await
-                            } else {
-                                page.links(&*selectors).await
-                            };
-
-                            (link, page, page_links)
-                        });
-                    }
-
-                    task::yield_now().await;
-
-                    if links.capacity() >= 1500 {
-                        links.shrink_to_fit();
-                    }
-
-                    while let Some(res) = set.join_next().await {
-                        match res {
-                            Ok(msg) => {
-                                let page = msg.1;
-                                links.extend(&msg.2 - &self.links_visited);
-                                task::yield_now().await;
-                                match self.pages.as_mut() {
-                                    Some(p) => p.push(page),
-                                    _ => (),
-                                };
-                            }
-                            _ => (),
-                        };
-                    }
-
-                    task::yield_now().await;
-                    if links.is_empty() {
-                        break;
                     }
                 }
             }
@@ -2044,117 +2060,7 @@ impl Website {
     /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
-        self.start();
-        match self.setup_selectors() {
-            Some(mut selector) => {
-                let (mut interval, throttle) = self.setup_crawl();
-                let blacklist_url = self.configuration.get_blacklist();
-                let on_link_find_callback = self.on_link_find_callback;
-                let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> = self
-                    .crawl_establish(&client, &mut selector, false, false)
-                    .await;
-
-                links.extend(self.links_visited.drain());
-
-                let shared = Arc::new((
-                    client.to_owned(),
-                    selector,
-                    self.channel.clone(),
-                    self.configuration.external_domains_caseless.clone(),
-                    self.channel_guard.clone(),
-                ));
-
-                let add_external = shared.3.len() > 0;
-
-                if !links.is_empty() {
-                    let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                    let chandle = Handle::current();
-
-                    // crawl while links exists
-                    loop {
-                        let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                            links.drain().collect(),
-                        )
-                        .throttle(*throttle);
-                        tokio::pin!(stream);
-
-                        loop {
-                            match stream.next().await {
-                                Some(link) => {
-                                    if !self
-                                        .handle_process(handle, &mut interval, set.shutdown())
-                                        .await
-                                    {
-                                        break;
-                                    }
-                                    if !self.is_allowed(&link, &blacklist_url) {
-                                        continue;
-                                    }
-
-                                    log("fetch", &link);
-                                    self.links_visited.insert(link.clone());
-
-                                    match SEM.acquire().await {
-                                        Ok(permit) => {
-                                            let shared = shared.clone();
-                                            task::yield_now().await;
-
-                                            set.spawn_on(
-                                                async move {
-                                                    let link_result = match on_link_find_callback {
-                                                        Some(cb) => cb(link, None),
-                                                        _ => (link, None),
-                                                    };
-                                                    let mut page = Page::new(
-                                                        &link_result.0.as_ref(),
-                                                        &shared.0,
-                                                    )
-                                                    .await;
-
-                                                    if add_external {
-                                                        page.set_external(shared.3.to_owned());
-                                                    }
-
-                                                    let page_links = if full_resources {
-                                                        page.links_full(&shared.1).await
-                                                    } else {
-                                                        page.links(&shared.1).await
-                                                    };
-
-                                                    channel_send_page(&shared.2, page, &shared.4);
-
-                                                    drop(permit);
-
-                                                    page_links
-                                                },
-                                                &chandle,
-                                            );
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                                _ => break,
-                            }
-                        }
-
-                        while let Some(res) = set.join_next().await {
-                            match res {
-                                Ok(msg) => {
-                                    links.extend(&msg - &self.links_visited);
-                                }
-                                _ => (),
-                            };
-                        }
-
-                        if links.is_empty() {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => log("", INVALID_URL),
-        }
+        self.crawl_concurrent_raw(&client, &handle).await
     }
 
     /// Start to crawl website concurrently.
@@ -2263,7 +2169,7 @@ impl Website {
         }
     }
 
-    /// Start to crawl website concurrently.
+    /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -2271,7 +2177,6 @@ impl Website {
             Some(mut selectors) => {
                 let (mut interval, throttle) = self.setup_crawl();
                 let blacklist_url = self.configuration.get_blacklist();
-
                 let on_link_find_callback = self.on_link_find_callback;
 
                 match launch_browser(&self.configuration).await {
@@ -2441,18 +2346,26 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => {
-                self.status = CrawlStatus::Active;
-                let blacklist_url = self.configuration.get_blacklist();
-                self.pages = Some(Box::new(Vec::new()));
-                let on_link_find_callback = self.on_link_find_callback;
-                let mut interval = tokio::time::interval(Duration::from_millis(10));
-                let throttle = Duration::from_millis(self.configuration.delay);
-                let full_resources = self.configuration.full_resources;
-                let mut links: HashSet<CaseInsensitiveString> = self
-                    .crawl_establish(&client, &mut selectors, false, true)
-                    .await;
+                if self.status != CrawlStatus::Active || self.pages.is_none() {
+                    self.pages.replace(Box::new(Vec::new()));
+                }
 
-                links.extend(self.links_visited.drain());
+                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+                if self.status == CrawlStatus::Active {
+                    links.extend(self.links_visited.drain());
+                }
+
+                let (mut interval, throttle) = self.setup_crawl();
+
+                links.extend(
+                    self.crawl_establish(&client, &mut selectors, false, true)
+                        .await,
+                );
+
+                let blacklist_url = self.configuration.get_blacklist();
+                let on_link_find_callback = self.on_link_find_callback;
+                let full_resources = self.configuration.full_resources;
 
                 let shared = Arc::new((
                     client.to_owned(),
@@ -2475,7 +2388,7 @@ impl Website {
                     let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                         links.drain().collect(),
                     )
-                    .throttle(throttle);
+                    .throttle(*throttle);
                     tokio::pin!(stream);
 
                     while let Some(link) = stream.next().await {
@@ -2548,7 +2461,6 @@ impl Website {
                         };
                     }
 
-                    task::yield_now().await;
                     if links.is_empty() {
                         break;
                     }
@@ -2564,7 +2476,7 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(selectors) => {
-                self.status = CrawlStatus::Active;
+                let (mut interval, throttle) = self.setup_crawl();
                 match launch_browser(&self.configuration).await {
                     Some((browser, browser_handle)) => {
                         match browser.new_page("about:blank").await {
@@ -2583,10 +2495,7 @@ impl Website {
 
                                 let blacklist_url = self.configuration.get_blacklist();
                                 self.pages = Some(Box::new(Vec::new()));
-                                let delay = self.configuration.delay;
                                 let on_link_find_callback = self.on_link_find_callback;
-                                let mut interval = tokio::time::interval(Duration::from_millis(10));
-                                let throttle = Duration::from_millis(delay);
 
                                 let mut set: JoinSet<(
                                     CaseInsensitiveString,
@@ -2618,7 +2527,7 @@ impl Website {
                                         tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                             links.drain().collect(),
                                         )
-                                        .throttle(throttle);
+                                        .throttle(*throttle);
                                     tokio::pin!(stream);
 
                                     while let Some(link) = stream.next().await {
