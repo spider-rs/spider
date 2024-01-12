@@ -110,6 +110,7 @@ pub extern crate serde;
 pub extern crate ua_generator;
 #[macro_use]
 pub extern crate string_concat;
+pub extern crate strum;
 #[macro_use]
 pub extern crate lazy_static;
 #[macro_use]

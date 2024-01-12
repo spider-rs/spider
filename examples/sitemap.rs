@@ -1,4 +1,4 @@
-//! `cargo run --example sitemap`
+//! `cargo run --example sitemap --features sitemap`
 extern crate spider;
 
 use spider::tokio;
@@ -8,11 +8,7 @@ use std::time::Instant;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr");
-    website
-        .configuration
-        .blacklist_url
-        .insert(Default::default())
-        .push("https://rsseau.fr/resume".into());
+
     website
         .configuration
         .with_respect_robots_txt(true)

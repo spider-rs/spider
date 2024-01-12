@@ -2658,108 +2658,119 @@ impl Website {
 
         let shared = Arc::new((self.channel.clone(), self.channel_guard.clone()));
 
-        while let Some(site) = &self.configuration.sitemap_url {
-            if !self.handle_process(handle, &mut interval, async {}).await {
-                break;
-            }
-            let mut sitemap_added = false;
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
+        let mut sitemaps = match self.configuration.sitemap_url {
+            Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
+            _ => Default::default(),
+        };
 
-            let shared = shared.clone();
+        loop {
+            let stream =
+                tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
+            tokio::pin!(stream);
 
-            let handles = tokio::spawn(async move {
-                let mut pages = Vec::new();
-
-                while let Some(page) = rx.recv().await {
-                    if shared.0.is_some() {
-                        if scrape {
-                            pages.push(page.clone());
-                        };
-
-                        channel_send_page(&shared.0.clone(), page, &shared.1);
-                    } else {
-                        pages.push(page);
-                    }
+            while let Some(sitemap_url) = stream.next().await {
+                if !self.handle_process(handle, &mut interval, async {}).await {
+                    break;
                 }
+                let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
 
-                pages
-            });
+                let shared = shared.clone();
 
-            match client.get(site.as_str()).send().await {
-                Ok(response) => {
-                    match response.text().await {
-                        Ok(text) => {
-                            // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
-                            let mut stream =
-                                tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
+                let handles = tokio::spawn(async move {
+                    let mut pages = Vec::new();
 
-                            while let Some(entity) = stream.next().await {
-                                if !self.handle_process(handle, &mut interval, async {}).await {
-                                    break;
-                                }
+                    while let Some(page) = rx.recv().await {
+                        if shared.0.is_some() {
+                            if scrape {
+                                pages.push(page.clone());
+                            };
 
-                                match entity {
-                                    SiteMapEntity::Url(url_entry) => match url_entry.loc {
-                                        Location::Url(url) => {
-                                            let link: CaseInsensitiveString = url.as_str().into();
+                            channel_send_page(&shared.0.clone(), page, &shared.1);
+                        } else {
+                            pages.push(page);
+                        }
+                    }
 
-                                            if !self.is_allowed(&link, &blacklist_url) {
-                                                continue;
-                                            }
+                    pages
+                });
 
-                                            self.links_visited.insert(link.clone());
+                match client.get(sitemap_url.as_str()).send().await {
+                    Ok(response) => {
+                        match response.text().await {
+                            Ok(text) => {
+                                // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
+                                let mut stream =
+                                    tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
 
-                                            let client = client.clone();
-                                            let tx = tx.clone();
+                                while let Some(entity) = stream.next().await {
+                                    if !self.handle_process(handle, &mut interval, async {}).await {
+                                        break;
+                                    }
 
-                                            tokio::spawn(async move {
-                                                let page = Page::new(&link.inner(), &client).await;
-
-                                                match tx.reserve().await {
-                                                    Ok(permit) => {
-                                                        permit.send(page);
-                                                    }
-                                                    _ => (),
-                                                }
-                                            });
-                                        }
-                                        Location::None | Location::ParseErr(_) => (),
-                                    },
-                                    SiteMapEntity::SiteMap(sitemap_entry) => {
-                                        match sitemap_entry.loc {
+                                    match entity {
+                                        SiteMapEntity::Url(url_entry) => match url_entry.loc {
                                             Location::Url(url) => {
-                                                self.configuration
-                                                    .sitemap_url
-                                                    .replace(Box::new(url.as_str().into()));
-                                                sitemap_added = true;
+                                                let link: CaseInsensitiveString =
+                                                    url.as_str().into();
+
+                                                if !self.is_allowed(&link, &blacklist_url) {
+                                                    continue;
+                                                }
+
+                                                self.links_visited.insert(link.clone());
+
+                                                let client = client.clone();
+                                                let tx = tx.clone();
+
+                                                tokio::spawn(async move {
+                                                    let page =
+                                                        Page::new(&link.inner(), &client).await;
+
+                                                    match tx.reserve().await {
+                                                        Ok(permit) => {
+                                                            permit.send(page);
+                                                        }
+                                                        _ => (),
+                                                    }
+                                                });
                                             }
                                             Location::None | Location::ParseErr(_) => (),
+                                        },
+                                        SiteMapEntity::SiteMap(sitemap_entry) => {
+                                            match sitemap_entry.loc {
+                                                Location::Url(url) => {
+                                                    sitemaps.push(Box::new(CompactString::new(
+                                                        &url.as_str(),
+                                                    )));
+                                                }
+                                                Location::None | Location::ParseErr(_) => (),
+                                            }
                                         }
-                                    }
-                                    SiteMapEntity::Err(err) => {
-                                        log("incorrect sitemap error: ", err.msg())
-                                    }
-                                };
+                                        SiteMapEntity::Err(err) => {
+                                            log("incorrect sitemap error: ", err.msg())
+                                        }
+                                    };
+                                }
                             }
-                        }
-                        Err(err) => log("http parse error: ", err.to_string()),
+                            Err(err) => log("http parse error: ", err.to_string()),
+                        };
+                    }
+                    Err(err) => log("http network error: ", err.to_string()),
+                };
+
+                drop(tx);
+
+                if let Ok(handle) = handles.await {
+                    match self.pages.as_mut() {
+                        Some(p) => p.extend(handle),
+                        _ => (),
                     };
                 }
-                Err(err) => log("http network error: ", err.to_string()),
-            };
-
-            drop(tx);
-
-            if let Ok(handle) = handles.await {
-                match self.pages.as_mut() {
-                    Some(p) => p.extend(handle),
-                    _ => (),
-                };
             }
 
-            if !sitemap_added {
-                self.configuration.sitemap_url = None;
-            };
+            if sitemaps.len() == 0 {
+                break;
+            }
         }
     }
 
