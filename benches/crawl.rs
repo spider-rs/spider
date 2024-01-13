@@ -28,7 +28,7 @@ pub fn bench_speed(c: &mut Criterion) {
     let rt = spider::tokio::runtime::Runtime::new().unwrap();
 
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
-        let mut website = Website::new(&query);
+        let mut website = Website::new(query);
         // try to only enable when you know you can or have permission from the website to avoid being blocked.
         website.configuration.respect_robots_txt = false;
 

@@ -244,7 +244,7 @@ impl Configuration {
     /// Add user agent to request.
     pub fn with_user_agent(&mut self, user_agent: Option<&str>) -> &mut Self {
         match user_agent {
-            Some(agent) => self.user_agent = Some(CompactString::new(agent.to_string()).into()),
+            Some(agent) => self.user_agent = Some(CompactString::new(agent).into()),
             _ => self.user_agent = None,
         };
         self

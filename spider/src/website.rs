@@ -35,7 +35,7 @@ lazy_static! {
         let physical = num_cpus::get_physical();
 
         let sem_limit = if logical > physical {
-            (logical) / (physical) as usize
+            (logical) / (physical)
         } else {
             logical
         };
@@ -198,7 +198,7 @@ impl Website {
             channel: None,
             status: CrawlStatus::Start,
             shutdown: false,
-            domain_parsed: match url::Url::parse(&domain.inner()) {
+            domain_parsed: match url::Url::parse(domain.inner()) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
             },
@@ -241,10 +241,10 @@ impl Website {
     ) -> bool {
         if self.links_visited.contains(link) {
             false
-        } else if self.is_over_budget(&link) {
+        } else if self.is_over_budget(link) {
             false
         } else {
-            self.is_allowed_default(&link.inner(), blacklist_url)
+            self.is_allowed_default(link.inner(), blacklist_url)
         }
     }
 
@@ -349,10 +349,10 @@ impl Website {
         link: &CompactString,
         blacklist_url: &Box<Vec<CompactString>>,
     ) -> bool {
-        if contains(blacklist_url, &link) {
+        if contains(blacklist_url, link) {
             false
         } else {
-            self.is_allowed_robots(&link)
+            self.is_allowed_robots(link)
         }
     }
 
@@ -365,7 +365,7 @@ impl Website {
                 self.robot_file_parser
                     .as_ref()
                     .unwrap_unchecked()
-                    .can_fetch("*", &link)
+                    .can_fetch("*", link)
             } // unwrap will always return
         } else {
             true
@@ -376,21 +376,19 @@ impl Website {
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
         if self.configuration.budget.is_some() || self.configuration.depth_distance > 0 {
-            match Url::parse(&link.inner()) {
+            match Url::parse(link.inner()) {
                 Ok(r) => {
                     let has_depth_control = self.configuration.depth_distance > 0;
 
-                    if !self.configuration.budget.is_some() {
+                    if self.configuration.budget.is_none() {
                         match r.path_segments() {
-                            Some(mut segments) => {
+                            Some(segments) => {
                                 let mut over = false;
                                 let mut depth: usize = 0;
 
-                                while let Some(_) = segments.next() {
+                                for _ in segments {
                                     if has_depth_control {
-                                        if depth != usize::MAX {
-                                            depth += 1;
-                                        }
+                                        depth = depth.saturating_add(1);
                                         if depth >= self.configuration.depth_distance {
                                             over = true;
                                             break;
@@ -429,17 +427,15 @@ impl Website {
                                 // check if paths pass
                                 if !skip_paths && !exceeded_wild_budget {
                                     match r.path_segments() {
-                                        Some(mut segments) => {
+                                        Some(segments) => {
                                             let mut joint_segment =
                                                 CaseInsensitiveString::default();
                                             let mut over = false;
                                             let mut depth: usize = 0;
 
-                                            while let Some(seg) = segments.next() {
+                                            for seg in segments {
                                                 if has_depth_control {
-                                                    if depth != usize::MAX {
-                                                        depth += 1;
-                                                    }
+                                                    depth = depth.saturating_add(1);
                                                     if depth >= self.configuration.depth_distance {
                                                         over = true;
                                                         break;
@@ -565,15 +561,15 @@ impl Website {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self
                 .robot_file_parser
-                .get_or_insert_with(|| RobotFileParser::new());
+                .get_or_insert_with(RobotFileParser::new);
 
             if robot_file_parser.mtime() <= 4000 {
                 let host_str = match &self.domain_parsed {
-                    Some(domain) => &*domain.as_str(),
-                    _ => &self.domain.inner(),
+                    Some(domain) => domain.as_str(),
+                    _ => self.domain.inner(),
                 };
-                if host_str.ends_with("/") {
-                    robot_file_parser.read(&client, &host_str).await;
+                if host_str.ends_with('/') {
+                    robot_file_parser.read(&client, host_str).await;
                 } else {
                     robot_file_parser
                         .read(&client, &string_concat!(host_str, "/"))
@@ -663,7 +659,7 @@ impl Website {
         let client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(),
+                _ => get_ua(),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500))
@@ -698,9 +694,9 @@ impl Website {
             _ => client,
         };
 
-        let client = self.configure_http_client_cookies(client);
+        
 
-        client
+        self.configure_http_client_cookies(client)
     }
 
     /// Build the HTTP client with caching enabled.
@@ -1092,7 +1088,7 @@ impl Website {
     /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
         get_page_selectors(
-            &self.domain.inner(),
+            self.domain.inner(),
             self.configuration.subdomains,
             self.configuration.tld,
         )
@@ -1169,14 +1165,14 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+            .is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist())
         {
-            let page = Page::new_page(&self.domain.inner(), &client).await;
+            let page = Page::new_page(self.domain.inner(), client).await;
 
             // allow initial page mutation
             match page.final_redirect_destination.as_deref() {
                 Some(domain) => {
-                    self.domain_parsed = match url::Url::parse(&domain) {
+                    self.domain_parsed = match url::Url::parse(domain) {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
                     };
@@ -1200,7 +1196,7 @@ impl Website {
                     }
                     _ => *self.domain.clone(),
                 });
-                HashSet::from(page.links(&base).await)
+                page.links(base).await
             } else {
                 self.status = CrawlStatus::Empty;
                 Default::default()
@@ -1236,7 +1232,7 @@ impl Website {
         selector: bool,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        self._crawl_establish(&client, base, selector, scrape).await
+        self._crawl_establish(client, base, selector, scrape).await
     }
 
     /// Expand links for crawl.
@@ -1538,7 +1534,7 @@ impl Website {
 
     /// Set the crawl status depending on crawl state.
     fn set_crawl_status(&mut self) {
-        self.status = if !self.domain_parsed.is_some() {
+        self.status = if self.domain_parsed.is_none() {
             CrawlStatus::Invalid
         } else {
             CrawlStatus::Idle
@@ -1673,7 +1669,7 @@ impl Website {
                 let (mut interval, throttle) = self.setup_crawl();
 
                 links.extend(
-                    self._crawl_establish(&client, &mut selector, false, false)
+                    self._crawl_establish(client, &mut selector, false, false)
                         .await,
                 );
 
@@ -1727,7 +1723,7 @@ impl Website {
                                                 _ => (link, None),
                                             };
                                             let mut page =
-                                                Page::new_page(&link_result.0.as_ref(), &shared.0)
+                                                Page::new_page(link_result.0.as_ref(), &shared.0)
                                                     .await;
                                             page.set_external(shared.3.to_owned());
 
@@ -1775,7 +1771,7 @@ impl Website {
         match self.setup_selectors() {
             Some(selectors) => {
                 if self.status != CrawlStatus::Active || self.pages.is_none() {
-                    self.pages.replace(Box::new(Vec::new()));
+                    self.pages.replace(Box::<Vec<Page>>::default());
                 }
                 let mut links: HashSet<CaseInsensitiveString> =
                     HashSet::from([*self.domain.clone()]);
@@ -1830,15 +1826,15 @@ impl Website {
                             set.spawn(async move {
                                 drop(permit);
                                 let page_resource =
-                                    crate::utils::fetch_page_html_raw(&link.as_ref(), &shared.0)
+                                    crate::utils::fetch_page_html_raw(link.as_ref(), &shared.0)
                                         .await;
-                                let mut page = build(&link.as_ref(), page_resource);
+                                let mut page = build(link.as_ref(), page_resource);
 
                                 let (link, _) = match on_link_find_callback {
                                     Some(cb) => {
-                                        let c = cb(link, Some(page.get_html()));
+                                        
 
-                                        c
+                                        cb(link, Some(page.get_html()))
                                     }
                                     _ => (link, None),
                                 };
@@ -2042,7 +2038,7 @@ impl Website {
     /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
-        self.crawl_concurrent_raw(&client, &handle).await
+        self.crawl_concurrent_raw(client, handle).await
     }
 
     /// Start to crawl website concurrently.
@@ -2306,7 +2302,7 @@ impl Website {
         match self.setup_selectors() {
             Some(mut selectors) => {
                 if self.status != CrawlStatus::Active || self.pages.is_none() {
-                    self.pages.replace(Box::new(Vec::new()));
+                    self.pages.replace(Box::<Vec<Page>>::default());
                 }
 
                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -2318,7 +2314,7 @@ impl Website {
                 let (mut interval, throttle) = self.setup_crawl();
 
                 links.extend(
-                    self.crawl_establish(&client, &mut selectors, false, true)
+                    self.crawl_establish(client, &mut selectors, false, true)
                         .await,
                 );
 
@@ -2370,17 +2366,17 @@ impl Website {
                                     set.spawn(async move {
                                         drop(permit);
                                         let page_resource = crate::utils::fetch_page_html(
-                                            &link.as_ref(),
+                                            link.as_ref(),
                                             &shared.0,
                                         )
                                         .await;
-                                        let mut page = build(&link.as_ref(), page_resource);
+                                        let mut page = build(link.as_ref(), page_resource);
 
                                         let (link, _) = match on_link_find_callback {
                                             Some(cb) => {
-                                                let c = cb(link, Some(page.get_html()));
+                                                
 
-                                                c
+                                                cb(link, Some(page.get_html()))
                                             }
                                             _ => (link, None),
                                         };
@@ -2964,7 +2960,7 @@ impl Website {
         >,
     ) -> &mut Self {
         match on_link_find_callback {
-            Some(callback) => self.on_link_find_callback = Some(callback.into()),
+            Some(callback) => self.on_link_find_callback = Some(callback),
             _ => self.on_link_find_callback = None,
         };
         self
@@ -3247,7 +3243,7 @@ impl Website {
         // *note*: it would be better to handle this on page drop if the subscription is used automatically. For now we add the API upfront.
         let channel_guard = self
             .channel_guard
-            .get_or_insert_with(|| ChannelGuard::new());
+            .get_or_insert_with(ChannelGuard::new);
         Some(channel_guard.clone())
     }
 
@@ -3289,9 +3285,7 @@ pub struct ChannelGuard(Arc<AtomicUsize>);
 impl ChannelGuard {
     /// Create a new channel guard.
     pub(crate) fn new() -> ChannelGuard {
-        ChannelGuard {
-            0: Arc::new(AtomicUsize::new(0)),
-        }
+        ChannelGuard(Arc::new(AtomicUsize::new(0)))
     }
     /// Lock the channel until complete.
     #[cfg(feature = "chrome")]
@@ -3379,7 +3373,7 @@ impl std::error::Error for Website {}
 #[tokio::test]
 async fn crawl() {
     let url = "https://choosealicense.com";
-    let mut website: Website = Website::new(&url);
+    let mut website: Website = Website::new(url);
     website.crawl().await;
     assert!(
         website
@@ -3467,7 +3461,7 @@ async fn scrape() {
         website.links_visited
     );
 
-    assert_eq!(website.get_pages().unwrap()[0].get_html().is_empty(), false);
+    assert!(!website.get_pages().unwrap()[0].get_html().is_empty());
 }
 
 #[tokio::test]
@@ -3475,7 +3469,7 @@ async fn scrape() {
 async fn crawl_invalid() {
     let mut website: Website = Website::new("https://w.com");
     website.crawl().await;
-    assert_eq!(website.links_visited.len() <= 1, true); // only the target url should exist
+    assert!(website.links_visited.len() <= 1); // only the target url should exist
 }
 
 #[tokio::test]
@@ -3590,7 +3584,7 @@ async fn test_with_configuration() {
         .with_request_timeout(None)
         .with_http2_prior_knowledge(false)
         .with_ignore_sitemap(true)
-        .with_user_agent(Some("myapp/version".into()))
+        .with_user_agent(Some("myapp/version"))
         .with_headers(None)
         .with_proxies(None);
 

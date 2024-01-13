@@ -135,11 +135,7 @@ impl<'a> Iterator for Text<'a> {
                             Some(n) => {
                                 let name = n.name();
                                 // prevent all script and style elements
-                                if name == "script" || name == "style" {
-                                    false
-                                } else {
-                                    true
-                                }
+                                !(name == "script" || name == "style")
                             }
                             _ => true,
                         }

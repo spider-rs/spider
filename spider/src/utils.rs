@@ -219,7 +219,7 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             ..Default::default()
         },
         Err(_) => {
-            log("- error parsing html text {}", &target_url);
+            log("- error parsing html text {}", target_url);
             Default::default()
         }
     }
@@ -228,7 +228,7 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
 #[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
 /// Perform a network request to a resource extracting all content as text streaming.
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw(&target_url, &client).await
+    fetch_page_html_raw(target_url, client).await
 }
 
 /// Perform a network request to a resource extracting all content as text.

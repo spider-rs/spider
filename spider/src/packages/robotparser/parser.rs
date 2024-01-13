@@ -82,7 +82,7 @@ impl RuleLine {
     fn new(path: &str, allowance: bool) -> RuleLine {
         RuleLine {
             path: path.into(),
-            allowance: path == "" && !allowance || allowance,
+            allowance: path.is_empty() && !allowance || allowance,
         }
     }
 
@@ -214,7 +214,7 @@ impl RobotFileParser {
     pub async fn read(&mut self, client: &Client, url: &str) {
         self.modified();
 
-        let request = client.get(&string_concat!(url, "robots.txt"));
+        let request = client.get(string_concat!(url, "robots.txt"));
 
         let res = match request.send().await {
             Ok(res) => res,
@@ -392,7 +392,7 @@ impl RobotFileParser {
 
         for entry in &self.entries {
             if entry.applies_to(useragent.as_ref()) {
-                return entry.allowance(&url_str);
+                return entry.allowance(url_str);
             }
         }
 
@@ -400,7 +400,7 @@ impl RobotFileParser {
         let default_entry = &self.default_entry;
 
         if !default_entry.is_empty() {
-            return default_entry.allowance(&url_str);
+            return default_entry.allowance(url_str);
         }
         // agent not found ==> access granted
         true

@@ -174,7 +174,7 @@ pub fn get_page_selectors(
     subdomains: bool,
     tld: bool,
 ) -> Option<(CompactString, SmallVec<[CompactString; 2]>)> {
-    match Url::parse(&url) {
+    match Url::parse(url) {
         Ok(host) => {
             let host_name = CompactString::from(
                 match convert_abs_path(&host, Default::default()).host_str() {
@@ -212,7 +212,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         } else {
             None
         },
-        base: Url::parse(&url).expect("Invalid page URL"),
+        base: Url::parse(url).expect("Invalid page URL"),
         url: url.into(),
         #[cfg(feature = "time")]
         duration: Instant::now(),
@@ -256,14 +256,14 @@ pub fn build(_: &str, res: PageResponse) -> Page {
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     pub async fn new_page(url: &str, client: &Client) -> Self {
-        let page_resource = crate::utils::fetch_page_html_raw(&url, &client).await;
+        let page_resource = crate::utils::fetch_page_html_raw(url, client).await;
         build(url, page_resource)
     }
 
     /// Instantiate a new page and gather the html.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     pub async fn new(url: &str, client: &Client) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client).await;
+        let page_resource = crate::utils::fetch_page_html(url, client).await;
         build(url, page_resource)
     }
 
@@ -404,7 +404,7 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_final(&self) -> &str {
         match self.final_redirect_destination.as_ref() {
-            Some(u) => &u,
+            Some(u) => u,
             _ => &self.url,
         }
     }
@@ -437,7 +437,7 @@ impl Page {
     /// Html getter for bytes on the page as string.
     pub fn get_html(&self) -> String {
         match self.html.as_ref() {
-            Some(html) => String::from_utf8_lossy(&html).to_string(),
+            Some(html) => String::from_utf8_lossy(html).to_string(),
             _ => Default::default(),
         }
     }
@@ -551,7 +551,7 @@ impl Page {
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         html: &str,
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_fragment(&html));
+        let html = Box::new(Html::parse_fragment(html));
         tokio::task::yield_now().await;
 
         let mut stream = tokio_stream::iter(html.tree);
@@ -570,7 +570,7 @@ impl Page {
                             let mut abs = self.abs_path(href);
                             let host_name = abs.host_str();
                             let mut can_process =
-                                parent_host_match(host_name, &base_domain, parent_host);
+                                parent_host_match(host_name, base_domain, parent_host);
 
                             if !can_process
                                 && host_name.is_some()
@@ -1004,7 +1004,7 @@ impl Page {
                         let mut abs = self.abs_path(href);
 
                         let can_process =
-                            parent_host_match(abs.host_str(), &base_domain, parent_host);
+                            parent_host_match(abs.host_str(), base_domain, parent_host);
 
                         if can_process {
                             if abs.scheme() != parent_host_scheme.as_str() {
@@ -1141,8 +1141,8 @@ async fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(&link_result, &client).await;
-    let selector = get_page_selectors(&link_result, false, false);
+    let page: Page = Page::new(link_result, &client).await;
+    let selector = get_page_selectors(link_result, false, false);
 
     let links = page.links(&selector.unwrap()).await;
 
@@ -1166,7 +1166,7 @@ async fn test_status_code() {
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/does-not-exist";
-    let page: Page = Page::new(&link_result, &client).await;
+    let page: Page = Page::new(link_result, &client).await;
 
     assert_eq!(page.status_code.as_u16(), 404);
 }
@@ -1183,7 +1183,7 @@ async fn test_abs_path() {
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(&link_result, &client).await;
+    let page: Page = Page::new(link_result, &client).await;
 
     assert_eq!(
         page.abs_path("/page"),

@@ -10,9 +10,9 @@ lazy_static! {
     /// top level request client to re-use
     static ref CLIENT: spider::Client = {
         let mut proxy_website = Website::new("proxy");
-        let client = proxy_website.configure_http_client();
+        
 
-        client
+        proxy_website.configure_http_client()
     };
 }
 
@@ -118,9 +118,9 @@ async fn main() {
     let port: u16 = std::env::var("SPIDER_WORKER_PORT")
         .unwrap_or_else(|_| "3030".into())
         .parse()
-        .unwrap_or_else(|_| 3030);
+        .unwrap_or(3030);
 
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
+    utils::log("Spider_Worker starting at 0.0.0.0:", port.to_string());
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }

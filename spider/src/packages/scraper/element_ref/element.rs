@@ -149,8 +149,7 @@ mod tests {
         let sel = Selector::parse("p").unwrap();
 
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(
-            true,
+        assert!(
             element.has_id(
                 &CssLocalName::from("link_id_456"),
                 CaseSensitivity::CaseSensitive
@@ -160,9 +159,8 @@ mod tests {
         let html = "<p>hey there</p>";
         let fragment = Html::parse_fragment(html);
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(
-            false,
-            element.has_id(
+        assert!(
+            !element.has_id(
                 &CssLocalName::from("any_link_id"),
                 CaseSensitivity::CaseSensitive
             )
@@ -175,13 +173,13 @@ mod tests {
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("link").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(true, element.is_link());
+        assert!(element.is_link());
 
         let html = "<p>hey there</p>";
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("p").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(false, element.is_link());
+        assert!(!element.is_link());
     }
 
     #[test]
@@ -190,8 +188,7 @@ mod tests {
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("p").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(
-            true,
+        assert!(
             element.has_class(
                 &CssLocalName::from("my_class"),
                 CaseSensitivity::CaseSensitive
@@ -202,9 +199,8 @@ mod tests {
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("p").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert_eq!(
-            false,
-            element.has_class(
+        assert!(
+            !element.has_class(
                 &CssLocalName::from("my_class"),
                 CaseSensitivity::CaseSensitive
             )

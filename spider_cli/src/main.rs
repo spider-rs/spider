@@ -45,21 +45,13 @@ async fn main() {
         .with_tld(cli.tld)
         .with_depth(cli.depth)
         .with_user_agent(cli.user_agent.as_deref())
-        .with_budget(match cli.budget {
-            Some(ref budget) => Some(
-                budget
-                    .split(",")
+        .with_budget(cli.budget.as_ref().map(|budget| budget
+                    .split(',')
                     .collect::<Vec<_>>()
                     .chunks(2)
                     .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
-                    .collect::<HashMap<&str, u32>>(),
-            ),
-            _ => None,
-        })
-        .with_blacklist_url(match cli.blacklist_url {
-            Some(blacklist_url) => Some(blacklist_url.split(',').map(|l| l.into()).collect()),
-            _ => None,
-        })
+                    .collect::<HashMap<&str, u32>>()))
+        .with_blacklist_url(cli.blacklist_url.map(|blacklist_url| blacklist_url.split(',').map(|l| l.into()).collect()))
         .with_external_domains(Some(cli.external_domains.unwrap_or_default().into_iter()))
         .build()
     {
@@ -89,7 +81,7 @@ async fn main() {
                     let tmp_path = Path::new(&tmp_dir);
 
                     if !Path::new(&tmp_path).exists() {
-                        match std::fs::create_dir_all(&tmp_path) {
+                        match std::fs::create_dir_all(tmp_path) {
                             _ => (),
                         };
                     }
@@ -109,7 +101,7 @@ async fn main() {
                                             let url_path = parsed_url.path();
                                             log("- ", page_url);
 
-                                            let split_paths: Vec<&str> = url_path.split("/").collect();
+                                            let split_paths: Vec<&str> = url_path.split('/').collect();
                                             let it = split_paths.iter();
                                             let last_item = split_paths.last().unwrap_or(&"");
 
@@ -129,7 +121,7 @@ async fn main() {
                                                         .write(true)
                                                         .create(true)
                                                         .truncate(true)
-                                                        .open(&download_path.join(if p.contains(".") {
+                                                        .open(&download_path.join(if p.contains('.') {
                                                             p.to_string()
                                                         } else {
                                                             string_concat!(
@@ -177,7 +169,7 @@ async fn main() {
                                     let mut links: Vec<String> = vec![];
 
                                     if output_links {
-                                        let page_links = page.links(&*selectors).await;
+                                        let page_links = page.links(&selectors).await;
 
                                         for link in page_links {
                                             links.push(link.as_ref().to_string());
