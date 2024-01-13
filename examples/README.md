@@ -75,3 +75,7 @@ Use URL globbing for a domain. [URL Globbing](./glob.rs).
 Use URL globbing for a domain and subdomains. [URL Globbing Subdomains](./url_glob_subdomains.rs).
 
 - `cargo run --example url_glob_subdomains --features glob`
+
+Downloading files in a subscription. [Subscribe Download](./subscribe_download.rs).
+
+- `cargo run --example subscribe_download`

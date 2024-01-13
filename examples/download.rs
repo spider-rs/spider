@@ -29,11 +29,7 @@ async fn main() {
     website.scrape().await;
 
     for page in website.get_pages().unwrap().iter() {
-        let download_file = percent_encode(
-            page.get_url().as_bytes(),
-            NON_ALPHANUMERIC,
-        )
-        .to_string();
+        let download_file = percent_encode(page.get_url().as_bytes(), NON_ALPHANUMERIC).to_string();
 
         let download_file = if download_file.is_empty() {
             "index"

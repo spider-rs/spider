@@ -122,3 +122,8 @@ required-features = ["spider/sync", "spider/glob"]
 name = "url_glob_subdomains"
 path = "url_glob_subdomains.rs"
 required-features = ["spider/sync", "spider/glob"]
+
+[[example]]
+name = "subscribe_download"
+path = "subscribe_download.rs"
+required-features = ["spider/sync"]
