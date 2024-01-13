@@ -2,6 +2,7 @@
 extern crate env_logger;
 extern crate spider;
 
+use spider::percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use spider::utils::log;
 use spider::website::Website;
 
@@ -24,22 +25,15 @@ async fn main() {
     let website_name = "https://rsseau.fr";
 
     let mut website: Website = Website::new(website_name);
-    website.configuration.respect_robots_txt = true;
-    website.configuration.delay = 0;
 
     website.scrape().await;
 
     for page in website.get_pages().unwrap().iter() {
-        let download_file = page.get_url();
-        let download_file = download_file.replace(website_name, "");
-        let download_file = download_file.replace(".", "-");
-        let download_file = download_file.replace("/", "-");
-
-        let download_file = if download_file.starts_with("-") {
-            &download_file[1..]
-        } else {
-            &download_file
-        };
+        let download_file = percent_encode(
+            page.get_url().as_bytes(),
+            NON_ALPHANUMERIC,
+        )
+        .to_string();
 
         let download_file = if download_file.is_empty() {
             "index"
