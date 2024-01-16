@@ -100,6 +100,9 @@ pub struct Configuration {
         Box<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
     /// Collect all the resources found on the page.
     pub full_resources: bool,
+    #[cfg(feature = "chrome")]
+    /// Wait for idle network connections.
+    pub wait_for_idle_network: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -393,6 +396,19 @@ impl Configuration {
     #[cfg(not(feature = "chrome"))]
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, _stealth_mode: bool) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_network(&mut self, wait_for_idle_network: bool) -> &mut Self {
+        self.wait_for_idle_network = wait_for_idle_network;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_network(&mut self, _wait_for_idle_network: bool) -> &mut Self {
         self
     }
 

@@ -10,7 +10,7 @@ lazy_static! {
     /// top level request client to re-use
     static ref CLIENT: spider::Client = {
         let mut proxy_website = Website::new("proxy");
-        
+
 
         proxy_website.configure_http_client()
     };
