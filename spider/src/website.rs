@@ -694,8 +694,6 @@ impl Website {
             _ => client,
         };
 
-        
-
         self.configure_http_client_cookies(client)
     }
 
@@ -1164,57 +1162,56 @@ impl Website {
         _: bool,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist())
-        {
-            let page = Page::new_page(self.domain.inner(), client).await;
+        let links: HashSet<CaseInsensitiveString> =
+            if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
+                let page = Page::new_page(self.domain.inner(), client).await;
 
-            // allow initial page mutation
-            match page.final_redirect_destination.as_deref() {
-                Some(domain) => {
-                    self.domain_parsed = match url::Url::parse(domain) {
-                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                        _ => None,
-                    };
-                    self.domain = Box::new(domain.into());
-                    match self.setup_selectors() {
-                        Some(s) => {
-                            base.0 = s.0;
-                            base.1 = s.1;
+                // allow initial page mutation
+                match page.final_redirect_destination.as_deref() {
+                    Some(domain) => {
+                        self.domain_parsed = match url::Url::parse(domain) {
+                            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                            _ => None,
+                        };
+                        self.domain = Box::new(domain.into());
+                        match self.setup_selectors() {
+                            Some(s) => {
+                                base.0 = s.0;
+                                base.1 = s.1;
+                            }
+                            _ => (),
                         }
-                        _ => (),
                     }
-                }
-                _ => (),
-            };
-
-            let links = if !page.is_empty() {
-                self.links_visited.insert(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.domain.clone(), None);
-                        c.0
-                    }
-                    _ => *self.domain.clone(),
-                });
-                page.links(base).await
-            } else {
-                self.status = CrawlStatus::Empty;
-                Default::default()
-            };
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
                     _ => (),
                 };
-            }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+                let links = if !page.is_empty() {
+                    self.links_visited.insert(match self.on_link_find_callback {
+                        Some(cb) => {
+                            let c = cb(*self.domain.clone(), None);
+                            c.0
+                        }
+                        _ => *self.domain.clone(),
+                    });
+                    page.links(base).await
+                } else {
+                    self.status = CrawlStatus::Empty;
+                    Default::default()
+                };
 
-            links
-        } else {
-            HashSet::new()
-        };
+                if scrape {
+                    match self.pages.as_mut() {
+                        Some(p) => p.push(page.clone()),
+                        _ => (),
+                    };
+                }
+
+                channel_send_page(&self.channel, page, &self.channel_guard);
+
+                links
+            } else {
+                HashSet::new()
+            };
 
         links
     }
@@ -1252,7 +1249,13 @@ impl Website {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
-            let page = Page::new(&self.domain.inner(), &client, &page).await;
+            let page = Page::new(
+                &self.domain.inner(),
+                &client,
+                &page,
+                self.configuration.wait_for_idle_network,
+            )
+            .await;
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -1431,7 +1434,13 @@ impl Website {
 
         for link in expanded {
             if self.is_allowed(&link, &blacklist_url) {
-                let page = Page::new(&link.inner().as_str(), &client, &page).await;
+                let page = Page::new(
+                    &link.inner().as_str(),
+                    &client,
+                    &page,
+                    self.configuration.wait_for_idle_network,
+                )
+                .await;
                 let u = page.get_url();
                 let u = if u.is_empty() { link } else { u.into() };
 
@@ -1831,11 +1840,7 @@ impl Website {
                                 let mut page = build(link.as_ref(), page_resource);
 
                                 let (link, _) = match on_link_find_callback {
-                                    Some(cb) => {
-                                        
-
-                                        cb(link, Some(page.get_html()))
-                                    }
+                                    Some(cb) => cb(link, Some(page.get_html())),
                                     _ => (link, None),
                                 };
 
@@ -1892,6 +1897,13 @@ impl Website {
             Some(mut selectors) => match launch_browser(&self.configuration).await {
                 Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
                     Ok(new_page) => {
+                        let mut links: HashSet<CaseInsensitiveString> =
+                            if self.status == CrawlStatus::Active {
+                                self.links_visited.drain().collect()
+                            } else {
+                                HashSet::new()
+                            };
+
                         let (mut interval, throttle) = self.setup_crawl();
 
                         if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
@@ -1908,11 +1920,11 @@ impl Website {
 
                         let new_page = configure_browser(new_page, &self.configuration).await;
                         let intercept_handle = self.setup_chrome_interception(&new_page).await;
-                        let mut links: HashSet<CaseInsensitiveString> = self
-                            .crawl_establish(&client, &mut selectors, false, &new_page, false)
-                            .await;
 
-                        links.extend(self.links_visited.drain());
+                        links.extend(
+                            self.crawl_establish(&client, &mut selectors, false, &new_page, false)
+                                .await,
+                        );
 
                         if !links.is_empty() {
                             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -1932,6 +1944,7 @@ impl Website {
                             let blacklist_url = self.configuration.get_blacklist();
                             let on_link_find_callback = self.on_link_find_callback;
                             let full_resources = self.configuration.full_resources;
+                            let wait_for_network_idle = self.configuration.wait_for_idle_network;
 
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -1974,6 +1987,7 @@ impl Website {
                                                         &link_result.0.as_ref(),
                                                         &shared.0,
                                                         &shared.3,
+                                                        wait_for_network_idle,
                                                     )
                                                     .await;
 
@@ -2065,12 +2079,9 @@ impl Website {
                     )
                     .await;
 
-                links.extend(self.links_visited.drain());
-
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                 let chandle = Handle::current();
 
-                // crawl while links exists
                 loop {
                     let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                         links.drain().collect(),
@@ -2155,6 +2166,13 @@ impl Website {
             Some(mut selectors) => match launch_browser(&self.configuration).await {
                 Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
                     Ok(new_page) => {
+                        let mut links: HashSet<CaseInsensitiveString> =
+                            if self.status == CrawlStatus::Active {
+                                self.links_visited.drain().collect()
+                            } else {
+                                HashSet::new()
+                            };
+
                         let (mut interval, throttle) = self.setup_crawl();
                         let blacklist_url = self.configuration.get_blacklist();
                         let on_link_find_callback = self.on_link_find_callback;
@@ -2173,11 +2191,11 @@ impl Website {
 
                         let new_page = configure_browser(new_page, &self.configuration).await;
                         let intercept_handle = self.setup_chrome_interception(&new_page).await;
-                        let mut links: HashSet<CaseInsensitiveString> = self
-                            .crawl_establish(&client, &mut selectors, false, &new_page, false)
-                            .await;
 
-                        links.extend(self.links_visited.drain());
+                        links.extend(
+                            self.crawl_establish(&client, &mut selectors, false, &new_page, false)
+                                .await,
+                        );
 
                         if !links.is_empty() {
                             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -2194,6 +2212,7 @@ impl Website {
                             ));
 
                             let add_external = shared.4.len() > 0;
+                            let wait_for_network_idle = self.configuration.wait_for_idle_network;
 
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2236,6 +2255,7 @@ impl Website {
                                                         &link_result.0.as_ref(),
                                                         &shared.0,
                                                         &shared.3,
+                                                        wait_for_network_idle,
                                                     )
                                                     .await;
 
@@ -2336,8 +2356,6 @@ impl Website {
                     HashSet<CaseInsensitiveString>,
                 )> = JoinSet::new();
 
-                links.extend(self.links_visited.drain());
-
                 if !links.is_empty() {
                     loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2365,19 +2383,13 @@ impl Website {
 
                                     set.spawn(async move {
                                         drop(permit);
-                                        let page_resource = crate::utils::fetch_page_html(
-                                            link.as_ref(),
-                                            &shared.0,
-                                        )
-                                        .await;
+                                        let page_resource =
+                                            crate::utils::fetch_page_html(link.as_ref(), &shared.0)
+                                                .await;
                                         let mut page = build(link.as_ref(), page_resource);
 
                                         let (link, _) = match on_link_find_callback {
-                                            Some(cb) => {
-                                                
-
-                                                cb(link, Some(page.get_html()))
-                                            }
+                                            Some(cb) => cb(link, Some(page.get_html())),
                                             _ => (link, None),
                                         };
 
@@ -2434,11 +2446,16 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(selectors) => {
-                let (mut interval, throttle) = self.setup_crawl();
                 match launch_browser(&self.configuration).await {
                     Some((browser, browser_handle)) => {
                         match browser.new_page("about:blank").await {
                             Ok(new_page) => {
+                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+
+                                if self.status == CrawlStatus::Active {
+                                    links.extend(self.links_visited.drain());
+                                }
+
                                 if cfg!(feature = "chrome_stealth") {
                                     let _ = new_page.enable_stealth_mode_with_agent(&if self
                                         .configuration
@@ -2451,9 +2468,12 @@ impl Website {
                                     });
                                 }
 
+                                let (mut interval, throttle) = self.setup_crawl();
                                 let blacklist_url = self.configuration.get_blacklist();
                                 self.pages = Some(Box::new(Vec::new()));
                                 let on_link_find_callback = self.on_link_find_callback;
+                                let wait_for_network_idle =
+                                    self.configuration.wait_for_idle_network;
 
                                 let mut set: JoinSet<(
                                     CaseInsensitiveString,
@@ -2466,10 +2486,7 @@ impl Website {
                                 let intercept_handle =
                                     self.setup_chrome_interception(&new_page).await;
 
-                                let mut links: HashSet<CaseInsensitiveString> =
-                                    HashSet::from([*self.domain.clone()]);
-
-                                links.extend(self.links_visited.drain());
+                                links.extend([*self.domain.clone()]);
 
                                 let shared = Arc::new((
                                     client.to_owned(),
@@ -2514,6 +2531,7 @@ impl Website {
                                                     &link.as_ref(),
                                                     &shared.0,
                                                     &shared.3,
+                                                    wait_for_network_idle,
                                                 )
                                                 .await;
                                                 let mut page = build(&link.as_ref(), page);
@@ -3002,6 +3020,13 @@ impl Website {
         self
     }
 
+    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_network(&mut self, wait_for_idle_network: bool) -> &mut Self {
+        self.configuration
+            .with_wait_for_idle_network(wait_for_idle_network);
+        self
+    }
+
     /// Set the max redirects allowed for request.
     pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
         self.configuration.with_redirect_limit(redirect_limit);
@@ -3241,9 +3266,7 @@ impl Website {
     #[cfg(feature = "sync")]
     pub fn subscribe_guard(&mut self) -> Option<ChannelGuard> {
         // *note*: it would be better to handle this on page drop if the subscription is used automatically. For now we add the API upfront.
-        let channel_guard = self
-            .channel_guard
-            .get_or_insert_with(ChannelGuard::new);
+        let channel_guard = self.channel_guard.get_or_insert_with(ChannelGuard::new);
         Some(channel_guard.clone())
     }
 

@@ -8,6 +8,7 @@ use spider::website::Website;
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr")
         .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .with_wait_for_idle_network(true)
         .with_caching(cfg!(feature = "cache"))
         .build()
         .unwrap();

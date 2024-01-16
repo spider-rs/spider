@@ -149,22 +149,18 @@ mod tests {
         let sel = Selector::parse("p").unwrap();
 
         let element = fragment.select(&sel).next().unwrap();
-        assert!(
-            element.has_id(
-                &CssLocalName::from("link_id_456"),
-                CaseSensitivity::CaseSensitive
-            )
-        );
+        assert!(element.has_id(
+            &CssLocalName::from("link_id_456"),
+            CaseSensitivity::CaseSensitive
+        ));
 
         let html = "<p>hey there</p>";
         let fragment = Html::parse_fragment(html);
         let element = fragment.select(&sel).next().unwrap();
-        assert!(
-            !element.has_id(
-                &CssLocalName::from("any_link_id"),
-                CaseSensitivity::CaseSensitive
-            )
-        );
+        assert!(!element.has_id(
+            &CssLocalName::from("any_link_id"),
+            CaseSensitivity::CaseSensitive
+        ));
     }
 
     #[test]
@@ -188,22 +184,18 @@ mod tests {
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("p").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert!(
-            element.has_class(
-                &CssLocalName::from("my_class"),
-                CaseSensitivity::CaseSensitive
-            )
-        );
+        assert!(element.has_class(
+            &CssLocalName::from("my_class"),
+            CaseSensitivity::CaseSensitive
+        ));
 
         let html = "<p>hey there</p>";
         let fragment = Html::parse_fragment(html);
         let sel = Selector::parse("p").unwrap();
         let element = fragment.select(&sel).next().unwrap();
-        assert!(
-            !element.has_class(
-                &CssLocalName::from("my_class"),
-                CaseSensitivity::CaseSensitive
-            )
-        );
+        assert!(!element.has_class(
+            &CssLocalName::from("my_class"),
+            CaseSensitivity::CaseSensitive
+        ));
     }
 }

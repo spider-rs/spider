@@ -1,3 +1,4 @@
+use crate::tokio_stream::StreamExt;
 use crate::Client;
 use log::{info, log_enabled, Level};
 use reqwest::{Error, Response, StatusCode};
@@ -15,13 +16,37 @@ pub struct PageResponse {
     pub error_for_status: Option<Result<Response, Error>>,
 }
 
+/// wait for idle network
+#[cfg(feature = "chrome")]
+pub async fn wait_for_idle_network(page: &chromiumoxide::Page) {
+    match page.event_listener::<crate::chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>().await {
+        Ok(mut events) => {
+            if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(30), async move {
+                loop {
+                    let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
+                    tokio::pin!(sleep);
+                    tokio::select! {
+                        _ = &mut sleep => break,
+                        _ = events.next() => (),
+                        else => break,
+                    }
+                }
+            })
+            .await
+            {}
+        }
+        _ => ()
+    }
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
     target_url: &str,
     page: &chromiumoxide::Page,
     content: bool,
-    wait: bool,
+    wait_for_navigation: bool,
+    wait_for_network_idle: bool,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let page = page.activate().await?;
 
@@ -31,7 +56,7 @@ pub async fn fetch_page_html_chrome_base(
         page.goto(target_url).await?
     };
 
-    let final_url = if wait {
+    let final_url = if wait_for_navigation {
         match page.wait_for_navigation_response().await {
             Ok(u) => get_last_redirect(&target_url, &u),
             _ => None,
@@ -39,6 +64,10 @@ pub async fn fetch_page_html_chrome_base(
     } else {
         None
     };
+
+    if wait_for_network_idle {
+        wait_for_idle_network(page).await;
+    }
 
     let res = page.content_bytes().await;
     let ok = res.is_ok();
@@ -70,8 +99,10 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
+    wait_for_network_idle: bool,
 ) -> PageResponse {
-    match fetch_page_html_chrome_base(&target_url, &page, false, true).await {
+    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for_network_idle).await
+    {
         Ok(page) => page,
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -83,6 +114,7 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
+    wait_for_network_idle: bool,
 ) -> PageResponse {
     let page = page.activate().await;
 
@@ -91,6 +123,9 @@ pub async fn fetch_page_html(
             match page.goto(target_url).await {
                 Ok(page) => {
                     let p = page.wait_for_navigation_response().await;
+                    if wait_for_network_idle {
+                        wait_for_idle_network(&page).await;
+                    }
                     let res = page.content_bytes().await;
                     let ok = res.is_ok();
 
@@ -185,7 +220,6 @@ pub fn get_last_redirect(
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use bytes::BytesMut;
-    use tokio_stream::StreamExt;
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
@@ -261,7 +295,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
     use percent_encoding::NON_ALPHANUMERIC;
     use std::time::SystemTime;
     use tendril::fmt::Slice;
-    use tokio_stream::StreamExt;
 
     lazy_static! {
         static ref TMP_DIR: String = {
@@ -380,9 +413,18 @@ pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
+    wait_for_network_idle: bool,
 ) -> PageResponse {
     match &page {
-        page => match fetch_page_html_chrome_base(&target_url, &page, false, true).await {
+        page => match fetch_page_html_chrome_base(
+            &target_url,
+            &page,
+            false,
+            true,
+            wait_for_network_idle,
+        )
+        .await
+        {
             Ok(page) => page,
             _ => {
                 log(
@@ -392,7 +434,6 @@ pub async fn fetch_page_html_chrome(
 
                 use crate::bytes::BufMut;
                 use bytes::BytesMut;
-                use tokio_stream::StreamExt;
 
                 let content = match client.get(target_url).send().await {
                     Ok(res) if res.status().is_success() => {

@@ -269,8 +269,14 @@ impl Page {
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
     /// Instantiate a new page and gather the html.
-    pub async fn new(url: &str, client: &Client, page: &chromiumoxide::Page) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client, &page).await;
+    pub async fn new(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide::Page,
+        wait_for_network_idle: bool,
+    ) -> Self {
+        let page_resource =
+            crate::utils::fetch_page_html(&url, &client, &page, wait_for_network_idle).await;
         let mut p = build(url, page_resource);
 
         // store the chrome page to perform actions like screenshots etc.
@@ -735,7 +741,7 @@ impl Page {
                                     tokio::task::spawn(async move {
                                         let page_resource =
                                             crate::utils::fetch_page_html_chrome_base(
-                                                &uu, &browser, true, false,
+                                                &uu, &browser, true, false, true,
                                             )
                                             .await;
 
