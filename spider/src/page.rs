@@ -273,7 +273,7 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for_network_idle: bool,
+        wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
     ) -> Self {
         let page_resource =
             crate::utils::fetch_page_html(&url, &client, &page, wait_for_network_idle).await;
@@ -655,6 +655,8 @@ impl Page {
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         browser: &chromiumoxide::Page,
     ) -> HashSet<A> {
+        use crate::configuration::WaitForIdleNetwork;
+
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
         let parent_host = &parent_frags[0];
@@ -741,7 +743,13 @@ impl Page {
                                     tokio::task::spawn(async move {
                                         let page_resource =
                                             crate::utils::fetch_page_html_chrome_base(
-                                                &uu, &browser, true, false, true,
+                                                &uu,
+                                                &browser,
+                                                true,
+                                                false,
+                                                &Some(WaitForIdleNetwork::new(Some(
+                                                    core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
+                                                ))),
                                             )
                                             .await;
 
