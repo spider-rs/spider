@@ -1,6 +1,9 @@
 //! `cargo run --example chrome --features chrome`
 extern crate spider;
 
+use std::time::Duration;
+
+use spider::configuration::WaitForIdleNetwork;
 use spider::tokio;
 use spider::website::Website;
 
@@ -8,7 +11,7 @@ use spider::website::Website;
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr")
         .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
-        .with_wait_for_idle_network(true)
+        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_caching(cfg!(feature = "cache"))
         .build()
         .unwrap();
