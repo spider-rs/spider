@@ -273,7 +273,7 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for_network_idle: bool,
+        wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
     ) -> Self {
         let page_resource =
             crate::utils::fetch_page_html(&url, &client, &page, wait_for_network_idle).await;

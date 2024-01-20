@@ -12,6 +12,20 @@ pub enum RedirectPolicy {
     Strict,
 }
 
+#[derive(Debug, Default, Clone)]
+/// Wait for network request with optional timeout. This does nothing without the `chrome` flag enabled.
+pub struct WaitForIdleNetwork {
+    /// The max time to wait for the network. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
+    pub timeout: Option<core::time::Duration>,
+}
+
+impl WaitForIdleNetwork {
+    /// Create new WaitForIdleNetwork with timeout.
+    pub fn new(&mut self, timeout: Option<core::time::Duration>) -> Self {
+        Self { timeout }
+    }
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -102,7 +116,7 @@ pub struct Configuration {
     pub full_resources: bool,
     #[cfg(feature = "chrome")]
     /// Wait for idle network connections.
-    pub wait_for_idle_network: bool,
+    pub wait_for_idle_network: Option<WaitForIdleNetwork>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -401,14 +415,20 @@ impl Configuration {
 
     #[cfg(feature = "chrome")]
     /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
-    pub fn with_wait_for_idle_network(&mut self, wait_for_idle_network: bool) -> &mut Self {
+    pub fn with_wait_for_idle_network(
+        &mut self,
+        wait_for_idle_network: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
         self.wait_for_idle_network = wait_for_idle_network;
         self
     }
 
     #[cfg(not(feature = "chrome"))]
     /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
-    pub fn with_wait_for_idle_network(&mut self, _wait_for_idle_network: bool) -> &mut Self {
+    pub fn with_wait_for_idle_network(
+        &mut self,
+        _wait_for_idle_network: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
         self
     }
 
