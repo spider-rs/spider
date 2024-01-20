@@ -1267,7 +1267,7 @@ impl Website {
                 &self.domain.inner(),
                 &client,
                 &page,
-                self.configuration.wait_for_idle_network,
+                &self.configuration.wait_for_idle_network,
             )
             .await;
 
@@ -1452,7 +1452,7 @@ impl Website {
                     &link.inner().as_str(),
                     &client,
                     &page,
-                    self.configuration.wait_for_idle_network,
+                    &self.configuration.wait_for_idle_network,
                 )
                 .await;
                 let u = page.get_url();
@@ -1951,14 +1951,13 @@ impl Website {
                                 new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
+                                self.configuration.wait_for_idle_network.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
-
                             let blacklist_url = self.configuration.get_blacklist();
                             let on_link_find_callback = self.on_link_find_callback;
                             let full_resources = self.configuration.full_resources;
-                            let wait_for_network_idle = self.configuration.wait_for_idle_network;
 
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2001,7 +2000,7 @@ impl Website {
                                                         &link_result.0.as_ref(),
                                                         &shared.0,
                                                         &shared.3,
-                                                        wait_for_network_idle,
+                                                        &shared.6,
                                                     )
                                                     .await;
 
@@ -2223,10 +2222,10 @@ impl Website {
                                 new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
+                                self.configuration.wait_for_idle_network.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
-                            let wait_for_network_idle = self.configuration.wait_for_idle_network;
 
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2269,7 +2268,7 @@ impl Website {
                                                         &link_result.0.as_ref(),
                                                         &shared.0,
                                                         &shared.3,
-                                                        wait_for_network_idle,
+                                                        &shared.6,
                                                     )
                                                     .await;
 
@@ -2486,8 +2485,6 @@ impl Website {
                                 let blacklist_url = self.configuration.get_blacklist();
                                 self.pages = Some(Box::new(Vec::new()));
                                 let on_link_find_callback = self.on_link_find_callback;
-                                let wait_for_network_idle =
-                                    self.configuration.wait_for_idle_network;
 
                                 let mut set: JoinSet<(
                                     CaseInsensitiveString,
@@ -2509,6 +2506,7 @@ impl Website {
                                     new_page.clone(),
                                     self.configuration.external_domains_caseless.clone(),
                                     self.channel_guard.clone(),
+                                    self.configuration.wait_for_idle_network.clone(),
                                 ));
 
                                 if !links.is_empty() {
@@ -2545,7 +2543,7 @@ impl Website {
                                                     &link.as_ref(),
                                                     &shared.0,
                                                     &shared.3,
-                                                    wait_for_network_idle,
+                                                    &shared.6,
                                                 )
                                                 .await;
                                                 let mut page = build(&link.as_ref(), page);
@@ -3058,7 +3056,10 @@ impl Website {
     }
 
     /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
-    pub fn with_wait_for_idle_network(&mut self, wait_for_idle_network: bool) -> &mut Self {
+    pub fn with_wait_for_idle_network(
+        &mut self,
+        wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
+    ) -> &mut Self {
         self.configuration
             .with_wait_for_idle_network(wait_for_idle_network);
         self

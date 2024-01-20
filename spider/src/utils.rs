@@ -18,22 +18,30 @@ pub struct PageResponse {
 
 /// wait for idle network
 #[cfg(feature = "chrome")]
-pub async fn wait_for_idle_network(page: &chromiumoxide::Page) {
+pub async fn wait_for_idle_network(
+    page: &chromiumoxide::Page,
+    timeout: Option<core::time::Duration>,
+) {
     match page.event_listener::<crate::chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>().await {
         Ok(mut events) => {
-            if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(30), async move {
+            let wait_until = async {
                 loop {
                     let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
                     tokio::pin!(sleep);
                     tokio::select! {
                         _ = &mut sleep => break,
-                        _ = events.next() => (),
-                        else => break,
+                        _ = events.next() => ()
                     }
                 }
-            })
-            .await
-            {}
+            };
+            match timeout {
+                Some(timeout) => {
+                    if let Err(_) = tokio::time::timeout(timeout, wait_until)
+                    .await
+                    {}
+                }
+                _ => wait_until.await
+            }
         }
         _ => ()
     }
@@ -46,7 +54,7 @@ pub async fn fetch_page_html_chrome_base(
     page: &chromiumoxide::Page,
     content: bool,
     wait_for_navigation: bool,
-    wait_for_network_idle: bool,
+    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let page = page.activate().await?;
 
@@ -65,8 +73,11 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
-    if wait_for_network_idle {
-        wait_for_idle_network(page).await;
+    match wait_for_network_idle {
+        Some(wait_for) => {
+            wait_for_idle_network(page, wait_for.timeout).await;
+        }
+        _ => (),
     }
 
     let res = page.content_bytes().await;
@@ -99,7 +110,7 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for_network_idle: bool,
+    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for_network_idle).await
     {
@@ -413,7 +424,7 @@ pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for_network_idle: bool,
+    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
 ) -> PageResponse {
     match &page {
         page => match fetch_page_html_chrome_base(
