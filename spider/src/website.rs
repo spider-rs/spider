@@ -1735,35 +1735,40 @@ impl Website {
 
                                     log("fetch", &link);
                                     self.links_visited.insert(link.clone());
-                                    let permit = SEM.acquire().await.unwrap();
-                                    let shared = shared.clone();
-                                    task::yield_now().await;
+                                    match SEM.acquire().await {
+                                        Ok(permit) => {
+                                            let shared = shared.clone();
 
-                                    set.spawn_on(
-                                        async move {
-                                            let link_result = match on_link_find_callback {
-                                                Some(cb) => cb(link, None),
-                                                _ => (link, None),
-                                            };
-                                            let mut page =
-                                                Page::new_page(link_result.0.as_ref(), &shared.0)
+                                            set.spawn_on(
+                                                async move {
+                                                    let link_result = match on_link_find_callback {
+                                                        Some(cb) => cb(link, None),
+                                                        _ => (link, None),
+                                                    };
+                                                    let mut page = Page::new_page(
+                                                        link_result.0.as_ref(),
+                                                        &shared.0,
+                                                    )
                                                     .await;
-                                            page.set_external(shared.3.to_owned());
+                                                    page.set_external(shared.3.to_owned());
 
-                                            let page_links = if full_resources {
-                                                page.links_full(&shared.1).await
-                                            } else {
-                                                page.links(&shared.1).await
-                                            };
+                                                    let page_links = if full_resources {
+                                                        page.links_full(&shared.1).await
+                                                    } else {
+                                                        page.links(&shared.1).await
+                                                    };
 
-                                            channel_send_page(&shared.2, page, &shared.4);
+                                                    channel_send_page(&shared.2, page, &shared.4);
 
-                                            drop(permit);
+                                                    drop(permit);
 
-                                            page_links
-                                        },
-                                        &chandle,
-                                    );
+                                                    page_links
+                                                },
+                                                &chandle,
+                                            );
+                                        }
+                                        _ => (),
+                                    }
                                 }
                                 _ => break,
                             }
@@ -1843,33 +1848,37 @@ impl Website {
                             }
                             self.links_visited.insert(link.clone());
                             log("fetch", &link);
-                            let permit = SEM.acquire().await.unwrap();
-                            let shared = shared.clone();
+                            match SEM.acquire().await {
+                                Ok(permit) => {
+                                    let shared = shared.clone();
 
-                            set.spawn(async move {
-                                drop(permit);
-                                let page_resource =
-                                    crate::utils::fetch_page_html_raw(link.as_ref(), &shared.0)
-                                        .await;
-                                let mut page = build(link.as_ref(), page_resource);
-
-                                let (link, _) = match on_link_find_callback {
-                                    Some(cb) => cb(link, Some(page.get_html())),
-                                    _ => (link, None),
-                                };
-
-                                channel_send_page(&shared.2, page.clone(), &shared.4);
-
-                                page.set_external(shared.3.clone());
-
-                                let page_links = if full_resources {
-                                    page.links_full(&shared.1).await
-                                } else {
-                                    page.links(&shared.1).await
-                                };
-
-                                (link, page, page_links)
-                            });
+                                    set.spawn(async move {
+                                        drop(permit);
+                                        let page_resource =
+                                            crate::utils::fetch_page_html_raw(link.as_ref(), &shared.0)
+                                                .await;
+                                        let mut page = build(link.as_ref(), page_resource);
+        
+                                        let (link, _) = match on_link_find_callback {
+                                            Some(cb) => cb(link, Some(page.get_html())),
+                                            _ => (link, None),
+                                        };
+        
+                                        channel_send_page(&shared.2, page.clone(), &shared.4);
+        
+                                        page.set_external(shared.3.clone());
+        
+                                        let page_links = if full_resources {
+                                            page.links_full(&shared.1).await
+                                        } else {
+                                            page.links(&shared.1).await
+                                        };
+        
+                                        (link, page, page_links)
+                                    });
+                                }
+                                _ => ()
+                            }
                         }
 
                         task::yield_now().await;
@@ -1988,7 +1997,6 @@ impl Website {
                                             self.links_visited.insert(link.clone());
                                             let permit = SEM.acquire().await.unwrap();
                                             let shared = shared.clone();
-                                            task::yield_now().await;
 
                                             set.spawn_on(
                                                 async move {
@@ -2256,7 +2264,6 @@ impl Website {
                                             self.links_visited.insert(link.clone());
                                             let permit = SEM.acquire().await.unwrap();
                                             let shared = shared.clone();
-                                            task::yield_now().await;
 
                                             set.spawn_on(
                                                 async move {
@@ -2570,8 +2577,6 @@ impl Website {
                                             });
                                         }
 
-                                        task::yield_now().await;
-
                                         if links.capacity() >= 1500 {
                                             links.shrink_to_fit();
                                         }
@@ -2580,7 +2585,6 @@ impl Website {
                                             match res {
                                                 Ok(msg) => {
                                                     links.extend(&msg.2 - &self.links_visited);
-                                                    task::yield_now().await;
                                                     match self.pages.as_mut() {
                                                         Some(p) => p.push(msg.1),
                                                         _ => (),
@@ -2590,7 +2594,6 @@ impl Website {
                                             };
                                         }
 
-                                        task::yield_now().await;
                                         if links.is_empty() {
                                             break;
                                         }
