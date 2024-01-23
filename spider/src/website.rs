@@ -41,15 +41,16 @@ lazy_static! {
         };
 
         let (sem_limit, sem_max) = if logical == physical {
-            (sem_limit * physical, 50)
+            (sem_limit * physical, 28)
         } else {
-            (sem_limit * 4, 25)
+            (sem_limit * 2, 18)
         };
         let sem_limit = if cfg!(feature = "chrome") {
-            sem_limit / 2
+            sem_limit / 4
         } else {
-            sem_limit
+            sem_limit / 2
         };
+
         Semaphore::const_new(sem_limit.max(sem_max))
     };
 }
@@ -1854,30 +1855,32 @@ impl Website {
 
                                     set.spawn(async move {
                                         drop(permit);
-                                        let page_resource =
-                                            crate::utils::fetch_page_html_raw(link.as_ref(), &shared.0)
-                                                .await;
+                                        let page_resource = crate::utils::fetch_page_html_raw(
+                                            link.as_ref(),
+                                            &shared.0,
+                                        )
+                                        .await;
                                         let mut page = build(link.as_ref(), page_resource);
-        
+
                                         let (link, _) = match on_link_find_callback {
                                             Some(cb) => cb(link, Some(page.get_html())),
                                             _ => (link, None),
                                         };
-        
+
                                         channel_send_page(&shared.2, page.clone(), &shared.4);
-        
+
                                         page.set_external(shared.3.clone());
-        
+
                                         let page_links = if full_resources {
                                             page.links_full(&shared.1).await
                                         } else {
                                             page.links(&shared.1).await
                                         };
-        
+
                                         (link, page, page_links)
                                     });
                                 }
-                                _ => ()
+                                _ => (),
                             }
                         }
 
