@@ -105,12 +105,12 @@ pub struct Page {
 lazy_static! {
     /// include only list of resources
     static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(16);
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(18);
 
         m.extend([
-            "html", "htm", "asp", "aspx", "php", "jps", "jpsx", "jsp",
+            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp",
             // handle .. prefix for urls ending with an extra ending
-            ".html", ".htm", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp",
+            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp",
         ].map(|s| s.into()));
 
         m
