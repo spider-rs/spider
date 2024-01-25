@@ -49,7 +49,7 @@ pub struct Configuration {
     pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
-    /// Request max timeout per page
+    /// Request max timeout per page. By default the request times out in 15s. Set to None to disable.
     pub request_timeout: Option<Box<Duration>>,
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
     pub http2_prior_knowledge: bool,
@@ -58,7 +58,7 @@ pub struct Configuration {
     /// Headers to include with request.
     pub headers: Option<Box<reqwest::header::HeaderMap>>,
     #[cfg(feature = "sitemap")]
-    /// Include a sitemap in response of the crawl
+    /// Include a sitemap in response of the crawl.
     pub sitemap_url: Option<Box<CompactString>>,
     #[cfg(feature = "sitemap")]
     /// Prevent including the sitemap links with the crawl.
@@ -74,7 +74,7 @@ pub struct Configuration {
     /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
     pub cron_str: String,
     #[cfg(feature = "cron")]
-    /// The type of cron to run either crawl or scrape
+    /// The type of cron to run either crawl or scrape.
     pub cron_type: CronType,
     #[cfg(feature = "budget")]
     /// The max depth to crawl for a website.
@@ -145,7 +145,7 @@ impl Configuration {
         Self {
             delay: 0,
             redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_millis(15000))),
+            request_timeout: Some(Box::new(Duration::from_secs(15))),
             ..Default::default()
         }
     }
@@ -156,7 +156,7 @@ impl Configuration {
         Self {
             delay: 0,
             redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_millis(15000))),
+            request_timeout: Some(Box::new(Duration::from_secs(15))),
             chrome_intercept: cfg!(feature = "chrome_intercept"),
             ..Default::default()
         }
@@ -213,7 +213,7 @@ impl Configuration {
         self
     }
 
-    /// Max time to wait for request.
+    /// Max time to wait for request. By default request times out in 15s. Set to None to disable.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         match request_timeout {
             Some(timeout) => {

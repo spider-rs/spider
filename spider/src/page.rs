@@ -577,6 +577,7 @@ impl Page {
                             let host_name = abs.host_str();
                             let mut can_process =
                                 parent_host_match(host_name, base_domain, parent_host);
+                            let mut external_domain = false;
 
                             if !can_process
                                 && host_name.is_some()
@@ -589,7 +590,8 @@ impl Page {
                                     )
                                     || self
                                         .external_domains_caseless
-                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD)
+                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+                                external_domain = can_process;
                             }
 
                             if can_process {
@@ -611,6 +613,7 @@ impl Page {
 
                                 if can_process
                                     && (base_domain.is_empty()
+                                        || external_domain
                                         || base_domain.as_str() == domain_name(&abs))
                                 {
                                     map.insert(abs.as_str().to_string().into());
@@ -866,12 +869,14 @@ impl Page {
                 let mut abs = self.abs_path(href.inner());
                 let host_name = abs.host_str();
                 let mut can_process = parent_host_match(host_name, &base_domain, parent_host);
+                let mut external_domain = false;
 
                 if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
                 {
                     can_process = self
                         .external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into());
+                    external_domain = can_process;
                 }
 
                 if can_process {
@@ -889,7 +894,9 @@ impl Page {
                     }
 
                     if can_process
-                        && (base_domain.is_empty() || base_domain.as_str() == domain_name(&abs))
+                        && (base_domain.is_empty()
+                            || external_domain
+                            || base_domain.as_str() == domain_name(&abs))
                     {
                         map.insert(abs.as_str().to_string().into());
                     }
