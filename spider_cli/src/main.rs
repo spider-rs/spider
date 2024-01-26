@@ -42,8 +42,9 @@ async fn main() {
         .with_delay(cli.delay.unwrap_or_default())
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(cli.block_images, true)
+        .with_limit(cli.limit.unwrap_or(0))
         .with_tld(cli.tld)
-        .with_depth(cli.depth)
+        .with_depth(cli.depth.unwrap_or(0))
         .with_user_agent(cli.user_agent.as_deref())
         .with_budget(cli.budget.as_ref().map(|budget| budget
                     .split(',')

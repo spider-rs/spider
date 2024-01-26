@@ -26,6 +26,9 @@ pub struct Cli {
     /// Polite crawling delay in milli seconds
     #[clap(short = 'D', long)]
     pub delay: Option<u64>,
+    /// The max pages allowed to crawl.
+    #[clap(long)]
+    pub limit: Option<u32>,
     /// Comma seperated string list of pages to not crawl or regex with feature enabled
     #[clap(short, long)]
     pub blacklist_url: Option<String>,
@@ -43,5 +46,5 @@ pub struct Cli {
     pub block_images: bool,
     /// The crawl depth limits.
     #[clap(short, long)]
-    pub depth: usize,
+    pub depth: Option<usize>,
 }
