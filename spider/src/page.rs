@@ -1023,9 +1023,26 @@ impl Page {
                 match element.attr(ele_attribute) {
                     Some(href) => {
                         let mut abs = self.abs_path(href);
+                        let host_name = abs.host_str();
+                        let mut can_process =
+                            parent_host_match(host_name, base_domain, parent_host);
 
-                        let can_process =
-                            parent_host_match(abs.host_str(), base_domain, parent_host);
+                        let mut external_domain = false;
+
+                        if !can_process
+                            && host_name.is_some()
+                            && !self.external_domains_caseless.is_empty()
+                        {
+                            can_process = self
+                                .external_domains_caseless
+                                .contains::<CaseInsensitiveString>(
+                                    &host_name.unwrap_or_default().into(),
+                                )
+                                || self
+                                    .external_domains_caseless
+                                    .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+                            external_domain = can_process;
+                        }
 
                         if can_process {
                             if abs.scheme() != parent_host_scheme.as_str() {
@@ -1036,6 +1053,7 @@ impl Page {
 
                             if can_process
                                 && (base_domain.is_empty()
+                                    || external_domain
                                     || base_domain.as_str() == domain_name(&abs))
                             {
                                 map.insert(h.to_string().into());
