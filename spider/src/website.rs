@@ -187,6 +187,11 @@ pub struct Website {
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
+        let url = if url.starts_with(" ") || url.ends_with(" ") {
+            url.trim()
+        } else {
+            url
+        };
         let domain: Box<CaseInsensitiveString> = if url.starts_with("http") {
             CaseInsensitiveString::new(&url).into()
         } else {
