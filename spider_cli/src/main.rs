@@ -42,6 +42,7 @@ async fn main() {
         .with_delay(cli.delay.unwrap_or_default())
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(cli.block_images, true)
+        .with_danger_accept_invalid_certs(cli.accept_invalid_certs)
         .with_limit(cli.limit.unwrap_or(0))
         .with_tld(cli.tld)
         .with_depth(cli.depth.unwrap_or(0))

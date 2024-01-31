@@ -47,4 +47,7 @@ pub struct Cli {
     /// The crawl depth limits.
     #[clap(short, long)]
     pub depth: Option<usize>,
+    /// Dangerously accept invalid certficates
+    #[clap(short, long)]
+    pub accept_invalid_certs: bool,
 }
