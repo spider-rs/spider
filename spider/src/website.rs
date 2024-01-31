@@ -676,6 +676,7 @@ impl Website {
                 _ => get_ua(),
             })
             .redirect(policy)
+            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
 
@@ -730,6 +731,7 @@ impl Website {
                 Some(ua) => ua.as_str(),
                 _ => &get_ua(),
             })
+            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500))
             .pool_idle_timeout(None);
@@ -2921,6 +2923,13 @@ impl Website {
     /// Max time to wait for request.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         self.configuration.with_request_timeout(request_timeout);
+        self
+    }
+
+    /// Dangerously accept invalid certificates - this should be used as a last resort.
+    pub fn with_danger_accept_invalid_certs(&mut self, accept_invalid_certs: bool) -> &mut Self {
+        self.configuration
+            .with_danger_accept_invalid_certs(accept_invalid_certs);
         self
     }
 

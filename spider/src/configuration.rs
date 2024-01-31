@@ -117,6 +117,8 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Wait for idle network connections.
     pub wait_for_idle_network: Option<WaitForIdleNetwork>,
+    /// Dangerously accept invalid certficates
+    pub accept_invalid_certs: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -509,6 +511,12 @@ impl Configuration {
             _ => self.external_domains_caseless.clear(),
         }
 
+        self
+    }
+
+    /// Dangerously accept invalid certificates - this should be used as a last resort.
+    pub fn with_danger_accept_invalid_certs(&mut self, accept_invalid_certs: bool) -> &mut Self {
+        self.accept_invalid_certs = accept_invalid_certs;
         self
     }
 
