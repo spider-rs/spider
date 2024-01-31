@@ -161,7 +161,7 @@ pub fn parent_host_match(
             if base_domain.is_empty() {
                 parent_host.eq(&host)
             } else {
-                parent_host.ends_with(host)
+                host.ends_with(parent_host.as_str())
             }
         }
         _ => false,
