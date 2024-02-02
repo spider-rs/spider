@@ -15,6 +15,11 @@ use std::time::Duration;
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
+#[cfg(all(feature = "decentralized", feature = "headers"))]
+use crate::utils::FetchPageResult;
+#[cfg(feature = "headers")]
+use reqwest::header::HeaderMap;
+
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -68,6 +73,9 @@ pub struct Page {
     base: Url,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
     url: String,
+    #[cfg(feature = "headers")]
+    /// The headers of the page request response.
+    pub headers: Option<HeaderMap>,
     /// The status code of the page request.
     pub status_code: StatusCode,
     /// The error of the request if any.
@@ -90,6 +98,9 @@ pub struct Page {
 pub struct Page {
     /// The bytes of the resource.
     html: Option<Bytes>,
+    #[cfg(feature = "headers")]
+    /// The headers of the page request response.
+    pub headers: Option<HeaderMap>,
     /// The status code of the page request.
     pub status_code: StatusCode,
     /// The error of the request if any.
@@ -212,6 +223,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         } else {
             None
         },
+        #[cfg(feature = "headers")]
+        headers: res.headers,
         base: Url::parse(url).expect("Invalid page URL"),
         url: url.into(),
         #[cfg(feature = "time")]
@@ -240,6 +253,8 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         } else {
             None
         },
+        #[cfg(feature = "headers")]
+        headers: res.headers,
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         error_status: match res.error_for_status {
@@ -288,10 +303,17 @@ impl Page {
     }
 
     /// Instantiate a new page and gather the links.
-    #[cfg(feature = "decentralized")]
+    #[cfg(all(feature = "decentralized", not(feature = "headers")))]
     pub async fn new(url: &str, client: &Client) -> Self {
+        Self::new_links_only(url, client).await
+    }
+
+    /// Instantiate a new page and gather the links.
+    #[cfg(all(feature = "decentralized"))]
+    pub async fn new_links_only(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
         use bytes::Buf;
+
         let links = match crate::utils::fetch_page(&url, &client).await {
             Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
                 Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
@@ -307,6 +329,39 @@ impl Page {
             html: None,
             links,
             ..Default::default()
+        }
+    }
+
+    /// Instantiate a new page and gather the headers and links.
+    #[cfg(all(feature = "decentralized", feature = "headers"))]
+    pub async fn new(url: &str, client: &Client) -> Self {
+        use crate::serde::Deserialize;
+        use bytes::Buf;
+
+        match crate::utils::fetch_page_and_headers(&url, &client).await {
+            FetchPageResult::Success(headers, page_content) => {
+                let links = match page_content {
+                    Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+                        Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
+                            Ok(link) => link,
+                            _ => Default::default(),
+                        },
+                        _ => Default::default(),
+                    },
+                    _ => Default::default(),
+                };
+                Page {
+                    html: None,
+                    headers: Some(headers),
+                    links,
+                    ..Default::default()
+                }
+            }
+            FetchPageResult::NoSuccess(headers) => Page {
+                headers: Some(headers),
+                ..Default::default()
+            },
+            FetchPageResult::FetchError => Default::default(),
         }
     }
 
@@ -1167,6 +1222,46 @@ impl Page {
     }
 }
 
+#[cfg(test)]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+const TEST_AGENT_NAME: &'static str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
+#[cfg(all(
+    feature = "headers",
+    not(feature = "decentralized"),
+    not(feature = "cache")
+))]
+#[tokio::test]
+async fn test_headers() {
+    use reqwest::header::HeaderName;
+    use reqwest::header::HeaderValue;
+
+    let client = Client::builder()
+        .user_agent(TEST_AGENT_NAME)
+        .build()
+        .unwrap();
+
+    let link_result = "https://choosealicense.com/";
+    let page: Page = Page::new(link_result, &client).await;
+
+    let headers = page.headers.expect("There should be some headers!");
+
+    assert_eq!(
+        headers
+            .get(HeaderName::from_static("server"))
+            .expect("There should be a server header value!"),
+        HeaderValue::from_static("GitHub.com")
+    );
+
+    assert_eq!(
+        headers
+            .get(HeaderName::from_static("content-type"))
+            .expect("There should be a content-type value!"),
+        HeaderValue::from_static("text/html; charset=utf-8")
+    );
+}
+
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "chrome"),
@@ -1175,7 +1270,7 @@ impl Page {
 #[tokio::test]
 async fn parse_links() {
     let client = Client::builder()
-        .user_agent("spider/1.1.2")
+        .user_agent(TEST_AGENT_NAME)
         .build()
         .unwrap();
 
@@ -1201,7 +1296,7 @@ async fn parse_links() {
 #[tokio::test]
 async fn test_status_code() {
     let client = Client::builder()
-        .user_agent("spider/1.1.2")
+        .user_agent(TEST_AGENT_NAME)
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/does-not-exist";
@@ -1218,7 +1313,7 @@ async fn test_status_code() {
 #[tokio::test]
 async fn test_abs_path() {
     let client = Client::builder()
-        .user_agent("spider/1.1.2")
+        .user_agent(TEST_AGENT_NAME)
         .build()
         .unwrap();
     let link_result = "https://choosealicense.com/";
@@ -1254,7 +1349,7 @@ async fn test_abs_path() {
 #[tokio::test]
 async fn test_duration() {
     let client = Client::builder()
-        .user_agent("spider/1.1.2")
+        .user_agent(TEST_AGENT_NAME)
         .build()
         .unwrap();
 

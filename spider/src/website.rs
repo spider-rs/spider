@@ -2148,7 +2148,7 @@ impl Website {
                                             _ => (link, None),
                                         };
                                         let link_results = link_results.0.as_ref();
-                                        let page = Page::new(
+                                        let page = Page::new_links_only(
                                             &if http_worker && link_results.starts_with("https") {
                                                 link_results
                                                     .replacen("https", "http", 1)

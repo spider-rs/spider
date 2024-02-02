@@ -1,6 +1,8 @@
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 use log::{info, log_enabled, Level};
+#[cfg(feature = "headers")]
+use reqwest::header::HeaderMap;
 use reqwest::{Error, Response, StatusCode};
 
 /// The response of a web page.
@@ -8,6 +10,9 @@ use reqwest::{Error, Response, StatusCode};
 pub struct PageResponse {
     /// The page response resource.
     pub content: Option<bytes::Bytes>,
+    #[cfg(feature = "headers")]
+    /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
+    pub headers: Option<HeaderMap>,
     /// The status code of the request.
     pub status_code: StatusCode,
     /// The final url destination after any redirects.
@@ -22,7 +27,10 @@ pub async fn wait_for_idle_network(
     page: &chromiumoxide::Page,
     timeout: Option<core::time::Duration>,
 ) {
-    match page.event_listener::<crate::chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>().await {
+    match page
+        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>()
+        .await
+    {
         Ok(mut events) => {
             let wait_until = async {
                 loop {
@@ -35,15 +43,11 @@ pub async fn wait_for_idle_network(
                 }
             };
             match timeout {
-                Some(timeout) => {
-                    if let Err(_) = tokio::time::timeout(timeout, wait_until)
-                    .await
-                    {}
-                }
-                _ => wait_until.await
+                Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+                _ => wait_until.await,
             }
         }
-        _ => ()
+        _ => (),
     }
 }
 
@@ -242,6 +246,8 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
                 None
             };
             let status_code = res.status();
+            #[cfg(feature = "headers")]
+            let headers = res.headers().clone();
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
 
@@ -253,6 +259,8 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             }
 
             PageResponse {
+                #[cfg(feature = "headers")]
+                headers: Some(headers),
                 content: Some(data.into()),
                 final_url: rd,
                 status_code,
@@ -260,6 +268,8 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             }
         }
         Ok(res) => PageResponse {
+            #[cfg(feature = "headers")]
+            headers: Some(res.headers().clone()),
             status_code: res.status(),
             ..Default::default()
         },
@@ -291,6 +301,40 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
         Err(_) => {
             log("- error parsing html bytes {}", &target_url);
             None
+        }
+    }
+}
+
+#[cfg(all(feature = "decentralized", feature = "headers"))]
+/// Fetch a page with the headers returned.
+pub enum FetchPageResult {
+    /// Success extracting contents of the page
+    Success(HeaderMap, Option<bytes::Bytes>),
+    /// No success extracting content
+    NoSuccess(HeaderMap),
+    /// A network error occured.
+    FetchError,
+}
+
+#[cfg(all(feature = "decentralized", feature = "headers"))]
+/// Perform a network request to a resource with the response headers..
+pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchPageResult {
+    match client.get(target_url).send().await {
+        Ok(res) if res.status().is_success() => {
+            let headers = res.headers().clone();
+            let b = match res.bytes().await {
+                Ok(text) => Some(text),
+                Err(_) => {
+                    log("- error fetching {}", &target_url);
+                    None
+                }
+            };
+            FetchPageResult::Success(headers, b)
+        }
+        Ok(res) => FetchPageResult::NoSuccess(res.headers().clone()),
+        Err(_) => {
+            log("- error parsing html bytes {}", &target_url);
+            FetchPageResult::FetchError
         }
     }
 }
@@ -341,6 +385,9 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 None
             };
 
+            let status_code = res.status();
+            #[cfg(feature = "headers")]
+            let headers = res.headers().clone();
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
             let mut file: Option<tokio::fs::File> = None;
@@ -388,6 +435,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             }
 
             PageResponse {
+                #[cfg(feature = "headers")]
+                headers: Some(headers),
                 content: Some(if file.is_some() {
                     let mut buffer = vec![];
 
@@ -406,11 +455,17 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 } else {
                     data.into()
                 }),
+                status_code,
                 final_url: rd,
                 ..Default::default()
             }
         }
-        Ok(_) => Default::default(),
+        Ok(res) => PageResponse {
+            #[cfg(feature = "headers")]
+            headers: Some(res.headers().clone()),
+            status_code: res.status(),
+            ..Default::default()
+        },
         Err(_) => {
             log("- error parsing html text {}", &target_url);
             Default::default()
@@ -446,8 +501,11 @@ pub async fn fetch_page_html_chrome(
                 use crate::bytes::BufMut;
                 use bytes::BytesMut;
 
-                let content = match client.get(target_url).send().await {
+                match client.get(target_url).send().await {
                     Ok(res) if res.status().is_success() => {
+                        #[cfg(feature = "headers")]
+                        let headers = res.headers().clone();
+                        let status_code = res.status();
                         let mut stream = res.bytes_stream();
                         let mut data: BytesMut = BytesMut::new();
 
@@ -458,18 +516,24 @@ pub async fn fetch_page_html_chrome(
                             }
                         }
 
-                        Some(data.into())
+                        PageResponse {
+                            #[cfg(feature = "headers")]
+                            headers: Some(headers),
+                            content: Some(data.into()),
+                            status_code,
+                            ..Default::default()
+                        }
                     }
-                    Ok(_) => None,
+                    Ok(res) => PageResponse {
+                        #[cfg(feature = "headers")]
+                        headers: Some(res.headers().clone()),
+                        status_code: res.status(),
+                        ..Default::default()
+                    },
                     Err(_) => {
                         log("- error parsing html text {}", &target_url);
-                        None
+                        Default::default()
                     }
-                };
-
-                PageResponse {
-                    content: content,
-                    ..Default::default()
                 }
             }
         },
