@@ -1,6 +1,5 @@
 use crate::CaseInsensitiveString;
 
-#[cfg(feature = "glob")]
 /// expand a website url to a glob pattern set
 pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
@@ -114,7 +113,6 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
         .collect::<Vec<CaseInsensitiveString>>()
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_list() {
     let url = "https://choosealicense.com/licenses/{mit,apache-2.0,mpl-2.0}/";
@@ -132,7 +130,6 @@ fn test_expand_url_list() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_list_escaped_closing() {
     let url = "https://choosealicense.com/licenses/{mit\\}/";
@@ -140,7 +137,6 @@ fn test_expand_url_list_escaped_closing() {
     assert_eq!(expand_url(url), Vec::<CaseInsensitiveString>::new());
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range() {
     let url = "https://choosealicense.com/licenses/bsd-[2-4]-clause/";
@@ -158,7 +154,6 @@ fn test_expand_url_numerical_range() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range_singe_item() {
     let url = "https://choosealicense.com/licenses/bsd-[4-4]-clause/";
@@ -172,7 +167,6 @@ fn test_expand_url_numerical_range_singe_item() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range_with_step() {
     let url = "https://choosealicense.com/licenses/bsd-[2-4:2]-clause/";
@@ -189,7 +183,6 @@ fn test_expand_url_numerical_range_with_step() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range_with_padding() {
     let url = "https://choosealicense.com/licenses/bsd-[002-004]-clause/";
@@ -207,7 +200,6 @@ fn test_expand_url_numerical_range_with_padding() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
     let url = "https://choosealicense.com/licenses/bsd-[008-10]-clause/";
@@ -225,7 +217,6 @@ fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_alphabetical_range() {
     let url = "https://choosealicense.com/licenses/[w-z]lib/";
@@ -244,7 +235,6 @@ fn test_expand_url_alphabetical_range() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_combination() {
     let url = "https://choosealicense.com/licenses/bsd-[2-4]-clause{,-clear}/";
@@ -265,7 +255,6 @@ fn test_expand_url_combination() {
     );
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_empty() {
     let url = "https://choosealicense.com";
@@ -273,7 +262,6 @@ fn test_expand_url_empty() {
     assert_eq!(expand_url(url), Vec::<CaseInsensitiveString>::new());
 }
 
-#[cfg(feature = "glob")]
 #[test]
 fn test_expand_url_percent_encoded() {
     let url = "https://choosealicense.com/licenses/%7Bmit%7D/";

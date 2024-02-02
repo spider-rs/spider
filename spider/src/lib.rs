@@ -73,6 +73,8 @@
 //! - `http3`: Enables experimental HTTP/3 client.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
+//! - `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
+//! - `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
 
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(
