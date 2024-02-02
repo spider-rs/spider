@@ -4,3 +4,7 @@ pub mod chrome;
 /// URL globbing
 #[cfg(feature = "glob")]
 pub mod glob;
+
+/// Decentralized header handling
+#[cfg(feature = "decentralized_headers")]
+pub mod decentralized_headers;

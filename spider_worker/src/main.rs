@@ -2,6 +2,7 @@ use std::convert::Infallible;
 
 use spider::{tokio, utils, website::Website};
 use warp::{path::FullPath, Filter};
+use spider::page::Page;
 
 #[macro_use]
 extern crate lazy_static;
@@ -15,6 +16,7 @@ lazy_static! {
         proxy_website.configure_http_client()
     };
 }
+
 
 /// forward request to get resources
 #[cfg(not(feature = "scrape"))]
@@ -44,9 +46,9 @@ async fn forward(
         )
     };
 
-    let page = spider::page::Page::new_page(&url_path, &CLIENT).await;
+    let page = Page::new_page(&url_path, &CLIENT).await;
 
-    Ok(if !page.get_html().is_empty() {
+    let extracted = if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {
             Some(r) => (r == "3" || r == "1", r == "3" || r == "2"),
             _ => (false, false),
@@ -70,7 +72,35 @@ async fn forward(
         }
     } else {
         Default::default()
-    })
+    };
+
+
+    #[cfg(feature = "headers")]
+    fn pack(page: Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
+        use warp::http::{Response, StatusCode};
+        use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
+
+        let mut response = Response::builder();
+        {
+            let mut builder = if let Some(headers) = page.headers {
+                let mut builder = WorkerProxyHeaderBuilder::with_capacity(headers.len() + 1);
+                builder.extend(headers);
+                builder
+            } else {
+                WorkerProxyHeaderBuilder::new();
+            };
+            builder.set_status_code(page.status_code.as_u16());
+            response.headers_mut().unwrap().extend(builder.build());
+        }
+        Ok(response.status(StatusCode::OK).body(extracted).unwrap())
+    }
+
+    #[cfg(not(feature = "headers"))]
+    fn pack(_page: Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
+        Ok(extracted)
+    }
+
+    pack(page, extracted)
 }
 
 /// forward request to get links resources
@@ -94,8 +124,34 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
     };
     let data = utils::fetch_page_html(&url_path, &CLIENT).await;
 
-    Ok(data.content.unwrap_or_default().to_vec())
+    #[cfg(feature = "headers")]
+    fn pack(data: spider::utils::PageResponse) -> Result<impl warp::Reply, Infallible> {
+        use warp::http::{Response, StatusCode};
+        use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
+
+        let mut response = Response::builder();
+        {
+            let mut builder = if let Some(headers) = data.headers {
+                let mut builder = WorkerProxyHeaderBuilder::with_capacity(headers.len() + 1);
+                builder.extend(headers);
+                builder
+            } else {
+                WorkerProxyHeaderBuilder::new();
+            };
+            builder.set_status_code(data.status_code.as_u16());
+            response.headers_mut().unwrap().extend(builder.build());
+        }
+        Ok(response.status(StatusCode::OK).body(data.content.unwrap_or_default().to_vec()).unwrap())
+    }
+
+    #[cfg(not(feature = "headers"))]
+    fn pack(data: spider::utils::PageResponse) -> Result<impl warp::Reply, Infallible> {
+        Ok(data.content.unwrap_or_default().to_vec())
+    }
+
+    pack(data)
 }
+
 
 #[tokio::main]
 #[cfg(all(
