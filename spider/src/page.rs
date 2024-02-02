@@ -15,10 +15,10 @@ use std::time::Duration;
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
-#[cfg(feature = "headers")]
-use reqwest::header::HeaderMap;
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
+#[cfg(feature = "headers")]
+use reqwest::header::HeaderMap;
 
 use tokio_stream::StreamExt;
 use url::Url;
@@ -357,15 +357,11 @@ impl Page {
                     ..Default::default()
                 }
             }
-            FetchPageResult::NoSuccess(headers) => {
-                Page {
-                    headers: Some(headers),
-                    ..Default::default()
-                }
-            }
-            FetchPageResult::FetchError => {
-                Default::default()
-            }
+            FetchPageResult::NoSuccess(headers) => Page {
+                headers: Some(headers),
+                ..Default::default()
+            },
+            FetchPageResult::FetchError => Default::default(),
         }
     }
 
@@ -1227,9 +1223,15 @@ impl Page {
 }
 
 #[cfg(test)]
-const TEST_AGENT_NAME: &'static str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+const TEST_AGENT_NAME: &'static str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
-#[cfg(feature = "headers")]
+#[cfg(all(
+    feature = "headers",
+    not(feature = "decentralized"),
+    not(feature = "cache")
+))]
 #[tokio::test]
 async fn test_headers() {
     use reqwest::header::HeaderName;
@@ -1246,12 +1248,16 @@ async fn test_headers() {
     let headers = page.headers.expect("There should be some headers!");
 
     assert_eq!(
-        headers.get(HeaderName::from_static("server")).expect("There should be a server header value!"),
+        headers
+            .get(HeaderName::from_static("server"))
+            .expect("There should be a server header value!"),
         HeaderValue::from_static("GitHub.com")
     );
 
     assert_eq!(
-        headers.get(HeaderName::from_static("content-type")).expect("There should be a content-type value!"),
+        headers
+            .get(HeaderName::from_static("content-type"))
+            .expect("There should be a content-type value!"),
         HeaderValue::from_static("text/html; charset=utf-8")
     );
 }

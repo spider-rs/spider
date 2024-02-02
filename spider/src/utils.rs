@@ -1,9 +1,9 @@
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 use log::{info, log_enabled, Level};
-use reqwest::{Error, Response, StatusCode};
 #[cfg(feature = "headers")]
 use reqwest::header::HeaderMap;
+use reqwest::{Error, Response, StatusCode};
 
 /// The response of a web page.
 #[derive(Debug, Default)]
@@ -18,7 +18,7 @@ pub struct PageResponse {
     /// The final url destination after any redirects.
     pub final_url: Option<String>,
     /// The message of the response error if any.
-    pub error_for_status: Option<Result<Response, Error>>
+    pub error_for_status: Option<Result<Response, Error>>,
 }
 
 /// wait for idle network
@@ -27,7 +27,10 @@ pub async fn wait_for_idle_network(
     page: &chromiumoxide::Page,
     timeout: Option<core::time::Duration>,
 ) {
-    match page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>().await {
+    match page
+        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>()
+        .await
+    {
         Ok(mut events) => {
             let wait_until = async {
                 loop {
@@ -40,15 +43,11 @@ pub async fn wait_for_idle_network(
                 }
             };
             match timeout {
-                Some(timeout) => {
-                    if let Err(_) = tokio::time::timeout(timeout, wait_until)
-                    .await
-                    {}
-                }
-                _ => wait_until.await
+                Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+                _ => wait_until.await,
             }
         }
-        _ => ()
+        _ => (),
     }
 }
 
@@ -259,7 +258,6 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
                 }
             }
 
-
             PageResponse {
                 #[cfg(feature = "headers")]
                 headers: Some(headers),
@@ -308,13 +306,18 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 }
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
+/// Fetch a page with the headers returned.
 pub enum FetchPageResult {
+    /// Success extracting contents of the page
     Success(HeaderMap, Option<bytes::Bytes>),
+    /// No success extracting content
     NoSuccess(HeaderMap),
-    FetchError
+    /// A network error occured.
+    FetchError,
 }
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
+/// Perform a network request to a resource with the response headers..
 pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchPageResult {
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
@@ -327,7 +330,7 @@ pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchP
                 }
             };
             FetchPageResult::Success(headers, b)
-        },
+        }
         Ok(res) => FetchPageResult::NoSuccess(res.headers().clone()),
         Err(_) => {
             log("- error parsing html bytes {}", &target_url);
@@ -457,13 +460,11 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 ..Default::default()
             }
         }
-        Ok(res) => {
-            PageResponse {
-                #[cfg(feature = "headers")]
-                headers: Some(res.headers().clone()),
-                status_code: res.status(),
-                ..Default::default()
-            }
+        Ok(res) => PageResponse {
+            #[cfg(feature = "headers")]
+            headers: Some(res.headers().clone()),
+            status_code: res.status(),
+            ..Default::default()
         },
         Err(_) => {
             log("- error parsing html text {}", &target_url);
@@ -523,13 +524,11 @@ pub async fn fetch_page_html_chrome(
                             ..Default::default()
                         }
                     }
-                    Ok(res) => {
-                        PageResponse {
-                            #[cfg(feature = "headers")]
-                            headers: Some(res.headers().clone()),
-                            status_code: res.status(),
-                            ..Default::default()
-                        }
+                    Ok(res) => PageResponse {
+                        #[cfg(feature = "headers")]
+                        headers: Some(res.headers().clone()),
+                        status_code: res.status(),
+                        ..Default::default()
                     },
                     Err(_) => {
                         log("- error parsing html text {}", &target_url);

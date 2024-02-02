@@ -1,8 +1,6 @@
-use std::convert::Infallible;
-
 use spider::{tokio, utils, website::Website};
+use std::convert::Infallible;
 use warp::{path::FullPath, Filter};
-use spider::page::Page;
 
 #[macro_use]
 extern crate lazy_static;
@@ -12,11 +10,9 @@ lazy_static! {
     static ref CLIENT: spider::Client = {
         let mut proxy_website = Website::new("proxy");
 
-
         proxy_website.configure_http_client()
     };
 }
-
 
 /// forward request to get resources
 #[cfg(not(feature = "scrape"))]
@@ -46,7 +42,7 @@ async fn forward(
         )
     };
 
-    let page = Page::new_page(&url_path, &CLIENT).await;
+    let page = spider::page::Page::new_page(&url_path, &CLIENT).await;
 
     let extracted = if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {
@@ -74,11 +70,10 @@ async fn forward(
         Default::default()
     };
 
-
     #[cfg(feature = "headers")]
-    fn pack(page: Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
-        use warp::http::{Response, StatusCode};
+    fn pack(page: spider::page::Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
         use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
+        use warp::http::{Response, StatusCode};
 
         let mut response = Response::builder();
         {
@@ -96,7 +91,7 @@ async fn forward(
     }
 
     #[cfg(not(feature = "headers"))]
-    fn pack(_page: Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
+    fn pack(_page: spider::page::Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
         Ok(extracted)
     }
 
@@ -126,8 +121,8 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
 
     #[cfg(feature = "headers")]
     fn pack(data: spider::utils::PageResponse) -> Result<impl warp::Reply, Infallible> {
-        use warp::http::{Response, StatusCode};
         use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
+        use warp::http::{Response, StatusCode};
 
         let mut response = Response::builder();
         {
@@ -136,12 +131,15 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
                 builder.extend(headers);
                 builder
             } else {
-                WorkerProxyHeaderBuilder::new();
+                WorkerProxyHeaderBuilder::new()
             };
             builder.set_status_code(data.status_code.as_u16());
             response.headers_mut().unwrap().extend(builder.build());
         }
-        Ok(response.status(StatusCode::OK).body(data.content.unwrap_or_default().to_vec()).unwrap())
+        Ok(response
+            .status(StatusCode::OK)
+            .body(data.content.unwrap_or_default().to_vec())
+            .unwrap())
     }
 
     #[cfg(not(feature = "headers"))]
@@ -151,7 +149,6 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
 
     pack(data)
 }
-
 
 #[tokio::main]
 #[cfg(all(

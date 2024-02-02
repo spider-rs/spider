@@ -104,7 +104,6 @@ lazy_static! {
 
 const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
 
-
 /// the active status of the crawl.
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CrawlStatus {
