@@ -592,7 +592,7 @@ impl Page {
         }
     }
 
-    /// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS. This fallsback to get_html without the [encoding] flag enabled.
+    /// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS. This fallsback to get_html without the `encoding` flag enabled.
     #[cfg(not(feature = "encoding"))]
     pub fn get_html_encoded(&self, _label: &str) -> String {
         self.get_html()

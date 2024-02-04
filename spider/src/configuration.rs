@@ -230,7 +230,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "sitemap")]
-    /// Set the sitemap url. This does nothing without the [sitemap] feature flag.
+    /// Set the sitemap url. This does nothing without the `sitemap` feature flag.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
         match sitemap_url {
             Some(sitemap_url) => {
@@ -242,20 +242,20 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "sitemap"))]
-    /// Set the sitemap url. This does nothing without the [sitemap] feature flag.
+    /// Set the sitemap url. This does nothing without the `sitemap` feature flag.
     pub fn with_sitemap(&mut self, _sitemap_url: Option<&str>) -> &mut Self {
         self
     }
 
     #[cfg(feature = "sitemap")]
-    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` is not enabled.
     pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
         self.ignore_sitemap = ignore_sitemap;
         self
     }
 
     #[cfg(not(feature = "sitemap"))]
-    /// Ignore the sitemap when crawling. This method does nothing if the [sitemap] is not enabled.
+    /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` is not enabled.
     pub fn with_ignore_sitemap(&mut self, _ignore_sitemap: bool) -> &mut Self {
         self
     }
@@ -270,14 +270,14 @@ impl Configuration {
     }
 
     #[cfg(feature = "cookies")]
-    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
         self.cookie_str = Box::new(cookie_str.into());
         self
     }
 
     #[cfg(not(feature = "cookies"))]
-    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
         self
     }
@@ -331,7 +331,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "cron")]
-    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    /// Setup cron jobs to run. This does nothing without the `cron` flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.cron_str = cron_str.into();
         self.cron_type = cron_type;
@@ -339,7 +339,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "cron"))]
-    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    /// Setup cron jobs to run. This does nothing without the `cron` flag enabled.
     pub fn with_cron(&mut self, _cron_str: &str, _cron_type: CronType) -> &mut Self {
         self
     }
@@ -383,7 +383,7 @@ impl Configuration {
         self
     }
 
-    /// Configures the view port for chrome. This method does nothing if the [chrome] feature is not enabled.
+    /// Configures the view port for chrome. This method does nothing if the `chrome` feature is not enabled.
     #[cfg(not(feature = "chrome"))]
     pub fn with_viewport(
         &mut self,
@@ -426,7 +426,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for idle network request. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_wait_for_idle_network(
         &mut self,
         _wait_for_idle_network: Option<WaitForIdleNetwork>,

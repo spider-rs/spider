@@ -71,6 +71,7 @@ async fn forward(
     };
 
     #[cfg(feature = "headers")]
+    /// Return the response with the header information.
     fn pack(page: spider::page::Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
         use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
         use warp::http::{Response, StatusCode};
@@ -91,6 +92,7 @@ async fn forward(
     }
 
     #[cfg(not(feature = "headers"))]
+    /// Return the response.
     fn pack(_page: spider::page::Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
         Ok(extracted)
     }

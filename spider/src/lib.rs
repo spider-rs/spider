@@ -47,7 +47,7 @@
 //! - `ua_generator`: Enables auto generating a random real User-Agent.
 //! - `regex`: Enables blacklisting paths with regx
 //! - `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
-//! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
+//! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](https://docs.rs/crate/spider_worker/latest) startup before crawls.
 //! - `sync`: Subscribe to changes for Page data processing async.
 //! - `budget`: Allows setting a crawl budget per path with depth.
 //! - `control`: Enables the ability to pause, start, and shutdown crawls on demand.
@@ -61,8 +61,8 @@
 //! - `time`: Enables duration tracking per page.
 //! - `cache`: Enables HTTP caching request to disk.
 //! - `cache_mem`: Enables HTTP caching request to persist in memory.
-//! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely [experimental].
-//! - `chrome_headed`: Enables chrome rendering headful rendering [experimental].
+//! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
+//! - `chrome_headed`: Enables chrome rendering headful rendering.
 //! - `chrome_cpu`: Disable gpu usage for chrome browser.
 //! - `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 //! - `chrome_store_page`: Store the page object to perform other actions like taking screenshots conditionally.
@@ -74,7 +74,11 @@
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
 //! - `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
-//! - `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
+//! - `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](https://docs.rs/spider/latest/spider/) and [spider_worker](https://docs.rs/crate/spider_worker/latest).
+//! 
+//! Additional learning resources include:
+//!
+//! - [Spider Repository Examples](https://github.com/spider-rs/spider/tree/main/examples)
 
 // performance reasons jemalloc memory backend for dedicated work and large crawls
 #[cfg(all(

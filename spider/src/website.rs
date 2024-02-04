@@ -2639,7 +2639,7 @@ impl Website {
     }
 
     #[cfg(not(feature = "sitemap"))]
-    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     pub async fn sitemap_crawl(
         &mut self,
         _client: &Client,
@@ -2658,7 +2658,7 @@ impl Website {
     ) {
     }
 
-    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(feature = "sitemap")]
     pub async fn sitemap_crawl_raw(
         &mut self,
@@ -2940,14 +2940,14 @@ impl Website {
     }
 
     #[cfg(feature = "sitemap")]
-    /// Add user agent to request. This does nothing without the [sitemap] flag enabled.
+    /// Add user agent to request. This does nothing without the `sitemap` flag enabled.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {
         self.configuration.with_sitemap(sitemap_url);
         self
     }
 
     #[cfg(not(feature = "sitemap"))]
-    /// Add user agent to request. This does nothing without the [sitemap] flag enabled.
+    /// Add user agent to request. This does nothing without the `sitemap` flag enabled.
     pub fn with_sitemap(&mut self, _sitemap_url: Option<&str>) -> &mut Self {
         self
     }
@@ -2958,7 +2958,7 @@ impl Website {
         self
     }
 
-    /// Set a crawl ID to use for tracking crawls. This does nothing without the [control] flag enabled.
+    /// Set a crawl ID to use for tracking crawls. This does nothing without the `control` flag enabled.
     #[cfg(not(feature = "control"))]
     pub fn with_crawl_id(&mut self, _crawl_id: String) -> &mut Self {
         self
@@ -3039,13 +3039,13 @@ impl Website {
         self
     }
 
-    /// Cookie string to use in request. This does nothing without the [cookies] flag enabled.
+    /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
         self.configuration.with_cookies(cookie_str);
         self
     }
 
-    /// Setup cron jobs to run. This does nothing without the [cron] flag enabled.
+    /// Setup cron jobs to run. This does nothing without the `cron` flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.configuration.with_cron(cron_str, cron_type);
         self
@@ -3063,19 +3063,19 @@ impl Website {
         self
     }
 
-    /// Cache the page following HTTP rules. This method does nothing if the [cache] feature is not enabled.
+    /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);
         self
     }
 
-    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
+    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
         self.configuration.with_viewport(viewport);
         self
     }
 
-    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for idle network request. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_wait_for_idle_network(
         &mut self,
         wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
