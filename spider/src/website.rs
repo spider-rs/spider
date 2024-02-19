@@ -2997,14 +2997,6 @@ impl Website {
         self
     }
 
-    #[cfg(feature = "budget")]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
-    pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
-        self.configuration.with_budget(budget);
-        self
-    }
-
-    #[cfg(not(feature = "budget"))]
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.configuration.with_budget(budget);
@@ -3108,20 +3100,7 @@ impl Website {
         self
     }
 
-    #[cfg(feature = "chrome_intercept")]
     /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
-    pub fn with_chrome_intercept(
-        &mut self,
-        chrome_intercept: bool,
-        block_images: bool,
-    ) -> &mut Self {
-        self.configuration
-            .with_chrome_intercept(chrome_intercept, block_images);
-        self
-    }
-
-    #[cfg(not(feature = "chrome_intercept"))]
-    /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: bool,
@@ -3138,14 +3117,6 @@ impl Website {
         self
     }
 
-    #[cfg(feature = "sitemap")]
-    /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` flag is not enabled.
-    pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
-        self.configuration.with_ignore_sitemap(ignore_sitemap);
-        self
-    }
-
-    #[cfg(not(feature = "sitemap"))]
     /// Ignore the sitemap when crawling. This method does nothing if the `sitemap` flag is not enabled.
     pub fn with_ignore_sitemap(&mut self, ignore_sitemap: bool) -> &mut Self {
         self.configuration.with_ignore_sitemap(ignore_sitemap);
