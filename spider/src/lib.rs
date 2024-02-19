@@ -75,7 +75,7 @@
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
 //! - `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
 //! - `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](https://docs.rs/spider/latest/spider/) and [spider_worker](https://docs.rs/crate/spider_worker/latest).
-//! 
+//!
 //! Additional learning resources include:
 //!
 //! - [Spider Repository Examples](https://github.com/spider-rs/spider/tree/main/examples)

@@ -494,11 +494,6 @@ impl Website {
         self.links_visited.len()
     }
 
-    /// Page getter.
-    pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
-        self.pages.as_ref()
-    }
-
     /// Drain the links visited.
     pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
         self.links_visited.drain()
@@ -514,6 +509,16 @@ impl Website {
         self.links_visited.clear();
         self.pages.take();
         self.extra_links.clear();
+    }
+
+    /// Get the HTTP request client. The client is set after the crawl has started.
+    pub fn get_client(&self) -> &Option<Client> {
+        &self.client
+    }
+
+    /// Page getter.
+    pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
+        self.pages.as_ref()
     }
 
     /// Links visited getter.
@@ -808,6 +813,12 @@ impl Website {
         client: reqwest::ClientBuilder,
     ) -> reqwest::ClientBuilder {
         client
+    }
+
+    /// Set the HTTP client to use directly. This is helpful if you manually call 'website.configure_http_client' before the crawl.
+    pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
+        self.client = Some(client);
+        &self.client
     }
 
     /// Configure http client.
