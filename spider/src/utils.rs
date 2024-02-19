@@ -84,12 +84,12 @@ pub async fn fetch_page_html_chrome_base(
         _ => (),
     }
 
-    let res = page.content_bytes().await;
-    let ok = res.is_ok();
+    let res: bytes::Bytes = page.content_bytes().await?;
+    let ok = res.len() > 0;
 
     Ok(PageResponse {
         content: if ok {
-            Some(res.unwrap_or_default())
+            Some(res)
         } else {
             None
         },
