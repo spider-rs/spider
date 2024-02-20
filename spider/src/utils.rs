@@ -66,18 +66,21 @@ pub async fn fetch_page_html_chrome_base(
         page.goto(target_url).await?
     };
 
-    let page = if wait_for_navigation {
-        page.wait_for_navigation().await?
-    } else {
-        page
-    };
-
     match wait_for_network_idle {
         Some(wait_for) => {
             wait_for_idle_network(page, wait_for.timeout).await;
         }
         _ => (),
     }
+
+    let final_url = if wait_for_navigation {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&target_url, &u),
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     let page = page.activate().await?;
     let res: bytes::Bytes = page.content_bytes().await?;
@@ -91,7 +94,7 @@ pub async fn fetch_page_html_chrome_base(
         } else {
             Default::default()
         },
-        final_url: page.url().await?,
+        final_url,
         ..Default::default()
     })
 }

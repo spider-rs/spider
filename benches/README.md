@@ -6,7 +6,7 @@ This folder consists of benches between different cases within the library and i
 
 ## Initial benchmarks
 
-We have comparisons set against 3 different languages and libs that can be used to crawl a web page.
+We have comparisons set against 4 different languages and libs that can be used to crawl a web page.
 
 ### Crawl
 
@@ -17,5 +17,11 @@ How fast can we crawl all pages on a medium sized website. Tests are ordered bet
 1. [Node.js](./node_crawler.rs) - node-crawler
 1. [Go](./go_crolly.rs) - Crolly
 1. [Rust](./crawl.rs) - Spider
+1. C - wget
+
+## Notes
+
+1. nodejs takes the cpu to 100% when crawling and performance suffers drastically when concurrent.
+1. wget under performs when latency is being considered. 
 
 You can view the latest [benches here](./BENCHMARKS.md)
