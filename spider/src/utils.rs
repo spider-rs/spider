@@ -87,11 +87,7 @@ pub async fn fetch_page_html_chrome_base(
     let ok = res.len() > 0;
 
     Ok(PageResponse {
-        content: if ok {
-            Some(res)
-        } else {
-            None
-        },
+        content: if ok { Some(res) } else { None },
         // todo: get the cdp error to status code.
         status_code: if ok {
             StatusCode::OK

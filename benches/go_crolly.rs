@@ -6,28 +6,28 @@ pub fn crawl_stub() -> String {
     package main
 
     import (
-        "fmt"
-    
         "github.com/gocolly/colly/v2"
+        "os"
     )
     
     func main() {
         c := colly.NewCollector()
-    
+        u := "https://rsseau.fr"
+
+        if len(os.Args) > 1 {
+            u = os.Args[1]
+        }
+
         c.Limit(&colly.LimitRule{
             Delay:      0,
         })
 
         c.OnHTML(`a[href^="/"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"]),
-        a[href^="https://rsseau.fr"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`, func(e *colly.HTMLElement) {
+        a[href^="` + u + `"]:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`, func(e *colly.HTMLElement) {
             e.Request.Visit(e.Attr("href"))
         })
     
-        c.OnRequest(func(r *colly.Request) {
-            fmt.Println("- visiting ", r.URL)
-        })
-    
-        c.Visit("https://rsseau.fr")
+        c.Visit(u)
     }
     "#.to_string()
 }

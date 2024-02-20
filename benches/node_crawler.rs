@@ -3,10 +3,10 @@ use std::io::{BufWriter, Write};
 
 pub fn crawl_stub() -> String {
     r#"
-
     const Crawler = require("crawler");
+    const { argv } = require('node:process');
 
-    const base = "https://rsseau.fr";
+    const base = argv.slice(1)[0] || "https://rsseau.fr";
     const crawledPages = { [base]: true };
     const ignoreSelector = `:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`;
     

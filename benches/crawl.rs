@@ -3,11 +3,12 @@ pub mod node_crawler;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use spider::website::Website;
-use std::process::Command;
+use std::{env, process::Command};
 
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
     let mut worker: Option<std::process::Child> = None;
+    let query = env::var("SPIDER_BENCH_URL").unwrap_or("https://rsseau.fr".into());
 
     if cfg!(feature = "decentralized") {
         worker.replace(
@@ -19,8 +20,7 @@ pub fn bench_speed(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("crawl-speed/libraries");
     let sample_count = 10;
-    // 200 static pages are found on the website for the baseline.
-    let query = "https://rsseau.fr";
+
     let sample_title = format!("crawl {} samples", sample_count);
 
     group.sample_size(sample_count);
@@ -28,7 +28,7 @@ pub fn bench_speed(c: &mut Criterion) {
     let rt = spider::tokio::runtime::Runtime::new().unwrap();
 
     group.bench_function(format!("Rust[spider]: {}", sample_title), |b| {
-        let mut website = Website::new(query);
+        let mut website = Website::new(&query);
         // try to only enable when you know you can or have permission from the website to avoid being blocked.
         website.configuration.respect_robots_txt = false;
 
@@ -47,22 +47,26 @@ pub fn bench_speed(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 Command::new("./gospider")
+                    .arg(&query)
                     .output()
                     .expect("go command failed to start"),
             )
         })
     });
-    // this is commented out since the crawl seems to stop on the first failure on linux giving an invalid output for node v18 up.
+
+    // nodejs runs the cpu fully to 100%. Small test can run fast - does not scale with concurrency
     // group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
     //     b.iter(|| {
     //         black_box(
     //             Command::new("node")
     //                 .arg("./node-crawler.js")
+    //                 .arg(&query)
     //                 .output()
     //                 .expect("node command failed to start"),
     //         )
     //     })
     // });
+
     group.bench_function(format!("C[wget]: {}", sample_title), |b| {
         b.iter(|| {
             black_box(
