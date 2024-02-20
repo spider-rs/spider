@@ -21,16 +21,13 @@ pub struct PageResponse {
     pub error_for_status: Option<Result<Response, Error>>,
 }
 
-/// wait for idle network
+/// wait for event with timeout
 #[cfg(feature = "chrome")]
-pub async fn wait_for_idle_network(
-    page: &chromiumoxide::Page,
-    timeout: Option<core::time::Duration>,
-) {
-    match page
-        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>()
-        .await
-    {
+pub async fn wait_for_event<T>(page: &chromiumoxide::Page, timeout: Option<core::time::Duration>)
+where
+    T: chromiumoxide::cdp::IntoEventKind + Unpin,
+{
+    match page.event_listener::<T>().await {
         Ok(mut events) => {
             let wait_until = async {
                 loop {
@@ -60,6 +57,7 @@ pub async fn fetch_page_html_chrome_base(
     wait_for_navigation: bool,
     wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    // used for smart mode re-rendering direct assigning html
     let page = if content {
         page.set_content(target_url).await?
     } else {
@@ -68,12 +66,17 @@ pub async fn fetch_page_html_chrome_base(
 
     match wait_for_network_idle {
         Some(wait_for) => {
-            wait_for_idle_network(page, wait_for.timeout).await;
+            wait_for_event::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
+                page,
+                wait_for.timeout,
+            )
+            .await;
         }
         _ => (),
     }
 
-    let final_url = if wait_for_navigation {
+    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    let final_url = if wait_for_navigation && !content {
         match page.wait_for_navigation_response().await {
             Ok(u) => get_last_redirect(&target_url, &u),
             _ => None,
