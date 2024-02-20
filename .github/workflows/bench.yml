@@ -8,7 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_LOG: "off"
-  SPIDER_BENCH_URL_LARGE: ${{ vars.SPIDER_BENCH_URL_LARGE }}
+  SPIDER_BENCH_URL: http://localhost:3000
 
 concurrency:
   group: ${{ github.ref }}
@@ -29,11 +29,12 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup Local Web server
+        run: |
+          git clone https://github.com/tailwindlabs/tailwindcss.com && cd tailwindcss.com
+          yarn && yarn build
+          yarn start & true
       - name: Run Benchmark Compare OSS
         run: cargo bench --bench crawl
       - name: Run Benchmark Compare OSS - Features[decentralized]
         run: cargo bench --bench crawl --features decentralized
-      - name: Run Benchmark Massive 50k pages plus
-        run: cargo bench --bench crawl_massive
-      - name: Run Benchmark Massive 50k pages plus - Features[decentralized]
-        run: cargo bench --bench crawl_massive --features decentralized
