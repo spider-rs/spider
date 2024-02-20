@@ -60,8 +60,6 @@ pub async fn fetch_page_html_chrome_base(
     wait_for_navigation: bool,
     wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    let page = page.activate().await?;
-
     let page = if content {
         page.set_content(target_url).await?
     } else {
@@ -84,6 +82,7 @@ pub async fn fetch_page_html_chrome_base(
         _ => (),
     }
 
+    let page = page.activate().await?;
     let res: bytes::Bytes = page.content_bytes().await?;
     let ok = res.len() > 0;
 
