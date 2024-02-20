@@ -66,13 +66,10 @@ pub async fn fetch_page_html_chrome_base(
         page.goto(target_url).await?
     };
 
-    let final_url = if wait_for_navigation {
-        match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&target_url, &u),
-            _ => None,
-        }
+    let page = if wait_for_navigation {
+        page.wait_for_navigation().await?
     } else {
-        None
+        page
     };
 
     match wait_for_network_idle {
@@ -94,7 +91,7 @@ pub async fn fetch_page_html_chrome_base(
         } else {
             Default::default()
         },
-        final_url,
+        final_url: page.url().await?,
         ..Default::default()
     })
 }
