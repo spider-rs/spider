@@ -1223,8 +1223,7 @@ impl Page {
 
 #[cfg(test)]
 #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
-const TEST_AGENT_NAME: &'static str =
-    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(all(
     feature = "headers",
