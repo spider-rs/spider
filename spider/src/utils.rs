@@ -34,7 +34,7 @@ where
                     let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
                     tokio::pin!(sleep);
                     tokio::select! {
-                        _ = &mut sleep => break,
+                        _ = &mut sleep => (),
                         v = events.next() => {
                           if v.is_none () {
                               break;
@@ -64,7 +64,7 @@ pub async fn wait_for_selector(
             let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(50));
             tokio::pin!(sleep);
             tokio::select! {
-                _ = &mut sleep => break,
+                _ = &mut sleep => (),
                 v = page.find_element(selector) => {
                     if !v.is_ok() {
                         break
