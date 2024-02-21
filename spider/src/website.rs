@@ -187,7 +187,7 @@ pub struct Website {
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
-        let url = if url.starts_with(" ") || url.ends_with(" ") {
+        let url = if url.starts_with(' ') || url.ends_with(' ') {
             url.trim()
         } else {
             url
@@ -1594,10 +1594,9 @@ impl Website {
         self.crawl_concurrent(&client, &handle).await;
         self.sitemap_crawl_chain(&client, &handle, false).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
@@ -1611,10 +1610,9 @@ impl Website {
         };
         self.sitemap_crawl(&client, &handle, false).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
@@ -1629,10 +1627,9 @@ impl Website {
         };
         self.crawl_concurrent_smart(&client, &handle).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
@@ -1653,10 +1650,9 @@ impl Website {
         self.crawl_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl_chain(&client, &handle, false).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
@@ -1671,10 +1667,9 @@ impl Website {
         self.scrape_concurrent(&client, &handle).await;
         self.sitemap_crawl_chain(&client, &handle, true).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
@@ -1689,10 +1684,9 @@ impl Website {
         self.scrape_concurrent_raw(&client, &handle).await;
         self.sitemap_crawl_chain(&client, &handle, true).await;
         self.set_crawl_status();
-        match join_handle {
-            Some(h) => h.abort(),
-            _ => (),
-        };
+        if let Some(h) = join_handle {
+            h.abort()
+        }
         self.client.replace(client);
     }
 
