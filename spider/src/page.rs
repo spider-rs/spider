@@ -712,7 +712,7 @@ impl Page {
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         browser: &chromiumoxide::Page,
     ) -> HashSet<A> {
-        use crate::configuration::WaitForIdleNetwork;
+        use crate::configuration::WaitFor;
 
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -804,9 +804,15 @@ impl Page {
                                                 &browser,
                                                 true,
                                                 false,
-                                                &Some(WaitForIdleNetwork::new(Some(
-                                                    core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
-                                                ))),
+                                                &Some(WaitFor::new(
+                                                    Some(
+                                                        core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
+                                                    ),
+                                                    None,
+                                                    true,
+                                                    true,
+                                                    None,
+                                                )),
                                             )
                                             .await;
 
