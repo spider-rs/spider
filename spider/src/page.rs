@@ -288,10 +288,9 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
+        wait_for: &Option<crate::configuration::WaitFor>,
     ) -> Self {
-        let page_resource =
-            crate::utils::fetch_page_html(&url, &client, &page, wait_for_network_idle).await;
+        let page_resource = crate::utils::fetch_page_html(&url, &client, &page, wait_for).await;
         let mut p = build(url, page_resource);
 
         // store the chrome page to perform actions like screenshots etc.

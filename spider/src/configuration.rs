@@ -26,6 +26,75 @@ impl WaitForIdleNetwork {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+/// Wait for a selector with optional timeout. This does nothing without the `chrome` flag enabled.
+pub struct WaitForSelector {
+    /// The max time to wait for the selector. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
+    pub timeout: Option<core::time::Duration>,
+    /// The selector wait for
+    pub selector: String,
+}
+
+impl WaitForSelector {
+    /// Create new WaitForSelector with timeout.
+    pub fn new(timeout: Option<core::time::Duration>, selector: String) -> Self {
+        Self { timeout, selector }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+/// Wait for with a delay. Should only be used for testing purposes. This does nothing without the `chrome` flag enabled.
+pub struct WaitForDelay {
+    /// The max time to wait. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
+    pub timeout: Option<core::time::Duration>,
+}
+
+impl WaitForDelay {
+    /// Create new WaitForDelay with timeout.
+    pub fn new(timeout: Option<core::time::Duration>) -> Self {
+        Self { timeout }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+/// The wait for options for the page. Multiple options can be set. This does nothing without the `chrome` flag enabled.
+pub struct WaitFor {
+    /// The max time to wait for the selector.
+    pub selector: Option<WaitForSelector>,
+    /// Wait for idle network 500ms.
+    pub idle_network: Option<WaitForIdleNetwork>,
+    /// Wait for delay. Should only be used for testing.
+    pub delay: Option<WaitForDelay>,
+    /// Wait for page navigations.
+    pub page_navigations: bool,
+}
+
+impl WaitFor {
+    /// Create new WaitFor with timeout.
+    pub fn new(
+        timeout: Option<core::time::Duration>,
+        delay: Option<WaitForDelay>,
+        page_navigations: bool,
+        idle_network: bool,
+        selector: Option<String>,
+    ) -> Self {
+        Self {
+            page_navigations,
+            idle_network: if idle_network {
+                Some(WaitForIdleNetwork::new(timeout))
+            } else {
+                None
+            },
+            selector: if selector.is_some() {
+                Some(WaitForSelector::new(timeout, selector.unwrap_or_default()))
+            } else {
+                None
+            },
+            delay,
+        }
+    }
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -115,8 +184,8 @@ pub struct Configuration {
     /// Collect all the resources found on the page.
     pub full_resources: bool,
     #[cfg(feature = "chrome")]
-    /// Wait for idle network connections.
-    pub wait_for_idle_network: Option<WaitForIdleNetwork>,
+    /// Wait for options for the page.
+    pub wait_for: Option<WaitFor>,
     /// Dangerously accept invalid certficates
     pub accept_invalid_certs: bool,
 }
@@ -421,7 +490,14 @@ impl Configuration {
         &mut self,
         wait_for_idle_network: Option<WaitForIdleNetwork>,
     ) -> &mut Self {
-        self.wait_for_idle_network = wait_for_idle_network;
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.idle_network = wait_for_idle_network,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.idle_network = wait_for_idle_network;
+                self.wait_for = Some(wait_for);
+            }
+        }
         self
     }
 
@@ -431,6 +507,52 @@ impl Configuration {
         &mut self,
         _wait_for_idle_network: Option<WaitForIdleNetwork>,
     ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Wait for a selector. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_selector(
+        &mut self,
+        wait_for_selector: Option<WaitForSelector>,
+    ) -> &mut Self {
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.selector = wait_for_selector,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.selector = wait_for_selector;
+                self.wait_for = Some(wait_for);
+            }
+        }
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for a selector. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_wait_for_selector(
+        &mut self,
+        _wait_for_selector: Option<WaitForSelector>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Wait for with delay. Should only be used for testing. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_delay(&mut self, wait_for_delay: Option<WaitForDelay>) -> &mut Self {
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.delay = wait_for_delay,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.delay = wait_for_delay;
+                self.wait_for = Some(wait_for);
+            }
+        }
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for with delay. Should only be used for testing. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_delay(&mut self, _wait_for_delay: Option<WaitForDelay>) -> &mut Self {
         self
     }
 

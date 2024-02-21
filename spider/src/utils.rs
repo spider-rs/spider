@@ -48,6 +48,29 @@ where
     }
 }
 
+/// wait for a selector
+#[cfg(feature = "chrome")]
+pub async fn wait_for_selector(
+    page: &chromiumoxide::Page,
+    timeout: Option<core::time::Duration>,
+    selector: &str,
+) {
+    let wait_until = async {
+        loop {
+            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(50));
+            tokio::pin!(sleep);
+            tokio::select! {
+                _ = &mut sleep => break,
+                _ = page.find_element(selector) => ()
+            }
+        }
+    };
+    match timeout {
+        Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+        _ => wait_until.await,
+    }
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -55,7 +78,7 @@ pub async fn fetch_page_html_chrome_base(
     page: &chromiumoxide::Page,
     content: bool,
     wait_for_navigation: bool,
-    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
+    wait_for: &Option<crate::configuration::WaitFor>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     // used for smart mode re-rendering direct assigning html
     let page = if content {
@@ -64,13 +87,37 @@ pub async fn fetch_page_html_chrome_base(
         page.goto(target_url).await?
     };
 
-    match wait_for_network_idle {
+    match wait_for {
         Some(wait_for) => {
-            wait_for_event::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
-                page,
-                wait_for.timeout,
-            )
-            .await;
+            match wait_for.idle_network {
+                Some(ref network_idle) => {
+                    wait_for_event::<
+                        chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished,
+                    >(page, network_idle.timeout)
+                    .await;
+                }
+                _ => (),
+            }
+
+            match wait_for.selector {
+                Some(ref await_for_selector) => {
+                    wait_for_selector(
+                        page,
+                        await_for_selector.timeout,
+                        &await_for_selector.selector,
+                    )
+                    .await;
+                }
+                _ => (),
+            }
+
+            match wait_for.delay {
+                Some(ref wait_for_delay) => match wait_for_delay.timeout {
+                    Some(timeout) => tokio::time::sleep(timeout).await,
+                    _ => (),
+                },
+                _ => (),
+            }
         }
         _ => (),
     }
@@ -112,10 +159,9 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
+    wait_for: &Option<crate::configuration::WaitFor>,
 ) -> PageResponse {
-    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for_network_idle).await
-    {
+    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for).await {
         Ok(page) => page,
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -477,64 +523,58 @@ pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for_network_idle: &Option<crate::configuration::WaitForIdleNetwork>,
+    wait_for: &Option<crate::configuration::WaitFor>,
 ) -> PageResponse {
     match &page {
-        page => match fetch_page_html_chrome_base(
-            &target_url,
-            &page,
-            false,
-            true,
-            wait_for_network_idle,
-        )
-        .await
-        {
-            Ok(page) => page,
-            _ => {
-                log(
-                    "- error parsing html text defaulting to raw http request {}",
-                    &target_url,
-                );
+        page => {
+            match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for).await {
+                Ok(page) => page,
+                _ => {
+                    log(
+                        "- error parsing html text defaulting to raw http request {}",
+                        &target_url,
+                    );
 
-                use crate::bytes::BufMut;
-                use bytes::BytesMut;
+                    use crate::bytes::BufMut;
+                    use bytes::BytesMut;
 
-                match client.get(target_url).send().await {
-                    Ok(res) if res.status().is_success() => {
-                        #[cfg(feature = "headers")]
-                        let headers = res.headers().clone();
-                        let status_code = res.status();
-                        let mut stream = res.bytes_stream();
-                        let mut data: BytesMut = BytesMut::new();
+                    match client.get(target_url).send().await {
+                        Ok(res) if res.status().is_success() => {
+                            #[cfg(feature = "headers")]
+                            let headers = res.headers().clone();
+                            let status_code = res.status();
+                            let mut stream = res.bytes_stream();
+                            let mut data: BytesMut = BytesMut::new();
 
-                        while let Some(item) = stream.next().await {
-                            match item {
-                                Ok(text) => data.put(text),
-                                _ => (),
+                            while let Some(item) = stream.next().await {
+                                match item {
+                                    Ok(text) => data.put(text),
+                                    _ => (),
+                                }
+                            }
+
+                            PageResponse {
+                                #[cfg(feature = "headers")]
+                                headers: Some(headers),
+                                content: Some(data.into()),
+                                status_code,
+                                ..Default::default()
                             }
                         }
-
-                        PageResponse {
+                        Ok(res) => PageResponse {
                             #[cfg(feature = "headers")]
-                            headers: Some(headers),
-                            content: Some(data.into()),
-                            status_code,
+                            headers: Some(res.headers().clone()),
+                            status_code: res.status(),
                             ..Default::default()
+                        },
+                        Err(_) => {
+                            log("- error parsing html text {}", &target_url);
+                            Default::default()
                         }
-                    }
-                    Ok(res) => PageResponse {
-                        #[cfg(feature = "headers")]
-                        headers: Some(res.headers().clone()),
-                        status_code: res.status(),
-                        ..Default::default()
-                    },
-                    Err(_) => {
-                        log("- error parsing html text {}", &target_url);
-                        Default::default()
                     }
                 }
             }
-        },
+        }
     }
 }
 

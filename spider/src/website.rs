@@ -1286,7 +1286,7 @@ impl Website {
                 &self.domain.inner(),
                 &client,
                 &page,
-                &self.configuration.wait_for_idle_network,
+                &self.configuration.wait_for,
             )
             .await;
 
@@ -1981,7 +1981,7 @@ impl Website {
                                 new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
-                                self.configuration.wait_for_idle_network.clone(),
+                                self.configuration.wait_for.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -2534,7 +2534,7 @@ impl Website {
                                     new_page.clone(),
                                     self.configuration.external_domains_caseless.clone(),
                                     self.channel_guard.clone(),
-                                    self.configuration.wait_for_idle_network.clone(),
+                                    self.configuration.wait_for.clone(),
                                 ));
 
                                 if !links.is_empty() {
@@ -3085,6 +3085,24 @@ impl Website {
     ) -> &mut Self {
         self.configuration
             .with_wait_for_idle_network(wait_for_idle_network);
+        self
+    }
+
+    /// Wait for a CSS query selector. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_wait_for_selector(
+        &mut self,
+        wait_for_selector: Option<crate::configuration::WaitForSelector>,
+    ) -> &mut Self {
+        self.configuration.with_wait_for_selector(wait_for_selector);
+        self
+    }
+
+    /// Wait for a delay. Should only be used for testing. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_wait_for_delay(
+        &mut self,
+        wait_for_delay: Option<crate::configuration::WaitForDelay>,
+    ) -> &mut Self {
+        self.configuration.with_wait_for_delay(wait_for_delay);
         self
     }
 
