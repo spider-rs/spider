@@ -87,6 +87,16 @@ pub async fn fetch_page_html_chrome_base(
         page.goto(target_url).await?
     };
 
+    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    let final_url = if wait_for_navigation && !content {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&target_url, &u),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     match wait_for {
         Some(wait_for) => {
             match wait_for.idle_network {
@@ -122,19 +132,12 @@ pub async fn fetch_page_html_chrome_base(
         _ => (),
     }
 
-    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !content {
-        match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&target_url, &u),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
     let page = page.activate().await?;
     let res: bytes::Bytes = page.content_bytes().await?;
     let ok = res.len() > 0;
+
+    page.execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+        .await?;
 
     Ok(PageResponse {
         content: if ok { Some(res) } else { None },

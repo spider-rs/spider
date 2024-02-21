@@ -1471,7 +1471,7 @@ impl Website {
                     &link.inner().as_str(),
                     &client,
                     &page,
-                    &self.configuration.wait_for_idle_network,
+                    &self.configuration.wait_for,
                 )
                 .await;
                 let u = page.get_url();
@@ -2245,7 +2245,7 @@ impl Website {
                                 new_page.clone(),
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
-                                self.configuration.wait_for_idle_network.clone(),
+                                self.configuration.wait_for.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
