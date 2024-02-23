@@ -1,6 +1,6 @@
 use crate::website::CronType;
 use compact_str::CompactString;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 /// Redirect policy configuration for request
 #[derive(Debug, Default, Clone)]
@@ -261,7 +261,7 @@ pub struct ScreenShotConfig {
     /// Store the screenshot to disk. This can be used with output_dir. If disabled will not store the file to the output directory.
     pub save: bool,
     /// The output directory to store the file. Parant folders may be created inside the directory.
-    pub output_dir: Option<String>,
+    pub output_dir: Option<std::path::PathBuf>,
 }
 
 impl ScreenShotConfig {
@@ -270,7 +270,7 @@ impl ScreenShotConfig {
         params: ScreenshotParams,
         bytes: bool,
         save: bool,
-        output_dir: Option<String>,
+        output_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             params,

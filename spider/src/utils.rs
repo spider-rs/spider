@@ -84,9 +84,12 @@ pub async fn wait_for_selector(
 
 /// Get the output path of a screenshot and create any parent folders if needed.
 #[cfg(feature = "chrome")]
-pub async fn create_output_path(base_out: &str, target_url: &str, format: &str) -> String {
+pub async fn create_output_path(
+    base: &std::path::PathBuf,
+    target_url: &str,
+    format: &str,
+) -> String {
     let out = string_concat!(
-        &base_out,
         &percent_encoding::percent_encode(
             target_url.as_bytes(),
             percent_encoding::NON_ALPHANUMERIC
@@ -95,8 +98,7 @@ pub async fn create_output_path(base_out: &str, target_url: &str, format: &str) 
         format
     );
 
-    let output_path = std::path::Path::new(&out);
-    match output_path.parent() {
+    match base.join(&out).parent() {
         Some(p) => {
             let _ = tokio::fs::create_dir_all(&p).await;
         }
@@ -219,9 +221,7 @@ pub async fn perform_screenshot(
 
             if ss.save {
                 let output_path = create_output_path(
-                    &ss.output_dir
-                        .clone()
-                        .unwrap_or_else(|| "./storage/".to_string()),
+                    &ss.output_dir.clone().unwrap_or_else(|| "./storage/".into()),
                     &target_url,
                     &output_format,
                 )
@@ -254,7 +254,9 @@ pub async fn perform_screenshot(
         }
         _ => {
             let output_path = create_output_path(
-                &std::env::var("SCREENSHOT_DIRECTORY").unwrap_or_else(|_| "./storage/".to_string()),
+                &std::env::var("SCREENSHOT_DIRECTORY")
+                    .unwrap_or_else(|_| "./storage/".to_string())
+                    .into(),
                 &target_url,
                 &".png",
             )
