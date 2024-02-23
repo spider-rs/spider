@@ -379,9 +379,9 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    /// Take a screenshot of the page. If the output path is omitted you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
-    pub async fn screenshot(
-        &self,
+    /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved. The feature flag `chrome_store_page` is required.
+    pub async fn take_screenshot(
+        page: &Page,
         full_page: bool,
         omit_background: bool,
         format: crate::configuration::CaptureScreenshotFormat,
@@ -389,30 +389,12 @@ impl Page {
         output_path: Option<impl AsRef<std::path::Path>>,
         clip: Option<crate::configuration::ClipViewport>,
     ) -> Vec<u8> {
-        match &self.chrome_page {
-            Some(page) => {
+        match &page.chrome_page {
+            Some(chrome_page) => {
                 let format =
                     chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::from(
                         format,
                     );
-
-                let output_path = match output_path {
-                    Some(out) => out.as_ref().to_path_buf(),
-                    _ => {
-                        let base_path = std::env::var("SCREENSHOT_DIRECTORY")
-                            .unwrap_or_else(|_| "./storage/".to_string());
-                        let path = std::path::Path::new(&base_path);
-                        path.join(string_concat!(
-                            percent_encoding::percent_encode(
-                                self.url.as_bytes(),
-                                percent_encoding::NON_ALPHANUMERIC
-                            )
-                            .to_string(),
-                            ".",
-                            format.as_ref()
-                        ))
-                    }
-                };
 
                 let screenshot_configs = chromiumoxide::page::ScreenshotParams::builder()
                     .format(format)
@@ -431,23 +413,81 @@ impl Page {
                     _ => screenshot_configs,
                 };
 
-                match page
-                    .save_screenshot(screenshot_configs.build(), &output_path)
-                    .await
-                {
-                    Ok(v) => {
-                        log::debug!("saved screenshot: {:?}", output_path);
-                        v
+                if output_path.is_none() {
+                    match chrome_page.screenshot(screenshot_configs.build()).await {
+                        Ok(v) => {
+                            log::debug!("saved screenshot: {:?}", page.url);
+                            v
+                        }
+                        Err(e) => {
+                            log::error!("failed to save screenshot: {:?} - {:?}", e, page.url);
+                            Default::default()
+                        }
                     }
-                    Err(e) => {
-                        log::error!("failed to save screenshot: {:?} - {:?}", e, output_path);
-                        Default::default()
+                } else {
+                    let output_path = match output_path {
+                        Some(out) => out.as_ref().to_path_buf(),
+                        _ => Default::default(),
+                    };
+
+                    match chrome_page
+                        .save_screenshot(screenshot_configs.build(), &output_path)
+                        .await
+                    {
+                        Ok(v) => {
+                            log::debug!("saved screenshot: {:?}", output_path);
+                            v
+                        }
+                        Err(e) => {
+                            log::error!("failed to save screenshot: {:?} - {:?}", e, output_path);
+                            Default::default()
+                        }
                     }
                 }
             }
             _ => Default::default(),
         }
     }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved. The feature flag `chrome_store_page` is required.
+    pub async fn screenshot(
+        &self,
+        full_page: bool,
+        omit_background: bool,
+        format: crate::configuration::CaptureScreenshotFormat,
+        quality: Option<i64>,
+        output_path: Option<impl AsRef<std::path::Path>>,
+        clip: Option<crate::configuration::ClipViewport>,
+    ) -> Vec<u8> {
+        Page::take_screenshot(
+            &self,
+            full_page,
+            omit_background,
+            format,
+            quality,
+            output_path,
+            clip,
+        )
+        .await
+    }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    /// Close the chrome page used. Useful when storing the page for subscription usage. The feature flag `chrome_store_page` is required.
+    pub async fn close_page(&mut self) {
+        match self.chrome_page.as_mut() {
+            Some(page) => {
+                let _ = page
+                    .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+                    .await;
+            }
+            _ => (),
+        }
+    }
+
+    #[cfg(all(feature = "decentralized", feature = "chrome"))]
+    /// Close the chrome page used. Useful when storing the page for subscription usage. The feature flag `chrome_store_page` is required.
+    pub async fn close_page(&mut self) {}
 
     /// Page request fulfilled.
     pub fn is_empty(&self) -> bool {

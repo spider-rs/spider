@@ -144,8 +144,54 @@ pub async fn fetch_page_html_chrome_base(
     let res: bytes::Bytes = page.content_bytes().await?;
     let ok = res.len() > 0;
 
-    page.execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
-        .await?;
+    if cfg!(feature = "chrome_screenshot") {
+        let output_path = string_concat!(
+            std::env::var("SCREENSHOT_DIRECTORY").unwrap_or_else(|_| "./storage/".to_string()),
+            &percent_encoding::percent_encode(
+                target_url.as_bytes(),
+                percent_encoding::NON_ALPHANUMERIC
+            )
+            .to_string(),
+            ".png"
+        );
+
+        let output_path = std::path::Path::new(&output_path);
+
+        match output_path.parent() {
+            Some(p) => {
+                let _ = tokio::fs::create_dir_all(&p).await;
+            }
+            _ => (),
+        }
+
+        match page
+            .save_screenshot(
+                chromiumoxide::page::ScreenshotParams::builder()
+                    .format(
+                        chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                    )
+                    .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
+                        Ok(t) => t == "true",
+                        _ => true,
+                    })
+                    .omit_background(match std::env::var("SCREENSHOT_OMIT_BACKGROUND") {
+                        Ok(t) => t == "true",
+                        _ => true,
+                    })
+                    .build(),
+                &output_path,
+            )
+            .await
+        {
+            Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
+            Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path),
+        };
+    }
+
+    if cfg!(not(feature = "chrome_store_page")) {
+        page.execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+            .await?;
+    }
 
     Ok(PageResponse {
         content: if ok { Some(res) } else { None },
@@ -160,11 +206,7 @@ pub async fn fetch_page_html_chrome_base(
     })
 }
 
-#[cfg(all(
-    not(feature = "fs"),
-    feature = "chrome",
-    not(feature = "chrome_screenshot")
-))]
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html(
     target_url: &str,
@@ -174,92 +216,6 @@ pub async fn fetch_page_html(
 ) -> PageResponse {
     match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for).await {
         Ok(page) => page,
-        _ => fetch_page_html_raw(&target_url, &client).await,
-    }
-}
-
-#[cfg(all(not(feature = "fs"), feature = "chrome", feature = "chrome_screenshot"))]
-/// Perform a network request to a resource extracting all content as text streaming via chrome storing screenshots for each page.
-pub async fn fetch_page_html(
-    target_url: &str,
-    client: &Client,
-    page: &chromiumoxide::Page,
-    wait_for_network_idle: bool,
-) -> PageResponse {
-    let page = page.activate().await;
-
-    match page {
-        Ok(page) => {
-            match page.goto(target_url).await {
-                Ok(page) => {
-                    let p = page.wait_for_navigation_response().await;
-                    if wait_for_network_idle {
-                        wait_for_idle_network(&page).await;
-                    }
-                    let res = page.content_bytes().await;
-                    let ok = res.is_ok();
-
-                    let output_path = string_concat!(
-                        std::env::var("SCREENSHOT_DIRECTORY")
-                            .unwrap_or_else(|_| "./storage/".to_string()),
-                        &percent_encoding::percent_encode(
-                            target_url.as_bytes(),
-                            percent_encoding::NON_ALPHANUMERIC
-                        )
-                        .to_string(),
-                        ".png"
-                    );
-
-                    let output_path = std::path::Path::new(&output_path);
-
-                    match output_path.parent() {
-                        Some(p) => {
-                            let _ = tokio::fs::create_dir_all(&p).await;
-                        }
-                        _ => (),
-                    }
-
-                    match page.save_screenshot(
-                        chromiumoxide::page::ScreenshotParams::builder()
-                            .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
-                            .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
-                                Ok(t) => t == "true",
-                                _ => true
-                            })
-                            .omit_background(match std::env::var("SCREENSHOT_OMIT_BACKGROUND") {
-                                Ok(t) => t == "true",
-                                _ => true
-                            })
-                            .build(),
-                           &output_path,
-                    )
-                    .await {
-                        Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
-                        Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path)
-                    };
-
-                    PageResponse {
-                        content: if ok {
-                            Some(res.unwrap_or_default())
-                        } else {
-                            None
-                        },
-                        // todo: get the cdp error to status code.
-                        status_code: if ok {
-                            StatusCode::OK
-                        } else {
-                            Default::default()
-                        },
-                        final_url: match p {
-                            Ok(u) => get_last_redirect(&target_url, &u),
-                            _ => None,
-                        },
-                        ..Default::default()
-                    }
-                }
-                _ => fetch_page_html_raw(&target_url, &client).await,
-            }
-        }
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
 }

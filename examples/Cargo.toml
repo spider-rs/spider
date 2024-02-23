@@ -1,7 +1,10 @@
 [package]
 name = "spider_examples"
-version = "1.83.6"
-authors = ["madeindjs <contact@rousseau-alexandre.fr>", "j-mendez <jeff@a11ywatch.com>"]
+version = "1.83.9"
+authors = [
+    "madeindjs <contact@rousseau-alexandre.fr>",
+    "j-mendez <jeff@a11ywatch.com>",
+]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
@@ -22,7 +25,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "1.83.6"
+version = "1.83.9"
 path = "../spider"
 features = ["serde"]
 

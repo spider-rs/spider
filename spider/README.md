@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.83.6"
+spider = "1.83.9"
 ```
 
 And then the code:
@@ -93,7 +93,7 @@ We have a couple optional feature flags. Regex blacklisting, jemaloc backend, gl
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["regex", "ua_generator"] }
+spider = { version = "1.83.9", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -114,7 +114,7 @@ spider = { version = "1.83.6", features = ["regex", "ua_generator"] }
 1. `cache`: Enables HTTP caching request to disk.
 1. `cache_mem`: Enables HTTP caching request to persist in memory.
 1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
-1. `chrome_store_page`: Store the page object to perform other actions like taking screenshots conditionally.
+1. `chrome_store_page`: Store the page object to perform other actions like taking screenshots conditionally. You need to also use `let mut guard = website.subscribe_guard()` and call `guard.inc()` if subscriptions are used along with `page.close_page().await;` to close the page.
 1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env var `SCREENSHOT_OMIT_BACKGROUND` to false.
 1. `chrome_headed`: Enables chrome rendering headful rendering [experimental].
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
@@ -125,7 +125,7 @@ spider = { version = "1.83.6", features = ["regex", "ua_generator"] }
 1. `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 1. `encoding`: Enables handling the content with different encodings like Shift_JIS.
 1. `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
-1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. 
+1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO.
 This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
 
 ### Decentralization
@@ -134,7 +134,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["decentralized"] }
+spider = { version = "1.83.9", features = ["decentralized"] }
 ```
 
 ```sh
@@ -151,7 +151,7 @@ The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the
 ### Handling headers with decentralisation
 
 Without decentralisation the values of the headers for a page are unmodified.
-When working with decentralized workers, each worker stores the headers retrieved 
+When working with decentralized workers, each worker stores the headers retrieved
 for the original request with prefixed element names (`"zz-spider-r--"`).
 
 Using the feature `decentralized_headers` provides some useful tools to clean and extract the original header
@@ -165,7 +165,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["sync"] }
+spider = { version = "1.83.9", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -195,7 +195,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["regex"] }
+spider = { version = "1.83.9", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -222,7 +222,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["control"] }
+spider = { version = "1.83.9", features = ["control"] }
 ```
 
 ```rust
@@ -292,7 +292,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["sync", "cron"] }
+spider = { version = "1.83.9", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -331,7 +331,7 @@ the feature flag [`chrome_intercept`] to possibly speed up request using Network
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["chrome", "chrome_intercept"] }
+spider = { version = "1.83.9", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
@@ -361,7 +361,7 @@ Enabling HTTP cache can be done with the feature flag [`cache`] or [`cache_mem`]
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["cache"] }
+spider = { version = "1.83.9", features = ["cache"] }
 ```
 
 You need to set `website.cache` to true to enable as well.
@@ -392,7 +392,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["smart"] }
+spider = { version = "1.83.9", features = ["smart"] }
 ```
 
 ```rust,no_run
@@ -418,7 +418,7 @@ Set a depth limit to prevent forwarding.
 
 ```toml
 [dependencies]
-spider = { version = "1.83.6", features = ["budget"] }
+spider = { version = "1.83.9", features = ["budget"] }
 ```
 
 ```rust,no_run

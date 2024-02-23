@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.83.9
+
+1. chore(chrome): add wait_for events
+
 ## v1.60.0
 
 1. feat(smart): add smart mode feature flag (HTTP until JS Rendering is needed per page)
