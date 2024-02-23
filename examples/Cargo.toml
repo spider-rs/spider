@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.83.9"
+version = "1.83.11"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -25,7 +25,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "1.83.9"
+version = "1.83.11"
 path = "../spider"
 features = ["serde"]
 
@@ -99,6 +99,11 @@ required-features = ["spider/sync", "spider/chrome"]
 [[example]]
 name = "chrome_screenshot"
 path = "chrome_screenshot.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
+name = "chrome_screenshot_with_config"
+path = "chrome_screenshot_with_config.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v1.83.9
+## v1.83.11
 
 1. chore(chrome): add wait_for events
 

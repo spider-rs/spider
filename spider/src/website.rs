@@ -1,5 +1,5 @@
 use crate::black_list::contains;
-use crate::configuration::{get_ua, Configuration, RedirectPolicy};
+use crate::configuration::{self, get_ua, Configuration, RedirectPolicy};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
@@ -1287,6 +1287,7 @@ impl Website {
                 &client,
                 &page,
                 &self.configuration.wait_for,
+                &self.configuration.screenshot,
             )
             .await;
 
@@ -1976,6 +1977,7 @@ impl Website {
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
                                 self.configuration.wait_for.clone(),
+                                self.configuration.screenshot.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -2024,6 +2026,7 @@ impl Website {
                                                         &shared.0,
                                                         &shared.3,
                                                         &shared.6,
+                                                        &shared.7,
                                                     )
                                                     .await;
 
@@ -2246,6 +2249,7 @@ impl Website {
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
                                 self.configuration.wait_for.clone(),
+                                self.configuration.screenshot.clone(),
                             ));
 
                             let add_external = shared.4.len() > 0;
@@ -2291,6 +2295,7 @@ impl Website {
                                                         &shared.0,
                                                         &shared.3,
                                                         &shared.6,
+                                                        &shared.7,
                                                     )
                                                     .await;
 
@@ -2299,7 +2304,9 @@ impl Website {
                                                     }
 
                                                     let page_links = page
-                                                        .smart_links(&shared.1, &shared.3)
+                                                        .smart_links(
+                                                            &shared.1, &shared.3, &shared.7,
+                                                        )
                                                         .await;
 
                                                     channel_send_page(&shared.2, page, &shared.5);
@@ -2529,6 +2536,7 @@ impl Website {
                                     self.configuration.external_domains_caseless.clone(),
                                     self.channel_guard.clone(),
                                     self.configuration.wait_for.clone(),
+                                    self.configuration.screenshot.clone(),
                                 ));
 
                                 if !links.is_empty() {
@@ -2566,6 +2574,7 @@ impl Website {
                                                     &shared.0,
                                                     &shared.3,
                                                     &shared.6,
+                                                    &shared.7,
                                                 )
                                                 .await;
                                                 let mut page = build(&link.as_ref(), page);
@@ -3150,6 +3159,15 @@ impl Website {
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.configuration.with_limit(limit);
+        self
+    }
+
+    /// Set the chrome screenshot configuration. This does nothing without the `chrome` flag enabled.
+    pub fn with_screenshot(
+        &mut self,
+        screenshot_config: Option<configuration::ScreenShotConfig>,
+    ) -> &mut Self {
+        self.configuration.with_screenshot(screenshot_config);
         self
     }
 

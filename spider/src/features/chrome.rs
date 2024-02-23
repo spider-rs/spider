@@ -11,11 +11,14 @@ pub fn get_browser_config(
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
+    request_timeout: &Option<Box<core::time::Duration>>,
 ) -> Option<BrowserConfig> {
-    use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
-        .request_timeout(Duration::from_secs(30));
+        .request_timeout(match request_timeout.as_ref() {
+            Some(timeout) => **timeout,
+            _ => Default::default(),
+        });
 
     let builder = if cache_enabled {
         builder.enable_cache()
@@ -68,12 +71,16 @@ pub fn get_browser_config(
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
+    request_timeout: &Option<Box<core::time::Duration>>,
 ) -> Option<BrowserConfig> {
     use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
-        .request_timeout(Duration::from_secs(30))
         .no_sandbox()
+        .request_timeout(match request_timeout.as_ref() {
+            Some(timeout) => **timeout,
+            _ => Default::default(),
+        })
         .with_head();
 
     let builder = if cache_enabled {
@@ -155,6 +162,7 @@ pub async fn launch_browser(
             config.chrome_intercept,
             config.cache,
             config.viewport.clone(),
+            &config.request_timeout,
         ) {
             Some(browser_config) => match Browser::launch(browser_config).await {
                 Ok(browser) => Some(browser),

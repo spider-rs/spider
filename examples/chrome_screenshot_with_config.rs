@@ -1,32 +1,32 @@
 //! Make sure to create a storage directory locally.
-//! cargo run --example chrome_screenshot --features="spider/sync spider/chrome spider/chrome_store_page"
+//! cargo run --example chrome_screenshot --features="spider/sync spider/chrome"
 extern crate spider;
 use spider::tokio;
-use spider::utils::create_output_path;
 use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.request_timeout = Some(std::time::Duration::from_secs(60).into());
+    // the cdp params
+    let screenshot_params =
+        spider::configuration::ScreenshotParams::new(Default::default(), Some(true), Some(true));
+    // params that handle the way to take screenshots
+    let screenshot_config =
+        spider::configuration::ScreenShotConfig::new(screenshot_params, true, false, None);
+
+    let mut website: Website = Website::new("https://choosealicense.com")
+        .with_screenshot(Some(screenshot_config))
+        .build()
+        .unwrap();
     let mut rx2 = website.subscribe(18).unwrap();
     let mut rxg = website.subscribe_guard().unwrap();
 
     tokio::spawn(async move {
-        while let Ok(mut page) = rx2.recv().await {
-            let file_format = spider::configuration::CaptureScreenshotFormat::Png;
-            let output_path = create_output_path("./storage/", page.get_url(), ".png").await;
-
-            let bytes = page
-                .screenshot(true, true, file_format, Some(75), Some(output_path), None)
-                .await;
-            if bytes.is_empty() {
+        while let Ok(page) = rx2.recv().await {
+            if page.screenshot_bytes.is_none() {
                 println!("🚫 - {:?}", page.get_url());
             } else {
                 println!("📸 - {:?}", page.get_url());
             }
-
-            page.close_page().await;
             rxg.inc();
         }
     });
@@ -34,7 +34,6 @@ async fn main() {
     let start = crate::tokio::time::Instant::now();
     website.crawl().await;
     let duration = start.elapsed();
-
     let links = website.get_links();
 
     println!(

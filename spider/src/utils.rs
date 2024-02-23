@@ -19,6 +19,9 @@ pub struct PageResponse {
     pub final_url: Option<String>,
     /// The message of the response error if any.
     pub error_for_status: Option<Result<Response, Error>>,
+    #[cfg(feature = "chrome")]
+    /// The screenshot bytes of the page. The ScreenShotConfig bytes boolean needs to be set to true.
+    pub screenshot_bytes: Option<Vec<u8>>,
 }
 
 /// wait for event with timeout
@@ -79,6 +82,30 @@ pub async fn wait_for_selector(
     }
 }
 
+/// Get the output path of a screenshot and create any parent folders if needed.
+#[cfg(feature = "chrome")]
+pub async fn create_output_path(base_out: &str, target_url: &str, format: &str) -> String {
+    let out = string_concat!(
+        &base_out,
+        &percent_encoding::percent_encode(
+            target_url.as_bytes(),
+            percent_encoding::NON_ALPHANUMERIC
+        )
+        .to_string(),
+        format
+    );
+
+    let output_path = std::path::Path::new(&out);
+    match output_path.parent() {
+        Some(p) => {
+            let _ = tokio::fs::create_dir_all(&p).await;
+        }
+        _ => (),
+    }
+
+    out
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -87,6 +114,7 @@ pub async fn fetch_page_html_chrome_base(
     content: bool,
     wait_for_navigation: bool,
     wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     // used for smart mode re-rendering direct assigning html
     let page = if content {
@@ -144,56 +172,7 @@ pub async fn fetch_page_html_chrome_base(
     let res: bytes::Bytes = page.content_bytes().await?;
     let ok = res.len() > 0;
 
-    if cfg!(feature = "chrome_screenshot") {
-        let output_path = string_concat!(
-            std::env::var("SCREENSHOT_DIRECTORY").unwrap_or_else(|_| "./storage/".to_string()),
-            &percent_encoding::percent_encode(
-                target_url.as_bytes(),
-                percent_encoding::NON_ALPHANUMERIC
-            )
-            .to_string(),
-            ".png"
-        );
-
-        let output_path = std::path::Path::new(&output_path);
-
-        match output_path.parent() {
-            Some(p) => {
-                let _ = tokio::fs::create_dir_all(&p).await;
-            }
-            _ => (),
-        }
-
-        match page
-            .save_screenshot(
-                chromiumoxide::page::ScreenshotParams::builder()
-                    .format(
-                        chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                    )
-                    .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
-                        Ok(t) => t == "true",
-                        _ => true,
-                    })
-                    .omit_background(match std::env::var("SCREENSHOT_OMIT_BACKGROUND") {
-                        Ok(t) => t == "true",
-                        _ => true,
-                    })
-                    .build(),
-                &output_path,
-            )
-            .await
-        {
-            Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
-            Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path),
-        };
-    }
-
-    if cfg!(not(feature = "chrome_store_page")) {
-        page.execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
-            .await?;
-    }
-
-    Ok(PageResponse {
+    let mut page_response = PageResponse {
         content: if ok { Some(res) } else { None },
         // todo: get the cdp error to status code.
         status_code: if ok {
@@ -203,7 +182,108 @@ pub async fn fetch_page_html_chrome_base(
         },
         final_url,
         ..Default::default()
-    })
+    };
+
+    if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
+        perform_screenshot(target_url, page, screenshot, &mut page_response).await;
+    }
+
+    if cfg!(not(feature = "chrome_store_page")) {
+        page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+            .await?;
+    }
+
+    Ok(page_response)
+}
+
+/// Perform a screenshot shortcut.
+#[cfg(feature = "chrome")]
+pub async fn perform_screenshot(
+    target_url: &str,
+    page: &chromiumoxide::Page,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_response: &mut PageResponse,
+) {
+    match screenshot {
+        Some(ref ss) => {
+            let output_format = string_concat!(
+                ".",
+                ss.params
+                    .cdp_params
+                    .format
+                    .clone()
+                    .unwrap_or_else(|| crate::configuration::CaptureScreenshotFormat::Png)
+                    .to_string()
+            );
+            let ss_params = chromiumoxide::page::ScreenshotParams::from(ss.params.clone());
+
+            if ss.save {
+                let output_path = create_output_path(
+                    &ss.output_dir
+                        .clone()
+                        .unwrap_or_else(|| "./storage/".to_string()),
+                    &target_url,
+                    &output_format,
+                )
+                .await;
+
+                match page.save_screenshot(ss_params, &output_path).await {
+                    Ok(b) => {
+                        log::debug!("saved screenshot: {:?}", output_path);
+                        if ss.bytes {
+                            page_response.screenshot_bytes = Some(b);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to save screenshot: {:?} - {:?}", e, output_path)
+                    }
+                };
+            } else {
+                match page.screenshot(ss_params).await {
+                    Ok(b) => {
+                        log::debug!("took screenshot: {:?}", target_url);
+                        if ss.bytes {
+                            page_response.screenshot_bytes = Some(b);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("failed to take screenshot: {:?} - {:?}", e, target_url)
+                    }
+                };
+            }
+        }
+        _ => {
+            let output_path = create_output_path(
+                &std::env::var("SCREENSHOT_DIRECTORY").unwrap_or_else(|_| "./storage/".to_string()),
+                &target_url,
+                &".png",
+            )
+            .await;
+
+            match page
+                .save_screenshot(
+                    chromiumoxide::page::ScreenshotParams::builder()
+                        .format(
+                            chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                        )
+                        .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
+                            Ok(t) => t == "true",
+                            _ => true,
+                        })
+                        .omit_background(match std::env::var("SCREENSHOT_OMIT_BACKGROUND") {
+                            Ok(t) => t == "true",
+                            _ => true,
+                        })
+                        .build(),
+                    &output_path,
+                )
+                .await
+            {
+                Ok(_) => log::debug!("saved screenshot: {:?}", output_path),
+                Err(e) => log::error!("failed to save screenshot: {:?} - {:?}", e, output_path),
+            };
+        }
+    }
 }
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
@@ -213,8 +293,9 @@ pub async fn fetch_page_html(
     client: &Client,
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
 ) -> PageResponse {
-    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for).await {
+    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for, screenshot).await {
         Ok(page) => page,
         _ => fetch_page_html_raw(&target_url, &client).await,
     }
@@ -491,10 +572,13 @@ pub async fn fetch_page_html_chrome(
     client: &Client,
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
 ) -> PageResponse {
     match &page {
         page => {
-            match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for).await {
+            match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for, screenshot)
+                .await
+            {
                 Ok(page) => page,
                 _ => {
                     log(

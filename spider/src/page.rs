@@ -90,6 +90,9 @@ pub struct Page {
     #[cfg(feature = "chrome")]
     /// Page object for chrome. The page may be closed when accessing it on another thread from concurrency.
     chrome_page: Option<chromiumoxide::Page>,
+    #[cfg(feature = "chrome")]
+    /// The screenshot bytes of the page.
+    pub screenshot_bytes: Option<Vec<u8>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -111,6 +114,9 @@ pub struct Page {
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Unused].
     pub final_redirect_destination: Option<String>,
+    #[cfg(feature = "chrome")]
+    /// The screenshot bytes of the page.
+    pub screenshot_bytes: Option<Vec<u8>>,
 }
 
 lazy_static! {
@@ -241,6 +247,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         },
         #[cfg(feature = "chrome")]
         chrome_page: None,
+        #[cfg(feature = "chrome")]
+        screenshot_bytes: res.screenshot_bytes,
     }
 }
 
@@ -289,8 +297,10 @@ impl Page {
         client: &Client,
         page: &chromiumoxide::Page,
         wait_for: &Option<crate::configuration::WaitFor>,
+        screenshot: &Option<crate::configuration::ScreenShotConfig>,
     ) -> Self {
-        let page_resource = crate::utils::fetch_page_html(&url, &client, &page, wait_for).await;
+        let page_resource =
+            crate::utils::fetch_page_html(&url, &client, &page, wait_for, screenshot).await;
         let mut p = build(url, page_resource);
 
         // store the chrome page to perform actions like screenshots etc.
@@ -365,7 +375,8 @@ impl Page {
     }
 
     #[cfg(not(all(not(feature = "decentralized"), feature = "chrome")))]
-    /// Take a screenshot of the page. If the output path is omitted you need to create a `storage` directory at the base root of your application to continue. The feature flag `chrome_store_page` is required.
+    /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved.
+    /// The feature flag `chrome_store_page` is required.
     pub async fn screenshot(
         &self,
         _full_page: bool,
@@ -379,7 +390,8 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved. The feature flag `chrome_store_page` is required.
+    /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved.
+    /// The feature flag `chrome_store_page` is required.
     pub async fn take_screenshot(
         page: &Page,
         full_page: bool,
@@ -416,11 +428,11 @@ impl Page {
                 if output_path.is_none() {
                     match chrome_page.screenshot(screenshot_configs.build()).await {
                         Ok(v) => {
-                            log::debug!("saved screenshot: {:?}", page.url);
+                            log::debug!("took screenshot: {:?}", page.url);
                             v
                         }
                         Err(e) => {
-                            log::error!("failed to save screenshot: {:?} - {:?}", e, page.url);
+                            log::error!("failed to took screenshot: {:?} - {:?}", e, page.url);
                             Default::default()
                         }
                     }
@@ -473,12 +485,12 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    /// Close the chrome page used. Useful when storing the page for subscription usage. The feature flag `chrome_store_page` is required.
+    /// Close the chrome page used. Useful when storing the page with subscription usage. The feature flag `chrome_store_page` is required.
     pub async fn close_page(&mut self) {
         match self.chrome_page.as_mut() {
             Some(page) => {
                 let _ = page
-                    .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+                    .execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
                     .await;
             }
             _ => (),
@@ -751,6 +763,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         browser: &chromiumoxide::Page,
+        screenshot: &Option<crate::configuration::ScreenShotConfig>,
     ) -> HashSet<A> {
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -834,6 +847,7 @@ impl Page {
                                     // we should re-use the html content instead with events.
                                     let uu = self.get_html();
                                     let browser = browser.to_owned();
+                                    let screenshot = screenshot.clone();
 
                                     tokio::task::spawn(async move {
                                         let page_resource =
@@ -851,6 +865,7 @@ impl Page {
                                                     true,
                                                     None,
                                                 )),
+                                                &screenshot,
                                             )
                                             .await;
 
@@ -1227,6 +1242,7 @@ impl Page {
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
         page: &chromiumoxide::Page,
+        screenshot: &Option<crate::configuration::ScreenShotConfig>,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -1234,6 +1250,7 @@ impl Page {
                 self.links_stream_smart::<CaseInsensitiveString>(
                     &(&selectors.0, &selectors.1),
                     page,
+                    screenshot,
                 )
                 .await
             }
