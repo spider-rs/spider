@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.83.11"
+version = "1.83.12"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",

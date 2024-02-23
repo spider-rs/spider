@@ -28,7 +28,7 @@ pub struct PageResponse {
 #[cfg(feature = "chrome")]
 pub async fn wait_for_event<T>(page: &chromiumoxide::Page, timeout: Option<core::time::Duration>)
 where
-    T: chromiumoxide::cdp::IntoEventKind + Unpin,
+    T: chromiumoxide::cdp::IntoEventKind + Unpin + std::fmt::Debug,
 {
     match page.event_listener::<T>().await {
         Ok(mut events) => {
@@ -37,9 +37,9 @@ where
                     let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
                     tokio::pin!(sleep);
                     tokio::select! {
-                        _ = &mut sleep => (),
+                        _ = &mut sleep => break,
                         v = events.next() => {
-                          if v.is_none () {
+                              if v.is_none () {
                               break;
                           }
                         }
