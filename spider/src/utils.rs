@@ -98,14 +98,16 @@ pub async fn create_output_path(
         format
     );
 
-    match base.join(&out).parent() {
+    let b = base.join(&out);
+
+    match b.parent() {
         Some(p) => {
             let _ = tokio::fs::create_dir_all(&p).await;
         }
         _ => (),
     }
 
-    out
+    b.display().to_string()
 }
 
 #[cfg(feature = "chrome")]
@@ -299,7 +301,10 @@ pub async fn fetch_page_html(
 ) -> PageResponse {
     match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for, screenshot).await {
         Ok(page) => page,
-        _ => fetch_page_html_raw(&target_url, &client).await,
+        Err(err) => {
+            log::error!("{:?}", err);
+            fetch_page_html_raw(&target_url, &client).await
+        }
     }
 }
 

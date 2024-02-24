@@ -155,7 +155,10 @@ pub async fn launch_browser(
         .await
         {
             Ok(browser) => Some(browser),
-            _ => None,
+            Err(err) => {
+                log::error!("{:?}", err);
+                None
+            }
         },
         _ => match get_browser_config(
             &proxies,
@@ -230,15 +233,9 @@ pub async fn configure_browser(new_page: Page, configuration: &Configuration) ->
 }
 
 /// close the browser and open handles
-pub async fn close_browser(mut browser: Browser, browser_handle: JoinHandle<()>, new_page: Page) {
-    if !std::env::var("CHROME_URL").is_ok() {
-        let _ = browser.close().await;
-        let _ = browser_handle.await;
-    } else {
-        let _ = new_page.close().await;
-        if !browser_handle.is_finished() {
-            browser_handle.abort();
-        }
+pub async fn close_browser(browser_handle: JoinHandle<()>) {
+    if !browser_handle.is_finished() {
+        browser_handle.abort();
     }
 }
 

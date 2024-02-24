@@ -290,7 +290,7 @@ impl Page {
         build(url, page_resource)
     }
 
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Instantiate a new page and gather the html.
     pub async fn new(
         url: &str,
@@ -762,8 +762,8 @@ impl Page {
     >(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
-        browser: &chromiumoxide::Page,
-        screenshot: &Option<crate::configuration::ScreenShotConfig>,
+        browser: &std::sync::Arc<chromiumoxide::Browser>,
+        configuration: &crate::configuration::Configuration,
     ) -> HashSet<A> {
         let base_domain = &selectors.0;
         let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -847,36 +847,70 @@ impl Page {
                                     // we should re-use the html content instead with events.
                                     let uu = self.get_html();
                                     let browser = browser.to_owned();
-                                    let screenshot = screenshot.clone();
+                                    let configuration = configuration.clone();
 
                                     tokio::task::spawn(async move {
-                                        let page_resource =
-                                            crate::utils::fetch_page_html_chrome_base(
-                                                &uu,
-                                                &browser,
-                                                true,
-                                                false,
-                                                &Some(crate::configuration::WaitFor::new(
-                                                    Some(
-                                                        core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
-                                                    ),
-                                                    None,
-                                                    true,
-                                                    true,
-                                                    None,
-                                                )),
-                                                &screenshot,
-                                            )
-                                            .await;
+                                        match browser.new_page("about:blank").await {
+                                            Ok(new_page) => {
+                                                let new_page =
+                                                    crate::features::chrome::configure_browser(
+                                                        new_page,
+                                                        &configuration,
+                                                    )
+                                                    .await;
 
-                                        match page_resource {
-                                            Ok(resource) => {
-                                                if let Err(_) = tx.send(resource) {
-                                                    crate::utils::log("the receiver dropped", "");
+                                                if cfg!(feature = "chrome_stealth")
+                                                    || configuration.stealth_mode
+                                                {
+                                                    let _ = new_page
+                                                        .enable_stealth_mode_with_agent(
+                                                            &if configuration.user_agent.is_some() {
+                                                                &configuration
+                                                                    .user_agent
+                                                                    .as_ref()
+                                                                    .unwrap()
+                                                                    .as_str()
+                                                            } else {
+                                                                ""
+                                                            },
+                                                        );
                                                 }
+
+                                                let page_resource =
+                                                    crate::utils::fetch_page_html_chrome_base(
+                                                        &uu,
+                                                        &new_page,
+                                                        true,
+                                                        false,
+                                                        &Some(crate::configuration::WaitFor::new(
+                                                            Some(
+                                                                core::time::Duration::from_secs(
+                                                                    120,
+                                                                ), // default a duration for smart handling. (maybe expose later on.)
+                                                            ),
+                                                            None,
+                                                            true,
+                                                            true,
+                                                            None,
+                                                        )),
+                                                        &configuration.screenshot,
+                                                    )
+                                                    .await;
+
+                                                match page_resource {
+                                                    Ok(resource) => {
+                                                        if let Err(_) = tx.send(resource) {
+                                                            crate::utils::log(
+                                                                "the receiver dropped",
+                                                                "",
+                                                            );
+                                                        }
+                                                    }
+                                                    _ => (),
+                                                };
                                             }
                                             _ => (),
-                                        };
+                                        }
                                     });
 
                                     break;
@@ -1241,8 +1275,8 @@ impl Page {
     pub async fn smart_links(
         &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
-        page: &chromiumoxide::Page,
-        screenshot: &Option<crate::configuration::ScreenShotConfig>,
+        page: &std::sync::Arc<chromiumoxide::Browser>,
+        configuration: &crate::configuration::Configuration,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -1250,7 +1284,7 @@ impl Page {
                 self.links_stream_smart::<CaseInsensitiveString>(
                     &(&selectors.0, &selectors.1),
                     page,
-                    screenshot,
+                    configuration,
                 )
                 .await
             }

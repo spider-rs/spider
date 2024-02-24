@@ -15,10 +15,10 @@ async fn main() {
 
     let mut website: Website = Website::new("https://choosealicense.com")
         .with_screenshot(Some(screenshot_config))
+        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(18).unwrap();
-    let mut rxg = website.subscribe_guard().unwrap();
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
@@ -27,7 +27,6 @@ async fn main() {
             } else {
                 println!("📸 - {:?}", page.get_url());
             }
-            rxg.inc();
         }
     });
 
