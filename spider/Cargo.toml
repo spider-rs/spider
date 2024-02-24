@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.84.0"
+version = "1.84.1"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -108,6 +108,7 @@ chrome_stealth = ["chrome"]
 chrome_screenshot = ["chrome"]
 chrome_store_page = ["chrome", "serde"]
 chrome_intercept = ["chrome"]
+chrome_headless_new = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 napi = ["dep:napi"]

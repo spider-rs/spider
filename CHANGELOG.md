@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.84.1
+
+1. feat(chrome): add chrome_headless_new flag
+
 ## v1.83.11
 
 1. chore(chrome): add wait_for events

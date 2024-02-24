@@ -242,7 +242,7 @@ pub async fn close_browser(browser_handle: JoinHandle<()>) {
 #[cfg(not(feature = "chrome_cpu"))]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
 static CHROME_ARGS: [&'static str; 59] = [
-    "--headless",
+    if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
     "--no-sandbox",
     "--no-first-run",
     "--hide-scrollbars",
@@ -309,7 +309,7 @@ static CHROME_ARGS: [&'static str; 59] = [
 #[cfg(feature = "chrome_cpu")]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
 static CHROME_ARGS: [&'static str; 62] = [
-    "--headless",
+    if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
     "--no-sandbox",
     "--no-first-run",
     "--hide-scrollbars",

@@ -10,7 +10,7 @@ use spider::website::Website;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr")
-        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .with_chrome_intercept(true, true)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_caching(cfg!(feature = "cache"))
         .build()
