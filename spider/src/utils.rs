@@ -119,12 +119,20 @@ pub async fn fetch_page_html_chrome_base(
     wait_for_navigation: bool,
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    // used for smart mode re-rendering direct assigning html
-    let page = if content {
-        page.set_content(target_url).await?
-    } else {
-        page.goto(target_url).await?
+    let page = {
+        // the active page was already set prior. No need to re-navigate or set the content.
+        if !page_set {
+            // used for smart mode re-rendering direct assigning html
+            if content {
+                page.set_content(target_url).await?
+            } else {
+                page.goto(target_url).await?
+            }
+        } else {
+            page
+        }
     };
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
@@ -298,8 +306,19 @@ pub async fn fetch_page_html(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
 ) -> PageResponse {
-    match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for, screenshot).await {
+    match fetch_page_html_chrome_base(
+        &target_url,
+        &page,
+        false,
+        true,
+        wait_for,
+        screenshot,
+        page_set,
+    )
+    .await
+    {
         Ok(page) => page,
         Err(err) => {
             log::error!("{:?}", err);
@@ -580,11 +599,20 @@ pub async fn fetch_page_html_chrome(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
 ) -> PageResponse {
     match &page {
         page => {
-            match fetch_page_html_chrome_base(&target_url, &page, false, true, wait_for, screenshot)
-                .await
+            match fetch_page_html_chrome_base(
+                &target_url,
+                &page,
+                false,
+                true,
+                wait_for,
+                screenshot,
+                page_set,
+            )
+            .await
             {
                 Ok(page) => page,
                 _ => {
