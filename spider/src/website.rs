@@ -171,7 +171,7 @@ pub struct Website {
     >,
     /// Subscribe and broadcast changes.
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
-    /// Guard counter for channel handling.
+    /// Guard counter for channel handling. This prevents things like the browser from closing after the crawl so that subscriptions can finalize events.
     channel_guard: Option<ChannelGuard>,
     /// The status of the active crawl.
     status: CrawlStatus,
@@ -604,7 +604,7 @@ impl Website {
         client
     }
 
-    /// Setup strict a strict redirect policy for request.
+    /// Setup strict a strict redirect policy for request. All redirects need to match the host.
     fn setup_strict_policy(&self) -> Policy {
         use crate::page::domain_name;
         use reqwest::redirect::Attempt;
@@ -1299,6 +1299,7 @@ impl Website {
                 &page,
                 &self.configuration.wait_for,
                 &self.configuration.screenshot,
+                false, // we use the initial about:blank page.
             )
             .await;
 
@@ -1944,11 +1945,8 @@ impl Website {
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
-            Some(mut selectors) => match launch_browser(&self.configuration).await {
-                Some((browser, browser_handle)) => {
-                    let browser = Arc::new(browser);
-                    let intercept_handle = self.setup_chrome_interception(&browser).await;
-
+            Some(mut selectors) => match self.setup_browser().await {
+                Some((browser, browser_handle, intercept_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             let mut links: HashSet<CaseInsensitiveString> =
@@ -1959,7 +1957,6 @@ impl Website {
                                 };
 
                             let (mut interval, throttle) = self.setup_crawl();
-
                             let new_page = configure_browser(new_page, &self.configuration).await;
 
                             links.extend(
@@ -2026,7 +2023,17 @@ impl Website {
 
                                                 set.spawn_on(
                                                     async move {
-                                                        match shared.5.new_page("about:blank").await
+
+                                                        let link_result =
+                                                        match on_link_find_callback {
+                                                            Some(cb) => cb(link, None),
+                                                            _ => (link, None),
+                                                        };
+
+
+                                                        let target_url = link_result.0.as_ref();
+
+                                                        match shared.5.new_page(target_url).await
                                                         {
                                                             Ok(new_page) => {
                                                                 let new_page = configure_browser(
@@ -2045,17 +2052,13 @@ impl Website {
                                                                     });
                                                                 }
 
-                                                                let link_result =
-                                                                    match on_link_find_callback {
-                                                                        Some(cb) => cb(link, None),
-                                                                        _ => (link, None),
-                                                                    };
                                                                 let mut page = Page::new(
-                                                                    &link_result.0.as_ref(),
+                                                                    &target_url,
                                                                     &shared.0,
                                                                     &new_page,
                                                                     &shared.6.wait_for,
                                                                     &shared.6.screenshot,
+                                                                    true
                                                                 )
                                                                 .await;
 
@@ -2238,11 +2241,8 @@ impl Website {
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
-            Some(mut selectors) => match launch_browser(&self.configuration).await {
-                Some((browser, browser_handle)) => {
-                    let browser = Arc::new(browser);
-                    let intercept_handle = self.setup_chrome_interception(&browser).await;
-
+            Some(mut selectors) => match self.setup_browser().await {
+                Some((browser, browser_handle, intercept_handle)) => {
                     match browser.new_page("about:blank").await {
                         Ok(new_page) => {
                             let mut links: HashSet<CaseInsensitiveString> =
@@ -2536,11 +2536,8 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(selectors) => {
-                match launch_browser(&self.configuration).await {
-                    Some((browser, browser_handle)) => {
-                        let browser = Arc::new(browser);
-                        let intercept_handle = self.setup_chrome_interception(&browser).await;
-
+                match self.setup_browser().await {
+                    Some((browser, browser_handle, intercept_handle)) => {
                         match browser.new_page("about:blank").await {
                             Ok(new_page) => {
                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -2614,8 +2611,9 @@ impl Website {
 
                                             set.spawn(async move {
                                                 drop(permit);
+                                                let target_url = link.as_ref();
 
-                                                match shared.5.new_page("about:blank").await {
+                                                match shared.5.new_page(target_url).await {
                                                     Ok(new_page) => {
                                                         let new_page =
                                                             configure_browser(new_page, &shared.6)
@@ -2645,15 +2643,17 @@ impl Website {
 
                                                         let page =
                                                             crate::utils::fetch_page_html_chrome(
-                                                                &link.as_ref(),
+                                                                &target_url,
                                                                 &shared.0,
                                                                 &new_page,
                                                                 &shared.6.wait_for,
                                                                 &shared.6.screenshot,
+                                                                true,
                                                             )
                                                             .await;
-                                                        let mut page = build(&link.as_ref(), page);
+                                                        let mut page = build(&target_url, page);
 
+                                                        // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
                                                         let (link, _) = match on_link_find_callback
                                                         {
                                                             Some(cb) => {
@@ -2982,6 +2982,26 @@ impl Website {
                 }
             }
             _ => (),
+        }
+    }
+
+    /// Launch or connect to browser with setup
+    #[cfg(feature = "chrome")]
+    pub async fn setup_browser(
+        &self,
+    ) -> Option<(
+        Arc<chromiumoxide::Browser>,
+        tokio::task::JoinHandle<()>,
+        Option<tokio::task::JoinHandle<()>>,
+    )> {
+        match launch_browser(&self.configuration).await {
+            Some((browser, browser_handle)) => {
+                let browser = Arc::new(browser);
+                let intercept_handle = self.setup_chrome_interception(&browser).await;
+
+                Some((browser, browser_handle, intercept_handle))
+            }
+            _ => None,
         }
     }
 

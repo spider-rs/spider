@@ -298,9 +298,11 @@ impl Page {
         page: &chromiumoxide::Page,
         wait_for: &Option<crate::configuration::WaitFor>,
         screenshot: &Option<crate::configuration::ScreenShotConfig>,
+        page_set: bool,
     ) -> Self {
         let page_resource =
-            crate::utils::fetch_page_html(&url, &client, &page, wait_for, screenshot).await;
+            crate::utils::fetch_page_html(&url, &client, &page, wait_for, screenshot, page_set)
+                .await;
         let mut p = build(url, page_resource);
 
         // store the chrome page to perform actions like screenshots etc.
@@ -664,8 +666,6 @@ impl Page {
         html: &str,
     ) -> HashSet<A> {
         let html = Box::new(Html::parse_fragment(html));
-        tokio::task::yield_now().await;
-
         let mut stream = tokio_stream::iter(html.tree);
         let mut map = HashSet::new();
 
@@ -774,8 +774,6 @@ impl Page {
         let html = Box::new(Html::parse_document(&self.get_html()));
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        tokio::task::yield_now().await;
-
         let mut stream = tokio_stream::iter(html.tree);
         let mut rerender = false;
         let mut static_app = false;
@@ -850,6 +848,7 @@ impl Page {
                                     let configuration = configuration.clone();
 
                                     tokio::task::spawn(async move {
+                                        // we need to use about:blank here since we set the HTML content directly
                                         match browser.new_page("about:blank").await {
                                             Ok(new_page) => {
                                                 let new_page =
@@ -1051,7 +1050,6 @@ impl Page {
             }
         } else {
             let html = Box::new(Html::parse_document(&html));
-            tokio::task::yield_now().await;
             let mut stream = tokio_stream::iter(html.tree);
 
             while let Some(node) = stream.next().await {
@@ -1145,8 +1143,6 @@ impl Page {
         let html = Box::new(crate::packages::scraper::Html::parse_document(
             &self.get_html(),
         ));
-        tokio::task::yield_now().await;
-
         let mut stream = tokio_stream::iter(html.tree);
         let mut map = HashSet::new();
 
