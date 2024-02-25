@@ -27,6 +27,9 @@ pub fn crawl_stub() -> String {
             e.Request.Visit(e.Attr("href"))
         })
     
+        c.OnRequest(func(r *colly.Request) {
+        })
+
         c.Visit(u)
     }
     "#.to_string()

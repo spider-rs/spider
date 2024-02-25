@@ -56,7 +56,7 @@ Test url: `https://rsseau.fr`
 The concurrent benchmarks are averaged across 10 individual runs for 10 concurrent crawls with 10 sample counts.
 
 In order for us to get better metrics we need to test the concurrency and simultaneous runs with a larger website. Favorably a website that can spin up inside the local container to avoid latency issues. The multi-threaded crawling capabilities shines brighter the larger the website.
-Currently even with a small website this package still runs faster than the top OSS crawlers to date. [Spider](https://github.com/spider-rs/spider/tree/main/spider) is capable of crawling over 10k pages between 1-10 minutes depending on the website and OS. When spider is used decentralized it can handle IO within fractions of the time depending on the specs and amount of workers. The IO handling in linux performs drastically better than macOS and windows.
+Currently even with a small website this package still runs faster than the top OSS crawlers to date. [Spider](https://github.com/spider-rs/spider/tree/main/spider) is capable of crawling over 100k pages between 1-10 minutes depending on the website and OS. When spider is used decentralized it can handle IO within fractions of the time depending on the specs and amount of workers. The IO handling in linux performs drastically better than macOS and windows.
 
 _Note_: Nodejs concurrency heavily impacts each additional run. As soon as you add multiple crawlers with nodejs the performance reduces over 2x plus per, while other lanaguages that can handle concurrency scale effectively.
 

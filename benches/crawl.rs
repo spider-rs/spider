@@ -43,48 +43,57 @@ pub fn bench_speed(c: &mut Criterion) {
     };
     drop(worker);
 
-    group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
-        b.iter(|| {
-            black_box(
-                Command::new("./gospider")
-                    .arg(&query)
-                    .output()
-                    .expect("go command failed to start"),
-            )
-        })
-    });
+    // [deprecated] - lib does not update and over 60x slower.
+    if env::var("BENCH_GO_CROLLY").unwrap_or_default() == "true" {
+        group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
+            b.iter(|| {
+                black_box(
+                    Command::new("./gospider")
+                        .arg(&query)
+                        .output()
+                        .expect("go command failed to start"),
+                )
+            })
+        });
+    }
 
-    // nodejs runs the cpu fully to 100%. Small test can run fast - does not scale with concurrency
-    // group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
-    //     b.iter(|| {
-    //         black_box(
-    //             Command::new("node")
-    //                 .arg("./node-crawler.js")
-    //                 .arg(&query)
-    //                 .output()
-    //                 .expect("node command failed to start"),
-    //         )
-    //     })
-    // });
+    // nodejs runs the cpu fully to 100%. Small test can run fast - does not scale with concurrency.
+    if env::var("BENCH_NODE_CRAWLER").unwrap_or_default() == "true" {
+        group.bench_function(format!("Node.js[crawler]: {}", sample_title), |b| {
+            b.iter(|| {
+                black_box(
+                    Command::new("node")
+                        .arg("./node-crawler.js")
+                        .arg(&query)
+                        .output()
+                        .expect("node command failed to start"),
+                )
+            })
+        });
+    }
 
-    group.bench_function(format!("C[wget]: {}", sample_title), |b| {
-        b.iter(|| {
-            black_box(
-                Command::new("wget")
-                    .args([
-                        "-4",
-                        "--recursive",
-                        "--no-parent",
-                        "--ignore-tags=img,link,script",
-                        "--spider",
-                        "-q",
-                        &query,
-                    ])
-                    .output()
-                    .expect("wget command failed to start"),
-            )
-        })
-    });
+    // network latency drawbacks - only compare locale examples.
+    if env::var("BENCH_C_WGET").unwrap_or_default() == "true" {
+        group.bench_function(format!("C[wget]: {}", sample_title), |b| {
+            b.iter(|| {
+                black_box(
+                    Command::new("wget")
+                        .args([
+                            "-4",
+                            "--recursive",
+                            "--no-parent",
+                            "--ignore-tags=img,link,script",
+                            "--spider",
+                            "-q",
+                            &query,
+                        ])
+                        .output()
+                        .expect("wget command failed to start"),
+                )
+            })
+        });
+    }
+
     group.finish();
 }
 
