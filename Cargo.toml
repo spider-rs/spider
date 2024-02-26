@@ -5,7 +5,6 @@ members = [
     "spider_cli",
     # internal
     "examples",
-    "benches",
-    "tests",
+    "benches"
 ]
 resolver = "2"
