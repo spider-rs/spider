@@ -893,7 +893,7 @@ impl Page {
                                                             None,
                                                         )),
                                                         &configuration.screenshot,
-                                                        false
+                                                        false,
                                                     )
                                                     .await;
 
