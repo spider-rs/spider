@@ -526,7 +526,7 @@ pub struct Configuration {
     pub screenshot: Option<ScreenShotConfig>,
     /// Dangerously accept invalid certficates.
     pub accept_invalid_certs: bool,
-    /// The auth challenge response.
+    /// The auth challenge response. The 'chrome_intercept' flag is also required in order to intercept the response.
     pub auth_challenge_response: Option<AuthChallengeResponse>,
 }
 

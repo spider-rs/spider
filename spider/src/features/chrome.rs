@@ -26,6 +26,7 @@ pub fn get_browser_config(
         builder.disable_cache()
     };
 
+    // request interception is required for all browser.new_page() creations. We also have to use "about:blank" as the base page to setup the listeners and navigate afterwards or the request will hang.
     let builder = if cfg!(feature = "chrome_intercept") && intercept {
         builder.enable_request_intercept()
     } else {
