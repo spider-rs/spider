@@ -1951,6 +1951,13 @@ impl Website {
                         Ok(new_page) => {
                             let new_page = configure_browser(new_page, &self.configuration).await;
 
+                            match self.configuration.auth_challenge_response {
+                                Some(ref auth_challenge_response) => {
+                                    let _ = new_page.execute(chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response)).await;
+                                }
+                                _ => (),
+                            }
+
                             let mut links: HashSet<CaseInsensitiveString> =
                                 if self.status == CrawlStatus::Active {
                                     self.extra_links.drain().collect()
@@ -2271,6 +2278,13 @@ impl Website {
 
                             let new_page = configure_browser(new_page, &self.configuration).await;
 
+                            match self.configuration.auth_challenge_response {
+                                Some(ref auth_challenge_response) => {
+                                    let _ = new_page.execute(chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response)).await;
+                                }
+                                _ => (),
+                            }
+
                             links.extend(
                                 self.crawl_establish(
                                     &client,
@@ -2542,6 +2556,8 @@ impl Website {
                         match browser.new_page("about:blank").await {
                             Ok(new_page) => {
                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                let new_page =
+                                    configure_browser(new_page, &self.configuration).await;
 
                                 if self.status == CrawlStatus::Active {
                                     links.extend(self.extra_links.drain());
@@ -2557,6 +2573,13 @@ impl Website {
                                     } else {
                                         ""
                                     });
+                                }
+
+                                match self.configuration.auth_challenge_response {
+                                    Some(ref auth_challenge_response) => {
+                                        let _ = new_page.execute(chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response)).await;
+                                    }
+                                    _ => (),
                                 }
 
                                 let (mut interval, throttle) = self.setup_crawl();
@@ -3525,6 +3548,16 @@ impl Website {
         screenshot_config: Option<configuration::ScreenShotConfig>,
     ) -> &mut Self {
         self.configuration.with_screenshot(screenshot_config);
+        self
+    }
+
+    /// Configure the response to an AuthChallenge. This does nothing if the 'chrome' feature is not enabled.
+    pub fn with_auth_challenge(
+        &mut self,
+        auth_challenge_response: Option<configuration::AuthChallengeResponse>,
+    ) -> &mut Self {
+        self.configuration
+            .with_auth_challenge(auth_challenge_response);
         self
     }
 

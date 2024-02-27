@@ -201,8 +201,9 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     if cfg!(not(feature = "chrome_store_page")) {
-        page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
-            .await?;
+        let _ = page
+            .execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+            .await;
     }
 
     Ok(page_response)

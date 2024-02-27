@@ -292,6 +292,48 @@ pub struct ScreenshotParams {
     pub omit_background: Option<bool>,
 }
 
+/// The decision on what to do in response to the authorization challenge.  Default means\ndeferring to the default behavior of the net stack, which will likely either the Cancel\nauthentication or display a popup dialog box.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AuthChallengeResponseResponse {
+    #[default]
+    /// The default challenge.
+    Default,
+    /// The cancel auth challenge.
+    CancelAuth,
+    /// The provide credentials challenge.
+    ProvideCredentials,
+}
+
+/// Response to an AuthChallenge.\n[AuthChallengeResponse](https://chromedevtools.github.io/devtools-protocol/tot/Fetch/#type-AuthChallengeResponse)
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AuthChallengeResponse {
+    /// The decision on what to do in response to the authorization challenge.  Default means\ndeferring to the default behavior of the net stack, which will likely either the Cancel\nauthentication or display a popup dialog box.
+    pub response: AuthChallengeResponseResponse,
+    /// The username to provide, possibly empty. Should only be set if response is\nProvideCredentials.
+    pub username: Option<String>,
+    /// The password to provide, possibly empty. Should only be set if response is\nProvideCredentials.
+    pub password: Option<String>,
+}
+
+#[cfg(feature = "chrome")]
+impl From<AuthChallengeResponse>
+    for chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse
+{
+    fn from(auth_challenge_response: AuthChallengeResponse) -> Self {
+        Self {
+            response: match auth_challenge_response.response {
+                AuthChallengeResponseResponse::CancelAuth => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::CancelAuth,
+                AuthChallengeResponseResponse::ProvideCredentials => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::ProvideCredentials,
+                AuthChallengeResponseResponse::Default => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::Default,
+            },
+            username: auth_challenge_response.username,
+            password: auth_challenge_response.password,
+        }
+    }
+}
+
 impl ScreenshotParams {
     /// Create a new ScreenshotParams.
     pub fn new(
@@ -481,6 +523,9 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Take a screenshot of the page.
     pub screenshot: Option<ScreenShotConfig>,
+    #[cfg(feature = "chrome")]
+    /// The decision on what to do in response to the authorization challenge. Only ran on the initial page.
+    pub auth_challenge_response: AuthChallengeResponse,
     /// Dangerously accept invalid certficates
     pub accept_invalid_certs: bool,
 }
@@ -756,7 +801,23 @@ impl Configuration {
         self
     }
 
-    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
+    /// Configure the response to an AuthChallenge. This does nothing if the 'chrome' feature is not enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_auth_challenge(&mut self, _viewport: Option<AuthChallengeResponse>) -> &mut Self {
+        self
+    }
+
+    /// Configure the response to an AuthChallenge. This does nothing if the 'chrome' feature is not enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_auth_challenge(
+        &mut self,
+        auth_challenge_response: Option<AuthChallengeResponse>,
+    ) -> &mut Self {
+        self.auth_challenge_response = auth_challenge_response;
+        self
+    }
+
+    /// Configures the viewport of the browser, which defaults to 800x600. This does nothing if the 'chrome' feature is not enabled.
     #[cfg(feature = "chrome")]
     pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
         self.viewport = match viewport {

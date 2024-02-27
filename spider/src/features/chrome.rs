@@ -34,8 +34,9 @@ pub fn get_browser_config(
 
     let builder = match proxies {
         Some(proxies) => {
-            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+            let mut chrome_args = CHROME_ARGS.clone();
 
+            // remember chrome can only connect to local proxies unless pre-authenticated.
             chrome_args.push(string_concat!(
                 r#"--proxy-server=""#,
                 proxies.join(";"),
