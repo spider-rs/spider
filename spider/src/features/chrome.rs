@@ -73,7 +73,6 @@ pub fn get_browser_config(
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
     request_timeout: &Option<Box<core::time::Duration>>,
 ) -> Option<BrowserConfig> {
-    use std::time::Duration;
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .no_sandbox()

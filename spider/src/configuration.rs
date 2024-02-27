@@ -387,6 +387,49 @@ impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
     }
 }
 
+#[doc = "The decision on what to do in response to the authorization challenge.  Default means\ndeferring to the default behavior of the net stack, which will likely either the Cancel\nauthentication or display a popup dialog box."]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AuthChallengeResponseResponse {
+    #[default]
+    /// The default.
+    Default,
+    /// Cancel the authentication prompt.
+    CancelAuth,
+    /// Provide credentials.
+    ProvideCredentials,
+}
+
+#[doc = "Response to an AuthChallenge.\n[AuthChallengeResponse](https://chromedevtools.github.io/devtools-protocol/tot/Fetch/#type-AuthChallengeResponse)"]
+#[derive(Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AuthChallengeResponse {
+    #[doc = "The decision on what to do in response to the authorization challenge.  Default means\ndeferring to the default behavior of the net stack, which will likely either the Cancel\nauthentication or display a popup dialog box."]
+    pub response: AuthChallengeResponseResponse,
+    #[doc = "The username to provide, possibly empty. Should only be set if response is\nProvideCredentials."]
+    pub username: Option<String>,
+    #[doc = "The password to provide, possibly empty. Should only be set if response is\nProvideCredentials."]
+    pub password: Option<String>,
+}
+
+#[cfg(feature = "chrome")]
+impl From<AuthChallengeResponse>
+    for chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse
+{
+    fn from(auth_challenge_response: AuthChallengeResponse) -> Self {
+        Self {
+            response: match auth_challenge_response.response {
+                AuthChallengeResponseResponse::CancelAuth => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::CancelAuth ,
+                AuthChallengeResponseResponse::ProvideCredentials => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::ProvideCredentials ,
+                AuthChallengeResponseResponse::Default => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::Default ,
+
+            },
+            username: auth_challenge_response.username,
+            password: auth_challenge_response.password
+        }
+    }
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -481,8 +524,10 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Take a screenshot of the page.
     pub screenshot: Option<ScreenShotConfig>,
-    /// Dangerously accept invalid certficates
+    /// Dangerously accept invalid certficates.
     pub accept_invalid_certs: bool,
+    /// The auth challenge response.
+    pub auth_challenge_response: Option<AuthChallengeResponse>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -718,6 +763,25 @@ impl Configuration {
     #[cfg(not(feature = "budget"))]
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, _limit: u32) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set the authentiation challenge response. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_auth_challenge_response(
+        &mut self,
+        auth_challenge_response: Option<AuthChallengeResponse>,
+    ) -> &mut Self {
+        self.auth_challenge_response = auth_challenge_response;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set the authentiation challenge response. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_auth_challenge_response(
+        &mut self,
+        _auth_challenge_response: Option<AuthChallengeResponse>,
+    ) -> &mut Self {
         self
     }
 

@@ -1031,19 +1031,58 @@ impl Website {
     #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
     async fn setup_chrome_interception(
         &self,
-        chrome_page: &Arc<chromiumoxide::Browser>,
+        browser: &Arc<chromiumoxide::Browser>,
     ) -> Option<tokio::task::JoinHandle<()>> {
         if self.configuration.chrome_intercept {
             use chromiumoxide::cdp::browser_protocol::network::ResourceType;
 
-            match chrome_page
+            match self.configuration.auth_challenge_response {
+                Some(ref auth_challenge_response) => {
+                    match browser
+                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                    .await
+                    {
+                        Ok(mut rp) => {
+                            let intercept_page = browser.clone();
+                            let auth_challenge_response = auth_challenge_response.clone();
+
+                            // we may need return for polling
+                            task::spawn(async move {
+                                while let Some(event) = rp.next().await {
+                                    let u = &event.request.url;
+                                    let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+
+                                    match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                                    .request_id(event.request_id.clone())
+                                    .auth_challenge_response(acr)
+                                    .build() {
+                                        Ok(c) => {
+                                            if let Err(e) = intercept_page.execute(c).await
+                                            {
+                                                log("Failed to fullfill auth challege request: ", e.to_string());
+                                            }
+                                        }
+                                        _ => {
+                                            log("Failed to get auth challege request handle ", &u);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            }
+
+            match browser
                 .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
                 .await
             {
                 Ok(mut rp) => {
                     let mut host_name = self.domain.inner().to_string();
                     let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
-                    let intercept_page = chrome_page.clone();
+                    let intercept_page = browser.clone();
 
                     let ih = task::spawn(async move {
                         let mut first_rq = true;
@@ -3530,6 +3569,16 @@ impl Website {
         screenshot_config: Option<configuration::ScreenShotConfig>,
     ) -> &mut Self {
         self.configuration.with_screenshot(screenshot_config);
+        self
+    }
+
+    /// Set the authentiation challenge response. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_auth_challenge_response(
+        &mut self,
+        auth_challenge_response: Option<configuration::AuthChallengeResponse>,
+    ) -> &mut Self {
+        self.configuration
+            .with_auth_challenge_response(auth_challenge_response);
         self
     }
 
