@@ -215,6 +215,26 @@ impl Website {
         }
     }
 
+    /// Set the url of the website to re-use configuration and data.
+    pub fn set_url(&mut self, url: &str) -> &mut Self {
+        let url = if url.starts_with(' ') || url.ends_with(' ') {
+            url.trim()
+        } else {
+            url
+        };
+        let domain: Box<CaseInsensitiveString> = if url.starts_with("http") {
+            CaseInsensitiveString::new(&url).into()
+        } else {
+            CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+        };
+        self.domain_parsed = match url::Url::parse(domain.inner()) {
+            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+            _ => None,
+        };
+        self.domain = domain;
+        self
+    }
+
     /// return `true` if URL:
     ///
     /// - is not already crawled
