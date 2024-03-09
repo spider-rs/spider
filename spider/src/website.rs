@@ -524,6 +524,15 @@ impl Website {
         self.extra_links.drain()
     }
 
+    /// Set extra links to crawl. This could be used in conjuntion with 'website.persist_links' to extend the crawl on the next run.
+    pub fn set_extra_links(
+        &mut self,
+        extra_links: HashSet<CaseInsensitiveString>,
+    ) -> &HashSet<CaseInsensitiveString> {
+        self.extra_links.extend(extra_links);
+        &self.extra_links
+    }
+
     /// Clear all pages and links stored.
     pub fn clear(&mut self) {
         self.links_visited.clear();
