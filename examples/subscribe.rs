@@ -14,8 +14,13 @@ async fn main() {
             println!("{:?}", res.get_url());
         }
     });
-
+    let start = std::time::Instant::now();
     website.crawl().await;
+    let duration = start.elapsed();
 
-    println!("Links found {:?}", website.get_links().len());
+    println!(
+        "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+        duration,
+        website.get_links().len()
+    )
 }

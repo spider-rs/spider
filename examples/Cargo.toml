@@ -135,3 +135,8 @@ required-features = ["spider/sync", "spider/glob"]
 name = "subscribe_download"
 path = "subscribe_download.rs"
 required-features = ["spider/sync"]
+
+[[example]]
+name = "queue"
+path = "queue.rs"
+required-features = ["spider/sync"]

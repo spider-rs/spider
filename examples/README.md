@@ -79,3 +79,7 @@ Use URL globbing for a domain and subdomains. [URL Globbing Subdomains](./url_gl
 Downloading files in a subscription. [Subscribe Download](./subscribe_download.rs).
 
 - `cargo run --example subscribe_download`
+
+Add links to gather mid crawl. [Queue](./queue.rs).
+
+- `cargo run --example queue`

@@ -173,6 +173,8 @@ pub struct Website {
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
     /// Guard counter for channel handling. This prevents things like the browser from closing after the crawl so that subscriptions can finalize events.
     channel_guard: Option<ChannelGuard>,
+    /// Send links to process during the crawl.
+    channel_queue: Option<(broadcast::Sender<String>, Arc<broadcast::Receiver<String>>)>,
     /// The status of the active crawl.
     status: CrawlStatus,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
@@ -1868,6 +1870,11 @@ impl Website {
                 let on_link_find_callback = self.on_link_find_callback;
                 let full_resources = self.configuration.full_resources;
 
+                let mut q = match &self.channel_queue {
+                    Some(q) => Some(q.0.subscribe()),
+                    _ => None,
+                };
+
                 if !links.is_empty() {
                     let shared = Arc::new((
                         client.to_owned(),
@@ -1937,6 +1944,21 @@ impl Website {
                                         }
                                         _ => (),
                                     }
+
+                                    match q.as_mut() {
+                                        Some(q) => {
+                                            while let Ok(link) = q.try_recv() {
+                                                let s = link.into();
+                                                if !self.is_allowed(&s, &blacklist_url) {
+                                                    continue;
+                                                }
+                                                links.extend(
+                                                    &HashSet::from([s]) - &self.links_visited,
+                                                );
+                                            }
+                                        }
+                                        _ => (),
+                                    }
                                 }
                                 _ => break,
                             }
@@ -1966,6 +1988,11 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(selectors) => {
+                let mut q = match &self.channel_queue {
+                    Some(q) => Some(q.0.subscribe()),
+                    _ => None,
+                };
+
                 if self.status != CrawlStatus::Active || self.pages.is_none() {
                     self.pages.replace(Box::<Vec<Page>>::default());
                 }
@@ -2049,6 +2076,19 @@ impl Website {
                                 }
                                 _ => (),
                             }
+
+                            match q.as_mut() {
+                                Some(q) => {
+                                    while let Ok(link) = q.try_recv() {
+                                        let s = link.into();
+                                        if !self.is_allowed(&s, &blacklist_url) {
+                                            continue;
+                                        }
+                                        links.extend(&HashSet::from([s]) - &self.links_visited);
+                                    }
+                                }
+                                _ => (),
+                            }
                         }
 
                         task::yield_now().await;
@@ -2094,6 +2134,11 @@ impl Website {
             Some(mut selectors) => match self.setup_browser().await {
                 Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
                     Ok(new_page) => {
+                        let mut q = match &self.channel_queue {
+                            Some(q) => Some(q.0.subscribe()),
+                            _ => None,
+                        };
+
                         let new_page = configure_browser(new_page, &self.configuration).await;
 
                         let mut links: HashSet<CaseInsensitiveString> =
@@ -2230,6 +2275,22 @@ impl Website {
                                                 },
                                                 &chandle,
                                             );
+
+                                            match q.as_mut() {
+                                                Some(q) => {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                            continue;
+                                                        }
+                                                        links.extend(
+                                                            &HashSet::from([s])
+                                                                - &self.links_visited,
+                                                        );
+                                                    }
+                                                }
+                                                _ => (),
+                                            }
                                         }
                                         _ => break,
                                     }
@@ -2276,7 +2337,10 @@ impl Website {
                     Ok(new_page) => {
                         let intercept_handle = self.setup_chrome_interception(&new_page).await;
                         let new_page = configure_browser(new_page, &self.configuration).await;
-
+                        let mut q = match &self.channel_queue {
+                            Some(q) => Some(q.0.subscribe()),
+                            _ => None,
+                        };
                         let mut links: HashSet<CaseInsensitiveString> =
                             if self.status == CrawlStatus::Active {
                                 self.extra_links.drain().collect()
@@ -2429,6 +2493,22 @@ impl Website {
                                                 }
                                                 _ => (),
                                             }
+
+                                            match q.as_mut() {
+                                                Some(q) => {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                            continue;
+                                                        }
+                                                        links.extend(
+                                                            &HashSet::from([s])
+                                                                - &self.links_visited,
+                                                        );
+                                                    }
+                                                }
+                                                _ => (),
+                                            }
                                         }
                                         _ => break,
                                     }
@@ -2472,6 +2552,10 @@ impl Website {
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.domain.inner()) {
             Ok(_) => {
+                let mut q = match &self.channel_queue {
+                    Some(q) => Some(q.0.subscribe()),
+                    _ => None,
+                };
                 let blacklist_url = self.configuration.get_blacklist();
                 let domain = self.domain.inner().as_str();
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
@@ -2547,6 +2631,19 @@ impl Website {
                                     },
                                     &chandle,
                                 );
+
+                                match q.as_mut() {
+                                    Some(q) => {
+                                        while let Ok(link) = q.try_recv() {
+                                            let s = link.into();
+                                            if !self.is_allowed(&s, &blacklist_url) {
+                                                continue;
+                                            }
+                                            links.extend(&HashSet::from([s]) - &self.links_visited);
+                                        }
+                                    }
+                                    _ => (),
+                                }
                             }
                             _ => break,
                         }
@@ -2577,6 +2674,10 @@ impl Website {
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
                 Some((browser, browser_handle)) => {
+                    let mut q = match &self.channel_queue {
+                        Some(q) => Some(q.0.subscribe()),
+                        _ => None,
+                    };
                     let mut links: HashSet<CaseInsensitiveString> =
                         if self.status == CrawlStatus::Active {
                             self.extra_links.drain().collect()
@@ -2664,6 +2765,21 @@ impl Website {
                                             },
                                             &chandle,
                                         );
+
+                                        match q.as_mut() {
+                                            Some(q) => {
+                                                while let Ok(link) = q.try_recv() {
+                                                    let s = link.into();
+                                                    if !self.is_allowed(&s, &blacklist_url) {
+                                                        continue;
+                                                    }
+                                                    links.extend(
+                                                        &HashSet::from([s]) - &self.links_visited,
+                                                    );
+                                                }
+                                            }
+                                            _ => (),
+                                        }
                                     }
                                     _ => break,
                                 }
@@ -2700,6 +2816,11 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => {
+                let mut q = match &self.channel_queue {
+                    Some(q) => Some(q.0.subscribe()),
+                    _ => None,
+                };
+
                 if self.status != CrawlStatus::Active || self.pages.is_none() {
                     self.pages.replace(Box::<Vec<Page>>::default());
                 }
@@ -2786,6 +2907,19 @@ impl Website {
                                     });
                                 }
                                 _ => (),
+                            };
+
+                            match q.as_mut() {
+                                Some(q) => {
+                                    while let Ok(link) = q.try_recv() {
+                                        let s = link.into();
+                                        if !self.is_allowed(&s, &blacklist_url) {
+                                            continue;
+                                        }
+                                        links.extend(&HashSet::from([s]) - &self.links_visited);
+                                    }
+                                }
+                                _ => (),
                             }
                         }
 
@@ -2829,6 +2963,11 @@ impl Website {
                     Some((browser, browser_handle)) => {
                         match browser.new_page("about:blank").await {
                             Ok(new_page) => {
+                                let mut q = match &self.channel_queue {
+                                    Some(q) => Some(q.0.subscribe()),
+                                    _ => None,
+                                };
+
                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
 
                                 if self.status == CrawlStatus::Active {
@@ -2976,6 +3115,22 @@ impl Website {
                                                     }
                                                 }
                                             });
+
+                                            match q.as_mut() {
+                                                Some(q) => {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                            continue;
+                                                        }
+                                                        links.extend(
+                                                            &HashSet::from([s])
+                                                                - &self.links_visited,
+                                                        );
+                                                    }
+                                                }
+                                                _ => (),
+                                            }
                                         }
 
                                         if links.capacity() >= 1500 {
@@ -3025,6 +3180,11 @@ impl Website {
             Some(selectors) => {
                 match self.setup_browser().await {
                     Some((browser, browser_handle)) => {
+                        let mut q = match &self.channel_queue {
+                            Some(q) => Some(q.0.subscribe()),
+                            _ => None,
+                        };
+
                         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
 
                         if self.status == CrawlStatus::Active {
@@ -3170,6 +3330,21 @@ impl Website {
                                         }
                                         _ => (),
                                     }
+
+                                    match q.as_mut() {
+                                        Some(q) => {
+                                            while let Ok(link) = q.try_recv() {
+                                                let s = link.into();
+                                                if !self.is_allowed(&s, &blacklist_url) {
+                                                    continue;
+                                                }
+                                                links.extend(
+                                                    &HashSet::from([s]) - &self.links_visited,
+                                                );
+                                            }
+                                        }
+                                        _ => (),
+                                    }
                                 }
 
                                 if links.capacity() >= 1500 {
@@ -3241,6 +3416,11 @@ impl Website {
 
         match self.setup_selectors() {
             Some(selectors) => {
+                let mut q = match &self.channel_queue {
+                    Some(q) => Some(q.0.subscribe()),
+                    _ => None,
+                };
+
                 let domain = self.domain.inner().as_str();
                 let mut interval = tokio::time::interval(Duration::from_millis(15));
                 let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
@@ -3393,6 +3573,20 @@ impl Website {
                                     Some(p) => p.extend(handle),
                                     _ => (),
                                 };
+                            }
+
+                            match q.as_mut() {
+                                Some(q) => {
+                                    while let Ok(link) = q.try_recv() {
+                                        let s = link.into();
+                                        if !self.is_allowed(&s, &blacklist_url) {
+                                            continue;
+                                        }
+                                        self.extra_links
+                                            .extend(&HashSet::from([s]) - &self.links_visited);
+                                    }
+                                }
+                                _ => (),
                             }
                         }
                     }
@@ -4086,6 +4280,26 @@ impl Website {
         let rx2 = channel.0.subscribe();
 
         Some(rx2)
+    }
+
+    /// Get a sender for queueing extra links mid crawl.
+    #[cfg(feature = "sync")]
+    pub fn queue(&mut self, capacity: usize) -> Option<broadcast::Sender<String>> {
+        let channel = self.channel_queue.get_or_insert_with(|| {
+            let (tx, rx) = broadcast::channel(capacity);
+            (tx, Arc::new(rx))
+        });
+
+        Some(channel.0.to_owned())
+    }
+
+    /// Get a sender for queueing extra links mid crawl.
+    #[cfg(not(feature = "sync"))]
+    pub fn queue(
+        &mut self,
+        capacity: usize,
+    ) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+        None
     }
 
     /// Remove subscriptions for data. This is useful for auto droping subscriptions that are running on another thread. This does nothing without the `sync` flag enabled.
