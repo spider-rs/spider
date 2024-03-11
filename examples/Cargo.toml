@@ -19,8 +19,8 @@ edition = "2018"
 maintenance = { status = "as-is" }
 
 [dev-dependencies]
-convert_case = "0.5.0"
-env_logger = "0.9.0"
+convert_case = "0.6.0"
+env_logger = "0.11.3"
 htr = "0.5.27"
 flexbuffers = "2.0.0"
 
