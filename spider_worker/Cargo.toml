@@ -1,6 +1,6 @@
 [package]
 name = "spider_worker"
-version = "1.85.0"
+version = "1.85.1"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -25,7 +25,7 @@ lazy_static = "1.4.0"
 env_logger = "0.10.0"
 
 [dependencies.spider]
-version = "1.85.0"
+version = "1.85.1"
 path = "../spider"
 features = ["serde", "flexbuffers"]
 

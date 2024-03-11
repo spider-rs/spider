@@ -1875,17 +1875,18 @@ impl Website {
                     _ => None,
                 };
 
-                if !links.is_empty() {
-                    let shared = Arc::new((
-                        client.to_owned(),
-                        selector,
-                        self.channel.clone(),
-                        self.configuration.external_domains_caseless.clone(),
-                        self.channel_guard.clone(),
-                    ));
-                    let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                    let chandle = Handle::current();
+                let shared = Arc::new((
+                    client.to_owned(),
+                    selector,
+                    self.channel.clone(),
+                    self.configuration.external_domains_caseless.clone(),
+                    self.channel_guard.clone(),
+                ));
 
+                let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                let chandle = Handle::current();
+
+                while !links.is_empty() {
                     loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
@@ -1977,6 +1978,10 @@ impl Website {
                             break;
                         }
                     }
+
+                    if self.channel.is_some() {
+                        self.subscription_guard().await;
+                    }
                 }
             }
             _ => log("", INVALID_URL),
@@ -2003,26 +2008,27 @@ impl Website {
                     links.extend(self.extra_links.drain());
                 }
 
-                if !links.is_empty() {
-                    let (mut interval, throttle) = self.setup_crawl();
+                let (mut interval, throttle) = self.setup_crawl();
 
-                    let mut set: JoinSet<(
-                        CaseInsensitiveString,
-                        Page,
-                        HashSet<CaseInsensitiveString>,
-                    )> = JoinSet::new();
+                let mut set: JoinSet<(
+                    CaseInsensitiveString,
+                    Page,
+                    HashSet<CaseInsensitiveString>,
+                )> = JoinSet::new();
 
-                    let shared = Arc::new((
-                        client.to_owned(),
-                        selectors,
-                        self.channel.clone(),
-                        self.configuration.external_domains_caseless.clone(),
-                        self.channel_guard.clone(),
-                    ));
+                let shared = Arc::new((
+                    client.to_owned(),
+                    selectors,
+                    self.channel.clone(),
+                    self.configuration.external_domains_caseless.clone(),
+                    self.channel_guard.clone(),
+                ));
 
-                    let blacklist_url = self.configuration.get_blacklist();
-                    let on_link_find_callback = self.on_link_find_callback;
-                    let full_resources = self.configuration.full_resources;
+                let blacklist_url = self.configuration.get_blacklist();
+                let on_link_find_callback = self.on_link_find_callback;
+                let full_resources = self.configuration.full_resources;
+
+                while !links.is_empty() {
                     // crawl while links exists
                     loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2116,6 +2122,9 @@ impl Website {
                             break;
                         }
                     }
+                    if self.channel.is_some() {
+                        self.subscription_guard().await;
+                    }
                 }
             }
             _ => log("", INVALID_URL),
@@ -2155,25 +2164,25 @@ impl Website {
                                 .await,
                         );
 
-                        if !links.is_empty() {
-                            let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                            let chandle = Handle::current();
+                        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                        let chandle = Handle::current();
 
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                selectors,
-                                self.channel.clone(),
-                                self.configuration.external_domains_caseless.clone(),
-                                self.channel_guard.clone(),
-                                browser.clone(),
-                                self.configuration.clone(),
-                            ));
+                        let shared = Arc::new((
+                            client.to_owned(),
+                            selectors,
+                            self.channel.clone(),
+                            self.configuration.external_domains_caseless.clone(),
+                            self.channel_guard.clone(),
+                            browser.clone(),
+                            self.configuration.clone(),
+                        ));
 
-                            let add_external = shared.3.len() > 0;
-                            let blacklist_url = self.configuration.get_blacklist();
-                            let on_link_find_callback = self.on_link_find_callback;
-                            let full_resources = self.configuration.full_resources;
+                        let add_external = shared.3.len() > 0;
+                        let blacklist_url = self.configuration.get_blacklist();
+                        let on_link_find_callback = self.on_link_find_callback;
+                        let full_resources = self.configuration.full_resources;
 
+                        while !links.is_empty() {
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
@@ -2307,10 +2316,10 @@ impl Website {
                                     break;
                                 }
                             }
-                        }
 
-                        if self.channel.is_some() {
-                            self.subscription_guard().await;
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
+                            }
                         }
 
                         crate::features::chrome::close_browser(browser_handle).await;
@@ -2361,25 +2370,26 @@ impl Website {
                             }
                             _ => (),
                         }
-                        if !links.is_empty() {
-                            let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                            let chandle = Handle::current();
 
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                selectors,
-                                self.channel.clone(),
-                                self.configuration.external_domains_caseless.clone(),
-                                self.channel_guard.clone(),
-                                browser,
-                                self.configuration.clone(),
-                            ));
+                        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                        let chandle = Handle::current();
 
-                            let add_external = shared.3.len() > 0;
-                            let blacklist_url = self.configuration.get_blacklist();
-                            let on_link_find_callback = self.on_link_find_callback;
-                            let full_resources = self.configuration.full_resources;
+                        let shared = Arc::new((
+                            client.to_owned(),
+                            selectors,
+                            self.channel.clone(),
+                            self.configuration.external_domains_caseless.clone(),
+                            self.channel_guard.clone(),
+                            browser,
+                            self.configuration.clone(),
+                        ));
 
+                        let add_external = shared.3.len() > 0;
+                        let blacklist_url = self.configuration.get_blacklist();
+                        let on_link_find_callback = self.on_link_find_callback;
+                        let full_resources = self.configuration.full_resources;
+
+                        while !links.is_empty() {
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
@@ -2525,10 +2535,9 @@ impl Website {
                                     break;
                                 }
                             }
-                        }
-
-                        if self.channel.is_some() {
-                            self.subscription_guard().await;
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
+                            }
                         }
 
                         crate::features::chrome::close_browser(browser_handle).await;
@@ -2694,22 +2703,22 @@ impl Website {
                             .await,
                     );
 
-                    if !links.is_empty() {
-                        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                        let chandle = Handle::current();
+                    let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                    let chandle = Handle::current();
 
-                        let shared = Arc::new((
-                            client.to_owned(),
-                            selectors,
-                            self.channel.clone(),
-                            self.configuration.external_domains_caseless.clone(),
-                            self.channel_guard.clone(),
-                            browser,
-                            self.configuration.clone(),
-                        ));
+                    let shared = Arc::new((
+                        client.to_owned(),
+                        selectors,
+                        self.channel.clone(),
+                        self.configuration.external_domains_caseless.clone(),
+                        self.channel_guard.clone(),
+                        browser,
+                        self.configuration.clone(),
+                    ));
 
-                        let add_external = shared.3.len() > 0;
+                    let add_external = shared.3.len() > 0;
 
+                    while !links.is_empty() {
                         loop {
                             let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                 links.drain().collect(),
@@ -2796,10 +2805,10 @@ impl Website {
                                 break;
                             }
                         }
-                    }
 
-                    if self.channel.is_some() {
-                        self.subscription_guard().await;
+                        if self.channel.is_some() {
+                            self.subscription_guard().await;
+                        }
                     }
 
                     crate::features::chrome::close_browser(browser_handle).await;
@@ -2856,7 +2865,7 @@ impl Website {
                     HashSet<CaseInsensitiveString>,
                 )> = JoinSet::new();
 
-                if !links.is_empty() {
+                while !links.is_empty() {
                     loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
@@ -2947,6 +2956,10 @@ impl Website {
                             break;
                         }
                     }
+
+                    if self.channel.is_some() {
+                        self.subscription_guard().await;
+                    }
                 }
             }
             _ => log("", INVALID_URL),
@@ -3009,7 +3022,7 @@ impl Website {
                                     self.configuration.clone(),
                                 ));
 
-                                if !links.is_empty() {
+                                while !links.is_empty() {
                                     loop {
                                         let stream =
                                             tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -3154,10 +3167,9 @@ impl Website {
                                             break;
                                         }
                                     }
-                                }
-
-                                if self.channel.is_some() {
-                                    self.subscription_guard().await;
+                                    if self.channel.is_some() {
+                                        self.subscription_guard().await;
+                                    }
                                 }
 
                                 crate::features::chrome::close_browser(browser_handle).await;
@@ -3214,7 +3226,7 @@ impl Website {
                             self.configuration.clone(),
                         ));
 
-                        if !links.is_empty() {
+                        while !links.is_empty() {
                             loop {
                                 let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
@@ -3368,10 +3380,9 @@ impl Website {
                                     break;
                                 }
                             }
-                        }
-
-                        if self.channel.is_some() {
-                            self.subscription_guard().await;
+                            if self.channel.is_some() {
+                                self.subscription_guard().await;
+                            }
                         }
 
                         crate::features::chrome::close_browser(browser_handle).await;
@@ -3894,7 +3905,6 @@ impl Website {
     }
 
     /// Guard the channel from closing until all subscription events complete.
-    #[cfg(feature = "chrome")]
     async fn subscription_guard(&self) {
         match &self.channel {
             Some(channel) => {
@@ -4433,7 +4443,6 @@ impl ChannelGuard {
         ChannelGuard(Arc::new(AtomicUsize::new(0)))
     }
     /// Lock the channel until complete.
-    #[cfg(feature = "chrome")]
     pub(crate) fn lock(&self, current: usize) {
         while self
             .0

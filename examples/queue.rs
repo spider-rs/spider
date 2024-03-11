@@ -9,6 +9,7 @@ use spider::website::Website;
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr");
     let mut rx2 = website.subscribe(16).unwrap();
+    let mut g = website.subscribe_guard().unwrap();
     let q = website.queue(100).unwrap();
 
     tokio::spawn(async move {
@@ -30,6 +31,8 @@ async fn main() {
                 // pre-fetch all fr locales
                 let _ = q.send(url.into());
             }
+
+            g.inc();
         }
     });
 
