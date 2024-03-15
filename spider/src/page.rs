@@ -851,6 +851,17 @@ impl Page {
                                         // we need to use about:blank here since we set the HTML content directly
                                         match browser.new_page("about:blank").await {
                                             Ok(new_page) => {
+                                                match configuration.evaluate_on_new_document {
+                                                    Some(ref script) => {
+                                                        let _ = new_page
+                                                            .evaluate_on_new_document(
+                                                                script.as_str(),
+                                                            )
+                                                            .await;
+                                                    }
+                                                    _ => (),
+                                                }
+
                                                 let new_page =
                                                     crate::features::chrome::configure_browser(
                                                         new_page,

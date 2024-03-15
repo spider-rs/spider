@@ -507,6 +507,9 @@ pub struct Configuration {
     /// Overrides default host system locale with the specified one. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub locale: Option<Box<String>>,
+    /// Set a custom script to eval on each new document. This does nothing without the flag `chrome` enabled.
+    #[cfg(feature = "chrome")]
+    pub evaluate_on_new_document: Option<Box<String>>,
     #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
@@ -773,6 +776,25 @@ impl Configuration {
         auth_challenge_response: Option<AuthChallengeResponse>,
     ) -> &mut Self {
         self.auth_challenge_response = auth_challenge_response;
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set a custom script to evaluate on new document creation. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_evaluate_on_new_document(
+        &mut self,
+        evaluate_on_new_document: Option<Box<String>>,
+    ) -> &mut Self {
+        self.evaluate_on_new_document = evaluate_on_new_document;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set a custom script to evaluate on new document creation. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_evaluate_on_new_document(
+        &mut self,
+        _evaluate_on_new_document: Option<Box<String>>,
+    ) -> &mut Self {
         self
     }
 

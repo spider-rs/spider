@@ -2134,8 +2134,8 @@ impl Website {
     /// Start to crawl website concurrently.
     #[cfg(all(
         not(feature = "decentralized"),
+        not(feature = "chrome_intercept"),
         feature = "chrome",
-        not(feature = "chrome_intercept")
     ))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -2149,6 +2149,13 @@ impl Website {
                         };
 
                         let new_page = configure_browser(new_page, &self.configuration).await;
+
+                        match self.configuration.evaluate_on_new_document {
+                            Some(ref script) => {
+                                let _ = new_page.evaluate_on_new_document(script.as_str()).await;
+                            }
+                            _ => (),
+                        }
 
                         let mut links: HashSet<CaseInsensitiveString> =
                             if self.status == CrawlStatus::Active {
@@ -2171,13 +2178,12 @@ impl Website {
                             client.to_owned(),
                             selectors,
                             self.channel.clone(),
-                            self.configuration.external_domains_caseless.clone(),
                             self.channel_guard.clone(),
                             browser.clone(),
-                            self.configuration.clone(),
+                            self.configuration.clone(), // we may just want to share explicit config instead.
                         ));
 
-                        let add_external = shared.3.len() > 0;
+                        let add_external = self.configuration.external_domains_caseless.len() > 0;
                         let blacklist_url = self.configuration.get_blacklist();
                         let on_link_find_callback = self.on_link_find_callback;
                         let full_resources = self.configuration.full_resources;
@@ -2222,25 +2228,37 @@ impl Website {
 
                                                     let target_url = link_result.0.as_ref();
 
-                                                    match shared.5.new_page(target_url).await {
+                                                    match shared.4.new_page(target_url).await {
                                                         Ok(new_page) => {
+                                                            match shared.5.evaluate_on_new_document
+                                                            {
+                                                                Some(ref script) => {
+                                                                    let _ = new_page
+                                                                        .evaluate_on_new_document(
+                                                                            script.as_str(),
+                                                                        )
+                                                                        .await;
+                                                                }
+                                                                _ => (),
+                                                            }
+
                                                             let new_page = configure_browser(
-                                                                new_page, &shared.6,
+                                                                new_page, &shared.5,
                                                             )
                                                             .await;
 
                                                             if cfg!(feature = "chrome_stealth")
-                                                                || shared.6.stealth_mode
+                                                                || shared.5.stealth_mode
                                                             {
                                                                 let _ = new_page
                                                                     .enable_stealth_mode_with_agent(
                                                                         &if shared
-                                                                            .6
+                                                                            .5
                                                                             .user_agent
                                                                             .is_some()
                                                                         {
                                                                             &shared
-                                                                                .6
+                                                                                .5
                                                                                 .user_agent
                                                                                 .as_ref()
                                                                                 .unwrap()
@@ -2255,14 +2273,19 @@ impl Website {
                                                                 &target_url,
                                                                 &shared.0,
                                                                 &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
+                                                                &shared.5.wait_for,
+                                                                &shared.5.screenshot,
                                                                 true,
                                                             )
                                                             .await;
 
                                                             if add_external {
-                                                                page.set_external(shared.3.clone());
+                                                                page.set_external(
+                                                                    shared
+                                                                        .5
+                                                                        .external_domains_caseless
+                                                                        .clone(),
+                                                                );
                                                             }
 
                                                             let page_links = if full_resources {
@@ -2272,7 +2295,7 @@ impl Website {
                                                             };
 
                                                             channel_send_page(
-                                                                &shared.2, page, &shared.4,
+                                                                &shared.2, page, &shared.3,
                                                             );
 
                                                             drop(permit);
@@ -2710,13 +2733,12 @@ impl Website {
                         client.to_owned(),
                         selectors,
                         self.channel.clone(),
-                        self.configuration.external_domains_caseless.clone(),
                         self.channel_guard.clone(),
                         browser,
                         self.configuration.clone(),
                     ));
 
-                    let add_external = shared.3.len() > 0;
+                    let add_external = self.configuration.external_domains_caseless.len() > 0;
 
                     while !links.is_empty() {
                         loop {
@@ -2759,14 +2781,16 @@ impl Website {
                                                 .await;
 
                                                 if add_external {
-                                                    page.set_external(shared.3.clone());
+                                                    page.set_external(
+                                                        shared.5.external_domains_caseless.clone(),
+                                                    );
                                                 }
 
                                                 let page_links = page
-                                                    .smart_links(&shared.1, &shared.5, &shared.6)
+                                                    .smart_links(&shared.1, &shared.4, &shared.5)
                                                     .await;
 
-                                                channel_send_page(&shared.2, page, &shared.4);
+                                                channel_send_page(&shared.2, page, &shared.3);
 
                                                 drop(permit);
 
@@ -2976,6 +3000,15 @@ impl Website {
                     Some((browser, browser_handle)) => {
                         match browser.new_page("about:blank").await {
                             Ok(new_page) => {
+                                match self.configuration.evaluate_on_new_document {
+                                    Some(ref script) => {
+                                        let _ = new_page
+                                            .evaluate_on_new_document(script.as_str())
+                                            .await;
+                                    }
+                                    _ => (),
+                                }
+
                                 let mut q = match &self.channel_queue {
                                     Some(q) => Some(q.0.subscribe()),
                                     _ => None,
@@ -3016,7 +3049,6 @@ impl Website {
                                     client.to_owned(),
                                     selectors,
                                     self.channel.clone(),
-                                    self.configuration.external_domains_caseless.clone(),
                                     self.channel_guard.clone(),
                                     browser,
                                     self.configuration.clone(),
@@ -3054,24 +3086,35 @@ impl Website {
                                                 drop(permit);
                                                 let target_url = link.as_ref();
 
-                                                match shared.5.new_page(target_url).await {
+                                                match shared.4.new_page(target_url).await {
                                                     Ok(new_page) => {
+                                                        match shared.5.evaluate_on_new_document {
+                                                            Some(ref script) => {
+                                                                let _ = new_page
+                                                                    .evaluate_on_new_document(
+                                                                        script.as_str(),
+                                                                    )
+                                                                    .await;
+                                                            }
+                                                            _ => (),
+                                                        }
+
                                                         let new_page =
-                                                            configure_browser(new_page, &shared.6)
+                                                            configure_browser(new_page, &shared.5)
                                                                 .await;
 
                                                         if cfg!(feature = "chrome_stealth")
-                                                            || shared.6.stealth_mode
+                                                            || shared.5.stealth_mode
                                                         {
                                                             let _ = new_page
                                                                 .enable_stealth_mode_with_agent(
                                                                     &if shared
-                                                                        .6
+                                                                        .5
                                                                         .user_agent
                                                                         .is_some()
                                                                     {
                                                                         &shared
-                                                                            .6
+                                                                            .5
                                                                             .user_agent
                                                                             .as_ref()
                                                                             .unwrap()
@@ -3087,8 +3130,8 @@ impl Website {
                                                                 &target_url,
                                                                 &shared.0,
                                                                 &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
+                                                                &shared.5.wait_for,
+                                                                &shared.5.screenshot,
                                                                 true,
                                                             )
                                                             .await;
@@ -3109,10 +3152,15 @@ impl Website {
                                                         channel_send_page(
                                                             &shared.2,
                                                             page.clone(),
-                                                            &shared.4,
+                                                            &shared.3,
                                                         );
 
-                                                        page.set_external(shared.3.clone());
+                                                        page.set_external(
+                                                            shared
+                                                                .5
+                                                                .external_domains_caseless
+                                                                .clone(),
+                                                        );
                                                         let page_links =
                                                             page.links(&shared.1).await;
 
@@ -4179,6 +4227,17 @@ impl Website {
     /// Overrides default host system timezone with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
         self.configuration.with_timezone_id(timezone_id);
+        self
+    }
+
+    /// Set a custom script to evaluate on new document creation. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_evaluate_on_new_document(
+        &mut self,
+        evaluate_on_new_document: Option<Box<String>>,
+    ) -> &mut Self {
+        self.configuration
+            .with_evaluate_on_new_document(evaluate_on_new_document);
+
         self
     }
 
