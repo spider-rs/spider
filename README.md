@@ -20,7 +20,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 
 ## Getting Started
 
-The simplest way to get started is to use the [Spider Cloud](https://spiderwebai.xyz) hosted service, use the coupon code `SPIDEY24` to get $5 initial credits at checkout. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations. You can also use spider with Node.js using [spider-nodejs](https://github.com/spider-rs/spider-nodejs) and Python using [spider-py](https://github.com/spider-rs/spider-py).
+The simplest way to get started is to use the [Spider Cloud](https://spiderwebai.xyz) hosted service. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations. You can also use spider with Node.js using [spider-nodejs](https://github.com/spider-rs/spider-nodejs) and Python using [spider-py](https://github.com/spider-rs/spider-py).
 
 ## Benchmarks
 
