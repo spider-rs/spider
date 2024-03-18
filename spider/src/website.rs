@@ -184,6 +184,9 @@ pub struct Website {
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
+    #[cfg(feature = "openai")]
+    /// The OpenAI client. Stored for re-use between runs.
+    openai_client: Option<async_openai::Client<async_openai::config::OpenAIConfig>>,
 }
 
 impl Website {
@@ -547,6 +550,20 @@ impl Website {
         &self.client
     }
 
+    #[cfg(feature = "openai")]
+    /// Get the OpenAI HTTP request client.
+    pub fn get_openai_client(
+        &self,
+    ) -> &Option<async_openai::Client<async_openai::config::OpenAIConfig>> {
+        &self.openai_client
+    }
+
+    #[cfg(not(feature = "openai"))]
+    /// Get the OpenAI HTTP request client.
+    pub fn get_openai_client<T>(&self) -> core::option::Option<T> {
+        None
+    }
+
     /// Page getter.
     pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
         self.pages.as_ref()
@@ -841,7 +858,16 @@ impl Website {
     }
 
     /// Set the HTTP client to use directly. This is helpful if you manually call 'website.configure_http_client' before the crawl.
+    #[cfg(not(feature = "openai"))]
     pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
+        self.client = Some(client);
+        &self.client
+    }
+
+    /// Set the HTTP client to use directly with the OpenAI client. This is helpful if you manually call 'website.configure_http_client' before the crawl.
+    #[cfg(feature = "openai")]
+    pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
+        self.openai_client = Some(async_openai::Client::new().with_http_client(client.clone()));
         self.client = Some(client);
         &self.client
     }
@@ -4149,6 +4175,12 @@ impl Website {
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.configuration.with_stealth(stealth_mode);
+        self
+    }
+
+    /// Use OpenAI to get dynamic javascript to drive the browser. This does nothing without the `openai` flag enabled.
+    pub fn with_openai(&mut self, openai_configs: Option<configuration::GPTConfigs>) -> &mut Self {
+        self.configuration.with_openai(openai_configs);
         self
     }
 
