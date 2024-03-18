@@ -2054,7 +2054,6 @@ impl Website {
                                     let shared = shared.clone();
 
                                     set.spawn(async move {
-                                        drop(permit);
                                         let page_resource = crate::utils::fetch_page_html_raw(
                                             link.as_ref(),
                                             &shared.0,
@@ -2076,6 +2075,7 @@ impl Website {
                                         } else {
                                             page.links(&shared.1).await
                                         };
+                                        drop(permit);
 
                                         (link, page, page_links)
                                     });
@@ -2915,7 +2915,6 @@ impl Website {
                                     let shared = shared.clone();
 
                                     set.spawn(async move {
-                                        drop(permit);
                                         let page_resource =
                                             crate::utils::fetch_page_html(link.as_ref(), &shared.0)
                                                 .await;
@@ -2935,6 +2934,7 @@ impl Website {
                                         } else {
                                             page.links(&shared.1).await
                                         };
+                                        drop(permit);
 
                                         (link, page, page_links)
                                     });
@@ -3083,10 +3083,9 @@ impl Website {
                                             let shared = shared.clone();
 
                                             set.spawn(async move {
-                                                drop(permit);
                                                 let target_url = link.as_ref();
 
-                                                match shared.4.new_page(target_url).await {
+                                                let r = match shared.4.new_page(target_url).await {
                                                     Ok(new_page) => {
                                                         match shared.5.evaluate_on_new_document {
                                                             Some(ref script) => {
@@ -3174,7 +3173,9 @@ impl Website {
 
                                                         (link, page, Default::default())
                                                     }
-                                                }
+                                                };
+                                                drop(permit);
+                                                r
                                             });
 
                                             match q.as_mut() {
@@ -3303,10 +3304,9 @@ impl Website {
                                                 self.setup_chrome_interception(&new_page).await;
 
                                             set.spawn(async move {
-                                                drop(permit);
                                                 let target_url = link.as_ref();
 
-                                                match shared.5.new_page(target_url).await {
+                                                let r = match shared.5.new_page(target_url).await {
                                                     Ok(new_page) => {
                                                         let new_page =
                                                             configure_browser(new_page, &shared.6)
@@ -3385,7 +3385,10 @@ impl Website {
 
                                                         (link, page, Default::default())
                                                     }
-                                                }
+                                                };
+                                                drop(permit);
+
+                                                r
                                             });
                                         }
                                         _ => (),
