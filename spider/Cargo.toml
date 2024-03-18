@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.85.4"
+version = "1.85.5"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -29,7 +29,7 @@ tokio = { version = "1.36.0", features = [
     "rt-multi-thread",
     "macros",
     "time",
-    "parking_lot",
+    "parking_lot"
 ] }
 tokio-stream = "0.1.14"
 hashbrown = { version = "0.14.3", default-features = true }
@@ -89,7 +89,7 @@ jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
-sync = ["tokio/sync"]
+sync = ["tokio/sync", "tokio/io-std"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde", "compact_str/serde"]
 fs = ["tokio/fs"]
