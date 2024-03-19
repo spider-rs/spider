@@ -428,9 +428,13 @@ pub struct GPTConfigs {
     /// The API key to use. This defaults to using the env var OPENAI_API_KEY.
     pub openai_key: String,
     /// The max tokens to use for the request.
-    pub max_tokens: u32,
+    pub max_tokens: u16,
     /// The temperature between 0 - 2
     pub temperature: Option<f32>,
+    /// The user for the request
+    pub user: Option<String>,
+    /// The top priority for the request
+    pub top_p: Option<f32>,
 }
 
 #[cfg(feature = "chrome")]

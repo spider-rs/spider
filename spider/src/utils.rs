@@ -111,40 +111,11 @@ pub async fn create_output_path(
 }
 
 #[cfg(feature = "chrome")]
-/// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome_base(
-    target_url: &str,
+/// Wait for page events.
+pub async fn page_wait(
     page: &chromiumoxide::Page,
-    content: bool,
-    wait_for_navigation: bool,
     wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
-    page_set: bool,
-) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    let page = {
-        // the active page was already set prior. No need to re-navigate or set the content.
-        if !page_set {
-            // used for smart mode re-rendering direct assigning html
-            if content {
-                page.set_content(target_url).await?
-            } else {
-                page.goto(target_url).await?
-            }
-        } else {
-            page
-        }
-    };
-
-    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !content {
-        match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&target_url, &u),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
+) {
     match wait_for {
         Some(wait_for) => {
             match wait_for.idle_network {
@@ -179,6 +150,45 @@ pub async fn fetch_page_html_chrome_base(
         }
         _ => (),
     }
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html_chrome_base(
+    target_url: &str,
+    page: &chromiumoxide::Page,
+    content: bool,
+    wait_for_navigation: bool,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
+) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    let page = {
+        // the active page was already set prior. No need to re-navigate or set the content.
+        if !page_set {
+            // used for smart mode re-rendering direct assigning html
+            if content {
+                page.set_content(target_url).await?
+            } else {
+                page.goto(target_url).await?
+            }
+        } else {
+            page
+        }
+    };
+
+    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    let final_url = if wait_for_navigation && !content {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&target_url, &u),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    page_wait(&page, &wait_for).await;
 
     let page = page.activate().await?;
     let res: bytes::Bytes = page.content_bytes().await?;
@@ -195,6 +205,54 @@ pub async fn fetch_page_html_chrome_base(
         final_url,
         ..Default::default()
     };
+
+    let js_script = match &openai_config {
+        Some(gpt_configs) => {
+            crate::utils::openai_request(
+                gpt_configs,
+                match page_response.content.as_ref() {
+                    Some(html) => String::from_utf8_lossy(html).to_string(),
+                    _ => Default::default(),
+                },
+                &target_url,
+            )
+            .await
+        }
+        _ => Default::default(),
+    };
+
+    // perform the js script on the page.
+    if !js_script.is_empty() {
+        let html: Option<bytes::Bytes> = match page
+            .evaluate_function(string_concat!(
+                "async function() { ",
+                js_script,
+                "; return document.documentElement.outerHTML; }"
+            ))
+            .await
+        {
+            Ok(h) => match h.into_value() {
+                Ok(hh) => Some(hh),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        if html.is_some() {
+            page_wait(&page, &wait_for).await;
+
+            if js_script.len() <= 400 && js_script.contains("window.location") {
+                match page.content_bytes().await {
+                    Ok(b) => {
+                        page_response.content = Some(b);
+                    }
+                    _ => (),
+                }
+            } else {
+                page_response.content = html;
+            }
+        }
+    }
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
         perform_screenshot(target_url, page, screenshot, &mut page_response).await;
@@ -307,6 +365,7 @@ pub async fn fetch_page_html(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -316,6 +375,7 @@ pub async fn fetch_page_html(
         wait_for,
         screenshot,
         page_set,
+        openai_config,
     )
     .await
     {
@@ -600,6 +660,7 @@ pub async fn fetch_page_html_chrome(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -611,6 +672,7 @@ pub async fn fetch_page_html_chrome(
                 wait_for,
                 screenshot,
                 page_set,
+                openai_config,
             )
             .await
             {
@@ -666,7 +728,12 @@ pub async fn fetch_page_html_chrome(
 
 #[cfg(not(feature = "openai"))]
 /// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
-pub async fn openai_request(_gpt_configs: &crate::configuration::GPTConfigs) -> String {
+pub async fn openai_request(
+    _gpt_configs: &crate::configuration::GPTConfigs,
+    _resource: String,
+    _url: &str,
+    _openai_client: &Option<bool>,
+) -> String {
     Default::default()
 }
 
@@ -675,8 +742,136 @@ pub async fn openai_request(_gpt_configs: &crate::configuration::GPTConfigs) -> 
 pub async fn openai_request(
     gpt_configs: &crate::configuration::GPTConfigs,
     resource: String,
+    url: &str,
 ) -> String {
-    Default::default()
+    lazy_static! {
+        // static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
+        static ref SEM: tokio::sync::Semaphore = {
+            let logical = num_cpus::get();
+            let physical = num_cpus::get_physical();
+
+            let sem_limit = if logical > physical {
+                (logical) / (physical)
+            } else {
+                logical
+            };
+
+            let (sem_limit, sem_max) = if logical == physical {
+                (sem_limit * physical, 20)
+            } else {
+                (sem_limit * 4, 10)
+            };
+            let sem_limit = sem_limit / 3;
+            tokio::sync::Semaphore::const_new(sem_limit.max(sem_max))
+        };
+
+        static ref CLIENT: async_openai::Client<async_openai::config::OpenAIConfig> = {
+            async_openai::Client::new()
+        };
+
+    };
+
+    let content: String = match SEM.acquire().await {
+        Ok(permit) => {
+            let mut chat_completion_defaults =
+                async_openai::types::CreateChatCompletionRequestArgs::default();
+            let gpt_base = chat_completion_defaults
+                .max_tokens(gpt_configs.max_tokens)
+                .model(&gpt_configs.model);
+            let gpt_base = match gpt_configs.user {
+                Some(ref user) => gpt_base.user(user),
+                _ => gpt_base,
+            };
+            let gpt_base = match gpt_configs.temperature {
+                Some(temp) => gpt_base.temperature(temp),
+                _ => gpt_base,
+            };
+            let gpt_base = match gpt_configs.top_p {
+                Some(tp) => gpt_base.top_p(tp),
+                _ => gpt_base,
+            };
+
+            // let core_bpe = match tiktoken_rs::get_bpe_from_model(&gpt_configs.model) {
+            //     Ok(bpe) => Some(bpe),
+            //     _ => None,
+            // };
+
+            // let (tokens, prompt_tokens) = match core_bpe {
+            //     Some(ref core_bpe) => (
+            //         core_bpe.encode_with_special_tokens(&resource),
+            //         core_bpe.encode_with_special_tokens(&gpt_configs.prompt),
+            //     ),
+            //     _ => (
+            //         CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&resource),
+            //         CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&gpt_configs.prompt),
+            //     ),
+            // };
+
+            // // we can use the output count later to perform concurrent actions.
+            // let output_tokens_count = tokens.len() + prompt_tokens.len();
+
+            let max_tokens = crate::features::openai::calculate_max_tokens(
+                &gpt_configs.model,
+                gpt_configs.max_tokens,
+                &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                &resource,
+                &gpt_configs.prompt,
+            );
+
+            match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
+                .content(&string_concat!("URL:", url, "\n", "HTML:", resource))
+                .build()
+            {
+                Ok(resource_completion) => {
+                    let messages: Vec<async_openai::types::ChatCompletionRequestMessage> = vec![
+                        crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT.clone(),
+                        resource_completion.into(),
+                        match async_openai::types::ChatCompletionRequestUserMessageArgs::default()
+                            .content(&*gpt_configs.prompt)
+                            .build()
+                        {
+                            Ok(o) => o,
+                            _ => Default::default(),
+                        }
+                        .into(),
+                    ];
+
+                    let v = match gpt_base
+                        .max_tokens(max_tokens.max(1) as u16)
+                        .messages(messages)
+                        .build()
+                    {
+                        Ok(request) => match CLIENT.chat().create(request).await {
+                            Ok(mut response) => {
+                                let mut choice = response.choices.first_mut();
+
+                                match choice.as_mut() {
+                                    Some(c) => match c.message.content.take() {
+                                        Some(content) => content,
+                                        _ => Default::default(),
+                                    },
+                                    _ => Default::default(),
+                                }
+                            }
+                            Err(err) => {
+                                log::error!("{:?}", err);
+                                Default::default()
+                            }
+                        },
+                        _ => Default::default(),
+                    };
+
+                    drop(permit);
+
+                    v
+                }
+                _ => Default::default(),
+            }
+        }
+        _ => Default::default(),
+    };
+
+    content
 }
 
 /// Log to console if configuration verbose.

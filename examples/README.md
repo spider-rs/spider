@@ -84,7 +84,10 @@ Add links to gather mid crawl. [Queue](./queue.rs).
 
 - `cargo run --example queue`
 
-
-Use OpenAI to get custom Javascript to run in a browser. [OpenAI](./openai.rs).
+Use OpenAI to get custom Javascript to run in a browser. [OpenAI](./openai.rs). Make sure to set OPENAI_API_KEY=$MY_KEY as an env variable or pass it in before the script.
 
 - `cargo run --example openai`
+
+or 
+
+- `OPENAI_API_KEY=replace_me_with_key cargo run --example openai`

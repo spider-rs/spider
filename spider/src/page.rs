@@ -299,10 +299,18 @@ impl Page {
         wait_for: &Option<crate::configuration::WaitFor>,
         screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
+        openai_config: &Option<crate::configuration::GPTConfigs>,
     ) -> Self {
-        let page_resource =
-            crate::utils::fetch_page_html(&url, &client, &page, wait_for, screenshot, page_set)
-                .await;
+        let page_resource = crate::utils::fetch_page_html(
+            &url,
+            &client,
+            &page,
+            wait_for,
+            screenshot,
+            page_set,
+            openai_config,
+        )
+        .await;
         let mut p = build(url, page_resource);
 
         // store the chrome page to perform actions like screenshots etc.
@@ -910,6 +918,7 @@ impl Page {
                                                         )),
                                                         &configuration.screenshot,
                                                         false,
+                                                        &configuration.openai_config,
                                                     )
                                                     .await;
 

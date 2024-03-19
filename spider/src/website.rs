@@ -184,9 +184,6 @@ pub struct Website {
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
-    #[cfg(feature = "openai")]
-    /// The OpenAI client. Stored for re-use between runs.
-    openai_client: Option<async_openai::Client<async_openai::config::OpenAIConfig>>,
 }
 
 impl Website {
@@ -550,20 +547,6 @@ impl Website {
         &self.client
     }
 
-    #[cfg(feature = "openai")]
-    /// Get the OpenAI HTTP request client.
-    pub fn get_openai_client(
-        &self,
-    ) -> &Option<async_openai::Client<async_openai::config::OpenAIConfig>> {
-        &self.openai_client
-    }
-
-    #[cfg(not(feature = "openai"))]
-    /// Get the OpenAI HTTP request client.
-    pub fn get_openai_client<T>(&self) -> core::option::Option<T> {
-        None
-    }
-
     /// Page getter.
     pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
         self.pages.as_ref()
@@ -858,22 +841,17 @@ impl Website {
     }
 
     /// Set the HTTP client to use directly. This is helpful if you manually call 'website.configure_http_client' before the crawl.
-    #[cfg(not(feature = "openai"))]
     pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
-        self.client = Some(client);
-        &self.client
-    }
-
-    /// Set the HTTP client to use directly with the OpenAI client. This is helpful if you manually call 'website.configure_http_client' before the crawl.
-    #[cfg(feature = "openai")]
-    pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
-        self.openai_client = Some(async_openai::Client::new().with_http_client(client.clone()));
         self.client = Some(client);
         &self.client
     }
 
     /// Configure http client.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "cache"),
+        not(feature = "openai")
+    ))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn
@@ -1382,43 +1360,16 @@ impl Website {
 
             let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
-            let mut page = Page::new(
+            let page = Page::new(
                 &self.domain.inner(),
                 &client,
                 &chrome_page,
                 &self.configuration.wait_for,
                 &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
+                &self.configuration.openai_config,
             )
             .await;
-
-            let js_script = match &self.configuration.openai_config {
-                Some(gpt_configs) => {
-                    crate::utils::openai_request(gpt_configs, page.get_html()).await
-                }
-                _ => Default::default(),
-            };
-
-            // perform the js script on the page.
-            if !js_script.is_empty() {
-                let _html: Option<bytes::Bytes> = match chrome_page
-                    .evaluate_function(string_concat!(
-                        "async function() { ",
-                        js_script,
-                        ";; return document.documentElement.outerHTML; }"
-                    ))
-                    .await
-                {
-                    Ok(h) => match h.into_value() {
-                        Ok(hh) => Some(hh),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if _html.is_some() {
-                    page.set_html_bytes(_html);
-                }
-            }
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -2331,36 +2282,9 @@ impl Website {
                                                                 &shared.5.wait_for,
                                                                 &shared.5.screenshot,
                                                                 true,
+                                                                &shared.5.openai_config,
                                                             )
                                                             .await;
-
-                                                            let js_script = match &shared.5.openai_config {
-                                                                Some(gpt_configs) => {
-                                                                    crate::utils::openai_request(gpt_configs, page.get_html()).await
-                                                                }
-                                                                _ => Default::default(),
-                                                            };
-
-                                                            // perform the js script on the page.
-                                                            if !js_script.is_empty() {
-                                                                let _html: Option<bytes::Bytes> = match new_page
-                                                                    .evaluate_function(string_concat!(
-                                                                        "async function() { ",
-                                                                        js_script,
-                                                                        ";; return document.documentElement.outerHTML; }"
-                                                                    ))
-                                                                    .await
-                                                                {
-                                                                    Ok(h) => match h.into_value() {
-                                                                        Ok(hh) => Some(hh),
-                                                                        _ => None,
-                                                                    },
-                                                                    _ => None,
-                                                                };
-                                                                if _html.is_some() {
-                                                                    page.set_html_bytes(_html);
-                                                                }
-                                                            }
 
                                                             if add_external {
                                                                 page.set_external(
@@ -2576,6 +2500,7 @@ impl Website {
                                                                 &shared.6.wait_for,
                                                                 &shared.6.screenshot,
                                                                 false,
+                                                                &shared.6.openai_config,
                                                             )
                                                             .await;
 
@@ -3215,6 +3140,7 @@ impl Website {
                                                                 &shared.5.wait_for,
                                                                 &shared.5.screenshot,
                                                                 true,
+                                                                &shared.5.openai_config,
                                                             )
                                                             .await;
                                                         let mut page = build(&target_url, page);
@@ -3425,6 +3351,7 @@ impl Website {
                                                                 &shared.6.wait_for,
                                                                 &shared.6.screenshot,
                                                                 true,
+                                                                &shared.6.openai_config,
                                                             )
                                                             .await;
                                                         let mut page = build(&target_url, page);

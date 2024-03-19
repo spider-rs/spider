@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.85.5"
+version = "1.86.0"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -119,5 +119,5 @@ http3 = ["reqwest/http3"]
 smart = ["chrome", "dep:regex"]
 encoding = ["dep:encoding_rs"]
 headers = []
-openai = ["chrome", "dep:async-openai", "dep:tiktoken-rs"]
+openai = ["chrome", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs"]
 decentralized_headers = ["dep:const_format", "dep:itertools"]

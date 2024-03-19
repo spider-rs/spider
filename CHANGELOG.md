@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.85.0
+
+1. feat(openai): use OpenAI to dynamically drive the browser.
+
 ## v1.84.1
 
 1. feat(chrome): add chrome_headless_new flag
