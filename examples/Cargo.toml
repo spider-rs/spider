@@ -112,6 +112,11 @@ path = "smart.rs"
 required-features = ["spider/sync", "spider/smart"]
 
 [[example]]
+name = "openai"
+path = "openai.rs"
+required-features = ["spider/sync", "spider/openai"]
+
+[[example]]
 name = "encoding"
 path = "encoding.rs"
 required-features = ["spider/sync", "spider/encoding"]

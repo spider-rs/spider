@@ -1,4 +1,6 @@
 use crate::website::CronType;
+use ahash::HashMap;
+use case_insensitive_string::CaseInsensitiveString;
 use compact_str::CompactString;
 use std::{path::PathBuf, time::Duration};
 
@@ -412,6 +414,29 @@ pub struct AuthChallengeResponse {
     pub password: Option<String>,
 }
 
+/// The GPT configs to use for dynamic Javascript execution and other functionality.
+#[derive(Debug, Default, Clone)]
+pub struct GPTConfigs {
+    /// The prompt to use for OPENAI.
+    pub prompt: String,
+    /// Prompts to use for certain urls.
+    pub prompt_url_map: Option<HashMap<CaseInsensitiveString, Self>>,
+    /// The max times a recursive prompt can be performed.
+    pub max_recurse: u32,
+    /// The model to use.
+    pub model: String,
+    /// The API key to use. This defaults to using the env var OPENAI_API_KEY.
+    pub openai_key: String,
+    /// The max tokens to use for the request.
+    pub max_tokens: u16,
+    /// The temperature between 0 - 2
+    pub temperature: Option<f32>,
+    /// The user for the request
+    pub user: Option<String>,
+    /// The top priority for the request
+    pub top_p: Option<f32>,
+}
+
 #[cfg(feature = "chrome")]
 impl From<AuthChallengeResponse>
     for chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse
@@ -531,6 +556,8 @@ pub struct Configuration {
     pub accept_invalid_certs: bool,
     /// The auth challenge response. The 'chrome_intercept' flag is also required in order to intercept the response.
     pub auth_challenge_response: Option<AuthChallengeResponse>,
+    /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
+    pub openai_config: Option<GPTConfigs>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -677,6 +704,22 @@ impl Configuration {
         match user_agent {
             Some(agent) => self.user_agent = Some(CompactString::new(agent).into()),
             _ => self.user_agent = None,
+        };
+        self
+    }
+
+    #[cfg(not(feature = "openai"))]
+    /// The OpenAI configs to use to drive the browser. This method does nothing if the `openai` is not enabled.
+    pub fn with_openai(&mut self, _openai_config: Option<GPTConfigs>) -> &mut Self {
+        self
+    }
+
+    /// The OpenAI configs to use to drive the browser. This method does nothing if the `openai` is not enabled.
+    #[cfg(feature = "openai")]
+    pub fn with_openai(&mut self, openai_config: Option<GPTConfigs>) -> &mut Self {
+        match openai_config {
+            Some(openai_config) => self.openai_config = Some(openai_config),
+            _ => self.openai_config = None,
         };
         self
     }

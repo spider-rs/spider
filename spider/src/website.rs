@@ -847,7 +847,11 @@ impl Website {
     }
 
     /// Configure http client.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "cache"),
+        not(feature = "openai")
+    ))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn
@@ -1336,32 +1340,34 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
-        page: &chromiumoxide::Page,
+        chrome_page: &chromiumoxide::Page,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
-                let _ =
-                    page.enable_stealth_mode_with_agent(
-                        &if self.configuration.user_agent.is_some() {
-                            &self.configuration.user_agent.as_ref().unwrap().as_str()
-                        } else {
-                            ""
-                        },
-                    );
+                let _ = chrome_page.enable_stealth_mode_with_agent(&if self
+                    .configuration
+                    .user_agent
+                    .is_some()
+                {
+                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                } else {
+                    ""
+                });
             }
 
-            let intercept_handle = self.setup_chrome_interception(&page).await;
+            let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
             let page = Page::new(
                 &self.domain.inner(),
                 &client,
-                &page,
+                &chrome_page,
                 &self.configuration.wait_for,
                 &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
+                &self.configuration.openai_config,
             )
             .await;
 
@@ -2276,6 +2282,7 @@ impl Website {
                                                                 &shared.5.wait_for,
                                                                 &shared.5.screenshot,
                                                                 true,
+                                                                &shared.5.openai_config,
                                                             )
                                                             .await;
 
@@ -2493,6 +2500,7 @@ impl Website {
                                                                 &shared.6.wait_for,
                                                                 &shared.6.screenshot,
                                                                 false,
+                                                                &shared.6.openai_config,
                                                             )
                                                             .await;
 
@@ -3132,6 +3140,7 @@ impl Website {
                                                                 &shared.5.wait_for,
                                                                 &shared.5.screenshot,
                                                                 true,
+                                                                &shared.5.openai_config,
                                                             )
                                                             .await;
                                                         let mut page = build(&target_url, page);
@@ -3342,6 +3351,7 @@ impl Website {
                                                                 &shared.6.wait_for,
                                                                 &shared.6.screenshot,
                                                                 true,
+                                                                &shared.6.openai_config,
                                                             )
                                                             .await;
                                                         let mut page = build(&target_url, page);
@@ -4149,6 +4159,12 @@ impl Website {
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
         self.configuration.with_stealth(stealth_mode);
+        self
+    }
+
+    /// Use OpenAI to get dynamic javascript to drive the browser. This does nothing without the `openai` flag enabled.
+    pub fn with_openai(&mut self, openai_configs: Option<configuration::GPTConfigs>) -> &mut Self {
+        self.configuration.with_openai(openai_configs);
         self
     }
 
