@@ -4,16 +4,12 @@ extern crate spider;
 use std::time::Duration;
 
 use spider::configuration::{GPTConfigs, WaitForIdleNetwork};
-use spider::tokio;
+use spider::hashbrown::HashMap;
 use spider::website::Website;
+use spider::{tokio, CaseInsensitiveString};
 
 #[tokio::main]
 async fn main() {
-    let mut gpt_config = GPTConfigs::default();
-    gpt_config.model = "gpt-4-1106-preview".into();
-    gpt_config.prompt = "Search for Movies".into();
-    gpt_config.max_tokens = 800;
-
     let _ = tokio::fs::create_dir_all("./storage/").await;
 
     let screenshot_params =
@@ -22,11 +18,22 @@ async fn main() {
     let screenshot_config =
         spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
 
-    let mut website: Website = Website::new("https://google.com")
+    let mut gpt_config = GPTConfigs::new("gpt-4-1106-preview", "Search for Movies", 500);
+
+    let mut prompt_url_map = HashMap::new();
+
+    prompt_url_map.insert(
+        CaseInsensitiveString::new("https://www.google.com/search/howsearchworks/?fg=1"),
+        GPTConfigs::new("gpt-4-1106-preview", "Change the background blue", 500),
+    );
+
+    gpt_config.prompt_url_map = Some(prompt_url_map);
+
+    let mut website: Website = Website::new("https://www.google.com")
         .with_chrome_intercept(true, true)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
-        .with_limit(1)
+        .with_limit(2)
         .with_openai(Some(gpt_config))
         .build()
         .unwrap();
@@ -34,20 +41,14 @@ async fn main() {
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
-            println!("{:?}", page.get_url());
-            println!("{:?}", page.get_html());
+            println!("{}\n{}", page.get_url(), page.get_html());
         }
     });
 
     let start = crate::tokio::time::Instant::now();
     website.crawl().await;
     let duration = start.elapsed();
-
     let links = website.get_links();
-
-    for link in links {
-        println!("- {:?}", link.as_ref());
-    }
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",

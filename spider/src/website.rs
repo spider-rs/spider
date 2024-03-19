@@ -847,11 +847,7 @@ impl Website {
     }
 
     /// Configure http client.
-    #[cfg(all(
-        not(feature = "decentralized"),
-        not(feature = "cache"),
-        not(feature = "openai")
-    ))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn

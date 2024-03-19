@@ -208,6 +208,14 @@ pub async fn fetch_page_html_chrome_base(
 
     let js_script = match &openai_config {
         Some(gpt_configs) => {
+            let gpt_configs = match gpt_configs.prompt_url_map {
+                Some(ref h) => h
+                    .get(&case_insensitive_string::CaseInsensitiveString::new(
+                        target_url,
+                    ))
+                    .unwrap_or(gpt_configs),
+                _ => gpt_configs,
+            };
             crate::utils::openai_request(
                 gpt_configs,
                 match page_response.content.as_ref() {
@@ -238,9 +246,8 @@ pub async fn fetch_page_html_chrome_base(
             _ => None,
         };
 
-        if html.is_some() {
+        if html.is_some() {            
             page_wait(&page, &wait_for).await;
-
             if js_script.len() <= 400 && js_script.contains("window.location") {
                 match page.content_bytes().await {
                     Ok(b) => {
