@@ -7,3 +7,6 @@ pub mod decentralized_headers;
 /// URL globbing
 #[cfg(feature = "glob")]
 pub mod glob;
+/// OpenAI
+#[cfg(feature = "openai")]
+pub mod openai;

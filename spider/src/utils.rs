@@ -664,6 +664,21 @@ pub async fn fetch_page_html_chrome(
     }
 }
 
+#[cfg(not(feature = "openai"))]
+/// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
+pub async fn openai_request(_gpt_configs: &crate::configuration::GPTConfigs) -> String {
+    Default::default()
+}
+
+#[cfg(feature = "openai")]
+/// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
+pub async fn openai_request(
+    gpt_configs: &crate::configuration::GPTConfigs,
+    resource: String,
+) -> String {
+    Default::default()
+}
+
 /// Log to console if configuration verbose.
 pub fn log(message: &'static str, data: impl AsRef<str>) {
     if log_enabled!(Level::Info) {

@@ -1362,34 +1362,63 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
-        page: &chromiumoxide::Page,
+        chrome_page: &chromiumoxide::Page,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
-                let _ =
-                    page.enable_stealth_mode_with_agent(
-                        &if self.configuration.user_agent.is_some() {
-                            &self.configuration.user_agent.as_ref().unwrap().as_str()
-                        } else {
-                            ""
-                        },
-                    );
+                let _ = chrome_page.enable_stealth_mode_with_agent(&if self
+                    .configuration
+                    .user_agent
+                    .is_some()
+                {
+                    &self.configuration.user_agent.as_ref().unwrap().as_str()
+                } else {
+                    ""
+                });
             }
 
-            let intercept_handle = self.setup_chrome_interception(&page).await;
+            let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
-            let page = Page::new(
+            let mut page = Page::new(
                 &self.domain.inner(),
                 &client,
-                &page,
+                &chrome_page,
                 &self.configuration.wait_for,
                 &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
             )
             .await;
+
+            let js_script = match &self.configuration.openai_config {
+                Some(gpt_configs) => {
+                    crate::utils::openai_request(gpt_configs, page.get_html()).await
+                }
+                _ => Default::default(),
+            };
+
+            // perform the js script on the page.
+            if !js_script.is_empty() {
+                let _html: Option<bytes::Bytes> = match chrome_page
+                    .evaluate_function(string_concat!(
+                        "async function() { ",
+                        js_script,
+                        ";; return document.documentElement.outerHTML; }"
+                    ))
+                    .await
+                {
+                    Ok(h) => match h.into_value() {
+                        Ok(hh) => Some(hh),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if _html.is_some() {
+                    page.set_html_bytes(_html);
+                }
+            }
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -2304,6 +2333,34 @@ impl Website {
                                                                 true,
                                                             )
                                                             .await;
+
+                                                            let js_script = match &shared.5.openai_config {
+                                                                Some(gpt_configs) => {
+                                                                    crate::utils::openai_request(gpt_configs, page.get_html()).await
+                                                                }
+                                                                _ => Default::default(),
+                                                            };
+
+                                                            // perform the js script on the page.
+                                                            if !js_script.is_empty() {
+                                                                let _html: Option<bytes::Bytes> = match new_page
+                                                                    .evaluate_function(string_concat!(
+                                                                        "async function() { ",
+                                                                        js_script,
+                                                                        ";; return document.documentElement.outerHTML; }"
+                                                                    ))
+                                                                    .await
+                                                                {
+                                                                    Ok(h) => match h.into_value() {
+                                                                        Ok(hh) => Some(hh),
+                                                                        _ => None,
+                                                                    },
+                                                                    _ => None,
+                                                                };
+                                                                if _html.is_some() {
+                                                                    page.set_html_bytes(_html);
+                                                                }
+                                                            }
 
                                                             if add_external {
                                                                 page.set_external(

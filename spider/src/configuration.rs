@@ -414,7 +414,7 @@ pub struct AuthChallengeResponse {
     pub password: Option<String>,
 }
 
-/// The GPT configs to use for dynamic javascript execution and other functionality.
+/// The GPT configs to use for dynamic Javascript execution and other functionality.
 #[derive(Debug, Default, Clone)]
 pub struct GPTConfigs {
     /// The prompt to use for OPENAI.
@@ -429,6 +429,8 @@ pub struct GPTConfigs {
     pub openai_key: String,
     /// The max tokens to use for the request.
     pub max_tokens: u32,
+    /// The temperature between 0 - 2
+    pub temperature: Option<f32>,
 }
 
 #[cfg(feature = "chrome")]

@@ -83,3 +83,8 @@ Downloading files in a subscription. [Subscribe Download](./subscribe_download.r
 Add links to gather mid crawl. [Queue](./queue.rs).
 
 - `cargo run --example queue`
+
+
+Use OpenAI to get custom Javascript to run in a browser. [OpenAI](./openai.rs).
+
+- `cargo run --example openai`

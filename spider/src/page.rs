@@ -528,6 +528,11 @@ impl Page {
         self.external_domains_caseless = external_domains_caseless;
     }
 
+    /// Set the html directly of the page
+    pub fn set_html_bytes(&mut self, html: Option<Bytes>) {
+        self.html = html;
+    }
+
     /// Parsed URL getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_parsed(&self) -> &Url {
