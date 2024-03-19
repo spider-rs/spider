@@ -216,15 +216,20 @@ pub async fn fetch_page_html_chrome_base(
                     .unwrap_or(gpt_configs),
                 _ => gpt_configs,
             };
-            crate::utils::openai_request(
-                gpt_configs,
-                match page_response.content.as_ref() {
-                    Some(html) => String::from_utf8_lossy(html).to_string(),
-                    _ => Default::default(),
-                },
-                &target_url,
-            )
-            .await
+
+            if !gpt_configs.model.is_empty() {
+                crate::utils::openai_request(
+                    gpt_configs,
+                    match page_response.content.as_ref() {
+                        Some(html) => String::from_utf8_lossy(html).to_string(),
+                        _ => Default::default(),
+                    },
+                    &target_url,
+                )
+                .await
+            } else {
+                Default::default()
+            }
         }
         _ => Default::default(),
     };
@@ -246,7 +251,7 @@ pub async fn fetch_page_html_chrome_base(
             _ => None,
         };
 
-        if html.is_some() {            
+        if html.is_some() {
             page_wait(&page, &wait_for).await;
             if js_script.len() <= 400 && js_script.contains("window.location") {
                 match page.content_bytes().await {
