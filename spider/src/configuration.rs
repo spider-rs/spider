@@ -425,8 +425,6 @@ pub struct GPTConfigs {
     pub max_recurse: u32,
     /// The model to use.
     pub model: String,
-    /// The API key to use. This defaults to using the env var OPENAI_API_KEY.
-    pub openai_key: String,
     /// The max tokens to use for the request.
     pub max_tokens: u16,
     /// The temperature between 0 - 2
@@ -435,6 +433,18 @@ pub struct GPTConfigs {
     pub user: Option<String>,
     /// The top priority for the request
     pub top_p: Option<f32>,
+}
+
+impl GPTConfigs {
+    /// GPTConfigs for OpenAI chrome dynamic scripting.
+    pub fn new(model: &str, prompt: &str, max_tokens: u16) -> GPTConfigs {
+        Self {
+            model: model.into(),
+            prompt: prompt.into(),
+            max_tokens,
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(feature = "chrome")]

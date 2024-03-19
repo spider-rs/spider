@@ -9,11 +9,6 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let mut gpt_config = GPTConfigs::default();
-    gpt_config.model = "gpt-4-1106-preview".into();
-    gpt_config.prompt = "Search for Movies".into();
-    gpt_config.max_tokens = 800;
-
     let _ = tokio::fs::create_dir_all("./storage/").await;
 
     let screenshot_params =
@@ -27,7 +22,11 @@ async fn main() {
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
         .with_limit(1)
-        .with_openai(Some(gpt_config))
+        .with_openai(Some(GPTConfigs::new(
+            "gpt-4-1106-preview",
+            "Search for Movies",
+            500,
+        )))
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
