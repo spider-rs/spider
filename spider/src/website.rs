@@ -1854,13 +1854,7 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selector) => {
-                let mut links: HashSet<CaseInsensitiveString> =
-                    if self.status == CrawlStatus::Active {
-                        self.extra_links.drain().collect()
-                    } else {
-                        HashSet::new()
-                    };
-
+                let mut links: HashSet<CaseInsensitiveString> = self.drain_extra_links().collect();
                 let (mut interval, throttle) = self.setup_crawl();
 
                 links.extend(
@@ -2006,8 +2000,8 @@ impl Website {
                 let mut links: HashSet<CaseInsensitiveString> =
                     HashSet::from([*self.domain.clone()]);
 
-                if self.status == CrawlStatus::Active {
-                    links.extend(self.extra_links.drain());
+                if !self.extra_links.is_empty() {
+                    links.extend(self.drain_extra_links());
                 }
 
                 let (mut interval, throttle) = self.setup_crawl();
@@ -2160,11 +2154,7 @@ impl Website {
                         }
 
                         let mut links: HashSet<CaseInsensitiveString> =
-                            if self.status == CrawlStatus::Active {
-                                self.extra_links.drain().collect()
-                            } else {
-                                HashSet::new()
-                            };
+                            self.drain_extra_links().collect();
 
                         let (mut interval, throttle) = self.setup_crawl();
 
@@ -2377,11 +2367,7 @@ impl Website {
                             _ => None,
                         };
                         let mut links: HashSet<CaseInsensitiveString> =
-                            if self.status == CrawlStatus::Active {
-                                self.extra_links.drain().collect()
-                            } else {
-                                HashSet::new()
-                            };
+                            self.drain_extra_links().collect();
 
                         let (mut interval, throttle) = self.setup_crawl();
 
@@ -2715,11 +2701,7 @@ impl Website {
                         _ => None,
                     };
                     let mut links: HashSet<CaseInsensitiveString> =
-                        if self.status == CrawlStatus::Active {
-                            self.extra_links.drain().collect()
-                        } else {
-                            HashSet::new()
-                        };
+                        self.drain_extra_links().collect();
 
                     let (mut interval, throttle) = self.setup_crawl();
                     let blacklist_url = self.configuration.get_blacklist();
@@ -2864,8 +2846,8 @@ impl Website {
 
                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-                if self.status == CrawlStatus::Active {
-                    links.extend(self.extra_links.drain());
+                if !self.extra_links.is_empty() {
+                    links.extend(self.drain_extra_links());
                 }
 
                 let (mut interval, throttle) = self.setup_crawl();
@@ -3020,8 +3002,8 @@ impl Website {
 
                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-                                if self.status == CrawlStatus::Active {
-                                    links.extend(self.extra_links.drain());
+                                if !self.extra_links.is_empty() {
+                                    links.extend(self.drain_extra_links());
                                 }
 
                                 if cfg!(feature = "chrome_stealth") {
@@ -3253,8 +3235,8 @@ impl Website {
 
                         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
 
-                        if self.status == CrawlStatus::Active {
-                            links.extend(self.extra_links.drain());
+                        if !self.extra_links.is_empty() {
+                            links.extend(self.drain_extra_links());
                         }
 
                         let (mut interval, throttle) = self.setup_crawl();

@@ -743,7 +743,7 @@ pub async fn fetch_page_html_chrome(
 pub async fn openai_request(
     _gpt_configs: &crate::configuration::GPTConfigs,
     _resource: String,
-    _url: &str
+    _url: &str,
 ) -> String {
     Default::default()
 }

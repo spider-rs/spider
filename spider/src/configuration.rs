@@ -96,7 +96,9 @@ impl WaitFor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, strum::EnumString, strum::Display, strum::AsRefStr)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Default, strum::EnumString, strum::Display, strum::AsRefStr,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Capture screenshot options for chrome.
 pub enum CaptureScreenshotFormat {

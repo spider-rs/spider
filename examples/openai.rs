@@ -4,7 +4,7 @@ extern crate spider;
 use std::time::Duration;
 
 use spider::configuration::{GPTConfigs, WaitForIdleNetwork};
-use spider::hashbrown::HashMap;
+use spider::hashbrown::{HashMap, HashSet};
 use spider::website::Website;
 use spider::{tokio, CaseInsensitiveString};
 
@@ -13,7 +13,7 @@ async fn main() {
     let _ = tokio::fs::create_dir_all("./storage/").await;
 
     let screenshot_params =
-        spider::configuration::ScreenshotParams::new(Default::default(), Some(true), Some(true));
+        spider::configuration::ScreenshotParams::new(Default::default(), Some(true), Some(false));
     // params that handle the way to take screenshots
     let screenshot_config =
         spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
@@ -38,6 +38,10 @@ async fn main() {
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
+
+    website.set_extra_links(HashSet::from([
+        "https://www.google.com/search/howsearchworks/?fg=1".into(),
+    ]));
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
