@@ -293,8 +293,8 @@ pub async fn perform_screenshot(
                 ss.params
                     .cdp_params
                     .format
-                    .clone()
-                    .unwrap_or_else(|| crate::configuration::CaptureScreenshotFormat::Png)
+                    .as_ref()
+                    .unwrap_or_else(|| &crate::configuration::CaptureScreenshotFormat::Png)
                     .to_string()
             );
             let ss_params = chromiumoxide::page::ScreenshotParams::from(ss.params.clone());

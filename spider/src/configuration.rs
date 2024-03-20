@@ -96,7 +96,7 @@ impl WaitFor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, strum::EnumString, strum::Display, strum::AsRefStr)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Capture screenshot options for chrome.
 pub enum CaptureScreenshotFormat {
@@ -110,6 +110,13 @@ pub enum CaptureScreenshotFormat {
     #[cfg_attr(feature = "serde", serde(rename = "webp"))]
     /// webp format
     Webp,
+}
+
+impl CaptureScreenshotFormat {
+    /// convert the format to a lowercase string
+    pub fn to_string(&self) -> String {
+        self.as_ref().to_lowercase()
+    }
 }
 
 #[cfg(feature = "chrome")]

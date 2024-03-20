@@ -11,7 +11,7 @@ async fn main() {
         spider::configuration::ScreenshotParams::new(Default::default(), Some(true), Some(true));
     // params that handle the way to take screenshots
     let screenshot_config =
-        spider::configuration::ScreenShotConfig::new(screenshot_params, true, false, None);
+        spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
 
     let mut website: Website = Website::new("https://choosealicense.com")
         .with_screenshot(Some(screenshot_config))
