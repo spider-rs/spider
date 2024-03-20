@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.86.4"
+version = "1.86.5"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3159,7 +3159,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.86.4"
+version = "1.86.5"
 dependencies = [
  "clap",
  "env_logger",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.86.4"
+version = "1.86.5"
 dependencies = [
  "env_logger",
  "lazy_static",

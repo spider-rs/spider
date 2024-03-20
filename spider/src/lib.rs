@@ -71,6 +71,7 @@
 //! - `chrome_headless_new`: Use headless=new to launch the chrome instance.
 //! - `cookies`: Enables cookies storing and setting to use for request.
 //! - `cron`: Enables the ability to start cron jobs for the website.
+//! - `openai`: Enables OpenAI to generate dynamic browser executable scripts.
 //! - `http3`: Enables experimental HTTP/3 client.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
