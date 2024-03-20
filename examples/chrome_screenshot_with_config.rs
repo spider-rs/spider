@@ -1,5 +1,5 @@
 //! Make sure to create a storage directory locally.
-//! cargo run --example chrome_screenshot --features="spider/sync spider/chrome"
+//! cargo run --example chrome_screenshot_with_config --features="spider/sync spider/chrome"
 extern crate spider;
 use spider::tokio;
 use spider::website::Website;
