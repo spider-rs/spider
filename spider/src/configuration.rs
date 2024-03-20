@@ -205,6 +205,7 @@ impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
 
 #[doc = "Capture page screenshot.\n[captureScreenshot](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-captureScreenshot)"]
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CaptureScreenshotParams {
     #[doc = "Image compression format (defaults to png)."]
     pub format: Option<CaptureScreenshotFormat>,
@@ -254,6 +255,7 @@ impl From<ClipViewport> for chromiumoxide::cdp::browser_protocol::page::Viewport
 
 /// Screenshot configuration.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScreenShotConfig {
     /// The screenshot params.
     pub params: ScreenshotParams,
@@ -284,6 +286,7 @@ impl ScreenShotConfig {
 
 /// The screenshot params for the page.
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScreenshotParams {
     /// Chrome DevTools Protocol screenshot options.
     pub cdp_params: CaptureScreenshotParams,
@@ -415,23 +418,24 @@ pub struct AuthChallengeResponse {
 
 /// The GPT configs to use for dynamic Javascript execution and other functionality.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GPTConfigs {
-    /// The prompt to use for OPENAI.
+    /// The prompt to use for OPENAI. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
     pub prompt: String,
-    /// Prompts to use for certain urls.
-    pub prompt_url_map: Option<hashbrown::HashMap<CaseInsensitiveString, Self>>,
-    /// The max times a recursive prompt can be performed.
-    pub max_recurse: u32,
-    /// The model to use.
+    /// The model to use. Example: gpt-4-1106-preview or gpt-3.5-turbo-16k
     pub model: String,
     /// The max tokens to use for the request.
     pub max_tokens: u16,
+    /// Prompts to use for certain urls.
+    pub prompt_url_map: Option<hashbrown::HashMap<CaseInsensitiveString, Self>>,
     /// The temperature between 0 - 2
     pub temperature: Option<f32>,
     /// The user for the request
     pub user: Option<String>,
     /// The top priority for the request
     pub top_p: Option<f32>,
+    /// The max times a recursive prompt can be performed.
+    pub max_recurse: Option<u32>,
 }
 
 impl GPTConfigs {
