@@ -106,6 +106,8 @@ pub extern crate url;
 
 #[cfg(feature = "cron")]
 pub extern crate async_job;
+#[cfg(feature = "openai")]
+pub extern crate async_openai;
 #[cfg(feature = "flexbuffers")]
 pub extern crate flexbuffers;
 #[cfg(feature = "cache")]
