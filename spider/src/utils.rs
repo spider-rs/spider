@@ -217,7 +217,7 @@ pub async fn fetch_page_html_chrome_base(
                 _ => gpt_configs,
             };
 
-            if !gpt_configs.model.is_empty() {
+            if !gpt_configs.model.is_empty() && ok {
                 crate::utils::openai_request(
                     gpt_configs,
                     match page_response.content.as_ref() {
@@ -756,7 +756,7 @@ pub async fn openai_request(
     url: &str,
 ) -> String {
     lazy_static! {
-        // static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
+        static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
         static ref SEM: tokio::sync::Semaphore = {
             let logical = num_cpus::get();
             let physical = num_cpus::get_physical();
@@ -775,11 +775,8 @@ pub async fn openai_request(
             let sem_limit = sem_limit / 3;
             tokio::sync::Semaphore::const_new(sem_limit.max(sem_max))
         };
-
-        static ref CLIENT: async_openai::Client<async_openai::config::OpenAIConfig> = {
-            async_openai::Client::new()
-        };
-
+        static ref CLIENT: async_openai::Client<async_openai::config::OpenAIConfig> =
+            async_openai::Client::new();
     };
 
     let content: String = match SEM.acquire().await {
@@ -802,24 +799,24 @@ pub async fn openai_request(
                 _ => gpt_base,
             };
 
-            // let core_bpe = match tiktoken_rs::get_bpe_from_model(&gpt_configs.model) {
-            //     Ok(bpe) => Some(bpe),
-            //     _ => None,
-            // };
+            let core_bpe = match tiktoken_rs::get_bpe_from_model(&gpt_configs.model) {
+                Ok(bpe) => Some(bpe),
+                _ => None,
+            };
 
-            // let (tokens, prompt_tokens) = match core_bpe {
-            //     Some(ref core_bpe) => (
-            //         core_bpe.encode_with_special_tokens(&resource),
-            //         core_bpe.encode_with_special_tokens(&gpt_configs.prompt),
-            //     ),
-            //     _ => (
-            //         CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&resource),
-            //         CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&gpt_configs.prompt),
-            //     ),
-            // };
+            let (tokens, prompt_tokens) = match core_bpe {
+                Some(ref core_bpe) => (
+                    core_bpe.encode_with_special_tokens(&resource),
+                    core_bpe.encode_with_special_tokens(&gpt_configs.prompt),
+                ),
+                _ => (
+                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&resource),
+                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&gpt_configs.prompt),
+                ),
+            };
 
             // // we can use the output count later to perform concurrent actions.
-            // let output_tokens_count = tokens.len() + prompt_tokens.len();
+            let output_tokens_count = tokens.len() + prompt_tokens.len();
 
             let max_tokens = crate::features::openai::calculate_max_tokens(
                 &gpt_configs.model,
@@ -828,6 +825,13 @@ pub async fn openai_request(
                 &resource,
                 &gpt_configs.prompt,
             );
+
+            // we need to slim down the content to fit the window.
+            let resource = if output_tokens_count > max_tokens {
+                clean_html(&resource)
+            } else {
+                resource
+            };
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(&string_concat!("URL:", url, "\n", "HTML:", resource))
@@ -883,6 +887,60 @@ pub async fn openai_request(
     };
 
     content
+}
+
+/// Clean the html removing css and js default using the scraper crate.
+pub fn clean_html_raw(html: &str) -> String {
+    use crate::packages::scraper;
+    lazy_static! {
+        static ref SCRIPT_SELECTOR: scraper::Selector = scraper::Selector::parse("script").unwrap();
+        static ref STYLE_SELECTOR: scraper::Selector = scraper::Selector::parse("style").unwrap();
+    }
+    let fragment = scraper::Html::parse_document(&html);
+    let without_scripts: String = fragment
+        .select(&SCRIPT_SELECTOR)
+        .fold(html.to_string(), |acc, script| {
+            acc.replace(&script.html(), "")
+        });
+
+    fragment
+        .select(&STYLE_SELECTOR)
+        .fold(without_scripts, |acc, style| acc.replace(&style.html(), ""))
+}
+
+/// Clean the html removing css and js
+#[cfg(not(feature = "openai"))]
+pub fn clean_html(html: &str) -> String {
+    clean_html_raw(html)
+}
+
+/// Clean the html removing css and js
+#[cfg(feature = "openai")]
+pub fn clean_html(html: &str) -> String {
+    use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+    match rewrite_str(
+        html,
+        RewriteStrSettings {
+            element_content_handlers: vec![
+                element!("script", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("style", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+            ],
+            document_content_handlers: vec![doc_comments!(|c| {
+                c.remove();
+                Ok(())
+            })],
+            ..RewriteStrSettings::default()
+        },
+    ) {
+        Ok(r) => r,
+        _ => clean_html_raw(html),
+    }
 }
 
 /// Log to console if configuration verbose.
