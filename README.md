@@ -16,6 +16,7 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 - Subscriptions
 - Smart Mode
 - Blacklisting and Budgeting Depth
+- Dynamic AI Prompt Scripting Headless
 - [Changelog](CHANGELOG.md)
 
 ## Getting Started

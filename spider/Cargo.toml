@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.86.5"
+version = "1.86.6"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -36,14 +36,14 @@ hashbrown = { version = "0.14.3", default-features = true }
 log = "0.4.20"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.2", optional = true }
-ua_generator = { git = "https://github.com/a11ywatch/ua_generator.git", version = "0.3.5", optional = true }
+ua_generator = { version = "0.3.6", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1.4.0"
 compact_str = "0.7.1"
 fast_html5ever = "0.26.1"
 selectors = "0.25.0"
 tendril = "0.4.3"
-ahash = "0.8.7"
+ahash = "0.8.11"
 cssparser = "0.31.2"
 smallvec = "1.11.2"
 ego-tree = "0.6.2"

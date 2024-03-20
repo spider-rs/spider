@@ -1146,15 +1146,6 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be"
-dependencies = [
- "instant",
-]
-
-[[package]]
-name = "fastrand"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25cbce373ec4653f1a01a31e8a5e5ec0c622dc27ff9c4e6606eefef5cbbed4a5"
@@ -1385,7 +1376,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b83e1915177ea624b5bbbdb16bc54f0c106c9664892c695f995e53f5c6793b80"
 dependencies = [
  "bytes",
- "fastrand 2.0.1",
+ "fastrand",
  "futures-util",
  "http",
  "pin-project-lite",
@@ -3112,7 +3103,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.86.5"
+version = "1.86.6"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3159,7 +3150,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.86.5"
+version = "1.86.6"
 dependencies = [
  "clap",
  "env_logger",
@@ -3182,7 +3173,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.86.5"
+version = "1.86.6"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -3386,7 +3377,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85b77fafb263dd9d05cbeac119526425676db3784113aa9295c88498cbf8bff1"
 dependencies = [
  "cfg-if",
- "fastrand 2.0.1",
+ "fastrand",
  "rustix",
  "windows-sys 0.52.0",
 ]
@@ -3706,10 +3697,11 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
 name = "ua_generator"
-version = "0.3.5"
-source = "git+https://github.com/a11ywatch/ua_generator.git#54abb2eea5b2161119248a2f572db5a38d816ea9"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6afbf8d271a815375a1723f8ca1764b54ae4a4e396a98342009a17de0445f35"
 dependencies = [
- "fastrand 1.9.0",
+ "fastrand",
  "serde",
  "serde_json",
  "ureq",
