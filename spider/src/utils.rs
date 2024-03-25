@@ -5,6 +5,50 @@ use log::{info, log_enabled, Level};
 use reqwest::header::HeaderMap;
 use reqwest::{Error, Response, StatusCode};
 
+/// Handle cloudflare protected pages via chrome. This does nothing without the cloudflare_bypass feature enabled.
+#[cfg(all(feature = "chrome", feature = "cloudflare_bypass"))]
+async fn cf_handle(
+    b: bytes::Bytes,
+    page: &chromiumoxide::Page,
+) -> Result<bytes::Bytes, chromiumoxide::error::CdpError> {
+    use crate::configuration::{WaitFor, WaitForDelay, WaitForIdleNetwork};
+    lazy_static! {
+        static ref CF_END: &'static [u8; 62] =
+            b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
+    };
+    let cf = CF_END.as_ref();
+
+    if b.ends_with(cf) {
+        let mut wait_for = WaitFor::default();
+        wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
+        wait_for.idle_network =
+            WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
+        page_wait(&page, &Some(wait_for.clone())).await;
+        page.find_element("iframe").await?.click().await?;
+        wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+        wait_for.page_navigations = true;
+        page_wait(&page, &Some(wait_for.clone())).await;
+        let next_content = page.content_bytes().await?;
+        Ok(if next_content.ends_with(cf) {
+            page_wait(&page, &Some(wait_for)).await;
+            page.content_bytes().await?
+        } else {
+            next_content
+        })
+    } else {
+        Ok(b)
+    }
+}
+
+/// Handle cloudflare protected pages via chrome. This does nothing without the cloudflare_bypass feature enabled.
+#[cfg(all(feature = "chrome", not(feature = "cloudflare_bypass")))]
+async fn cf_handle(
+    b: bytes::Bytes,
+    _page: &chromiumoxide::Page,
+) -> Result<bytes::Bytes, chromiumoxide::error::CdpError> {
+    Ok(b)
+}
+
 /// The response of a web page.
 #[derive(Debug, Default)]
 pub struct PageResponse {
@@ -192,6 +236,12 @@ pub async fn fetch_page_html_chrome_base(
 
     let page = page.activate().await?;
     let res: bytes::Bytes = page.content_bytes().await?;
+    let res = if cfg!(feature = "cloudflare_bypass") {
+        cf_handle(res, &page).await?
+    } else {
+        res
+    };
+
     let ok = res.len() > 0;
 
     let mut page_response = PageResponse {
