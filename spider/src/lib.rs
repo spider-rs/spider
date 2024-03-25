@@ -70,6 +70,7 @@
 //! - `chrome_intercept`: Allows intercepting network request to speed up processing.
 //! - `chrome_headless_new`: Use headless=new to launch the chrome instance.
 //! - `cookies`: Enables cookies storing and setting to use for request.
+//! - `real_browser`: Enables the ability to bypass cloudflare protected pages.
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env var `OPENAI_API_KEY`.
 //! - `http3`: Enables experimental HTTP/3 client.

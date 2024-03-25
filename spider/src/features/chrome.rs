@@ -239,9 +239,80 @@ pub async fn close_browser(browser_handle: JoinHandle<()>) {
     }
 }
 
-#[cfg(not(feature = "chrome_cpu"))]
+/// static chrome arguments to start
+#[cfg(all(feature = "chrome_cpu", feature = "real_browser"))]
+pub static CHROME_ARGS: [&'static str; 27] = [
+    if cfg!(feature = "chrome_headless_new") {
+        "--headless=new"
+    } else {
+        "--headless"
+    },
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-client-side-phishing-detection",
+    "--disable-sync",
+    "--metrics-recording-only",
+    "--disable-default-apps",
+    "--mute-audio",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--disable-gpu",
+    "--disable-gpu-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+    "--disable-ipc-flooding-protection",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--force-fieldtrials=*BackgroundTracing/default/",
+    "--disable-hang-monitor",
+    "--disable-prompt-on-repost",
+    "--disable-domain-reliability",
+    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
+];
+
+/// static chrome arguments to start
+#[cfg(all(not(feature = "chrome_cpu"), feature = "real_browser"))]
+pub static CHROME_ARGS: [&'static str; 24] = [
+    if cfg!(feature = "chrome_headless_new") {
+        "--headless=new"
+    } else {
+        "--headless"
+    },
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-client-side-phishing-detection",
+    "--disable-sync",
+    "--disable-dev-shm-usage",
+    "--metrics-recording-only",
+    "--disable-default-apps",
+    "--mute-audio",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+    "--disable-ipc-flooding-protection",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--force-fieldtrials=*BackgroundTracing/default/",
+    "--disable-hang-monitor",
+    "--disable-prompt-on-repost",
+    "--disable-domain-reliability",
+    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
+];
+
+// One of the configs below is detected by CF bots. We need to take a look at the optimal args 03/25/24.
+
+#[cfg(all(not(feature = "chrome_cpu"), not(feature = "real_browser")))]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
-static CHROME_ARGS: [&'static str; 59] = [
+static CHROME_ARGS: [&'static str; 60] = [
     if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
     "--no-sandbox",
     "--no-first-run",
@@ -289,6 +360,7 @@ static CHROME_ARGS: [&'static str; 59] = [
     "--disable-field-trial-config",
     "--disable-back-forward-cache",
     "--disable-backgrounding-occluded-windows",
+    "--force-fieldtrials=*BackgroundTracing/default/",
     // "--enable-automation",
     "--log-level=3",
     "--enable-logging=stderr",
@@ -303,12 +375,12 @@ static CHROME_ARGS: [&'static str; 59] = [
     "--no-pings",
     "--use-gl=swiftshader",
     "--window-size=1920,1080",
-    "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
+    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
 ];
 
-#[cfg(feature = "chrome_cpu")]
+#[cfg(all(feature = "chrome_cpu", not(feature = "real_browser")))]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
-static CHROME_ARGS: [&'static str; 62] = [
+static CHROME_ARGS: [&'static str; 63] = [
     if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
     "--no-sandbox",
     "--no-first-run",
@@ -359,6 +431,7 @@ static CHROME_ARGS: [&'static str; 62] = [
     "--disable-field-trial-config",
     "--disable-back-forward-cache",
     "--disable-backgrounding-occluded-windows",
+    "--force-fieldtrials=*BackgroundTracing/default/",
     // "--enable-automation",
     "--log-level=3",
     "--enable-logging=stderr",
@@ -373,5 +446,5 @@ static CHROME_ARGS: [&'static str; 62] = [
     "--no-pings",
     "--use-gl=swiftshader",
     "--window-size=1920,1080",
-    "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
+    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
 ];
