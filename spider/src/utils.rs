@@ -66,6 +66,9 @@ pub struct PageResponse {
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page. The ScreenShotConfig bytes boolean needs to be set to true.
     pub screenshot_bytes: Option<Vec<u8>>,
+    #[cfg(feature = "openai")]
+    /// The credits used from OpenAI in order.
+    pub openai_credits_used: Option<Vec<OpenAIUsage>>,
 }
 
 /// wait for event with timeout
@@ -270,7 +273,7 @@ pub async fn fetch_page_html_chrome_base(
             let mut prompts = gpt_configs.prompt.clone();
 
             while let Some(prompt) = prompts.next() {
-                let js_script = if !gpt_configs.model.is_empty() && ok {
+                let (js_script, tokens_used) = if !gpt_configs.model.is_empty() && ok {
                     crate::utils::openai_request(
                         gpt_configs,
                         match page_response.content.as_ref() {
@@ -283,6 +286,11 @@ pub async fn fetch_page_html_chrome_base(
                     .await
                 } else {
                     Default::default()
+                };
+
+                match page_response.openai_credits_used.as_mut() {
+                    Some(v) => v.push(tokens_used),
+                    None => page_response.openai_credits_used = Some(vec![tokens_used]),
                 };
 
                 // perform the js script on the page.
@@ -800,8 +808,19 @@ pub async fn openai_request(
     _resource: String,
     _url: &str,
     _prompt: &str,
-) -> String {
+) -> (String, OpenAIUsage) {
     Default::default()
+}
+
+#[derive(Debug, Default)]
+/// The usage used from OpenAI.
+pub struct OpenAIUsage {
+    /// The prompt tokens used.
+    pub prompt_tokens: u32,
+    /// The completion tokens used.
+    pub completion_tokens: u32,
+    /// The total tokens used.
+    pub total_tokens: u32,
 }
 
 #[cfg(feature = "openai")]
@@ -811,7 +830,7 @@ pub async fn openai_request(
     resource: String,
     url: &str,
     prompt: &str,
-) -> String {
+) -> (String, OpenAIUsage) {
     lazy_static! {
         static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
         static ref SEM: tokio::sync::Semaphore = {
@@ -836,7 +855,7 @@ pub async fn openai_request(
             async_openai::Client::new();
     };
 
-    let content: String = match SEM.acquire().await {
+    match SEM.acquire().await {
         Ok(permit) => {
             let mut chat_completion_defaults =
                 async_openai::types::CreateChatCompletionRequestArgs::default();
@@ -890,6 +909,8 @@ pub async fn openai_request(
                 resource
             };
 
+            let mut tokens_used = OpenAIUsage::default();
+
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(&string_concat!("URL:", url, "\n", "HTML:", resource))
                 .build()
@@ -917,6 +938,15 @@ pub async fn openai_request(
                             Ok(mut response) => {
                                 let mut choice = response.choices.first_mut();
 
+                                match response.usage.take() {
+                                    Some(usage) => {
+                                        tokens_used.prompt_tokens = usage.prompt_tokens;
+                                        tokens_used.completion_tokens = usage.completion_tokens;
+                                        tokens_used.total_tokens = usage.total_tokens;
+                                    }
+                                    _ => (),
+                                }
+
                                 match choice.as_mut() {
                                     Some(c) => match c.message.content.take() {
                                         Some(content) => content,
@@ -935,15 +965,13 @@ pub async fn openai_request(
 
                     drop(permit);
 
-                    v
+                    (v, tokens_used)
                 }
                 _ => Default::default(),
             }
         }
         _ => Default::default(),
-    };
-
-    content
+    }
 }
 
 /// Clean the html removing css and js default using the scraper crate.
