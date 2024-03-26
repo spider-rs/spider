@@ -425,12 +425,52 @@ pub struct AuthChallengeResponse {
     pub password: Option<String>,
 }
 
+/// The type of prompt to use.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Prompt {
+    /// A single prompt to run.
+    Single(String),
+    /// Multiple prompts to run after one another.
+    Multi(std::collections::VecDeque<String>),
+}
+
+impl Prompt {
+    /// A new single prompt.
+    pub fn new_single(prompt: &str) -> Self {
+        Prompt::Single(prompt.into())
+    }
+    /// Multiple prompts to run after another.
+    pub fn new_multiple(prompt: std::collections::VecDeque<String>) -> Self {
+        Prompt::Multi(prompt)
+    }
+    /// Get the next prompt
+    pub fn next(&mut self) -> Option<String> {
+        match self {
+            Prompt::Single(prompt) => {
+                if prompt.is_empty() {
+                    None
+                } else {
+                    Some(prompt.drain(..).collect())
+                }
+            }
+            Prompt::Multi(prompt) => prompt.pop_front(),
+        }
+    }
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Prompt::Single(Default::default())
+    }
+}
+
 /// The GPT configs to use for dynamic Javascript execution and other functionality.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GPTConfigs {
     /// The prompt to use for OPENAI. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
-    pub prompt: String,
+    pub prompt: Prompt,
     /// The model to use. Example: gpt-4-1106-preview or gpt-3.5-turbo-16k
     pub model: String,
     /// The max tokens to use for the request.
@@ -443,8 +483,6 @@ pub struct GPTConfigs {
     pub user: Option<String>,
     /// The top priority for the request
     pub top_p: Option<f32>,
-    /// The max times a recursive prompt can be performed.
-    pub max_recurse: Option<u32>,
 }
 
 impl GPTConfigs {
@@ -452,7 +490,21 @@ impl GPTConfigs {
     pub fn new(model: &str, prompt: &str, max_tokens: u16) -> GPTConfigs {
         Self {
             model: model.into(),
-            prompt: prompt.into(),
+            prompt: Prompt::Single(prompt.into()),
+            max_tokens,
+            ..Default::default()
+        }
+    }
+
+    /// GPTConfigs for OpenAI chrome dynamic scripting multi chain prompts.
+    pub fn new_multi<I, S>(model: &str, prompt: I, max_tokens: u16) -> GPTConfigs
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            model: model.into(),
+            prompt: Prompt::Multi(prompt.into_iter().map(|s| s.as_ref().to_string()).collect()),
             max_tokens,
             ..Default::default()
         }

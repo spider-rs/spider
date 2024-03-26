@@ -256,7 +256,7 @@ pub async fn fetch_page_html_chrome_base(
         ..Default::default()
     };
 
-    let js_script = match &openai_config {
+    match &openai_config {
         Some(gpt_configs) => {
             let gpt_configs = match gpt_configs.prompt_url_map {
                 Some(ref h) => h
@@ -267,54 +267,59 @@ pub async fn fetch_page_html_chrome_base(
                 _ => gpt_configs,
             };
 
-            if !gpt_configs.model.is_empty() && ok {
-                crate::utils::openai_request(
-                    gpt_configs,
-                    match page_response.content.as_ref() {
-                        Some(html) => String::from_utf8_lossy(html).to_string(),
-                        _ => Default::default(),
-                    },
-                    &target_url,
-                )
-                .await
-            } else {
-                Default::default()
-            }
-        }
-        _ => Default::default(),
-    };
+            let mut prompts = gpt_configs.prompt.clone();
 
-    // perform the js script on the page.
-    if !js_script.is_empty() {
-        let html: Option<bytes::Bytes> = match page
-            .evaluate_function(string_concat!(
-                "async function() { ",
-                js_script,
-                "; return document.documentElement.outerHTML; }"
-            ))
-            .await
-        {
-            Ok(h) => match h.into_value() {
-                Ok(hh) => Some(hh),
-                _ => None,
-            },
-            _ => None,
-        };
+            while let Some(prompt) = prompts.next() {
+                let js_script = if !gpt_configs.model.is_empty() && ok {
+                    crate::utils::openai_request(
+                        gpt_configs,
+                        match page_response.content.as_ref() {
+                            Some(html) => String::from_utf8_lossy(html).to_string(),
+                            _ => Default::default(),
+                        },
+                        &target_url,
+                        &prompt,
+                    )
+                    .await
+                } else {
+                    Default::default()
+                };
 
-        if html.is_some() {
-            page_wait(&page, &wait_for).await;
-            if js_script.len() <= 400 && js_script.contains("window.location") {
-                match page.content_bytes().await {
-                    Ok(b) => {
-                        page_response.content = Some(b);
+                // perform the js script on the page.
+                if !js_script.is_empty() {
+                    let html: Option<bytes::Bytes> = match page
+                        .evaluate_function(string_concat!(
+                            "async function() { ",
+                            js_script,
+                            "; return document.documentElement.outerHTML; }"
+                        ))
+                        .await
+                    {
+                        Ok(h) => match h.into_value() {
+                            Ok(hh) => Some(hh),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+
+                    if html.is_some() {
+                        page_wait(&page, &wait_for).await;
+                        if js_script.len() <= 400 && js_script.contains("window.location") {
+                            match page.content_bytes().await {
+                                Ok(b) => {
+                                    page_response.content = Some(b);
+                                }
+                                _ => (),
+                            }
+                        } else {
+                            page_response.content = html;
+                        }
                     }
-                    _ => (),
                 }
-            } else {
-                page_response.content = html;
             }
         }
-    }
+        _ => (),
+    };
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
         perform_screenshot(target_url, page, screenshot, &mut page_response).await;
@@ -794,6 +799,7 @@ pub async fn openai_request(
     _gpt_configs: &crate::configuration::GPTConfigs,
     _resource: String,
     _url: &str,
+    _prompt: &str,
 ) -> String {
     Default::default()
 }
@@ -804,6 +810,7 @@ pub async fn openai_request(
     gpt_configs: &crate::configuration::GPTConfigs,
     resource: String,
     url: &str,
+    prompt: &str,
 ) -> String {
     lazy_static! {
         static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
@@ -857,11 +864,11 @@ pub async fn openai_request(
             let (tokens, prompt_tokens) = match core_bpe {
                 Some(ref core_bpe) => (
                     core_bpe.encode_with_special_tokens(&resource),
-                    core_bpe.encode_with_special_tokens(&gpt_configs.prompt),
+                    core_bpe.encode_with_special_tokens(&prompt),
                 ),
                 _ => (
                     CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&resource),
-                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&gpt_configs.prompt),
+                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
                 ),
             };
 
@@ -873,7 +880,7 @@ pub async fn openai_request(
                 gpt_configs.max_tokens,
                 &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
                 &resource,
-                &gpt_configs.prompt,
+                &prompt,
             );
 
             // we need to slim down the content to fit the window.
@@ -892,7 +899,7 @@ pub async fn openai_request(
                         crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT.clone(),
                         resource_completion.into(),
                         match async_openai::types::ChatCompletionRequestUserMessageArgs::default()
-                            .content(&*gpt_configs.prompt)
+                            .content(prompt)
                             .build()
                         {
                             Ok(o) => o,

@@ -91,3 +91,7 @@ Use OpenAI to get custom Javascript to run in a browser. [OpenAI](./openai.rs). 
 or 
 
 - `OPENAI_API_KEY=replace_me_with_key cargo run --example openai`
+
+or 
+
+- `OPENAI_API_KEY=replace_me_with_key cargo run --example openai_multi`
