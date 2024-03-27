@@ -1121,8 +1121,16 @@ pub fn clean_html_slim(html: &str) -> String {
                     el.remove();
                     Ok(())
                 }),
-                element!("svgs", |el| {
+                element!("svg", |el| {
                     el.remove();
+                    Ok(())
+                }),
+                element!("a", |el| {
+                    if let Some(src) = el.get_attribute("href") {
+                        if src.len() >= 200 {
+                            el.remove();
+                        }
+                    }
                     Ok(())
                 }),
                 element!("img", |el| {
