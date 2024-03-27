@@ -121,6 +121,10 @@ name = "openai_multi"
 path = "openai_multi.rs"
 required-features = ["spider/sync", "spider/openai"]
 
+[[example]]
+name = "openai_extra"
+path = "openai_extra.rs"
+required-features = ["spider/sync", "spider/openai"]
 
 [[example]]
 name = "encoding"

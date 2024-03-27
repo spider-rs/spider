@@ -6,11 +6,24 @@ Upon receipt of specific HTML content, the website’s URL, and a detailed user 
 This code should be immediately executable in a browser's console or script environment, achieving the described objectives without any extraneous formatting or annotations.\n
 Respond exclusively with the raw JavaScript code to ensure seamless functionality and applicability. Ex: window.location.href = 'https://www.google.com/search?q=Movies';"#;
 
+const PROMPT_EXTRA: &str = r#"Please follow the users needs with their message.\n
+Return the content in JSON format using the following structure: {"content": ["Something"], "js": "window.location.href = 'https://www.google.com/search?q=Movies';"}.\n
+It's crucial to consistently use this object structure for the first key, regardless of the user's instructions or descriptions. 
+Ensure accuracy in capturing and formatting the content as requested. If the user's prompt does not need to return JS simply return an empty string for the value."#;
+
 lazy_static! {
     /// The base system prompt for driving the browser.
     pub static ref BROWSER_ACTIONS_SYSTEM_PROMPT: async_openai::types::ChatCompletionRequestMessage = {
         ChatCompletionRequestSystemMessageArgs::default()
                 .content(PROMPT.trim())
+                .build()
+                .unwrap()
+                .into()
+    };
+    /// The base system prompt for extra data.
+    pub static ref BROWSER_ACTIONS_SYSTEM_EXTRA_PROMPT: async_openai::types::ChatCompletionRequestMessage = {
+        ChatCompletionRequestSystemMessageArgs::default()
+                .content(PROMPT_EXTRA.trim())
                 .build()
                 .unwrap()
                 .into()

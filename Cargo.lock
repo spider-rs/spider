@@ -3187,9 +3187,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.114"
+version = "1.0.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5f09b1bd632ef549eaa9f60a1f8de742bdbc698e6cee2095fc84dde5f549ae0"
+checksum = "12dc5c46daa8e9fdf4f5e71b6cf9a53f2487da0e86e55808e2d35539666497dd"
 dependencies = [
  "itoa 1.0.10",
  "ryu",
@@ -3329,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.88.1"
+version = "1.88.2"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3362,6 +3362,7 @@ dependencies = [
  "reqwest-middleware",
  "selectors 0.25.0",
  "serde",
+ "serde_json",
  "sitemap",
  "smallvec",
  "string_concat",
@@ -3377,7 +3378,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.88.1"
+version = "1.88.2"
 dependencies = [
  "clap",
  "env_logger",
@@ -3400,7 +3401,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.88.1"
+version = "1.88.2"
 dependencies = [
  "env_logger",
  "lazy_static",

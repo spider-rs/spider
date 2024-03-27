@@ -92,6 +92,10 @@ or
 
 - `OPENAI_API_KEY=replace_me_with_key cargo run --example openai`
 
-or 
+or setting multiple actions to drive the browser
 
 - `OPENAI_API_KEY=replace_me_with_key cargo run --example openai_multi`
+
+or to get custom data from the GPT with JS scripts if needed.
+
+- `OPENAI_API_KEY=replace_me_with_key cargo run --example openai_extra`

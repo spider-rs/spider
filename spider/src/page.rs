@@ -93,6 +93,12 @@ pub struct Page {
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page.
     pub screenshot_bytes: Option<Vec<u8>>,
+    #[cfg(feature = "openai")]
+    /// The credits used from OpenAI in order.
+    pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
+    #[cfg(feature = "openai")]
+    /// The extra data from the AI, example extracting data etc...
+    pub extra_ai_data: Option<Vec<String>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -117,6 +123,12 @@ pub struct Page {
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page.
     pub screenshot_bytes: Option<Vec<u8>>,
+    #[cfg(feature = "openai")]
+    /// The credits used from OpenAI in order.
+    pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
+    #[cfg(feature = "openai")]
+    /// The extra data from the AI, example extracting data etc...
+    pub extra_ai_data: Option<Vec<String>>,
 }
 
 lazy_static! {
@@ -249,6 +261,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         chrome_page: None,
         #[cfg(feature = "chrome")]
         screenshot_bytes: res.screenshot_bytes,
+        #[cfg(feature = "openai")]
+        openai_credits_used: res.openai_credits_used,
+        #[cfg(feature = "openai")]
+        extra_ai_data: res.extra_ai_data,
     }
 }
 

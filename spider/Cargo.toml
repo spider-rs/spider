@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.88.1"
+version = "1.88.2"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -79,6 +79,7 @@ const_format = { version = "0.2.32", optional = true }
 async-openai = { version = "0.19.1", optional = true }
 tiktoken-rs = { version = "0.5.8", optional = true }
 lol_html = { version = "1.2.1", optional = true }
+serde_json = { version = "1.0.115", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -121,5 +122,6 @@ smart = ["chrome", "dep:regex"]
 encoding = ["dep:encoding_rs"]
 headers = []
 real_browser = []
-openai = ["chrome", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html"]
+openai = ["chrome", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
+openai_slim_fit = []
 decentralized_headers = ["dep:const_format", "dep:itertools"]

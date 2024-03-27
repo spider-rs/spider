@@ -477,12 +477,14 @@ pub struct GPTConfigs {
     pub max_tokens: u16,
     /// Prompts to use for certain urls.
     pub prompt_url_map: Option<hashbrown::HashMap<CaseInsensitiveString, Self>>,
-    /// The temperature between 0 - 2
+    /// The temperature between 0 - 2.
     pub temperature: Option<f32>,
-    /// The user for the request
+    /// The user for the request.
     pub user: Option<String>,
-    /// The top priority for the request
+    /// The top priority for the request.
     pub top_p: Option<f32>,
+    /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
+    pub extra_ai_data: bool,
 }
 
 impl GPTConfigs {
@@ -508,6 +510,12 @@ impl GPTConfigs {
             max_tokens,
             ..Default::default()
         }
+    }
+
+    /// Set extra AI data to return results.
+    pub fn set_extra(&mut self, extra_ai_data: bool) -> &mut Self {
+        self.extra_ai_data = extra_ai_data;
+        self
     }
 }
 

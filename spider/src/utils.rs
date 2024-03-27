@@ -69,6 +69,9 @@ pub struct PageResponse {
     #[cfg(feature = "openai")]
     /// The credits used from OpenAI in order.
     pub openai_credits_used: Option<Vec<OpenAIUsage>>,
+    #[cfg(feature = "openai")]
+    /// The extra data from the AI, example extracting data etc...
+    pub extra_ai_data: Option<Vec<String>>,
 }
 
 /// wait for event with timeout
@@ -199,6 +202,17 @@ pub async fn page_wait(
     }
 }
 
+#[derive(Debug, Default)]
+#[cfg(feature = "openai")]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// The json response from OpenAI.
+struct JsonResponse {
+    /// The content returned.
+    content: Vec<String>,
+    /// The js script for the browser.
+    js: String,
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -286,6 +300,22 @@ pub async fn fetch_page_html_chrome_base(
                     .await
                 } else {
                     Default::default()
+                };
+
+                let js_script = if gpt_configs.extra_ai_data {
+                    match serde_json::from_str::<JsonResponse>(&js_script) {
+                        Ok(x) => {
+                            match page_response.extra_ai_data.as_mut() {
+                                Some(v) => v.extend(x.content),
+                                None => page_response.extra_ai_data = Some(x.content),
+                            };
+
+                            x.js
+                        }
+                        _ => Default::default(),
+                    }
+                } else {
+                    js_script
                 };
 
                 match page_response.openai_credits_used.as_mut() {
@@ -812,7 +842,7 @@ pub async fn openai_request(
     Default::default()
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 /// The usage used from OpenAI.
 pub struct OpenAIUsage {
     /// The prompt tokens used.
@@ -904,34 +934,81 @@ pub async fn openai_request(
 
             // we need to slim down the content to fit the window.
             let resource = if output_tokens_count > max_tokens {
-                clean_html(&resource)
+                let r = clean_html(&resource);
+
+                if cfg!(feature = "openai_slim_fit") {
+                    r
+                } else {
+                    let max_tokens = crate::features::openai::calculate_max_tokens(
+                        &gpt_configs.model,
+                        gpt_configs.max_tokens,
+                        &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                        &r,
+                        &prompt,
+                    );
+                    let (tokens, prompt_tokens) = match core_bpe {
+                        Some(ref core_bpe) => (
+                            core_bpe.encode_with_special_tokens(&r),
+                            core_bpe.encode_with_special_tokens(&prompt),
+                        ),
+                        _ => (
+                            CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&r),
+                            CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
+                        ),
+                    };
+                    let output_tokens_count = tokens.len() + prompt_tokens.len();
+                    if output_tokens_count > max_tokens {
+                        clean_html_slim(&r)
+                    } else {
+                        r
+                    }
+                }
             } else {
                 resource
             };
 
             let mut tokens_used = OpenAIUsage::default();
+            let json_mode = gpt_configs.extra_ai_data;
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(&string_concat!("URL:", url, "\n", "HTML:", resource))
                 .build()
             {
                 Ok(resource_completion) => {
-                    let messages: Vec<async_openai::types::ChatCompletionRequestMessage> = vec![
-                        crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT.clone(),
-                        resource_completion.into(),
-                        match async_openai::types::ChatCompletionRequestUserMessageArgs::default()
+                    let mut messages: Vec<async_openai::types::ChatCompletionRequestMessage> =
+                        vec![crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT.clone()];
+
+                    if json_mode {
+                        messages.push(
+                            crate::features::openai::BROWSER_ACTIONS_SYSTEM_EXTRA_PROMPT.clone(),
+                        );
+                    }
+
+                    messages.push(resource_completion.into());
+
+                    if !prompt.is_empty() {
+                        messages.push(
+                            match async_openai::types::ChatCompletionRequestUserMessageArgs::default()
                             .content(prompt)
                             .build()
                         {
                             Ok(o) => o,
                             _ => Default::default(),
                         }
-                        .into(),
-                    ];
+                        .into()
+                        )
+                    }
 
                     let v = match gpt_base
                         .max_tokens(max_tokens.max(1) as u16)
                         .messages(messages)
+                        .response_format(async_openai::types::ChatCompletionResponseFormat {
+                            r#type: if json_mode {
+                                async_openai::types::ChatCompletionResponseFormatType::JsonObject
+                            } else {
+                                async_openai::types::ChatCompletionResponseFormatType::Text
+                            },
+                        })
                         .build()
                     {
                         Ok(request) => match CLIENT.chat().create(request).await {
@@ -945,7 +1022,7 @@ pub async fn openai_request(
                                         tokens_used.total_tokens = usage.total_tokens;
                                     }
                                     _ => (),
-                                }
+                                };
 
                                 match choice.as_mut() {
                                     Some(c) => match c.message.content.take() {
@@ -1001,7 +1078,7 @@ pub fn clean_html(html: &str) -> String {
 
 /// Clean the html removing css and js
 #[cfg(feature = "openai")]
-pub fn clean_html(html: &str) -> String {
+pub fn clean_html_base(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
     match rewrite_str(
         html,
@@ -1026,6 +1103,65 @@ pub fn clean_html(html: &str) -> String {
         Ok(r) => r,
         _ => clean_html_raw(html),
     }
+}
+
+/// Clean the HTML to slim fit GPT models. This removes base64 images from the prompt.
+#[cfg(feature = "openai")]
+pub fn clean_html_slim(html: &str) -> String {
+    use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+    match rewrite_str(
+        html,
+        RewriteStrSettings {
+            element_content_handlers: vec![
+                element!("script", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("style", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("svgs", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("img", |el| {
+                    if let Some(src) = el.get_attribute("src") {
+                        if src.starts_with("data:image") {
+                            el.remove();
+                        }
+                    }
+                    Ok(())
+                }),
+            ],
+            document_content_handlers: vec![doc_comments!(|c| {
+                c.remove();
+                Ok(())
+            })],
+            ..RewriteStrSettings::default()
+        },
+    ) {
+        Ok(r) => r,
+        _ => clean_html_raw(html),
+    }
+}
+
+/// Clean the html removing css and js
+#[cfg(all(feature = "openai", not(feature = "openai_slim_fit")))]
+pub fn clean_html(html: &str) -> String {
+    clean_html_base(html)
+}
+
+/// Clean the html removing css and js
+#[cfg(all(feature = "openai", feature = "openai_slim_fit"))]
+pub fn clean_html(html: &str) -> String {
+    clean_html_slim(html)
+}
+
+#[cfg(not(feature = "openai"))]
+/// Clean and remove all base64 images from the prompt.
+pub fn clean_html_slim(html: &str) -> String {
+    html.into()
 }
 
 /// Log to console if configuration verbose.
