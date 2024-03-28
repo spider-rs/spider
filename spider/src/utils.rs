@@ -1121,17 +1121,8 @@ pub fn clean_html_slim(html: &str) -> String {
                     el.remove();
                     Ok(())
                 }),
-                element!("svg", |el| {
+                element!("svgs", |el| {
                     el.remove();
-                    Ok(())
-                }),
-                element!("a", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(mut parsed_url) = url::Url::parse(&href) {
-                            parsed_url.set_query(None);
-                            el.set_attribute("href", &parsed_url.to_string()).unwrap();
-                        }
-                    }
                     Ok(())
                 }),
                 element!("img", |el| {
