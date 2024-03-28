@@ -890,7 +890,13 @@ impl Page {
                                                     }
                                                     _ => (),
                                                 }
-
+                                                if configuration.fingerprint {
+                                                    let _ = new_page
+                                                        .evaluate_on_new_document(
+                                                            &crate::features::chrome::FP_JS,
+                                                        )
+                                                        .await;
+                                                }
                                                 let new_page =
                                                     crate::features::chrome::configure_browser(
                                                         new_page,

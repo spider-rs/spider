@@ -2153,6 +2153,12 @@ impl Website {
                             _ => (),
                         }
 
+                        if self.configuration.fingerprint {
+                            let _ = new_page
+                                .evaluate_on_new_document(&crate::features::chrome::FP_JS)
+                                .await;
+                        }
+
                         let mut links: HashSet<CaseInsensitiveString> =
                             self.drain_extra_links().collect();
 
@@ -2994,7 +3000,11 @@ impl Website {
                                     }
                                     _ => (),
                                 }
-
+                                if self.configuration.fingerprint {
+                                    let _ = new_page
+                                        .evaluate_on_new_document(&crate::features::chrome::FP_JS)
+                                        .await;
+                                }
                                 let mut q = match &self.channel_queue {
                                     Some(q) => Some(q.0.subscribe()),
                                     _ => None,
@@ -3083,7 +3093,13 @@ impl Website {
                                                             }
                                                             _ => (),
                                                         }
-
+                                                        if shared.5.fingerprint {
+                                                            let _ = new_page
+                                                                .evaluate_on_new_document(
+                                                                    &crate::features::chrome::FP_JS,
+                                                                )
+                                                                .await;
+                                                        }
                                                         let new_page =
                                                             configure_browser(new_page, &shared.5)
                                                                 .await;
@@ -4149,6 +4165,12 @@ impl Website {
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);
+        self
+    }
+
+    /// Setup custom fingerprinting for chrome. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_fingerprint(&mut self, fingerprint: bool) -> &mut Self {
+        self.configuration.with_fingerprint(fingerprint);
         self
     }
 

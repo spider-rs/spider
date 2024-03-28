@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "1.88.6"
+version = "1.88.7"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -29,7 +29,7 @@ quote = "1.0.18"
 failure_derive = "0.1.8"
 
 [dependencies.spider]
-version = "1.88.6"
+version = "1.88.7"
 path = "../spider"
 
 [[bin]]

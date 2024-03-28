@@ -640,6 +640,9 @@ pub struct Configuration {
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
     pub openai_config: Option<GPTConfigs>,
+    /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
+    #[cfg(feature = "chrome")]
+    pub fingerprint: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -816,6 +819,19 @@ impl Configuration {
     #[cfg(not(feature = "cookies"))]
     /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
+    pub fn with_fingerprint(&mut self, fingerprint: bool) -> &mut Self {
+        self.fingerprint = fingerprint;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
+    pub fn with_fingerprint(&mut self, _fingerprint: bool) -> &mut Self {
         self
     }
 
