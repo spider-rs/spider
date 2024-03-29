@@ -3822,8 +3822,8 @@ impl Website {
                                                                                     &new_page,
                                                                                     &shared.3.wait_for,
                                                                                     &shared.3.screenshot,
-                                                                                    false
-
+                                                                                    false,
+                                                                                    &shared.3.openai_config
                                                                                 )
                                                                                 .await;
 
