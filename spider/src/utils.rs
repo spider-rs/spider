@@ -203,14 +203,48 @@ pub async fn page_wait(
 }
 
 #[derive(Debug, Default)]
-#[cfg(feature = "openai")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(feature = "openai")]
 /// The json response from OpenAI.
-struct JsonResponse {
+pub struct JsonResponse {
     /// The content returned.
     content: Vec<String>,
     /// The js script for the browser.
     js: String,
+}
+
+/// Handle the OpenAI credits used. This does nothing without 'openai' feature flag.
+#[cfg(feature = "openai")]
+pub fn handle_openai_credits(page_response: &mut PageResponse, tokens_used: OpenAIUsage) {
+    match page_response.openai_credits_used.as_mut() {
+        Some(v) => v.push(tokens_used),
+        None => page_response.openai_credits_used = Some(vec![tokens_used]),
+    };
+}
+
+#[cfg(not(feature = "openai"))]
+/// Handle the OpenAI credits used. This does nothing without 'openai' feature flag.
+pub fn handle_openai_credits(_page_response: &mut PageResponse, _tokens_used: OpenAIUsage) {}
+
+/// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
+#[cfg(feature = "openai")]
+pub fn handle_extra_ai_data(page_response: &mut PageResponse, js: &str) -> String {
+    match serde_json::from_str::<JsonResponse>(&js) {
+        Ok(x) => {
+            match page_response.extra_ai_data.as_mut() {
+                Some(v) => v.extend(x.content),
+                None => page_response.extra_ai_data = Some(x.content),
+            };
+            x.js
+        }
+        _ => Default::default(),
+    }
+}
+
+#[cfg(not(feature = "openai"))]
+/// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
+pub fn handle_extra_ai_data(_page_response: &mut PageResponse, _js: &str) -> String {
+    Default::default()
 }
 
 #[cfg(feature = "chrome")]
@@ -303,25 +337,12 @@ pub async fn fetch_page_html_chrome_base(
                 };
 
                 let js_script = if gpt_configs.extra_ai_data {
-                    match serde_json::from_str::<JsonResponse>(&js_script) {
-                        Ok(x) => {
-                            match page_response.extra_ai_data.as_mut() {
-                                Some(v) => v.extend(x.content),
-                                None => page_response.extra_ai_data = Some(x.content),
-                            };
-
-                            x.js
-                        }
-                        _ => Default::default(),
-                    }
+                    handle_extra_ai_data(&mut page_response, &js_script)
                 } else {
                     js_script
                 };
 
-                match page_response.openai_credits_used.as_mut() {
-                    Some(v) => v.push(tokens_used),
-                    None => page_response.openai_credits_used = Some(vec![tokens_used]),
-                };
+                handle_openai_credits(&mut page_response, tokens_used);
 
                 // perform the js script on the page.
                 if !js_script.is_empty() {

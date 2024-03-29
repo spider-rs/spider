@@ -99,12 +99,12 @@ pub extern crate compact_str;
 pub extern crate hashbrown;
 extern crate log;
 pub extern crate percent_encoding;
+pub extern crate quick_xml;
 pub extern crate reqwest;
 pub extern crate smallvec;
 pub extern crate tokio;
 pub extern crate tokio_stream;
 pub extern crate url;
-pub extern crate quick_xml;
 
 #[cfg(feature = "cron")]
 pub extern crate async_job;

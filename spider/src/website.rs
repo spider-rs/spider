@@ -2155,7 +2155,7 @@ impl Website {
 
                         if self.configuration.fingerprint {
                             let _ = new_page
-                                .evaluate_on_new_document(&crate::features::chrome::FP_JS)
+                                .evaluate_on_new_document(crate::features::chrome::FP_JS)
                                 .await;
                         }
 
@@ -3002,7 +3002,7 @@ impl Website {
                                 }
                                 if self.configuration.fingerprint {
                                     let _ = new_page
-                                        .evaluate_on_new_document(&crate::features::chrome::FP_JS)
+                                        .evaluate_on_new_document(crate::features::chrome::FP_JS)
                                         .await;
                                 }
                                 let mut q = match &self.channel_queue {
@@ -3096,7 +3096,7 @@ impl Website {
                                                         if shared.5.fingerprint {
                                                             let _ = new_page
                                                                 .evaluate_on_new_document(
-                                                                    &crate::features::chrome::FP_JS,
+                                                                    crate::features::chrome::FP_JS,
                                                                 )
                                                                 .await;
                                                         }

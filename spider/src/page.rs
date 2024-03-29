@@ -986,7 +986,7 @@ impl Page {
                                                     if configuration.fingerprint {
                                                         let _ = new_page
                                                             .evaluate_on_new_document(
-                                                                &crate::features::chrome::FP_JS,
+                                                                crate::features::chrome::FP_JS,
                                                             )
                                                             .await;
                                                     }
