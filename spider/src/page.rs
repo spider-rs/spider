@@ -686,6 +686,126 @@ impl Page {
         self.duration.elapsed()
     }
 
+    /// Validate link and push into the map
+    pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        href: &str,
+        map: &mut HashSet<A>,
+        base_domain: &CompactString,
+        parent_host: &CompactString,
+        parent_host_scheme: &CompactString,
+    ) {
+        let mut abs = self.abs_path(href);
+        let host_name = abs.host_str();
+        let mut can_process = parent_host_match(host_name, base_domain, parent_host);
+        let mut external_domain = false;
+
+        if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty() {
+            can_process = self
+                .external_domains_caseless
+                .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                || self
+                    .external_domains_caseless
+                    .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+            external_domain = can_process;
+        }
+
+        if can_process {
+            if abs.scheme() != parent_host_scheme.as_str() {
+                let _ = abs.set_scheme(parent_host_scheme.as_str());
+            }
+
+            let hchars = abs.path();
+
+            if let Some(position) = hchars.rfind('.') {
+                let resource_ext = &hchars[position + 1..hchars.len()];
+
+                if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
+                    can_process = false;
+                }
+            }
+
+            if can_process
+                && (base_domain.is_empty()
+                    || external_domain
+                    || base_domain.as_str() == domain_name(&abs))
+            {
+                map.insert(abs.as_str().to_string().into());
+            }
+        }
+    }
+
+    /// Find the links as a stream using string resource validation for XML files
+    pub async fn links_stream_xml_links_stream_base<
+        A: PartialEq + Eq + std::hash::Hash + From<String>,
+    >(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        xml: &str,
+        map: &mut HashSet<A>,
+    ) {
+        use quick_xml::events::Event;
+        use quick_xml::reader::NsReader;
+
+        let mut reader = NsReader::from_reader(xml.as_bytes());
+
+        reader.trim_text(true);
+
+        let mut buf = Vec::new();
+
+        let parent_host = &selectors.1[0];
+        let parent_host_scheme = &selectors.1[1];
+
+        let mut is_link_tag = false;
+
+        loop {
+            match reader.read_event_into_async(&mut buf).await {
+                Ok(e) => match e {
+                    Event::Start(e) => {
+                        let (_, local) = reader.resolve_element(e.name());
+                        match local.as_ref() {
+                            b"link" => {
+                                is_link_tag = true;
+                            }
+                            _ => (),
+                        }
+                    }
+                    Event::Text(e) => {
+                        if is_link_tag {
+                            match e.unescape() {
+                                Ok(v) => {
+                                    self.push_link(
+                                        &v,
+                                        map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                    );
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    Event::End(ref e) => {
+                        let (_, local) = reader.resolve_element(e.name());
+                        match local.as_ref() {
+                            b"link" => {
+                                is_link_tag = false;
+                            }
+                            _ => (),
+                        }
+                    }
+                    Event::Eof => {
+                        break;
+                    }
+                    _ => (),
+                },
+                _ => break,
+            }
+            buf.clear();
+        }
+    }
+
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
@@ -694,73 +814,39 @@ impl Page {
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         html: &str,
     ) -> HashSet<A> {
-        let html = Box::new(Html::parse_fragment(html));
-        let mut stream = tokio_stream::iter(html.tree);
         let mut map = HashSet::new();
 
-        let base_domain = &selectors.0;
-        let parent_frags = &selectors.1; // todo: allow mix match tpt
-        let parent_host = &parent_frags[0];
-        let parent_host_scheme = &parent_frags[1];
+        if html.starts_with("<?xml") {
+            self.links_stream_xml_links_stream_base(selectors, html, &mut map)
+                .await;
+        } else {
+            let html = Box::new(Html::parse_fragment(html));
+            let mut stream = tokio_stream::iter(html.tree);
 
-        while let Some(node) = stream.next().await {
-            if let Some(element) = node.as_element() {
-                if element.name() == "a" {
-                    match element.attr("href") {
-                        Some(href) => {
-                            let mut abs = self.abs_path(href);
-                            let host_name = abs.host_str();
-                            let mut can_process =
-                                parent_host_match(host_name, base_domain, parent_host);
-                            let mut external_domain = false;
+            let parent_host = &selectors.1[0];
+            let parent_host_scheme = &selectors.1[1];
 
-                            if !can_process
-                                && host_name.is_some()
-                                && !self.external_domains_caseless.is_empty()
-                            {
-                                can_process = self
-                                    .external_domains_caseless
-                                    .contains::<CaseInsensitiveString>(
-                                        &host_name.unwrap_or_default().into(),
-                                    )
-                                    || self
-                                        .external_domains_caseless
-                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                                external_domain = can_process;
+            while let Some(node) = stream.next().await {
+                if let Some(element) = node.as_element() {
+                    let element_name = element.name();
+
+                    if element_name == "a" {
+                        match element.attr("href") {
+                            Some(href) => {
+                                self.push_link(
+                                    href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                );
                             }
-
-                            if can_process {
-                                if abs.scheme() != parent_host_scheme.as_str() {
-                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                }
-
-                                let hchars = abs.path();
-
-                                if let Some(position) = hchars.rfind('.') {
-                                    let resource_ext = &hchars[position + 1..hchars.len()];
-
-                                    if !ONLY_RESOURCES
-                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
-                                    {
-                                        can_process = false;
-                                    }
-                                }
-
-                                if can_process
-                                    && (base_domain.is_empty()
-                                        || external_domain
-                                        || base_domain.as_str() == domain_name(&abs))
-                                {
-                                    map.insert(abs.as_str().to_string().into());
-                                }
-                            }
-                        }
-                        _ => (),
-                    };
+                            _ => (),
+                        };
+                    }
                 }
             }
         }
-
         map
     }
 
@@ -794,360 +880,198 @@ impl Page {
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
     ) -> HashSet<A> {
-        let base_domain = &selectors.0;
-        let parent_frags = &selectors.1; // todo: allow mix match tpt
-        let parent_host = &parent_frags[0];
-        let parent_host_scheme = &parent_frags[1];
-
         let mut map = HashSet::new();
-        let html = Box::new(Html::parse_document(&self.get_html()));
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let html = self.get_html();
 
-        let mut stream = tokio_stream::iter(html.tree);
-        let mut rerender = false;
-        let mut static_app = false;
-
-        while let Some(node) = stream.next().await {
-            if let Some(element) = node.as_element() {
-                let element_name = element.name();
-
-                // check scripts for non SSR/SSG pages. We need to check for lazy loading elements done by the static app for re-rendering.
-                if !static_app && element_name == "script" {
-                    match element.attr("src") {
-                        Some(src) => {
-                            if src.starts_with("/") {
-                                if src.starts_with("/_next/static/chunks/pages/")
-                                    || src.starts_with("/webpack-runtime-")
-                                    || element.attr("id") == Some("gatsby-chunk-mapping")
-                                {
-                                    static_app = true;
-                                    continue;
-                                }
-                                match self
-                                    .abs_path(src)
-                                    .path_segments()
-                                    .ok_or_else(|| "cannot be base")
-                                {
-                                    Ok(mut paths) => {
-                                        while let Some(p) = paths.next() {
-                                            // todo: get the path last before None instead of checking for ends_with
-                                            if p.ends_with(".js")
-                                                && JS_FRAMEWORK_ASSETS.contains(&p)
-                                            {
-                                                rerender = true;
-                                            } else {
-                                                match node.as_text() {
-                                                    Some(text) => {
-                                                        lazy_static! {
-                                                            static ref DOM_WATCH_METHODS: regex::RegexSet = {
-                                                                let set = unsafe {
-                                                                    regex::RegexSet::new(&[
-                                                                        r"/.createElementNS/gm",
-                                                                        r"/.removeChild/gm",
-                                                                        r"/.insertBefore/gm",
-                                                                        r"/.createElement/gm",
-                                                                        r"/.setAttribute/gm",
-                                                                        r"/.createTextNode/gm",
-                                                                        r"/.replaceChildren/gm",
-                                                                        r"/.prepend/gm",
-                                                                        r"/.append/gm",
-                                                                        r"/.appendChild/gm",
-                                                                        r"/.write/gm",
-                                                                    ])
-                                                                    .unwrap_unchecked()
-                                                                };
-
-                                                                set
-                                                            };
-                                                        }
-                                                        rerender = DOM_WATCH_METHODS.is_match(text);
-                                                    }
-                                                    _ => (),
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                };
-
-                                if rerender {
-                                    // we should re-use the html content instead with events.
-                                    let uu = self.get_html();
-                                    let browser = browser.to_owned();
-                                    let configuration = configuration.clone();
-
-                                    tokio::task::spawn(async move {
-                                        // we need to use about:blank here since we set the HTML content directly
-                                        match browser.new_page("about:blank").await {
-                                            Ok(new_page) => {
-                                                match configuration.evaluate_on_new_document {
-                                                    Some(ref script) => {
-                                                        let _ = new_page
-                                                            .evaluate_on_new_document(
-                                                                script.as_str(),
-                                                            )
-                                                            .await;
-                                                    }
-                                                    _ => (),
-                                                }
-                                                if configuration.fingerprint {
-                                                    let _ = new_page
-                                                        .evaluate_on_new_document(
-                                                            &crate::features::chrome::FP_JS,
-                                                        )
-                                                        .await;
-                                                }
-                                                let new_page =
-                                                    crate::features::chrome::configure_browser(
-                                                        new_page,
-                                                        &configuration,
-                                                    )
-                                                    .await;
-
-                                                if cfg!(feature = "chrome_stealth")
-                                                    || configuration.stealth_mode
-                                                {
-                                                    let _ = new_page
-                                                        .enable_stealth_mode_with_agent(
-                                                            &if configuration.user_agent.is_some() {
-                                                                &configuration
-                                                                    .user_agent
-                                                                    .as_ref()
-                                                                    .unwrap()
-                                                                    .as_str()
-                                                            } else {
-                                                                ""
-                                                            },
-                                                        );
-                                                }
-
-                                                let page_resource =
-                                                    crate::utils::fetch_page_html_chrome_base(
-                                                        &uu,
-                                                        &new_page,
-                                                        true,
-                                                        false,
-                                                        &Some(crate::configuration::WaitFor::new(
-                                                            Some(
-                                                                core::time::Duration::from_secs(
-                                                                    120,
-                                                                ), // default a duration for smart handling. (maybe expose later on.)
-                                                            ),
-                                                            None,
-                                                            true,
-                                                            true,
-                                                            None,
-                                                        )),
-                                                        &configuration.screenshot,
-                                                        false,
-                                                        &configuration.openai_config,
-                                                    )
-                                                    .await;
-
-                                                match page_resource {
-                                                    Ok(resource) => {
-                                                        if let Err(_) = tx.send(resource) {
-                                                            crate::utils::log(
-                                                                "the receiver dropped",
-                                                                "",
-                                                            );
-                                                        }
-                                                    }
-                                                    _ => (),
-                                                };
-                                            }
-                                            _ => (),
-                                        }
-                                    });
-
-                                    break;
-                                }
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-
-                if element_name == "a" {
-                    // add fullresources?
-                    match element.attr("href") {
-                        Some(href) => {
-                            let mut abs = self.abs_path(href);
-                            let host_name = abs.host_str();
-                            let mut can_process =
-                                parent_host_match(host_name, &base_domain, parent_host);
-
-                            if can_process {
-                                if abs.scheme() != parent_host_scheme.as_str() {
-                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                }
-                                let hchars = abs.path();
-
-                                if let Some(position) = hchars.rfind('.') {
-                                    let resource_ext = &hchars[position + 1..hchars.len()];
-
-                                    if !ONLY_RESOURCES
-                                        .contains::<CaseInsensitiveString>(&resource_ext.into())
-                                    {
-                                        can_process = false;
-                                    }
-                                }
-
-                                if can_process
-                                    && (base_domain.is_empty()
-                                        || base_domain.as_str() == domain_name(&abs))
-                                {
-                                    map.insert(abs.as_str().to_string().into());
-                                }
-                            }
-                        }
-                        _ => (),
-                    };
-                }
-            }
-        }
-
-        if rerender {
-            drop(stream);
-            match rx.await {
-                Ok(v) => {
-                    let extended_map = self
-                        .links_stream_base::<A>(
-                            selectors,
-                            &match v.content {
-                                Some(h) => String::from_utf8_lossy(&h).to_string(),
-                                _ => Default::default(),
-                            },
-                        )
-                        .await;
-                    map.extend(extended_map)
-                }
-                Err(e) => {
-                    crate::utils::log("receiver error", e.to_string());
-                }
-            };
-        }
-
-        map
-    }
-
-    /// Find the links as a stream using string resource validation
-    #[cfg(all(
-        not(feature = "decentralized"),
-        not(feature = "full_resources"),
-        not(feature = "smart"),
-        feature = "js"
-    ))]
-    #[inline(always)]
-    pub async fn links_stream<
-        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
-    >(
-        &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
-    ) -> HashSet<A> {
-        use jsdom::extract::extract_links;
-
-        let base_domain = &selectors.0;
-        let parent_frags = &selectors.1; // todo: allow mix match tpt
-        let parent_host = &parent_frags[0];
-        let parent_host_scheme = &parent_frags[1];
-
-        let mut map = HashSet::new();
-        let html = Box::new(self.get_html());
-
-        if !base_domain.is_empty() && !html.starts_with("<") {
-            let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
-            let mut stream = tokio_stream::iter(&links);
-
-            while let Some(href) = stream.next().await {
-                let mut abs = self.abs_path(href.inner());
-                let host_name = abs.host_str();
-                let mut can_process = parent_host_match(host_name, &base_domain, parent_host);
-                let mut external_domain = false;
-
-                if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
-                {
-                    can_process = self
-                        .external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into());
-                    external_domain = can_process;
-                }
-
-                if can_process {
-                    if abs.scheme() != parent_host_scheme.as_str() {
-                        let _ = abs.set_scheme(parent_host_scheme.as_str());
-                    }
-                    let hchars = abs.path();
-
-                    if let Some(position) = hchars.rfind('.') {
-                        let resource_ext = &hchars[position + 1..hchars.len()];
-
-                        if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
-                            can_process = false;
-                        }
-                    }
-
-                    if can_process
-                        && (base_domain.is_empty()
-                            || external_domain
-                            || base_domain.as_str() == domain_name(&abs))
-                    {
-                        map.insert(abs.as_str().to_string().into());
-                    }
-                }
-            }
+        if html.starts_with("<?xml") {
+            self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
+                .await;
         } else {
+            let base_domain = &selectors.0;
+            let parent_frags = &selectors.1; // todo: allow mix match tpt
+            let parent_host = &parent_frags[0];
+            let parent_host_scheme = &parent_frags[1];
+
             let html = Box::new(Html::parse_document(&html));
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
             let mut stream = tokio_stream::iter(html.tree);
+            let mut rerender = false;
+            let mut static_app = false;
 
             while let Some(node) = stream.next().await {
                 if let Some(element) = node.as_element() {
                     let element_name = element.name();
 
-                    if element_name == "script" {
+                    // check scripts for non SSR/SSG pages. We need to check for lazy loading elements done by the static app for re-rendering.
+                    if !static_app && element_name == "script" {
                         match element.attr("src") {
                             Some(src) => {
-                                if src.starts_with("/")
-                                    && element.attr("id") != Some("gatsby-chunk-mapping")
-                                {
-                                    // check special framework paths todo: customize path segments to build for framework
-                                    // IGNORE: next.js pre-rendering pages since html is already rendered
-                                    if !src.starts_with("/_next/static/chunks/pages/")
-                                        && !src.starts_with("/webpack-runtime-")
+                                if src.starts_with("/") {
+                                    if src.starts_with("/_next/static/chunks/pages/")
+                                        || src.starts_with("/webpack-runtime-")
+                                        || element.attr("id") == Some("gatsby-chunk-mapping")
                                     {
-                                        let abs = self.abs_path(src);
-                                        // determine if script can run
-                                        let mut insertable = true;
+                                        static_app = true;
+                                        continue;
+                                    }
+                                    match self
+                                        .abs_path(src)
+                                        .path_segments()
+                                        .ok_or_else(|| "cannot be base")
+                                    {
+                                        Ok(mut paths) => {
+                                            while let Some(p) = paths.next() {
+                                                // todo: get the path last before None instead of checking for ends_with
+                                                if p.ends_with(".js")
+                                                    && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                {
+                                                    rerender = true;
+                                                } else {
+                                                    match node.as_text() {
+                                                        Some(text) => {
+                                                            lazy_static! {
+                                                                static ref DOM_WATCH_METHODS: regex::RegexSet = {
+                                                                    let set = unsafe {
+                                                                        regex::RegexSet::new(&[
+                                                                            r"/.createElementNS/gm",
+                                                                            r"/.removeChild/gm",
+                                                                            r"/.insertBefore/gm",
+                                                                            r"/.createElement/gm",
+                                                                            r"/.setAttribute/gm",
+                                                                            r"/.createTextNode/gm",
+                                                                            r"/.replaceChildren/gm",
+                                                                            r"/.prepend/gm",
+                                                                            r"/.append/gm",
+                                                                            r"/.appendChild/gm",
+                                                                            r"/.write/gm",
+                                                                        ])
+                                                                        .unwrap_unchecked()
+                                                                    };
 
-                                        match abs.path_segments().ok_or_else(|| "cannot be base") {
-                                            Ok(mut paths) => {
-                                                while let Some(p) = paths.next() {
-                                                    // todo: get the path last before None instead of checking for ends_with
-                                                    if p.ends_with(".js")
-                                                        && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                    {
-                                                        insertable = false;
+                                                                    set
+                                                                };
+                                                            }
+                                                            rerender =
+                                                                DOM_WATCH_METHODS.is_match(text);
+                                                        }
+                                                        _ => (),
                                                     }
                                                 }
                                             }
-                                            _ => (),
-                                        };
-
-                                        if insertable {
-                                            map.insert(abs.as_str().to_string().into());
                                         }
+                                        _ => (),
+                                    };
+
+                                    if rerender {
+                                        // we should re-use the html content instead with events.
+                                        let uu = self.get_html();
+                                        let browser = browser.to_owned();
+                                        let configuration = configuration.clone();
+
+                                        tokio::task::spawn(async move {
+                                            // we need to use about:blank here since we set the HTML content directly
+                                            match browser.new_page("about:blank").await {
+                                                Ok(new_page) => {
+                                                    match configuration.evaluate_on_new_document {
+                                                        Some(ref script) => {
+                                                            let _ = new_page
+                                                                .evaluate_on_new_document(
+                                                                    script.as_str(),
+                                                                )
+                                                                .await;
+                                                        }
+                                                        _ => (),
+                                                    }
+                                                    if configuration.fingerprint {
+                                                        let _ = new_page
+                                                            .evaluate_on_new_document(
+                                                                &crate::features::chrome::FP_JS,
+                                                            )
+                                                            .await;
+                                                    }
+                                                    let new_page =
+                                                        crate::features::chrome::configure_browser(
+                                                            new_page,
+                                                            &configuration,
+                                                        )
+                                                        .await;
+
+                                                    if cfg!(feature = "chrome_stealth")
+                                                        || configuration.stealth_mode
+                                                    {
+                                                        let _ = new_page
+                                                            .enable_stealth_mode_with_agent(
+                                                                &if configuration
+                                                                    .user_agent
+                                                                    .is_some()
+                                                                {
+                                                                    &configuration
+                                                                        .user_agent
+                                                                        .as_ref()
+                                                                        .unwrap()
+                                                                        .as_str()
+                                                                } else {
+                                                                    ""
+                                                                },
+                                                            );
+                                                    }
+
+                                                    let page_resource =
+                                                        crate::utils::fetch_page_html_chrome_base(
+                                                            &uu,
+                                                            &new_page,
+                                                            true,
+                                                            false,
+                                                            &Some(crate::configuration::WaitFor::new(
+                                                                Some(
+                                                                    core::time::Duration::from_secs(
+                                                                        120,
+                                                                    ), // default a duration for smart handling. (maybe expose later on.)
+                                                                ),
+                                                                None,
+                                                                true,
+                                                                true,
+                                                                None,
+                                                            )),
+                                                            &configuration.screenshot,
+                                                            false,
+                                                            &configuration.openai_config,
+                                                        )
+                                                        .await;
+
+                                                    match page_resource {
+                                                        Ok(resource) => {
+                                                            if let Err(_) = tx.send(resource) {
+                                                                crate::utils::log(
+                                                                    "the receiver dropped",
+                                                                    "",
+                                                                );
+                                                            }
+                                                        }
+                                                        _ => (),
+                                                    };
+                                                }
+                                                _ => (),
+                                            }
+                                        });
+
+                                        break;
                                     }
                                 }
                             }
                             _ => (),
                         }
                     }
+
                     if element_name == "a" {
+                        // add fullresources?
                         match element.attr("href") {
                             Some(href) => {
                                 let mut abs = self.abs_path(href);
+                                let host_name = abs.host_str();
                                 let mut can_process =
-                                    parent_host_match(abs.host_str(), &base_domain, parent_host);
+                                    parent_host_match(host_name, &base_domain, parent_host);
 
                                 if can_process {
                                     if abs.scheme() != parent_host_scheme.as_str() {
@@ -1178,7 +1102,198 @@ impl Page {
                     }
                 }
             }
+
+            if rerender {
+                drop(stream);
+                match rx.await {
+                    Ok(v) => {
+                        let extended_map = self
+                            .links_stream_base::<A>(
+                                selectors,
+                                &match v.content {
+                                    Some(h) => String::from_utf8_lossy(&h).to_string(),
+                                    _ => Default::default(),
+                                },
+                            )
+                            .await;
+                        map.extend(extended_map)
+                    }
+                    Err(e) => {
+                        crate::utils::log("receiver error", e.to_string());
+                    }
+                };
+            }
         }
+
+        map
+    }
+
+    /// Find the links as a stream using string resource validation
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "full_resources"),
+        not(feature = "smart"),
+        feature = "js"
+    ))]
+    #[inline(always)]
+    pub async fn links_stream<
+        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
+    >(
+        &self,
+        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+    ) -> HashSet<A> {
+        use jsdom::extract::extract_links;
+
+        let mut map = HashSet::new();
+        let html = Box::new(self.get_html());
+
+        if html.starts_with("<?xml") {
+            self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
+                .await;
+        } else {
+            let base_domain = &selectors.0;
+            let parent_frags = &selectors.1; // todo: allow mix match tpt
+            let parent_host = &parent_frags[0];
+            let parent_host_scheme = &parent_frags[1];
+
+            if !base_domain.is_empty() && !html.starts_with("<") {
+                let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
+                let mut stream = tokio_stream::iter(&links);
+
+                while let Some(href) = stream.next().await {
+                    let mut abs = self.abs_path(href.inner());
+                    let host_name = abs.host_str();
+                    let mut can_process = parent_host_match(host_name, &base_domain, parent_host);
+                    let mut external_domain = false;
+
+                    if !can_process
+                        && host_name.is_some()
+                        && !self.external_domains_caseless.is_empty()
+                    {
+                        can_process = self
+                            .external_domains_caseless
+                            .contains::<CaseInsensitiveString>(
+                                &host_name.unwrap_or_default().into(),
+                            );
+                        external_domain = can_process;
+                    }
+
+                    if can_process {
+                        if abs.scheme() != parent_host_scheme.as_str() {
+                            let _ = abs.set_scheme(parent_host_scheme.as_str());
+                        }
+                        let hchars = abs.path();
+
+                        if let Some(position) = hchars.rfind('.') {
+                            let resource_ext = &hchars[position + 1..hchars.len()];
+
+                            if !ONLY_RESOURCES
+                                .contains::<CaseInsensitiveString>(&resource_ext.into())
+                            {
+                                can_process = false;
+                            }
+                        }
+
+                        if can_process
+                            && (base_domain.is_empty()
+                                || external_domain
+                                || base_domain.as_str() == domain_name(&abs))
+                        {
+                            map.insert(abs.as_str().to_string().into());
+                        }
+                    }
+                }
+            } else {
+                let html = Box::new(Html::parse_document(&html));
+                let mut stream = tokio_stream::iter(html.tree);
+
+                while let Some(node) = stream.next().await {
+                    if let Some(element) = node.as_element() {
+                        let element_name = element.name();
+
+                        if element_name == "script" {
+                            match element.attr("src") {
+                                Some(src) => {
+                                    if src.starts_with("/")
+                                        && element.attr("id") != Some("gatsby-chunk-mapping")
+                                    {
+                                        // check special framework paths todo: customize path segments to build for framework
+                                        // IGNORE: next.js pre-rendering pages since html is already rendered
+                                        if !src.starts_with("/_next/static/chunks/pages/")
+                                            && !src.starts_with("/webpack-runtime-")
+                                        {
+                                            let abs = self.abs_path(src);
+                                            // determine if script can run
+                                            let mut insertable = true;
+
+                                            match abs
+                                                .path_segments()
+                                                .ok_or_else(|| "cannot be base")
+                                            {
+                                                Ok(mut paths) => {
+                                                    while let Some(p) = paths.next() {
+                                                        // todo: get the path last before None instead of checking for ends_with
+                                                        if p.ends_with(".js")
+                                                            && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                        {
+                                                            insertable = false;
+                                                        }
+                                                    }
+                                                }
+                                                _ => (),
+                                            };
+
+                                            if insertable {
+                                                map.insert(abs.as_str().to_string().into());
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+                        if element_name == "a" {
+                            match element.attr("href") {
+                                Some(href) => {
+                                    let mut abs = self.abs_path(href);
+                                    let mut can_process = parent_host_match(
+                                        abs.host_str(),
+                                        &base_domain,
+                                        parent_host,
+                                    );
+
+                                    if can_process {
+                                        if abs.scheme() != parent_host_scheme.as_str() {
+                                            let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                        }
+                                        let hchars = abs.path();
+
+                                        if let Some(position) = hchars.rfind('.') {
+                                            let resource_ext = &hchars[position + 1..hchars.len()];
+
+                                            if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(
+                                                &resource_ext.into(),
+                                            ) {
+                                                can_process = false;
+                                            }
+                                        }
+
+                                        if can_process
+                                            && (base_domain.is_empty()
+                                                || base_domain.as_str() == domain_name(&abs))
+                                        {
+                                            map.insert(abs.as_str().to_string().into());
+                                        }
+                                    }
+                                }
+                                _ => (),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
         map
     }
 
@@ -1188,74 +1303,78 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        let html = Box::new(crate::packages::scraper::Html::parse_document(
-            &self.get_html(),
-        ));
-        let mut stream = tokio_stream::iter(html.tree);
         let mut map = HashSet::new();
+        let html = self.get_html();
 
-        let base_domain = &selectors.0;
-        let parent_frags = &selectors.1; // todo: allow mix match tpt
-        let parent_host = &parent_frags[0];
-        let parent_host_scheme = &parent_frags[1];
+        if html.starts_with("<?xml") {
+            self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
+                .await;
+        } else {
+            let html = Box::new(crate::packages::scraper::Html::parse_document(&html));
+            let mut stream = tokio_stream::iter(html.tree);
 
-        while let Some(node) = stream.next().await {
-            if let Some(element) = node.as_element() {
-                let element_name = element.name();
+            let base_domain = &selectors.0;
+            let parent_frags = &selectors.1; // todo: allow mix match tpt
+            let parent_host = &parent_frags[0];
+            let parent_host_scheme = &parent_frags[1];
 
-                let ele_attribute = if element_name == "a" || element_name == "link" {
-                    "href"
-                } else if element_name == "script" {
-                    "src"
-                } else {
-                    "href"
-                };
+            while let Some(node) = stream.next().await {
+                if let Some(element) = node.as_element() {
+                    let element_name = element.name();
 
-                match element.attr(ele_attribute) {
-                    Some(href) => {
-                        let mut abs = self.abs_path(href);
-                        let host_name = abs.host_str();
-                        let mut can_process =
-                            parent_host_match(host_name, base_domain, parent_host);
+                    let ele_attribute = if element_name == "a" || element_name == "link" {
+                        "href"
+                    } else if element_name == "script" {
+                        "src"
+                    } else {
+                        "href"
+                    };
 
-                        let mut external_domain = false;
+                    match element.attr(ele_attribute) {
+                        Some(href) => {
+                            let mut abs = self.abs_path(href);
+                            let host_name = abs.host_str();
+                            let mut can_process =
+                                parent_host_match(host_name, base_domain, parent_host);
 
-                        if !can_process
-                            && host_name.is_some()
-                            && !self.external_domains_caseless.is_empty()
-                        {
-                            can_process = self
-                                .external_domains_caseless
-                                .contains::<CaseInsensitiveString>(
-                                    &host_name.unwrap_or_default().into(),
-                                )
-                                || self
-                                    .external_domains_caseless
-                                    .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                            external_domain = can_process;
-                        }
+                            let mut external_domain = false;
 
-                        if can_process {
-                            if abs.scheme() != parent_host_scheme.as_str() {
-                                let _ = abs.set_scheme(parent_host_scheme.as_str());
-                            }
-
-                            let h = abs.as_str();
-
-                            if can_process
-                                && (base_domain.is_empty()
-                                    || external_domain
-                                    || base_domain.as_str() == domain_name(&abs))
+                            if !can_process
+                                && host_name.is_some()
+                                && !self.external_domains_caseless.is_empty()
                             {
-                                map.insert(h.to_string().into());
+                                can_process = self
+                                    .external_domains_caseless
+                                    .contains::<CaseInsensitiveString>(
+                                        &host_name.unwrap_or_default().into(),
+                                    )
+                                    || self
+                                        .external_domains_caseless
+                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+                                external_domain = can_process;
+                            }
+
+                            if can_process {
+                                if abs.scheme() != parent_host_scheme.as_str() {
+                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                }
+
+                                let h = abs.as_str();
+
+                                if can_process
+                                    && (base_domain.is_empty()
+                                        || external_domain
+                                        || base_domain.as_str() == domain_name(&abs))
+                                {
+                                    map.insert(h.to_string().into());
+                                }
                             }
                         }
-                    }
-                    _ => (),
-                };
+                        _ => (),
+                    };
+                }
             }
         }
-
         map
     }
 

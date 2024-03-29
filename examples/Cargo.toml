@@ -59,6 +59,11 @@ path = "subscribe.rs"
 required-features = ["spider/sync"]
 
 [[example]]
+name = "rss"
+path = "rss.rs"
+required-features = ["spider/sync"]
+
+[[example]]
 name = "callback"
 path = "callback.rs"
 

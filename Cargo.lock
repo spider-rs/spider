@@ -2552,6 +2552,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
+dependencies = [
+ "memchr",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "quinn"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3329,7 +3340,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.88.7"
+version = "1.89.1"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3357,6 +3368,7 @@ dependencies = [
  "napi",
  "num_cpus",
  "percent-encoding",
+ "quick-xml",
  "regex",
  "reqwest",
  "reqwest-middleware",
@@ -3378,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.88.7"
+version = "1.89.1"
 dependencies = [
  "clap",
  "env_logger",
@@ -3401,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.88.7"
+version = "1.89.1"
 dependencies = [
  "env_logger",
  "lazy_static",
