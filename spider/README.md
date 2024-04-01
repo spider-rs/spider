@@ -99,8 +99,7 @@ spider = { version = "1.89.5", features = ["regex", "ua_generator"] }
 1. `ua_generator`: Enables auto generating a random real User-Agent.
 1. `regex`: Enables blacklisting paths with regx
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
-1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md)
-   startup before crawls.
+1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
 1. `sync`: Subscribe to changes for Page data processing async. [Enabled by default]
 1. `budget`: Allows setting a crawl budget per path with depth.
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.
@@ -116,9 +115,7 @@ spider = { version = "1.89.5", features = ["regex", "ua_generator"] }
 1. `cache_mem`: Enables HTTP caching request to persist in memory.
 1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 1. `chrome_store_page`: Store the page object to perform other actions. The page may be closed.
-1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/
-   directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env
-   var `SCREENSHOT_OMIT_BACKGROUND` to false.
+1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env var `SCREENSHOT_OMIT_BACKGROUND` to false.
 1. `chrome_headed`: Enables chrome rendering headful rendering.
 1. `chrome_headless_new`: Use headless=new to launch the browser.
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
@@ -127,22 +124,15 @@ spider = { version = "1.89.5", features = ["regex", "ua_generator"] }
 1. `cookies`: Enables cookies storing and setting to use for request.
 1. `real_browser`: Enables the ability to bypass cloudflare protected pages.
 1. `cron`: Enables the ability to start cron jobs for the website.
-1. `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env
-   var `OPENAI_API_KEY`.
-1. `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending
-   multiple network request by re-using the content.
+1. `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env var `OPENAI_API_KEY`.
+1. `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 1. `encoding`: Enables handling the content with different encodings like Shift_JIS.
-1. `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page
-   struct.
-1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of
-   IO.
-   This is needed if `headers` is set in both [spider](../spider/README.md)
-   and [spider_worker](../spider_worker/README.md).
+1. `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
+1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
 
 ### Decentralization
 
-Move processing to a worker, drastically increases performance even if worker is on the same machine due to efficient
-runtime split IO work.
+Move processing to a worker, drastically increases performance even if worker is on the same machine due to efficient runtime split IO work.
 
 ```toml
 [dependencies]
@@ -158,8 +148,7 @@ RUST_LOG=info SPIDER_WORKER_PORT=3030 spider_worker
 SPIDER_WORKER=http://127.0.0.1:3030 cargo run --example example --features decentralized
 ```
 
-The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag
-is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
+The `SPIDER_WORKER` env variable takes a comma seperated list of urls to set the workers. If the `scrape` feature flag is enabled, use the `SPIDER_WORKER_SCRAPER` env variable to determine the scraper worker.
 
 ### Handling headers with decentralisation
 
@@ -339,9 +328,7 @@ async fn main() {
 
 ### Chrome
 
-Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is
-launched on the system. You do not need a chrome installation if you are connecting remotely. If you are not scraping
-content for downloading use
+Connecting to Chrome can be done using the ENV variable `CHROME_URL`, if no connection is found a new browser is launched on the system. You do not need a chrome installation if you are connecting remotely. If you are not scraping content for downloading use
 the feature flag [`chrome_intercept`] to possibly speed up request using Network Interception.
 
 ```toml
@@ -349,8 +336,7 @@ the feature flag [`chrome_intercept`] to possibly speed up request using Network
 spider = { version = "1.89.5", features = ["chrome", "chrome_intercept"] }
 ```
 
-You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature
-flag `chrome_headed` to enable headful browser usage if needed to debug.
+You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
 
 ```rust
 extern crate spider;
@@ -404,8 +390,7 @@ async fn main() {
 
 ### Smart Mode
 
-Intelligently run crawls using HTTP and JavaScript Rendering when needed. The best of both worlds to maintain speed and
-extract every page. This requires a chrome connection or browser installed on the system.
+Intelligently run crawls using HTTP and JavaScript Rendering when needed. The best of both worlds to maintain speed and extract every page. This requires a chrome connection or browser installed on the system.
 
 ```toml
 [dependencies]
