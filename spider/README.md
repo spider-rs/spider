@@ -128,7 +128,8 @@ spider = { version = "1.89.5", features = ["regex", "ua_generator"] }
 1. `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 1. `encoding`: Enables handling the content with different encodings like Shift_JIS.
 1. `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
-1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
+1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. 
+This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
 
 ### Decentralization
 
