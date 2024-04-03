@@ -48,7 +48,7 @@ pub struct GPTConfigs {
     pub model: String,
     /// The max tokens to use for the request.
     pub max_tokens: u16,
-    /// Prompts to use for certain urls.
+    /// Prompts to use for certain urls. If this is set only the urls that match exactly are ran.
     pub prompt_url_map:
         Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, Self>>,
     /// The temperature between 0 - 2.
@@ -59,6 +59,8 @@ pub struct GPTConfigs {
     pub top_p: Option<f32>,
     /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
     pub extra_ai_data: bool,
+    /// Map to paths. If the prompt_url_map has a key called /blog and all blog pages are found like /blog/something the same prompt is perform unless an exact match is found.
+    pub paths_map: bool,
 }
 
 impl GPTConfigs {

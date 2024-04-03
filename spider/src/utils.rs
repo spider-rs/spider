@@ -310,71 +310,86 @@ pub async fn fetch_page_html_chrome_base(
     match &openai_config {
         Some(gpt_configs) => {
             let gpt_configs = match gpt_configs.prompt_url_map {
-                Some(ref h) => h
-                    .get(&case_insensitive_string::CaseInsensitiveString::new(
-                        target_url,
-                    ))
-                    .unwrap_or(gpt_configs),
-                _ => gpt_configs,
+                Some(ref h) => {
+                    let c =
+                        h.get::<case_insensitive_string::CaseInsensitiveString>(&target_url.into());
+
+                    if !c.is_some() && gpt_configs.paths_map {
+                        match url::Url::parse(target_url) {
+                            Ok(u) => h.get::<case_insensitive_string::CaseInsensitiveString>(
+                                &u.path().into(),
+                            ),
+                            _ => None,
+                        }
+                    } else {
+                        c
+                    }
+                }
+                _ => Some(gpt_configs),
             };
 
-            let mut prompts = gpt_configs.prompt.clone();
+            match gpt_configs {
+                Some(gpt_configs) => {
+                    let mut prompts = gpt_configs.prompt.clone();
 
-            while let Some(prompt) = prompts.next() {
-                let (js_script, tokens_used) = if !gpt_configs.model.is_empty() && ok {
-                    crate::utils::openai_request(
-                        gpt_configs,
-                        match page_response.content.as_ref() {
-                            Some(html) => String::from_utf8_lossy(html).to_string(),
-                            _ => Default::default(),
-                        },
-                        &target_url,
-                        &prompt,
-                    )
-                    .await
-                } else {
-                    Default::default()
-                };
-
-                let js_script = if gpt_configs.extra_ai_data {
-                    handle_extra_ai_data(&mut page_response, &js_script)
-                } else {
-                    js_script
-                };
-
-                handle_openai_credits(&mut page_response, tokens_used);
-
-                // perform the js script on the page.
-                if !js_script.is_empty() {
-                    let html: Option<bytes::Bytes> = match page
-                        .evaluate_function(string_concat!(
-                            "async function() { ",
-                            js_script,
-                            "; return document.documentElement.outerHTML; }"
-                        ))
-                        .await
-                    {
-                        Ok(h) => match h.into_value() {
-                            Ok(hh) => Some(hh),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-
-                    if html.is_some() {
-                        page_wait(&page, &wait_for).await;
-                        if js_script.len() <= 400 && js_script.contains("window.location") {
-                            match page.content_bytes().await {
-                                Ok(b) => {
-                                    page_response.content = Some(b);
-                                }
-                                _ => (),
-                            }
+                    while let Some(prompt) = prompts.next() {
+                        let (js_script, tokens_used) = if !gpt_configs.model.is_empty() && ok {
+                            crate::utils::openai_request(
+                                gpt_configs,
+                                match page_response.content.as_ref() {
+                                    Some(html) => String::from_utf8_lossy(html).to_string(),
+                                    _ => Default::default(),
+                                },
+                                &target_url,
+                                &prompt,
+                            )
+                            .await
                         } else {
-                            page_response.content = html;
+                            Default::default()
+                        };
+
+                        let js_script = if gpt_configs.extra_ai_data {
+                            handle_extra_ai_data(&mut page_response, &js_script)
+                        } else {
+                            js_script
+                        };
+
+                        handle_openai_credits(&mut page_response, tokens_used);
+
+                        // perform the js script on the page.
+                        if !js_script.is_empty() {
+                            let html: Option<bytes::Bytes> = match page
+                                .evaluate_function(string_concat!(
+                                    "async function() { ",
+                                    js_script,
+                                    "; return document.documentElement.outerHTML; }"
+                                ))
+                                .await
+                            {
+                                Ok(h) => match h.into_value() {
+                                    Ok(hh) => Some(hh),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+
+                            if html.is_some() {
+                                page_wait(&page, &wait_for).await;
+                                if js_script.len() <= 400 && js_script.contains("window.location") {
+                                    match page.content_bytes().await {
+                                        Ok(b) => {
+                                            page_response.content = Some(b);
+                                        }
+                                        _ => (),
+                                    }
+                                } else {
+                                    page_response.content = html;
+                                }
+                            }
                         }
                     }
                 }
+                _ => (),
             }
         }
         _ => (),

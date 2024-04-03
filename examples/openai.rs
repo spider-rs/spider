@@ -11,25 +11,30 @@ use spider::{tokio, CaseInsensitiveString};
 #[tokio::main]
 async fn main() {
     let _ = tokio::fs::create_dir_all("./storage/").await;
-
     let screenshot_params =
         spider::configuration::ScreenshotParams::new(Default::default(), Some(true), Some(false));
-    // params that handle the way to take screenshots
     let screenshot_config =
         spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
 
-    let mut gpt_config = GPTConfigs::new("gpt-4-1106-preview", "Search for Movies", 500);
+    let website_url = "https://www.google.com";
 
-    let mut prompt_url_map = HashMap::new();
-
-    prompt_url_map.insert(
-        CaseInsensitiveString::new("https://www.google.com/search/howsearchworks/?fg=1"),
-        GPTConfigs::new("gpt-4-1106-preview", "Change the background blue", 500),
-    );
+    let mut gpt_config = GPTConfigs::default();
+    let prompt_url_map = HashMap::from([
+        (
+            CaseInsensitiveString::new(website_url),
+            GPTConfigs::new("gpt-4-1106-preview", "Search for Movies", 500),
+        ),
+        (
+            CaseInsensitiveString::new(
+                &((website_url.to_owned()) + "/search/howsearchworks/?fg=1"),
+            ),
+            GPTConfigs::new("gpt-4-1106-preview", "Change the background blue", 500),
+        ),
+    ]);
 
     gpt_config.prompt_url_map = Some(prompt_url_map);
 
-    let mut website: Website = Website::new("https://www.google.com")
+    let mut website: Website = Website::new(website_url)
         .with_chrome_intercept(true, true)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
@@ -39,9 +44,9 @@ async fn main() {
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
 
-    website.set_extra_links(HashSet::from([
-        "https://www.google.com/search/howsearchworks/?fg=1".into(),
-    ]));
+    website.set_extra_links(HashSet::from([(website_url.to_owned()
+        + "/search/howsearchworks/?fg=1")
+        .into()]));
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

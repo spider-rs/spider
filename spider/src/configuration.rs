@@ -1,6 +1,7 @@
 pub use crate::features::chrome_common::{
-    AuthChallengeResponse, AuthChallengeResponseResponse, CaptureScreenshotFormat, ClipViewport,
-    ScreenShotConfig, Viewport, WaitFor, WaitForDelay, WaitForIdleNetwork, WaitForSelector,
+    AuthChallengeResponse, AuthChallengeResponseResponse, CaptureScreenshotFormat,
+    CaptureScreenshotParams, ClipViewport, ScreenShotConfig, ScreenshotParams, Viewport, WaitFor,
+    WaitForDelay, WaitForIdleNetwork, WaitForSelector,
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::website::CronType;
