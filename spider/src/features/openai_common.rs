@@ -8,6 +8,32 @@ pub enum Prompt {
     Multi(std::collections::VecDeque<String>),
 }
 
+impl std::fmt::Display for Prompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Prompt::Single(s) => write!(f, "{}", s),
+            Prompt::Multi(m) => write!(f, "{:?}", m),
+        }
+    }
+}
+
+#[cfg(feature = "openai")]
+impl std::str::FromStr for Prompt {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(prompts) = serde_json::from_str::<Vec<String>>(s) {
+            Ok(Prompt::Multi(
+                prompts
+                    .into_iter()
+                    .collect::<std::collections::VecDeque<String>>(),
+            ))
+        } else {
+            Ok(Prompt::Single(s.to_string()))
+        }
+    }
+}
+
 impl Prompt {
     /// A new single prompt.
     pub fn new_single(prompt: &str) -> Self {
