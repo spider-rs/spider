@@ -314,7 +314,7 @@ pub async fn fetch_page_html_chrome_base(
                     let c =
                         h.get::<case_insensitive_string::CaseInsensitiveString>(&target_url.into());
 
-                    if !c.is_some() && gpt_configs.paths_map {
+                    if !c.is_some() && gpt_configs.paths_map.is_some() && gpt_configs.paths_map.unwrap_or_default() {
                         match url::Url::parse(target_url) {
                             Ok(u) => h.get::<case_insensitive_string::CaseInsensitiveString>(
                                 &u.path().into(),
@@ -348,7 +348,7 @@ pub async fn fetch_page_html_chrome_base(
                             Default::default()
                         };
 
-                        let js_script = if gpt_configs.extra_ai_data {
+                        let js_script = if gpt_configs.extra_ai_data.is_some() && gpt_configs.extra_ai_data.unwrap_or_default() {
                             handle_extra_ai_data(&mut page_response, &js_script)
                         } else {
                             js_script
@@ -1004,7 +1004,7 @@ pub async fn openai_request(
             };
 
             let mut tokens_used = OpenAIUsage::default();
-            let json_mode = gpt_configs.extra_ai_data;
+            let json_mode = gpt_configs.extra_ai_data.unwrap_or_default();
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(&string_concat!("URL:", url, "\n", "HTML:", resource))

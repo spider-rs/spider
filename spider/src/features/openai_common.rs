@@ -58,9 +58,9 @@ pub struct GPTConfigs {
     /// The top priority for the request.
     pub top_p: Option<f32>,
     /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
-    pub extra_ai_data: bool,
+    pub extra_ai_data: Option<bool>,
     /// Map to paths. If the prompt_url_map has a key called /blog and all blog pages are found like /blog/something the same prompt is perform unless an exact match is found.
-    pub paths_map: bool,
+    pub paths_map: Option<bool>,
 }
 
 impl GPTConfigs {
@@ -90,7 +90,11 @@ impl GPTConfigs {
 
     /// Set extra AI data to return results.
     pub fn set_extra(&mut self, extra_ai_data: bool) -> &mut Self {
-        self.extra_ai_data = extra_ai_data;
+        self.extra_ai_data = if extra_ai_data {
+            Some(extra_ai_data)
+        } else {
+            None
+        };
         self
     }
 }
