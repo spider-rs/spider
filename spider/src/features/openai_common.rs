@@ -1,6 +1,6 @@
 /// The type of prompt to use.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Prompt {
     /// A single prompt to run.
     Single(String),
@@ -123,4 +123,64 @@ impl GPTConfigs {
         };
         self
     }
+}
+
+/// Custom deserialization for `Prompt`
+#[cfg(feature = "serde")]
+mod prompt_deserializer {
+    use super::Prompt;
+    use serde::{
+        de::{self, SeqAccess, Visitor},
+        Deserialize, Deserializer,
+    };
+    use std::collections::VecDeque;
+    use std::fmt;
+
+    struct PromptVisitor;
+
+    impl<'de> Visitor<'de> for PromptVisitor {
+        type Value = Prompt;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string or an array of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Prompt::Single(value.to_owned()))
+        }
+
+        fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+        where
+            S: SeqAccess<'de>,
+        {
+            let mut strings = VecDeque::new();
+            while let Some(value) = seq.next_element()? {
+                strings.push_back(value);
+            }
+            Ok(Prompt::Multi(strings))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Prompt {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_any(PromptVisitor)
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "openai")]
+fn deserialize_gpt_configs() {
+    let gpt_configs_json = "{\"prompt\":\"change background blue\",\"model\":\"gpt-3.5-turbo-16k\",\"max_tokens\":256,\"temperature\":0.54,\"top_p\":0.17}";
+    let configs = match serde_json::from_str::<GPTConfigs>(&gpt_configs_json) {
+        Ok(e) => Some(e),
+        _ => None,
+    };
+    assert!(configs.is_some())
 }
