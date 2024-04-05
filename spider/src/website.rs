@@ -161,8 +161,8 @@ pub struct Website {
     pages: Option<Box<Vec<Page>>>,
     /// Robot.txt parser.
     robot_file_parser: Option<Box<RobotFileParser>>,
-    /// Base root domain of the crawl.
-    domain: Box<CaseInsensitiveString>,
+    /// Base url of the crawl.
+    url: Box<CaseInsensitiveString>,
     /// The domain url parsed.
     domain_parsed: Option<Box<Url>>,
     /// The callback when a link is found.
@@ -194,7 +194,7 @@ impl Website {
         } else {
             url
         };
-        let domain: Box<CaseInsensitiveString> = if url.starts_with("http") {
+        let url: Box<CaseInsensitiveString> = if url.starts_with("http") {
             CaseInsensitiveString::new(&url).into()
         } else {
             CaseInsensitiveString::new(&string_concat!("https://", url)).into()
@@ -208,11 +208,11 @@ impl Website {
             channel: None,
             status: CrawlStatus::Start,
             shutdown: false,
-            domain_parsed: match url::Url::parse(domain.inner()) {
+            domain_parsed: match url::Url::parse(url.inner()) {
                 Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                 _ => None,
             },
-            domain,
+            url,
             ..Default::default()
         }
     }
@@ -233,7 +233,7 @@ impl Website {
             Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
             _ => None,
         };
-        self.domain = domain;
+        self.url = domain;
         self
     }
 
@@ -564,7 +564,7 @@ impl Website {
 
     /// Domain name getter.
     pub fn get_domain(&self) -> &CaseInsensitiveString {
-        &self.domain
+        &self.url
     }
 
     /// Crawl delay getter.
@@ -616,7 +616,7 @@ impl Website {
             if robot_file_parser.mtime() <= 4000 {
                 let host_str = match &self.domain_parsed {
                     Some(domain) => domain.as_str(),
-                    _ => self.domain.inner(),
+                    _ => self.url.inner(),
                 };
                 if host_str.ends_with('/') {
                     robot_file_parser.read(&client, host_str).await;
@@ -1031,7 +1031,7 @@ impl Website {
         use crate::utils::{Handler, CONTROLLER};
         let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
         let handle = c.clone();
-        let target_id = string_concat!(self.crawl_id, self.domain.inner());
+        let target_id = string_concat!(self.crawl_id, self.url.inner());
         let c_lock = CONTROLLER.clone();
 
         let join_handle = tokio::spawn(async move {
@@ -1111,7 +1111,7 @@ impl Website {
                 .await
             {
                 Ok(mut rp) => {
-                    let mut host_name = self.domain.inner().to_string();
+                    let mut host_name = self.url.inner().to_string();
                     let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
                     let intercept_page = page.clone();
 
@@ -1177,7 +1177,7 @@ impl Website {
     /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
         get_page_selectors(
-            self.domain.inner(),
+            self.url.inner(),
             self.configuration.subdomains,
             self.configuration.tld,
         )
@@ -1261,7 +1261,7 @@ impl Website {
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> =
             if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
-                let page = Page::new_page(self.domain.inner(), client).await;
+                let page = Page::new_page(self.url.inner(), client).await;
 
                 // allow initial page mutation
                 match page.final_redirect_destination.as_deref() {
@@ -1270,7 +1270,7 @@ impl Website {
                             Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                             _ => None,
                         };
-                        self.domain = Box::new(domain.into());
+                        self.url = Box::new(domain.into());
                         match self.setup_selectors() {
                             Some(s) => {
                                 base.0 = s.0;
@@ -1285,10 +1285,10 @@ impl Website {
                 let links = if !page.is_empty() {
                     self.links_visited.insert(match self.on_link_find_callback {
                         Some(cb) => {
-                            let c = cb(*self.domain.clone(), None);
+                            let c = cb(*self.url.clone(), None);
                             c.0
                         }
-                        _ => *self.domain.clone(),
+                        _ => *self.url.clone(),
                     });
                     page.links(base).await
                 } else {
@@ -1357,7 +1357,7 @@ impl Website {
             let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
             let page = Page::new(
-                &self.domain.inner(),
+                &self.url.inner(),
                 &client,
                 &chrome_page,
                 &self.configuration.wait_for,
@@ -1375,7 +1375,7 @@ impl Website {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
                     };
-                    self.domain = domain;
+                    self.url = domain;
                     match self.setup_selectors() {
                         Some(s) => {
                             base.0 = s.0;
@@ -1390,11 +1390,11 @@ impl Website {
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
-                        let c = cb(*self.domain.clone(), None);
+                        let c = cb(*self.url.clone(), None);
 
                         c.0
                     }
-                    _ => *self.domain.clone(),
+                    _ => *self.url.clone(),
                 });
 
                 let links = HashSet::from(page.links(&base).await);
@@ -1446,7 +1446,7 @@ impl Website {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
-            let page = Page::new_page(&self.domain.inner(), &client).await;
+            let page = Page::new_page(&self.url.inner(), &client).await;
 
             let page_links: HashSet<CaseInsensitiveString> =
                 page.smart_links(&base, &browser, &self.configuration).await;
@@ -1459,7 +1459,7 @@ impl Website {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
                     };
-                    self.domain = domain;
+                    self.url = domain;
                     match self.setup_selectors() {
                         Some(s) => {
                             base.0 = s.0;
@@ -1474,11 +1474,11 @@ impl Website {
             let links = if !page_links.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
-                        let c = cb(*self.domain.clone(), None);
+                        let c = cb(*self.url.clone(), None);
 
                         c.0
                     }
-                    _ => *self.domain.clone(),
+                    _ => *self.url.clone(),
                 });
 
                 page_links
@@ -1517,7 +1517,7 @@ impl Website {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
         {
-            let link = self.domain.inner();
+            let link = self.url.inner();
 
             let page = Page::new(
                 &if http_worker && link.starts_with("https") {
@@ -1531,11 +1531,11 @@ impl Website {
 
             self.links_visited.insert(match self.on_link_find_callback {
                 Some(cb) => {
-                    let c = cb(*self.domain.to_owned(), None);
+                    let c = cb(*self.url.to_owned(), None);
 
                     c.0
                 }
-                _ => *self.domain.to_owned(),
+                _ => *self.url.to_owned(),
             });
 
             let page_links = HashSet::from(page.links.clone());
@@ -1567,7 +1567,7 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let expanded = self.get_expanded_links(&self.domain.inner().as_str());
+        let expanded = self.get_expanded_links(&self.url.inner().as_str());
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
@@ -1621,7 +1621,7 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let expanded = self.get_expanded_links(&self.domain.inner().as_str());
+        let expanded = self.get_expanded_links(&self.url.inner().as_str());
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
@@ -1675,7 +1675,7 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let domain_name = self.domain.inner();
+        let domain_name = self.url.inner();
         let expanded = self.get_expanded_links(&domain_name.as_str());
 
         let blacklist_url = self.configuration.get_blacklist();
@@ -1692,7 +1692,7 @@ impl Website {
                             Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                             _ => None,
                         };
-                        self.domain = domain;
+                        self.url = domain;
                         match self.setup_selectors() {
                             Some(s) => {
                                 base.0 = s.0;
@@ -1998,7 +1998,7 @@ impl Website {
                     self.pages.replace(Box::<Vec<Page>>::default());
                 }
                 let mut links: HashSet<CaseInsensitiveString> =
-                    HashSet::from([*self.domain.clone()]);
+                    HashSet::from([*self.url.clone()]);
 
                 if !self.extra_links.is_empty() {
                     links.extend(self.drain_extra_links());
@@ -2578,14 +2578,14 @@ impl Website {
     /// Start to crawl website concurrently.
     #[cfg(feature = "decentralized")]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
-        match url::Url::parse(&self.domain.inner()) {
+        match url::Url::parse(&self.url.inner()) {
             Ok(_) => {
                 let mut q = match &self.channel_queue {
                     Some(q) => Some(q.0.subscribe()),
                     _ => None,
                 };
                 let blacklist_url = self.configuration.get_blacklist();
-                let domain = self.domain.inner().as_str();
+                let domain = self.url.inner().as_str();
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
                 let throttle = Box::pin(self.get_delay());
                 let on_link_find_callback = self.on_link_find_callback;
@@ -3039,7 +3039,7 @@ impl Website {
                                     HashSet<CaseInsensitiveString>,
                                 )> = JoinSet::new();
 
-                                links.extend([*self.domain.clone()]);
+                                links.extend([*self.url.clone()]);
 
                                 let shared = Arc::new((
                                     client.to_owned(),
@@ -3266,7 +3266,7 @@ impl Website {
                             HashSet<CaseInsensitiveString>,
                         )> = JoinSet::new();
 
-                        links.extend([*self.domain.clone()]);
+                        links.extend([*self.url.clone()]);
 
                         let shared = Arc::new((
                             client.to_owned(),
@@ -3487,7 +3487,7 @@ impl Website {
                     _ => None,
                 };
 
-                let domain = self.domain.inner().as_str();
+                let domain = self.url.inner().as_str();
                 let mut interval = tokio::time::interval(Duration::from_millis(15));
                 let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
                     Some(sitemap_path) => {
@@ -3685,7 +3685,7 @@ impl Website {
             Some(selectors) => {
                 match self.setup_browser().await {
                     Some((browser, browser_handle)) => {
-                        let domain = self.domain.inner().as_str();
+                        let domain = self.url.inner().as_str();
                         let mut interval = tokio::time::interval(Duration::from_millis(15));
                         let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
                             Some(sitemap_path) => {
@@ -3950,13 +3950,13 @@ impl Website {
     /// get base link for crawl establishing
     #[cfg(feature = "regex")]
     fn get_base_link(&self) -> &CaseInsensitiveString {
-        &self.domain
+        &self.url
     }
 
     /// get base link for crawl establishing
     #[cfg(not(feature = "regex"))]
     fn get_base_link(&self) -> &CompactString {
-        self.domain.inner()
+        self.url.inner()
     }
 
     /// Guard the channel from closing until all subscription events complete.
