@@ -1,6 +1,6 @@
 /// The type of prompt to use.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Prompt {
     /// A single prompt to run.
     Single(String),
@@ -83,10 +83,12 @@ pub struct GPTConfigs {
     pub user: Option<String>,
     /// The top priority for the request.
     pub top_p: Option<f32>,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
-    pub extra_ai_data: Option<bool>,
+    pub extra_ai_data: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// Map to paths. If the prompt_url_map has a key called /blog and all blog pages are found like /blog/something the same prompt is perform unless an exact match is found.
-    pub paths_map: Option<bool>,
+    pub paths_map: bool,
 }
 
 impl GPTConfigs {
@@ -116,11 +118,67 @@ impl GPTConfigs {
 
     /// Set extra AI data to return results.
     pub fn set_extra(&mut self, extra_ai_data: bool) -> &mut Self {
-        self.extra_ai_data = if extra_ai_data {
-            Some(extra_ai_data)
-        } else {
-            None
-        };
+        self.extra_ai_data = extra_ai_data;
         self
     }
+}
+
+/// Custom deserialization for `Prompt`
+#[cfg(feature = "serde")]
+mod prompt_deserializer {
+    use super::Prompt;
+    use serde::{
+        de::{self, SeqAccess, Visitor},
+        Deserialize, Deserializer,
+    };
+    use std::collections::VecDeque;
+    use std::fmt;
+
+    struct PromptVisitor;
+
+    impl<'de> Visitor<'de> for PromptVisitor {
+        type Value = Prompt;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string or an array of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Prompt::Single(value.to_owned()))
+        }
+
+        fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+        where
+            S: SeqAccess<'de>,
+        {
+            let mut strings = VecDeque::new();
+            while let Some(value) = seq.next_element()? {
+                strings.push_back(value);
+            }
+            Ok(Prompt::Multi(strings))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Prompt {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_any(PromptVisitor)
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "openai")]
+fn deserialize_gpt_configs() {
+    let gpt_configs_json = "{\"prompt\":\"change background blue\",\"model\":\"gpt-3.5-turbo-16k\",\"max_tokens\":256,\"temperature\":0.54,\"top_p\":0.17}";
+    let configs = match serde_json::from_str::<GPTConfigs>(&gpt_configs_json) {
+        Ok(e) => Some(e),
+        _ => None,
+    };
+    assert!(configs.is_some())
 }
