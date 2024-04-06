@@ -540,7 +540,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "chrome")]
-    /// Wait for with delay. Should only be used for testing. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for with delay. Should only be used for testing. This method does nothing if the 'chrome' feature is not enabled.
     pub fn with_wait_for_delay(&mut self, wait_for_delay: Option<WaitForDelay>) -> &mut Self {
         match self.wait_for.as_mut() {
             Some(wait_for) => wait_for.delay = wait_for_delay,
@@ -554,7 +554,7 @@ impl Configuration {
     }
 
     #[cfg(not(feature = "chrome"))]
-    /// Wait for with delay. Should only be used for testing. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for with delay. Should only be used for testing. This method does nothing if the 'chrome' feature is not enabled.
     pub fn with_wait_for_delay(&mut self, _wait_for_delay: Option<WaitForDelay>) -> &mut Self {
         self
     }
