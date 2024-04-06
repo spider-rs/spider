@@ -42,6 +42,32 @@
 //! }
 //! ```
 //!
+//! Subscribe to crawl events:
+//!
+//! ```no_run
+//! use spider::tokio;
+//! use spider::website::Website;
+//! use tokio::io::AsyncWriteExt;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let mut website: Website = Website::new("https://rsseau.fr");
+//!     let mut rx2 = website.subscribe(16).unwrap();
+//!
+//!     tokio::spawn(async move {
+//!         let mut stdout = tokio::io::stdout();
+//!
+//!         while let Ok(res) = rx2.recv().await {
+//!             let _ = stdout
+//!                 .write_all(format!("- {}\n", res.get_url()).as_bytes())
+//!                 .await;
+//!         }
+//!     });
+//!
+//!     website.crawl().await;
+//! }
+//! ```
+//!
 //! ## Feature flags
 //!
 //! - `ua_generator`: Enables auto generating a random real User-Agent.
@@ -70,7 +96,7 @@
 //! - `chrome_intercept`: Allows intercepting network request to speed up processing.
 //! - `chrome_headless_new`: Use headless=new to launch the chrome instance.
 //! - `cookies`: Enables cookies storing and setting to use for request.
-//! - `real_browser`: Enables the ability to bypass cloudflare protected pages.
+//! - `real_browser`: Enables the ability to bypass protected pages.
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env var `OPENAI_API_KEY`.
 //! - `http3`: Enables experimental HTTP/3 client.

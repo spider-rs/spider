@@ -1997,8 +1997,7 @@ impl Website {
                 if self.status != CrawlStatus::Active || self.pages.is_none() {
                     self.pages.replace(Box::<Vec<Page>>::default());
                 }
-                let mut links: HashSet<CaseInsensitiveString> =
-                    HashSet::from([*self.url.clone()]);
+                let mut links: HashSet<CaseInsensitiveString> = HashSet::from([*self.url.clone()]);
 
                 if !self.extra_links.is_empty() {
                     links.extend(self.drain_extra_links());
