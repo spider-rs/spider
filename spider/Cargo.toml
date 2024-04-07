@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.89.16"
+version = "1.89.17"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -126,3 +126,6 @@ real_browser = []
 openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
 openai_slim_fit = []
 decentralized_headers = ["dep:const_format", "dep:itertools"]
+
+[package.metadata.docs.rs]
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
