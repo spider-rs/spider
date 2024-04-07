@@ -68,27 +68,30 @@ impl Default for Prompt {
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GPTConfigs {
-    /// The prompt to use for OPENAI. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
+    /// The prompt to use for the Chat. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
     pub prompt: Prompt,
     /// The model to use. Example: gpt-4-1106-preview or gpt-3.5-turbo-16k
     pub model: String,
     /// The max tokens to use for the request.
     pub max_tokens: u16,
-    /// Prompts to use for certain urls. If this is set only the urls that match exactly are ran.
-    pub prompt_url_map:
-        Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, Self>>,
     /// The temperature between 0 - 2.
     pub temperature: Option<f32>,
     /// The user for the request.
     pub user: Option<String>,
     /// The top priority for the request.
     pub top_p: Option<f32>,
+    /// Prompts to use for certain urls. If this is set only the urls that match exactly are ran.
+    pub prompt_url_map:
+        Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, Self>>,
     #[cfg_attr(feature = "serde", serde(default))]
     /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
     pub extra_ai_data: bool,
     #[cfg_attr(feature = "serde", serde(default))]
     /// Map to paths. If the prompt_url_map has a key called /blog and all blog pages are found like /blog/something the same prompt is perform unless an exact match is found.
     pub paths_map: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
+    /// The API key to use for the request.
+    pub api_key: Option<String>,
 }
 
 impl GPTConfigs {
