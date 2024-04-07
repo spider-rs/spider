@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.89.13"
+version = "1.89.14"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -76,7 +76,7 @@ reqwest-middleware = { version = "0.2.4", optional = true }
 http-cache-reqwest = { version = "0.13.0", optional = true }
 encoding_rs = { version = "0.8.33", optional = true }
 const_format = { version = "0.2.32", optional = true }
-async-openai = { version = "0.20.0", optional = true }
+async-openai = { version = "0.19.1", optional = true }
 tiktoken-rs = { version = "0.5.8", optional = true }
 lol_html = { version = "1.2.1", optional = true }
 serde_json = { version = "1", optional = true }

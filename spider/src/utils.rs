@@ -1047,32 +1047,47 @@ pub async fn openai_request(
                         })
                         .build()
                     {
-                        Ok(request) => match CLIENT.chat().create(request).await {
-                            Ok(mut response) => {
-                                let mut choice = response.choices.first_mut();
+                        Ok(request) => {
+                            let res = match gpt_configs.api_key {
+                                Some(ref key) => {
+                                    let conf = CLIENT.config().to_owned();
+                                    async_openai::Client::with_config(
+                                        conf.with_api_key(key.clone()),
+                                    )
+                                    .chat()
+                                    .create(request)
+                                    .await
+                                }
+                                _ => CLIENT.chat().create(request).await,
+                            };
 
-                                match response.usage.take() {
-                                    Some(usage) => {
-                                        tokens_used.prompt_tokens = usage.prompt_tokens;
-                                        tokens_used.completion_tokens = usage.completion_tokens;
-                                        tokens_used.total_tokens = usage.total_tokens;
-                                    }
-                                    _ => (),
-                                };
+                            match res {
+                                Ok(mut response) => {
+                                    let mut choice = response.choices.first_mut();
 
-                                match choice.as_mut() {
-                                    Some(c) => match c.message.content.take() {
-                                        Some(content) => content,
+                                    match response.usage.take() {
+                                        Some(usage) => {
+                                            tokens_used.prompt_tokens = usage.prompt_tokens;
+                                            tokens_used.completion_tokens = usage.completion_tokens;
+                                            tokens_used.total_tokens = usage.total_tokens;
+                                        }
+                                        _ => (),
+                                    };
+
+                                    match choice.as_mut() {
+                                        Some(c) => match c.message.content.take() {
+                                            Some(content) => content,
+                                            _ => Default::default(),
+                                        },
                                         _ => Default::default(),
-                                    },
-                                    _ => Default::default(),
+                                    }
+                                }
+                                Err(err) => {
+                                    log::error!("{:?}", err);
+                                    Default::default()
                                 }
                             }
-                            Err(err) => {
-                                log::error!("{:?}", err);
-                                Default::default()
-                            }
-                        },
+                        }
                         _ => Default::default(),
                     };
 
