@@ -4402,7 +4402,7 @@ impl Website {
     /// Setup subscription counter to track concurrent operation completions.
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
-    /// This does nothing without the `sync` flag enabled.
+    /// This does nothing without the `sync` flag enabled. You also need to use the 'chrome_store_page' to keep the page alive between request.
     ///
     /// # Example
     ///
@@ -4410,10 +4410,12 @@ impl Website {
     /// use spider::tokio;
     /// use spider::website::Website;
     /// #[tokio::main]
+    /// 
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");
     ///     let mut rx2 = website.subscribe(18).unwrap();
     ///     let mut rxg = website.subscribe_guard().unwrap();
+    ///
     ///     tokio::spawn(async move {
     ///         while let Ok(page) = rx2.recv().await {
     ///             println!("📸 - {:?}", page.get_url());
@@ -4441,18 +4443,20 @@ impl Website {
     /// Setup subscription counter to track concurrent operation completions.
     /// This helps keep a chrome instance active until all operations are completed from all threads to safely take screenshots and other actions.
     /// Make sure to call `inc` if you take a guard. Without calling `inc` in the subscription receiver the crawl will stay in a infinite loop.
-    /// This does nothing without the `sync` flag enabled.
+    /// This does nothing without the `sync` flag enabled. You also need to use the 'chrome_store_page' to keep the page alive between request.
     ///
     /// # Example
     ///
     /// ```
     /// use spider::tokio;
     /// use spider::website::Website;
+    /// 
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");
     ///     let mut rx2 = website.subscribe(18).unwrap();
     ///     let mut rxg = website.subscribe_guard().unwrap();
+    ///
     ///     tokio::spawn(async move {
     ///         while let Ok(page) = rx2.recv().await {
     ///             println!("📸 - {:?}", page.get_url());
