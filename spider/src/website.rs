@@ -4410,7 +4410,7 @@ impl Website {
     /// use spider::tokio;
     /// use spider::website::Website;
     /// #[tokio::main]
-    /// 
+    ///
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");
     ///     let mut rx2 = website.subscribe(18).unwrap();
@@ -4450,7 +4450,7 @@ impl Website {
     /// ```
     /// use spider::tokio;
     /// use spider::website::Website;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");

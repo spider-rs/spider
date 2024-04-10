@@ -71,7 +71,7 @@ pub struct PageResponse {
     pub openai_credits_used: Option<Vec<OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
-    pub extra_ai_data: Option<Vec<String>>,
+    pub extra_ai_data: Option<Vec<crate::page::AIResults>>,
 }
 
 /// wait for event with timeout
@@ -228,24 +228,27 @@ pub fn handle_openai_credits(_page_response: &mut PageResponse, _tokens_used: Op
 
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
-pub fn handle_extra_ai_data(page_response: &mut PageResponse, js: &str) -> String {
+pub fn handle_extra_ai_data(page_response: &mut PageResponse, prompt: &str, js: &str) {
     match serde_json::from_str::<JsonResponse>(&js) {
         Ok(x) => {
-            match page_response.extra_ai_data.as_mut() {
-                Some(v) => v.extend(x.content),
-                None => page_response.extra_ai_data = Some(x.content),
+            let ai_response = crate::page::AIResults {
+                input: prompt.into(),
+                js_output: x.js,
+                content_output: x.content,
             };
-            x.js
+
+            match page_response.extra_ai_data.as_mut() {
+                Some(v) => v.push(ai_response),
+                None => page_response.extra_ai_data = Some(Vec::from([ai_response])),
+            };
         }
-        _ => Default::default(),
+        _ => (),
     }
 }
 
 #[cfg(not(feature = "openai"))]
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
-pub fn handle_extra_ai_data(_page_response: &mut PageResponse, _js: &str) -> String {
-    Default::default()
-}
+pub fn handle_extra_ai_data(_page_response: &mut PageResponse, _prompt: &str, _js: &str) {}
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -349,7 +352,8 @@ pub async fn fetch_page_html_chrome_base(
                         };
 
                         let js_script = if gpt_configs.extra_ai_data {
-                            handle_extra_ai_data(&mut page_response, &js_script)
+                            handle_extra_ai_data(&mut page_response, &prompt, &js_script);
+                            js_script
                         } else {
                             js_script
                         };

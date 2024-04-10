@@ -63,6 +63,17 @@ lazy_static! {
     };
 }
 
+/// The AI data returned from a GPT.
+#[derive(Debug, Clone)]
+pub struct AIResults {
+    /// The prompt used for the GPT.
+    pub input: String,
+    /// The js output of the GPT response.
+    pub js_output: String,
+    /// The content output returned from the GPT response that is not a browser script, example: extracted data from the markup.
+    pub content_output: Vec<String>,
+}
+
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
@@ -98,7 +109,7 @@ pub struct Page {
     pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
-    pub extra_ai_data: Option<Vec<String>>,
+    pub extra_ai_data: Option<Vec<AIResults>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -128,7 +139,7 @@ pub struct Page {
     pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
-    pub extra_ai_data: Option<Vec<String>>,
+    pub extra_ai_data: Option<Vec<AIResults>>,
 }
 
 lazy_static! {
