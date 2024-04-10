@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.89.18"
+version = "1.90.0"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -40,7 +40,7 @@ ua_generator = { version = "0.3.6", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1.4.0"
 compact_str = "0.7.1"
-fast_html5ever = "0.26.1"
+fast_html5ever = "0.26.4"
 selectors = "0.25.0"
 tendril = "0.4.3"
 ahash = "0.8.11"
