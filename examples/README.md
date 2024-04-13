@@ -68,7 +68,7 @@ Use advanced configuration re-use. [Advanced Configuration](./advanced_configura
 
 - `cargo run --example advanced_configuration`
 
-Use URL globbing for a domain. [URL Globbing](./glob.rs).
+Use URL globbing for a domain. [URL Globbing](./url_glob.rs).
 
 - `cargo run --example glob --features glob`
 
