@@ -107,7 +107,7 @@ pub struct Page {
     pub screenshot_bytes: Option<Vec<u8>>,
     #[cfg(feature = "openai")]
     /// The credits used from OpenAI in order.
-    pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
+    pub openai_credits_used: Option<Vec<crate::features::openai_common::OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
@@ -137,7 +137,7 @@ pub struct Page {
     pub screenshot_bytes: Option<Vec<u8>>,
     #[cfg(feature = "openai")]
     /// The credits used from OpenAI in order.
-    pub openai_credits_used: Option<Vec<crate::utils::OpenAIUsage>>,
+    pub openai_credits_used: Option<Vec<crate::features::openai_common::OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,

@@ -92,7 +92,39 @@ pub struct GPTConfigs {
     #[cfg_attr(feature = "serde", serde(default))]
     /// The API key to use for the request.
     pub api_key: Option<String>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default),
+        serde(skip_serializing, skip_deserializing)
+    )]
+    /// Use caching to cache the prompt. This does nothing without the 'cache_openai' flag enabled.
+    pub cache: Option<AICache>,
 }
+
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// The usage used from OpenAI.
+pub struct OpenAIUsage {
+    /// The prompt tokens used.
+    pub prompt_tokens: u32,
+    /// The completion tokens used.
+    pub completion_tokens: u32,
+    /// The total tokens used.
+    pub total_tokens: u32,
+    /// Is the request cached? Useful for ignoring the tokens.
+    pub cached: bool,
+}
+
+/// The OpenAI return type
+pub type OpenAIReturn = (String, OpenAIUsage);
+
+#[cfg(feature = "cache_openai")]
+/// The OpenAI cache to use.
+pub type AICache = moka::future::Cache<u64, OpenAIReturn>;
+
+#[cfg(not(feature = "cache_openai"))]
+/// The OpenAI cache to use.
+pub type AICache = String;
 
 impl GPTConfigs {
     /// GPTConfigs for OpenAI chrome dynamic scripting.
@@ -101,6 +133,22 @@ impl GPTConfigs {
             model: model.into(),
             prompt: Prompt::Single(prompt.into()),
             max_tokens,
+            ..Default::default()
+        }
+    }
+
+    /// GPTConfigs for OpenAI chrome dynamic scripting and caching.
+    pub fn new_cache(
+        model: &str,
+        prompt: &str,
+        max_tokens: u16,
+        cache: Option<AICache>,
+    ) -> GPTConfigs {
+        Self {
+            model: model.into(),
+            prompt: Prompt::Single(prompt.into()),
+            max_tokens,
+            cache,
             ..Default::default()
         }
     }
@@ -115,6 +163,26 @@ impl GPTConfigs {
             model: model.into(),
             prompt: Prompt::Multi(prompt.into_iter().map(|s| s.as_ref().to_string()).collect()),
             max_tokens,
+            ..Default::default()
+        }
+    }
+
+    /// GPTConfigs for OpenAI chrome dynamic scripting multi chain prompts with prompt caching. The feature flag 'cache_openai' is required.
+    pub fn new_multi_cache<I, S>(
+        model: &str,
+        prompt: I,
+        max_tokens: u16,
+        cache: Option<AICache>,
+    ) -> GPTConfigs
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            model: model.into(),
+            prompt: Prompt::Multi(prompt.into_iter().map(|s| s.as_ref().to_string()).collect()),
+            max_tokens,
+            cache,
             ..Default::default()
         }
     }

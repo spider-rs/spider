@@ -87,6 +87,7 @@
 //! - `time`: Enables duration tracking per page.
 //! - `cache`: Enables HTTP caching request to disk.
 //! - `cache_mem`: Enables HTTP caching request to persist in memory.
+//! - `cache_openai`: Enables caching the OpenAI request. This can drastically save costs when developing AI workflows.
 //! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 //! - `chrome_headed`: Enables chrome rendering headful rendering.
 //! - `chrome_cpu`: Disable gpu usage for chrome browser.
@@ -140,6 +141,8 @@ pub extern crate async_openai;
 pub extern crate flexbuffers;
 #[cfg(feature = "cache")]
 pub extern crate http_cache_reqwest;
+#[cfg(feature = "cache_openai")]
+pub extern crate moka;
 #[cfg(feature = "cache")]
 pub extern crate reqwest_middleware;
 #[cfg(feature = "serde")]

@@ -68,7 +68,7 @@ pub struct PageResponse {
     pub screenshot_bytes: Option<Vec<u8>>,
     #[cfg(feature = "openai")]
     /// The credits used from OpenAI in order.
-    pub openai_credits_used: Option<Vec<OpenAIUsage>>,
+    pub openai_credits_used: Option<Vec<crate::features::openai_common::OpenAIUsage>>,
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<crate::page::AIResults>>,
@@ -215,7 +215,10 @@ pub struct JsonResponse {
 
 /// Handle the OpenAI credits used. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
-pub fn handle_openai_credits(page_response: &mut PageResponse, tokens_used: OpenAIUsage) {
+pub fn handle_openai_credits(
+    page_response: &mut PageResponse,
+    tokens_used: crate::features::openai_common::OpenAIUsage,
+) {
     match page_response.openai_credits_used.as_mut() {
         Some(v) => v.push(tokens_used),
         None => page_response.openai_credits_used = Some(vec![tokens_used]),
@@ -224,7 +227,11 @@ pub fn handle_openai_credits(page_response: &mut PageResponse, tokens_used: Open
 
 #[cfg(not(feature = "openai"))]
 /// Handle the OpenAI credits used. This does nothing without 'openai' feature flag.
-pub fn handle_openai_credits(_page_response: &mut PageResponse, _tokens_used: OpenAIUsage) {}
+pub fn handle_openai_credits(
+    _page_response: &mut PageResponse,
+    _tokens_used: crate::features::openai_common::OpenAIUsage,
+) {
+}
 
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
@@ -878,29 +885,18 @@ pub async fn openai_request(
     _resource: String,
     _url: &str,
     _prompt: &str,
-) -> (String, OpenAIUsage) {
+) -> crate::features::openai_common::OpenAIReturn {
     Default::default()
-}
-
-#[derive(Debug, Default, Clone)]
-/// The usage used from OpenAI.
-pub struct OpenAIUsage {
-    /// The prompt tokens used.
-    pub prompt_tokens: u32,
-    /// The completion tokens used.
-    pub completion_tokens: u32,
-    /// The total tokens used.
-    pub total_tokens: u32,
 }
 
 #[cfg(feature = "openai")]
 /// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
-pub async fn openai_request(
+pub async fn openai_request_base(
     gpt_configs: &crate::configuration::GPTConfigs,
     resource: String,
     url: &str,
     prompt: &str,
-) -> (String, OpenAIUsage) {
+) -> crate::features::openai_common::OpenAIReturn {
     lazy_static! {
         static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
         static ref SEM: tokio::sync::Semaphore = {
@@ -1007,7 +1003,7 @@ pub async fn openai_request(
                 resource
             };
 
-            let mut tokens_used = OpenAIUsage::default();
+            let mut tokens_used = crate::features::openai_common::OpenAIUsage::default();
             let json_mode = gpt_configs.extra_ai_data;
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
@@ -1105,6 +1101,58 @@ pub async fn openai_request(
             }
         }
         _ => Default::default(),
+    }
+}
+
+#[cfg(all(feature = "openai", not(feature = "cache_openai")))]
+/// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
+pub async fn openai_request(
+    gpt_configs: &crate::configuration::GPTConfigs,
+    resource: String,
+    url: &str,
+    prompt: &str,
+) -> crate::features::openai_common::OpenAIReturn {
+    openai_request_base(gpt_configs, resource, url, prompt).await
+}
+
+#[cfg(all(feature = "openai", feature = "cache_openai"))]
+/// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
+pub async fn openai_request(
+    gpt_configs: &crate::configuration::GPTConfigs,
+    resource: String,
+    url: &str,
+    prompt: &str,
+) -> crate::features::openai_common::OpenAIReturn {
+    match &gpt_configs.cache {
+        Some(cache) => {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+            let mut s = DefaultHasher::new();
+
+            url.hash(&mut s);
+            prompt.hash(&mut s);
+            gpt_configs.model.hash(&mut s);
+            gpt_configs.max_tokens.hash(&mut s);
+            gpt_configs.extra_ai_data.hash(&mut s);
+            // non-determinstic
+            resource.hash(&mut s);
+
+            let key = s.finish();
+
+            match cache.get(&key).await {
+                Some(cache) => {
+                    let mut usage = cache.1;
+                    usage.cached = true;
+
+                    (cache.0, usage)
+                }
+                _ => {
+                    let r = openai_request_base(gpt_configs, resource, url, prompt).await;
+                    let _ = cache.insert(key, r.clone()).await;
+                    r
+                }
+            }
+        }
+        _ => openai_request_base(gpt_configs, resource, url, prompt).await,
     }
 }
 

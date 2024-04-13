@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.91.1"
+version = "1.92.0"
 authors = [
     "madeindjs <contact@rousseau-alexandre.fr>",
     "j-mendez <jeff@a11ywatch.com>",
@@ -81,6 +81,7 @@ tiktoken-rs = { version = "0.5.8", optional = true }
 lol_html = { version = "1.2.1", optional = true }
 serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.31.0", features = ["serde", "serialize", "async-tokio"]}
+moka = { version = "0.12.1", features = ["future"], optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -106,6 +107,7 @@ js = ["dep:jsdom"]
 budget = []
 cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
+cache_openai = ["dep:moka"]
 chrome = ["dep:chromiumoxide"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]

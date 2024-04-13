@@ -16,7 +16,7 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "1.91.1"
+spider = "1.92.0"
 ```
 
 And then the code:
@@ -93,7 +93,7 @@ We have the following optional feature flags.
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["regex", "ua_generator"] }
+spider = { version = "1.92.0", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
@@ -113,6 +113,7 @@ spider = { version = "1.91.1", features = ["regex", "ua_generator"] }
 1. `time`: Enables duration tracking per page.
 1. `cache`: Enables HTTP caching request to disk.
 1. `cache_mem`: Enables HTTP caching request to persist in memory.
+1. `cache_openai`: Enables caching the OpenAI request. This can drastically save costs when developing AI workflows.
 1. `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 1. `chrome_store_page`: Store the page object to perform other actions. The page may be closed.
 1. `chrome_screenshot`: Enables storing a screenshot of each page on crawl. Defaults the screenshots to the ./storage/ directory. Use the env variable `SCREENSHOT_DIRECTORY` to adjust the directory. To save the background set the env var `SCREENSHOT_OMIT_BACKGROUND` to false.
@@ -137,7 +138,7 @@ Move processing to a worker, drastically increases performance even if worker is
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["decentralized"] }
+spider = { version = "1.92.0", features = ["decentralized"] }
 ```
 
 ```sh
@@ -168,7 +169,7 @@ Use the subscribe method to get a broadcast channel.
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["sync"] }
+spider = { version = "1.92.0", features = ["sync"] }
 ```
 
 ```rust,no_run
@@ -198,7 +199,7 @@ Allow regex for blacklisting routes
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["regex"] }
+spider = { version = "1.92.0", features = ["regex"] }
 ```
 
 ```rust,no_run
@@ -225,7 +226,7 @@ If you are performing large workloads you may need to control the crawler by ena
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["control"] }
+spider = { version = "1.92.0", features = ["control"] }
 ```
 
 ```rust
@@ -295,7 +296,7 @@ Use cron jobs to run crawls continuously at anytime.
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["sync", "cron"] }
+spider = { version = "1.92.0", features = ["sync", "cron"] }
 ```
 
 ```rust,no_run
@@ -334,7 +335,7 @@ the feature flag [`chrome_intercept`] to possibly speed up request using Network
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["chrome", "chrome_intercept"] }
+spider = { version = "1.92.0", features = ["chrome", "chrome_intercept"] }
 ```
 
 You can use `website.crawl_concurrent_raw` to perform a crawl without chromium when needed. Use the feature flag `chrome_headed` to enable headful browser usage if needed to debug.
@@ -364,7 +365,7 @@ Enabling HTTP cache can be done with the feature flag [`cache`] or [`cache_mem`]
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["cache"] }
+spider = { version = "1.92.0", features = ["cache"] }
 ```
 
 You need to set `website.cache` to true to enable as well.
@@ -395,7 +396,7 @@ Intelligently run crawls using HTTP and JavaScript Rendering when needed. The be
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["smart"] }
+spider = { version = "1.92.0", features = ["smart"] }
 ```
 
 ```rust,no_run
@@ -421,7 +422,7 @@ Use OpenAI to generate dynamic scripts to drive the browser done with the featur
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["openai"] }
+spider = { version = "1.92.0", features = ["openai"] }
 ```
 
 ```rust
@@ -447,7 +448,7 @@ Set a depth limit to prevent forwarding.
 
 ```toml
 [dependencies]
-spider = { version = "1.91.1", features = ["budget"] }
+spider = { version = "1.92.0", features = ["budget"] }
 ```
 
 ```rust,no_run
