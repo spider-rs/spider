@@ -21,6 +21,7 @@ async fn main() {
         3000,
     );
 
+    gpt_config.screenshot = true;
     gpt_config.set_extra(true);
 
     let mut website: Website = Website::new("https://www.bing.com")

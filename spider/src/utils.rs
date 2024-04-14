@@ -204,13 +204,15 @@ pub async fn page_wait(
 
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg(feature = "openai")]
 /// The json response from OpenAI.
 pub struct JsonResponse {
     /// The content returned.
     content: Vec<String>,
     /// The js script for the browser.
     js: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    /// The AI failed to parse the data.
+    error: Option<String>,
 }
 
 /// Handle the OpenAI credits used. This does nothing without 'openai' feature flag.
@@ -235,27 +237,49 @@ pub fn handle_openai_credits(
 
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
-pub fn handle_extra_ai_data(page_response: &mut PageResponse, prompt: &str, js: &str) {
-    match serde_json::from_str::<JsonResponse>(&js) {
-        Ok(x) => {
-            let ai_response = crate::page::AIResults {
-                input: prompt.into(),
-                js_output: x.js,
-                content_output: x.content,
-            };
+pub fn handle_extra_ai_data(
+    page_response: &mut PageResponse,
+    prompt: &str,
+    x: JsonResponse,
+    screenshot_output: Option<Vec<u8>>,
+) {
+    let ai_response = crate::page::AIResults {
+        input: prompt.into(),
+        js_output: x.js,
+        content_output: x.content,
+        screenshot_output,
+    };
 
-            match page_response.extra_ai_data.as_mut() {
-                Some(v) => v.push(ai_response),
-                None => page_response.extra_ai_data = Some(Vec::from([ai_response])),
-            };
-        }
-        _ => (),
-    }
+    match page_response.extra_ai_data.as_mut() {
+        Some(v) => v.push(ai_response),
+        None => page_response.extra_ai_data = Some(Vec::from([ai_response])),
+    };
 }
 
 #[cfg(not(feature = "openai"))]
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
-pub fn handle_extra_ai_data(_page_response: &mut PageResponse, _prompt: &str, _js: &str) {}
+pub fn handle_extra_ai_data(
+    _page_response: &mut PageResponse,
+    _prompt: &str,
+    _x: JsonResponse,
+    _screenshot_output: Option<Vec<u8>>,
+) {
+}
+
+/// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
+#[cfg(feature = "openai")]
+pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
+    match serde_json::from_str::<JsonResponse>(&js) {
+        Ok(x) => Some(x),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "openai"))]
+/// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
+pub fn handle_ai_data(_js: &str) -> Option<JsonResponse> {
+    None
+}
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -358,21 +382,31 @@ pub async fn fetch_page_html_chrome_base(
                             Default::default()
                         };
 
-                        let js_script = if gpt_configs.extra_ai_data {
-                            handle_extra_ai_data(&mut page_response, &prompt, &js_script);
-                            js_script
-                        } else {
-                            js_script
-                        };
-
+                        // set the credits used for the request
                         handle_openai_credits(&mut page_response, tokens_used);
 
+                        let json_res = if gpt_configs.extra_ai_data {
+                            match handle_ai_data(&js_script) {
+                                Some(jr) => jr,
+                                _ => {
+                                    let mut jr = JsonResponse::default();
+                                    jr.error = Some("An issue occured with serialization.".into());
+
+                                    jr
+                                }
+                            }
+                        } else {
+                            let mut x = JsonResponse::default();
+                            x.js = js_script;
+                            x
+                        };
+
                         // perform the js script on the page.
-                        if !js_script.is_empty() {
+                        if !json_res.js.is_empty() {
                             let html: Option<bytes::Bytes> = match page
                                 .evaluate_function(string_concat!(
                                     "async function() { ",
-                                    js_script,
+                                    json_res.js,
                                     "; return document.documentElement.outerHTML; }"
                                 ))
                                 .await
@@ -386,7 +420,9 @@ pub async fn fetch_page_html_chrome_base(
 
                             if html.is_some() {
                                 page_wait(&page, &wait_for).await;
-                                if js_script.len() <= 400 && js_script.contains("window.location") {
+                                if json_res.js.len() <= 400
+                                    && json_res.js.contains("window.location")
+                                {
                                     match page.content_bytes().await {
                                         Ok(b) => {
                                             page_response.content = Some(b);
@@ -397,6 +433,46 @@ pub async fn fetch_page_html_chrome_base(
                                     page_response.content = html;
                                 }
                             }
+                        }
+
+                        // attach the data to the page
+                        if gpt_configs.extra_ai_data {
+                            let screenshot_bytes = if gpt_configs.screenshot
+                                && !json_res.js.is_empty()
+                            {
+                                let format = chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
+
+                                let screenshot_configs =
+                                    chromiumoxide::page::ScreenshotParams::builder()
+                                        .format(format)
+                                        .full_page(true)
+                                        .quality(45)
+                                        .omit_background(false);
+
+                                match page.screenshot(screenshot_configs.build()).await {
+                                    Ok(b) => {
+                                        log::debug!("took screenshot: {:?}", target_url);
+                                        Some(b)
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "failed to take screenshot: {:?} - {:?}",
+                                            e,
+                                            target_url
+                                        );
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+
+                            handle_extra_ai_data(
+                                &mut page_response,
+                                &prompt,
+                                json_res,
+                                screenshot_bytes,
+                            );
                         }
                     }
                 }

@@ -90,6 +90,9 @@ pub struct GPTConfigs {
     /// Map to paths. If the prompt_url_map has a key called /blog and all blog pages are found like /blog/something the same prompt is perform unless an exact match is found.
     pub paths_map: bool,
     #[cfg_attr(feature = "serde", serde(default))]
+    /// Take a screenshot of the page after each JS script execution. The screenshot is stored as a base64.
+    pub screenshot: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The API key to use for the request.
     pub api_key: Option<String>,
     #[cfg_attr(

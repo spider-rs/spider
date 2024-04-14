@@ -73,6 +73,8 @@ pub struct AIResults {
     pub js_output: String,
     /// The content output returned from the GPT response that is not a browser script, example: extracted data from the markup.
     pub content_output: Vec<String>,
+    /// The base64 image of the page.
+    pub screenshot_output: Option<Vec<u8>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
