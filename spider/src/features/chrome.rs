@@ -37,11 +37,7 @@ pub fn get_browser_config(
         Some(proxies) => {
             let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
 
-            chrome_args.push(string_concat!(
-                r#"--proxy-server=""#,
-                proxies.join(";"),
-                r#"""#
-            ));
+            chrome_args.push(string_concat!(r#"--proxy-server="#, proxies.join(";")));
 
             builder.args(chrome_args)
         }
@@ -105,11 +101,7 @@ pub fn get_browser_config(
 
     let builder = match proxies {
         Some(proxies) => {
-            chrome_args.push(string_concat!(
-                r#"--proxy-server=""#,
-                proxies.join(";"),
-                r#"""#
-            ));
+            chrome_args.push(string_concat!(r#"--proxy-server="#, proxies.join(";")));
 
             builder.args(chrome_args)
         }
