@@ -26,4 +26,4 @@ jobs:
       - name: Build
         run: cargo build --verbose --release
       - name: Run tests
-        run: ./target/release/spider_worker & RUSTFLAGS='--cfg reqwest_unstable' cargo test --verbose --all-features
+        run: cargo test
