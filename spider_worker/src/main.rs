@@ -83,10 +83,29 @@ async fn forward(
                 builder.extend(headers);
                 builder
             } else {
-                WorkerProxyHeaderBuilder::new();
+                WorkerProxyHeaderBuilder::new()
             };
+
             builder.set_status_code(page.status_code.as_u16());
-            response.headers_mut().unwrap().extend(builder.build());
+            match response.headers_mut() {
+                Some(headers) => {
+                    let h = builder.build();
+
+                    headers.extend(h.into_iter().filter_map(|(key, value)| {
+                        if let Some(name) = key {
+                            let header_name =
+                                warp::http::HeaderName::from_bytes(name.as_str().as_bytes())
+                                    .ok()?;
+                            let header_value =
+                                warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
+                            Some((Some(header_name), header_value))
+                        } else {
+                            None
+                        }
+                    }));
+                }
+                _ => (),
+            }
         }
         Ok(response.status(StatusCode::OK).body(extracted).unwrap())
     }
@@ -136,7 +155,26 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
                 WorkerProxyHeaderBuilder::new()
             };
             builder.set_status_code(data.status_code.as_u16());
-            response.headers_mut().unwrap().extend(builder.build());
+
+            match response.headers_mut() {
+                Some(headers) => {
+                    let h = builder.build();
+
+                    headers.extend(h.into_iter().filter_map(|(key, value)| {
+                        if let Some(name) = key {
+                            let header_name =
+                                warp::http::HeaderName::from_bytes(name.as_str().as_bytes())
+                                    .ok()?;
+                            let header_value =
+                                warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
+                            Some((Some(header_name), header_value))
+                        } else {
+                            None
+                        }
+                    }));
+                }
+                _ => (),
+            }
         }
         Ok(response
             .status(StatusCode::OK)
