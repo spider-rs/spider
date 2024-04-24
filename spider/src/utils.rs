@@ -246,10 +246,13 @@ pub fn handle_extra_ai_data(
     let ai_response = crate::page::AIResults {
         input: prompt.into(),
         js_output: x.js,
-        content_output: x.content,
+        content_output: x
+            .content
+            .iter()
+            .map(|c| c.trim_start().into())
+            .collect::<Vec<_>>(),
         screenshot_output,
     };
-
     match page_response.extra_ai_data.as_mut() {
         Some(v) => v.push(ai_response),
         None => page_response.extra_ai_data = Some(Vec::from([ai_response])),
