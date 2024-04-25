@@ -6,7 +6,7 @@ pub fn crawl_stub() -> String {
     const Crawler = require("crawler");
     const { argv } = require('node:process');
 
-    const base = argv.slice(1)[0] || "https://rsseau.fr";
+    const base = argv.slice(1)[0] || "https://spider.cloud";
     const crawledPages = { [base]: true };
     const ignoreSelector = `:not([href$=".png"]):not([href$=".jpg"]):not([href$=".mp4"]):not([href$=".mp3"]):not([href$=".gif"])`;
     

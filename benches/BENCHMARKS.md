@@ -19,7 +19,7 @@ mac Apple M1 Max
 1 TB of SSD disk space
 -----------------------
 
-Test url: `https://rsseau.fr`
+Test url: `https://spider.cloud`
 
 185 pages
 ```
@@ -41,7 +41,7 @@ linux ubuntu-latest
 14 GB of SSD disk space
 -----------------------
 
-Test url: `https://rsseau.fr`
+Test url: `https://spider.cloud`
 
 185 pages
 ```

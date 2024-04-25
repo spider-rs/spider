@@ -12,7 +12,7 @@ We have comparisons set against 4 different languages and libs that can be used 
 
 How fast can we crawl all pages on a medium sized website. Tests are ordered between the largest to smallest runtimes needed. All examples use the same html selector to gather the pages for a website.
 
-10 samples between each run on `https://rsseau.fr`:
+10 samples between each run on `https://spider.cloud`:
 
 1. [Node.js](./node_crawler.rs) - node-crawler
 1. [Go](./go_crolly.rs) - Crolly

@@ -30,7 +30,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut website: Website = Website::new("https://rsseau.fr");
+//!     let mut website: Website = Website::new("https://spider.cloud");
 //!
 //!     website.crawl().await;
 //!
@@ -51,7 +51,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut website: Website = Website::new("https://rsseau.fr");
+//!     let mut website: Website = Website::new("https://spider.cloud");
 //!     let mut rx2 = website.subscribe(16).unwrap();
 //!
 //!     tokio::spawn(async move {

@@ -12,7 +12,7 @@ pub fn crawl_stub() -> String {
     
     func main() {
         c := colly.NewCollector()
-        u := "https://rsseau.fr"
+        u := "https://spider.cloud"
 
         if len(os.Args) > 1 {
             u = os.Args[1]

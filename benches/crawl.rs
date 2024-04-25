@@ -8,7 +8,7 @@ use std::{env, process::Command};
 /// bench crawling between different libs
 pub fn bench_speed(c: &mut Criterion) {
     let mut worker: Option<std::process::Child> = None;
-    let query = env::var("SPIDER_BENCH_URL").unwrap_or("https://rsseau.fr".into());
+    let query = env::var("SPIDER_BENCH_URL").unwrap_or("https://spider.cloud".into());
 
     if cfg!(feature = "decentralized") {
         worker.replace(

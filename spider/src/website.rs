@@ -4983,7 +4983,7 @@ async fn test_crawl_shutdown() {
     use crate::utils::shutdown;
 
     // use target blog to prevent shutdown of prior crawler
-    let domain = "https://rsseau.fr/";
+    let domain = "https://spider.cloud/";
     let mut website: Website = Website::new(&domain);
 
     tokio::spawn(async move {
