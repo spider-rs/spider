@@ -1,9 +1,9 @@
 # Spider
 
-[![Build Status](https://github.com/madeindjs/spider/actions/workflows/rust.yml/badge.svg)](https://github.com/madeindjs/spider/actions)
+[![Build Status](https://github.com/spider-rs/spider/actions/workflows/rust.yml/badge.svg)](https://github.com/spider-rs/spider/actions)
 [![Crates.io](https://img.shields.io/crates/v/spider.svg)](https://crates.io/crates/spider)
 [![Documentation](https://docs.rs/spider/badge.svg)](https://docs.rs/spider)
-[![Rust](https://img.shields.io/badge/rust-1.56.1%2B-blue.svg?maxAge=3600)](https://github.com/madeindjs/spider)
+[![Rust](https://img.shields.io/badge/rust-1.56.1%2B-blue.svg?maxAge=3600)](https://github.com/spider-rs/spider)
 
 The fastest web crawler and indexer. Foundational building blocks for data curation workloads.
 
