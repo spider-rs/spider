@@ -204,6 +204,7 @@ pub async fn page_wait(
 
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(any(feature = "openai", feature = "chrome"))]
 /// The json response from OpenAI.
 pub struct JsonResponse {
     /// The content returned.
@@ -259,7 +260,7 @@ pub fn handle_extra_ai_data(
     };
 }
 
-#[cfg(not(feature = "openai"))]
+#[cfg(all(not(feature = "openai"), feature = "chrome"))]
 /// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
 pub fn handle_extra_ai_data(
     _page_response: &mut PageResponse,
@@ -278,7 +279,7 @@ pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
     }
 }
 
-#[cfg(not(feature = "openai"))]
+#[cfg(all(not(feature = "openai"), feature = "chrome"))]
 /// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
 pub fn handle_ai_data(_js: &str) -> Option<JsonResponse> {
     None
