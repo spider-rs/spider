@@ -563,7 +563,7 @@ impl Website {
     }
 
     /// Domain name getter.
-    pub fn get_domain(&self) -> &CaseInsensitiveString {
+    pub fn get_url(&self) -> &CaseInsensitiveString {
         &self.url
     }
 
@@ -4563,7 +4563,7 @@ impl Job for Website {
     async fn handle(&mut self) {
         log::info!(
             "CRON: {} - cron job running {}",
-            self.get_domain().as_ref(),
+            self.get_url().as_ref(),
             self.now()
         );
         if self.configuration.cron_type == CronType::Crawl {
