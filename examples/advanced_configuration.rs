@@ -36,7 +36,7 @@ async fn main() -> Result<(), Error> {
         {
             Ok(mut website) => {
                 let handle = tokio::spawn(async move {
-                    println!("Starting Crawl - {:?}", website.get_domain().inner());
+                    println!("Starting Crawl - {:?}", website.get_url().inner());
 
                     let start = Instant::now();
                     website.crawl().await;
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Error> {
 
                     println!(
                         "{:?} - Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
-                        website.get_domain().inner(),
+                        website.get_url().inner(),
                         duration,
                         links.len()
                     );
