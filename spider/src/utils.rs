@@ -26,16 +26,32 @@ async fn cf_handle(
         wait_for.idle_network =
             WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         page_wait(&page, &Some(wait_for.clone())).await;
-        page.find_element(r###"form > iframe"###)
-            .await?
-            .click()
-            .await?;
-        wait_for.page_navigations = true;
-        page_wait(&page, &Some(wait_for.clone())).await;
+
+        let mut element_exist = false;
+
+        // wait max 3 seconds for the element to exist.
+        let _ = tokio::time::timeout(tokio::time::Duration::from_secs(3), async {
+            match page.find_element("form > iframe").await {
+                Ok(element) => match element.click().await {
+                    Ok(_) => {
+                        element_exist = true;
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        })
+        .await;
+
+        if element_exist {
+            wait_for.page_navigations = true;
+            page_wait(&page, &Some(wait_for.clone())).await;
+        }
+
         let next_content = page.content_bytes().await?;
 
         Ok(
-            if next_content.ends_with(cf) || next_content.starts_with(cn) {
+            if element_exist && (next_content.ends_with(cf) || next_content.starts_with(cn)) {
                 wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
                 page_wait(&page, &Some(wait_for)).await;
                 page.content_bytes().await?
