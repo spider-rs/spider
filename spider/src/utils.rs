@@ -15,50 +15,52 @@ async fn cf_handle(
     lazy_static! {
         static ref CF_END: &'static [u8; 62] =
             b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
-        static ref CF_HEAD: &'static [u8; 719] = b"<html><head>\n    <style global=\"\">body{font-family:Arial,Helvetica,sans-serif}.container{align-items:center;display:flex;flex-direction:column;gap:2rem;height:100%;justify-content:center;width:100%}@keyframes enlarge-appear{0%{opacity:0;transform:scale(75%) rotate(-90deg)}to{opacity:1;transform:scale(100%) rotate(0deg)}}.logo{color:#8e8ea0}.scale-appear{animation:enlarge-appear .4s ease-out}@media (min-width:768px){.scale-appear{height:48px;width:48px}}.data:empty{display:none}.data{border-radius:5px;color:#8e8ea0;text-align:center}@media (prefers-color-scheme:dark){body{background-color:#343541}.logo{color:#acacbe}}</style>\n  <meta http-equiv=\"refresh\" content=\"375\">\n<script src=\"/cdn-cgi/challenge-platform/h";
+        static ref CF_END2: &'static [u8; 72] =
+            b"Performance &amp; security by Cloudflare</div></div></div></body></html>";
+        static ref CF_HEAD: &'static [u8; 34] = b"<html><head>\n    <style global=\"\">";
+        static ref CF_MOCK_FRAME: &'static [u8; 137] = b"<iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>";
     };
-    let cf = CF_END.as_ref();
-    let cn = CF_HEAD.as_ref();
 
-    if b.ends_with(cf) || b.starts_with(cn) {
+    let cf = CF_END.as_ref();
+    let cf2 = CF_END2.as_ref();
+    let cn = CF_HEAD.as_ref();
+    let cnf = CF_MOCK_FRAME.as_ref();
+
+    if b.ends_with(cf) || b.ends_with(cf2) || b.starts_with(cn) && b.ends_with(cnf) {
         let mut wait_for = WaitFor::default();
         wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
         wait_for.idle_network =
             WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         page_wait(&page, &Some(wait_for.clone())).await;
 
-        let mut element_exist = false;
-
         // wait max 3 seconds for the element to exist.
-        let _ = tokio::time::timeout(tokio::time::Duration::from_secs(3), async {
-            match page.find_element("form > iframe").await {
-                Ok(element) => match element.click().await {
-                    Ok(_) => {
-                        element_exist = true;
-                    }
-                    _ => (),
-                },
-                _ => (),
-            }
-        })
-        .await;
-
-        if element_exist {
+        if let Err(_) = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            page.find_element("form > iframe").await?.click(),
+        )
+        .await
+        {
+            Ok(b)
+        } else {
             wait_for.page_navigations = true;
             page_wait(&page, &Some(wait_for.clone())).await;
+
+            let next_content = page.content_bytes().await?;
+
+            Ok(
+                if next_content.ends_with(cf)
+                    || next_content.ends_with(cf2)
+                    || next_content.starts_with(cn) && next_content.ends_with(cnf)
+                {
+                    wait_for.delay =
+                        WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+                    page_wait(&page, &Some(wait_for)).await;
+                    page.content_bytes().await?
+                } else {
+                    next_content
+                },
+            )
         }
-
-        let next_content = page.content_bytes().await?;
-
-        Ok(
-            if element_exist && (next_content.ends_with(cf) || next_content.starts_with(cn)) {
-                wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-                page_wait(&page, &Some(wait_for)).await;
-                page.content_bytes().await?
-            } else {
-                next_content
-            },
-        )
     } else {
         Ok(b)
     }
