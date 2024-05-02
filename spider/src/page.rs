@@ -48,7 +48,7 @@ lazy_static! {
 lazy_static! {
     /// popular js frameworks and libs
     pub static ref JS_FRAMEWORK_ALLOW: HashSet<&'static str> = {
-        let mut m: HashSet<&'static str> = HashSet::with_capacity(19);
+        let mut m: HashSet<&'static str> = HashSet::with_capacity(20);
 
         m.extend(JS_FRAMEWORK_ASSETS.iter().filter_map(|v| {
             if vec!["material-components-web.min.js", "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js"].contains(v) {
@@ -58,6 +58,7 @@ lazy_static! {
             }
         }));
         m.extend(["https://m.stripe.network/inner.html", "https://m.stripe.network/out-4.5.43.js"]);
+        m.insert("https://challenges.cloudflare.com/turnstile");
 
         m
     };

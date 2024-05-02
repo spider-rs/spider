@@ -1067,96 +1067,112 @@ impl Website {
         if self.configuration.chrome_intercept {
             use chromiumoxide::cdp::browser_protocol::network::ResourceType;
 
-            match self.configuration.auth_challenge_response {
-                Some(ref auth_challenge_response) => {
-                    match page
-                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
-                    .await
-                    {
-                        Ok(mut rp) => {
-                            let intercept_page = page.clone();
-                            let auth_challenge_response = auth_challenge_response.clone();
+            match self.get_url_parsed() {
+                Some(ref url_parsed) => {
+                    match self.configuration.auth_challenge_response {
+                        Some(ref auth_challenge_response) => {
+                            match page
+                            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                            .await
+                            {
+                                Ok(mut rp) => {
+                                    let intercept_page = page.clone();
+                                    let auth_challenge_response = auth_challenge_response.clone();
 
-                            // we may need return for polling
-                            task::spawn(async move {
-                                while let Some(event) = rp.next().await {
-                                    let u = &event.request.url;
-                                    let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+                                    // we may need return for polling
+                                    task::spawn(async move {
+                                        while let Some(event) = rp.next().await {
+                                            let u = &event.request.url;
+                                            let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
 
-                                    match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
-                                    .request_id(event.request_id.clone())
-                                    .auth_challenge_response(acr)
-                                    .build() {
-                                        Ok(c) => {
-                                            if let Err(e) = intercept_page.execute(c).await
-                                            {
-                                                log("Failed to fullfill auth challege request: ", e.to_string());
+                                            match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                                            .request_id(event.request_id.clone())
+                                            .auth_challenge_response(acr)
+                                            .build() {
+                                                Ok(c) => {
+                                                    if let Err(e) = intercept_page.execute(c).await
+                                                    {
+                                                        log("Failed to fullfill auth challege request: ", e.to_string());
+                                                    }
+                                                }
+                                                _ => {
+                                                    log("Failed to get auth challege request handle ", &u);
+                                                }
                                             }
                                         }
-                                        _ => {
-                                            log("Failed to get auth challege request handle ", &u);
-                                        }
-                                    }
+                                    });
                                 }
-                            });
+                                _ => (),
+                            }
                         }
                         _ => (),
                     }
-                }
-                _ => (),
-            }
+                    match page
+                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                    .await
+                {
+                    Ok(mut rp) => {
+                        let mut host_name = string_concat!(url_parsed.scheme(), "://", url_parsed.host_str().unwrap_or_default().to_string());
+                        let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
+                        let intercept_page = page.clone();
 
-            match page
-                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
-                .await
-            {
-                Ok(mut rp) => {
-                    let mut host_name = self.url.inner().to_string();
-                    let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
-                    let intercept_page = page.clone();
+                        let ih = task::spawn(async move {
+                            let mut first_rq = true;
 
-                    let ih = task::spawn(async move {
-                        let mut first_rq = true;
-                        while let Some(event) = rp.next().await {
-                            let u = &event.request.url;
+                            while let Some(event) = rp.next().await {
+                                let u = &event.request.url;
 
-                            if first_rq {
-                                if ResourceType::Document == event.resource_type {
-                                    host_name = u.into();
+                                if first_rq {
+                                    if ResourceType::Document == event.resource_type && !u.starts_with(&host_name) {
+                                        host_name = match Url::parse(u) {
+                                            Ok(uu) => {
+                                                string_concat!(uu.scheme(), "://", uu.host_str().unwrap_or_default().to_string())
+                                            }
+                                            _ => host_name
+                                        };
+                                    }
+                                    first_rq = false;
                                 }
-                                first_rq = false;
-                            }
 
-                            if
-                                ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
-                                ResourceType::Prefetch == event.resource_type ||
-                                ResourceType::Ping == event.resource_type ||
-                                ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
-                            {
-                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
-                                .request_id(event.request_id.clone())
-                                .response_code(200)
-                                .build() {
-                                    Ok(c) => {
-                                        if let Err(e) = intercept_page.execute(c).await
-                                        {
-                                            log("Failed to fullfill request: ", e.to_string());
+                                let primary_block = ignore_visuals
+                                    && (ResourceType::Image == event.resource_type
+                                        || ResourceType::Media == event.resource_type
+                                        || ResourceType::Stylesheet == event.resource_type)
+                                    || ResourceType::Prefetch == event.resource_type
+                                    || ResourceType::Ping == event.resource_type;
+
+                                if
+                                primary_block ||
+                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
+                                {
+                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                    .request_id(event.request_id.clone())
+                                    .response_code(200)
+                                    .build() {
+                                        Ok(c) => {
+
+                                            if let Err(e) = intercept_page.execute(c).await
+                                            {
+                                                log("Failed to fullfill request: ", e.to_string());
+                                            }
+                                        }
+                                        _ => {
+                                            log("Failed to get request handle ", &host_name);
                                         }
                                     }
-                                    _ => {
-                                        log("Failed to get request handle ", &host_name);
-                                    }
+                            } else if let Err(e) = intercept_page
+                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                                .await
+                                {
+                                    log("Failed to continue request: ", e.to_string());
                                 }
-                        } else if let Err(e) = intercept_page
-                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
-                            .await
-                            {
-                                log("Failed to continue request: ", e.to_string());
                             }
-                        }
-                    });
+                        });
 
-                    Some(ih)
+                        Some(ih)
+                    }
+                    _ => None,
+                }
                 }
                 _ => None,
             }

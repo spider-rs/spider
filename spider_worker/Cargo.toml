@@ -1,9 +1,8 @@
 [package]
 name = "spider_worker"
-version = "1.93.16"
+version = "1.93.20"
 authors = [
-    "madeindjs <contact@rousseau-alexandre.fr>",
-    "j-mendez <jeff@a11ywatch.com>",
+    "j-mendez <jeff@a11ywatch.com>"
 ]
 description = "The fastest web crawler as a worker or proxy."
 repository = "https://github.com/spider-rs/spider"
@@ -25,7 +24,7 @@ lazy_static = "1.4.0"
 env_logger = "0.11.3"
 
 [dependencies.spider]
-version = "1.93.16"
+version = "1.93.20"
 path = "../spider"
 features = ["serde", "flexbuffers"]
 

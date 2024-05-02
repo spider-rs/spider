@@ -8,9 +8,9 @@ use reqwest::{Error, Response, StatusCode};
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
-    b: bytes::Bytes,
+    b: &mut bytes::Bytes,
     page: &chromiumoxide::Page,
-) -> Result<bytes::Bytes, chromiumoxide::error::CdpError> {
+) -> Result<(), chromiumoxide::error::CdpError> {
     use crate::configuration::{WaitFor, WaitForDelay, WaitForIdleNetwork};
     lazy_static! {
         static ref CF_END: &'static [u8; 62] =
@@ -33,46 +33,44 @@ async fn cf_handle(
             WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         page_wait(&page, &Some(wait_for.clone())).await;
 
-        // wait max 3 seconds for the element to exist.
-        if let Err(_) = tokio::time::timeout(
-            tokio::time::Duration::from_secs(3),
-            page.find_element("form > iframe").await?.click(),
-        )
-        .await
-        {
-            Ok(b)
-        } else {
-            wait_for.page_navigations = true;
-            page_wait(&page, &Some(wait_for.clone())).await;
+        let iframes = page.find_elements("iframe").await?;
 
-            let next_content = page.content_bytes().await?;
-
-            Ok(
-                if next_content.ends_with(cf)
-                    || next_content.ends_with(cf2)
-                    || next_content.starts_with(cn) && next_content.ends_with(cnf)
-                {
-                    wait_for.delay =
-                        WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-                    page_wait(&page, &Some(wait_for)).await;
-                    page.content_bytes().await?
-                } else {
-                    next_content
-                },
-            )
+        for frame in iframes {
+            match frame.click().await {
+                _ => ()
+            }
         }
-    } else {
-        Ok(b)
+
+        wait_for.page_navigations = true;
+        page_wait(&page, &Some(wait_for.clone())).await;
+
+        let next_content = page.content_bytes().await?;
+
+        let next_content = if next_content.ends_with(cf)
+            || next_content.ends_with(cf2)
+            || next_content.starts_with(cn) && next_content.ends_with(cnf)
+        {
+            wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+            page_wait(&page, &Some(wait_for)).await;
+            page.content_bytes().await?
+        } else {
+            next_content
+        };
+
+        *b = next_content;
     }
+
+    Ok(())
+
 }
 
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
 async fn cf_handle(
-    b: bytes::Bytes,
+    b: &mut bytes::Bytes,
     _page: &chromiumoxide::Page,
-) -> Result<bytes::Bytes, chromiumoxide::error::CdpError> {
-    Ok(b)
+) -> Result<(), chromiumoxide::error::CdpError> {
+    Ok(())
 }
 
 /// The response of a web page.
@@ -350,11 +348,13 @@ pub async fn fetch_page_html_chrome_base(
     page_wait(&page, &wait_for).await;
 
     let page = page.activate().await?;
-    let res: bytes::Bytes = page.content_bytes().await?;
-    let res = if cfg!(feature = "real_browser") {
-        cf_handle(res, &page).await?
-    } else {
-        res
+    let mut res: bytes::Bytes = page.content_bytes().await?;
+
+    if cfg!(feature = "real_browser") {
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(15)) => (),
+            _ = cf_handle(&mut res, &page) => ()
+        }
     };
 
     let ok = res.len() > 0;
