@@ -1067,112 +1067,96 @@ impl Website {
         if self.configuration.chrome_intercept {
             use chromiumoxide::cdp::browser_protocol::network::ResourceType;
 
-            match self.get_url_parsed() {
-                Some(ref url_parsed) => {
-                    match self.configuration.auth_challenge_response {
-                        Some(ref auth_challenge_response) => {
-                            match page
-                            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
-                            .await
-                            {
-                                Ok(mut rp) => {
-                                    let intercept_page = page.clone();
-                                    let auth_challenge_response = auth_challenge_response.clone();
-
-                                    // we may need return for polling
-                                    task::spawn(async move {
-                                        while let Some(event) = rp.next().await {
-                                            let u = &event.request.url;
-                                            let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
-
-                                            match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
-                                            .request_id(event.request_id.clone())
-                                            .auth_challenge_response(acr)
-                                            .build() {
-                                                Ok(c) => {
-                                                    if let Err(e) = intercept_page.execute(c).await
-                                                    {
-                                                        log("Failed to fullfill auth challege request: ", e.to_string());
-                                                    }
-                                                }
-                                                _ => {
-                                                    log("Failed to get auth challege request handle ", &u);
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-                                _ => (),
-                            }
-                        }
-                        _ => (),
-                    }
+            match self.configuration.auth_challenge_response {
+                Some(ref auth_challenge_response) => {
                     match page
-                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
                     .await
-                {
-                    Ok(mut rp) => {
-                        let mut host_name = string_concat!(url_parsed.scheme(), "://", url_parsed.host_str().unwrap_or_default().to_string());
-                        let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
-                        let intercept_page = page.clone();
+                    {
+                        Ok(mut rp) => {
+                            let intercept_page = page.clone();
+                            let auth_challenge_response = auth_challenge_response.clone();
 
-                        let ih = task::spawn(async move {
-                            let mut first_rq = true;
+                            // we may need return for polling
+                            task::spawn(async move {
+                                while let Some(event) = rp.next().await {
+                                    let u = &event.request.url;
+                                    let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
 
-                            while let Some(event) = rp.next().await {
-                                let u = &event.request.url;
-
-                                if first_rq {
-                                    if ResourceType::Document == event.resource_type && !u.starts_with(&host_name) {
-                                        host_name = match Url::parse(u) {
-                                            Ok(uu) => {
-                                                string_concat!(uu.scheme(), "://", uu.host_str().unwrap_or_default().to_string())
-                                            }
-                                            _ => host_name
-                                        };
-                                    }
-                                    first_rq = false;
-                                }
-
-                                let primary_block = ignore_visuals
-                                    && (ResourceType::Image == event.resource_type
-                                        || ResourceType::Media == event.resource_type
-                                        || ResourceType::Stylesheet == event.resource_type)
-                                    || ResourceType::Prefetch == event.resource_type
-                                    || ResourceType::Ping == event.resource_type;
-
-                                if
-                                primary_block ||
-                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
-                                {
-                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                    match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
                                     .request_id(event.request_id.clone())
-                                    .response_code(200)
+                                    .auth_challenge_response(acr)
                                     .build() {
                                         Ok(c) => {
-
                                             if let Err(e) = intercept_page.execute(c).await
                                             {
-                                                log("Failed to fullfill request: ", e.to_string());
+                                                log("Failed to fullfill auth challege request: ", e.to_string());
                                             }
                                         }
                                         _ => {
-                                            log("Failed to get request handle ", &host_name);
+                                            log("Failed to get auth challege request handle ", &u);
                                         }
                                     }
-                            } else if let Err(e) = intercept_page
-                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
-                                .await
-                                {
-                                    log("Failed to continue request: ", e.to_string());
                                 }
-                            }
-                        });
-
-                        Some(ih)
+                            });
+                        }
+                        _ => (),
                     }
-                    _ => None,
                 }
+                _ => (),
+            }
+
+            match page
+                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                .await
+            {
+                Ok(mut rp) => {
+                    let mut host_name = self.url.inner().to_string();
+                    let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
+                    let intercept_page = page.clone();
+
+                    let ih = task::spawn(async move {
+                        let mut first_rq = true;
+                        while let Some(event) = rp.next().await {
+                            let u = &event.request.url;
+
+                            if first_rq {
+                                if ResourceType::Document == event.resource_type {
+                                    host_name = u.into();
+                                }
+                                first_rq = false;
+                            }
+
+                            if
+                                ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
+                                ResourceType::Prefetch == event.resource_type ||
+                                ResourceType::Ping == event.resource_type ||
+                                ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
+                            {
+                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                .request_id(event.request_id.clone())
+                                .response_code(200)
+                                .build() {
+                                    Ok(c) => {
+                                        if let Err(e) = intercept_page.execute(c).await
+                                        {
+                                            log("Failed to fullfill request: ", e.to_string());
+                                        }
+                                    }
+                                    _ => {
+                                        log("Failed to get request handle ", &host_name);
+                                    }
+                                }
+                        } else if let Err(e) = intercept_page
+                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                            .await
+                            {
+                                log("Failed to continue request: ", e.to_string());
+                            }
+                        }
+                    });
+
+                    Some(ih)
                 }
                 _ => None,
             }
@@ -1370,7 +1354,7 @@ impl Website {
                 });
             }
 
-            let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
+            let _ = self.setup_chrome_interception(&chrome_page).await;
 
             let page = Page::new(
                 &self.url.inner(),
@@ -1420,13 +1404,6 @@ impl Website {
                 self.status = CrawlStatus::Empty;
                 Default::default()
             };
-
-            match intercept_handle {
-                Some(intercept_handle) => {
-                    let _ = intercept_handle.await;
-                }
-                _ => (),
-            }
 
             if scrape {
                 match self.pages.as_mut() {
@@ -2381,7 +2358,7 @@ impl Website {
             Some(mut selectors) => match self.setup_browser().await {
                 Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
                     Ok(new_page) => {
-                        let intercept_handle = self.setup_chrome_interception(&new_page).await;
+                        let _ = self.setup_chrome_interception(&new_page).await;
                         let new_page = configure_browser(new_page, &self.configuration).await;
                         let mut q = match &self.channel_queue {
                             Some(q) => Some(q.0.subscribe()),
@@ -2396,13 +2373,6 @@ impl Website {
                             self.crawl_establish(&client, &mut selectors, false, &new_page, false)
                                 .await,
                         );
-
-                        match intercept_handle {
-                            Some(intercept_handle) => {
-                                let _ = intercept_handle.await;
-                            }
-                            _ => (),
-                        }
 
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                         let chandle = Handle::current();
@@ -2455,7 +2425,7 @@ impl Website {
 
                                             match shared.5.new_page("about:blank").await {
                                                 Ok(new_page) => {
-                                                    let intercept_handle = self
+                                                    let _ = self
                                                         .setup_chrome_interception(&new_page)
                                                         .await;
 
@@ -2506,13 +2476,6 @@ impl Website {
                                                                 &shared.6.openai_config,
                                                             )
                                                             .await;
-
-                                                            match intercept_handle {
-                                                                Some(intercept_handle) => {
-                                                                    let _ = intercept_handle.await;
-                                                                }
-                                                                _ => (),
-                                                            }
 
                                                             if add_external {
                                                                 page.set_external(shared.3.clone());
@@ -3318,7 +3281,7 @@ impl Website {
 
                                     match shared.5.new_page("about:blank").await {
                                         Ok(new_page) => {
-                                            let intercept_handle =
+                                            let _ =
                                                 self.setup_chrome_interception(&new_page).await;
 
                                             set.spawn(async move {
@@ -3364,13 +3327,6 @@ impl Website {
                                                             )
                                                             .await;
                                                         let mut page = build(&target_url, page);
-
-                                                        match intercept_handle {
-                                                            Some(intercept_handle) => {
-                                                                let _ = intercept_handle.await;
-                                                            }
-                                                            _ => (),
-                                                        }
 
                                                         // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
                                                         let (link, _) = match on_link_find_callback

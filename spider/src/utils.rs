@@ -351,10 +351,7 @@ pub async fn fetch_page_html_chrome_base(
     let mut res: bytes::Bytes = page.content_bytes().await?;
 
     if cfg!(feature = "real_browser") {
-        tokio::select! {
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(15)) => (),
-            _ = cf_handle(&mut res, &page) => ()
-        }
+        let _ = cf_handle(&mut res, &page).await;
     };
 
     let ok = res.len() > 0;
