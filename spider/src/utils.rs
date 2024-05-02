@@ -5,7 +5,7 @@ use log::{info, log_enabled, Level};
 use reqwest::header::HeaderMap;
 use reqwest::{Error, Response, StatusCode};
 
-/// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
+/// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
     b: &mut bytes::Bytes,
@@ -33,13 +33,9 @@ async fn cf_handle(
             WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         page_wait(&page, &Some(wait_for.clone())).await;
 
-        let iframes = page.find_elements("iframe").await?;
-
-        for frame in iframes {
-            match frame.click().await {
-                _ => ()
-            }
-        }
+        let _ = page
+            .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
+            .await;
 
         wait_for.page_navigations = true;
         page_wait(&page, &Some(wait_for.clone())).await;
@@ -61,7 +57,6 @@ async fn cf_handle(
     }
 
     Ok(())
-
 }
 
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.

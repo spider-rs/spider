@@ -3281,8 +3281,7 @@ impl Website {
 
                                     match shared.5.new_page("about:blank").await {
                                         Ok(new_page) => {
-                                            let _ =
-                                                self.setup_chrome_interception(&new_page).await;
+                                            let _ = self.setup_chrome_interception(&new_page).await;
 
                                             set.spawn(async move {
                                                 let target_url = link.as_ref();
