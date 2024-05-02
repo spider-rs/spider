@@ -15,26 +15,34 @@ async fn cf_handle(
     lazy_static! {
         static ref CF_END: &'static [u8; 62] =
             b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
+        static ref CF_HEAD: &'static [u8; 719] = b"<html><head>\n    <style global=\"\">body{font-family:Arial,Helvetica,sans-serif}.container{align-items:center;display:flex;flex-direction:column;gap:2rem;height:100%;justify-content:center;width:100%}@keyframes enlarge-appear{0%{opacity:0;transform:scale(75%) rotate(-90deg)}to{opacity:1;transform:scale(100%) rotate(0deg)}}.logo{color:#8e8ea0}.scale-appear{animation:enlarge-appear .4s ease-out}@media (min-width:768px){.scale-appear{height:48px;width:48px}}.data:empty{display:none}.data{border-radius:5px;color:#8e8ea0;text-align:center}@media (prefers-color-scheme:dark){body{background-color:#343541}.logo{color:#acacbe}}</style>\n  <meta http-equiv=\"refresh\" content=\"375\">\n<script src=\"/cdn-cgi/challenge-platform/h";
     };
     let cf = CF_END.as_ref();
+    let cn = CF_HEAD.as_ref();
 
-    if b.ends_with(cf) {
+    if b.ends_with(cf) || b.starts_with(cn) {
         let mut wait_for = WaitFor::default();
         wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
         wait_for.idle_network =
             WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         page_wait(&page, &Some(wait_for.clone())).await;
-        page.find_element("iframe").await?.click().await?;
+        page.find_element(r###"form > iframe"###)
+            .await?
+            .click()
+            .await?;
         wait_for.page_navigations = true;
         page_wait(&page, &Some(wait_for.clone())).await;
         let next_content = page.content_bytes().await?;
-        Ok(if next_content.ends_with(cf) {
-            wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-            page_wait(&page, &Some(wait_for)).await;
-            page.content_bytes().await?
-        } else {
-            next_content
-        })
+
+        Ok(
+            if next_content.ends_with(cf) || next_content.starts_with(cn) {
+                wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+                page_wait(&page, &Some(wait_for)).await;
+                page.content_bytes().await?
+            } else {
+                next_content
+            },
+        )
     } else {
         Ok(b)
     }
