@@ -14,3 +14,6 @@ pub mod glob;
 pub mod openai;
 /// Common modules for OpenAI
 pub mod openai_common;
+/// Spoof the refereer
+#[cfg(feature = "spoof")]
+pub mod spoof_referrer;

@@ -1187,9 +1187,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.0.2"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "658bd65b1cf4c852a3cc96f18a8ce7b5640f6b703f905c7d74532294c2a63984"
+checksum = "9fc0510504f03c51ada170672ac806f1f105a88aa97a5281117e1ddc3368e51a"
 
 [[package]]
 name = "flate2"
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.93.24"
+version = "1.93.27"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3383,6 +3383,7 @@ dependencies = [
  "ego-tree",
  "encoding_rs",
  "fast_html5ever",
+ "fastrand",
  "flexbuffers",
  "hashbrown 0.14.3",
  "http-cache-reqwest",
@@ -3417,7 +3418,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.93.24"
+version = "1.93.27"
 dependencies = [
  "clap",
  "env_logger",
@@ -3429,7 +3430,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.93.24"
+version = "1.93.27"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3440,7 +3441,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.93.24"
+version = "1.93.27"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -3997,9 +3998,9 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
 name = "ua_generator"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d249c226d3e76c84c566cd98c8b73e1c4c675c380a4b682bc9d45c774781067"
+checksum = "22bac46ad1e2506fa063cef945b7aaaceebe28b534d6df16771fae9d57cf3f5a"
 dependencies = [
  "fastrand",
  "serde",

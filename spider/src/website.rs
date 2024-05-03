@@ -701,6 +701,76 @@ impl Website {
         }
     }
 
+    /// Set the default headers of the request.
+    #[cfg(all(feature = "spoof", not(feature = "cache")))]
+    fn default_headers(&self, client: crate::ClientBuilder) -> crate::ClientBuilder {
+        use crate::features::spoof_referrer::spoof_referrer;
+        use reqwest::header::{HeaderValue, REFERER};
+
+        match &self.configuration.headers {
+            Some(headers) => {
+                if !headers.contains_key(REFERER) {
+                    match HeaderValue::from_str(&spoof_referrer()) {
+                        Ok(h) => {
+                            let mut hm = headers.to_owned();
+                            hm.append(REFERER, h);
+
+                            client.default_headers(*hm)
+                        }
+                        _ => client.default_headers(*headers.to_owned()),
+                    }
+                } else {
+                    client.default_headers(*headers.to_owned())
+                }
+            }
+            _ => client,
+        }
+    }
+
+    /// Set the default headers of the request.
+    #[cfg(all(feature = "spoof", feature = "cache"))]
+    fn default_headers(&self, client: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        use crate::features::spoof_referrer::spoof_referrer;
+        use reqwest::header::{HeaderValue, REFERER};
+
+        match &self.configuration.headers {
+            Some(headers) => {
+                if !headers.contains_key(REFERER) {
+                    match HeaderValue::from_str(&spoof_referrer()) {
+                        Ok(h) => {
+                            let mut hm = headers.to_owned();
+                            hm.append(REFERER, h);
+
+                            client.default_headers(*hm)
+                        }
+                        _ => client.default_headers(*headers.to_owned()),
+                    }
+                } else {
+                    client.default_headers(*headers.to_owned())
+                }
+            }
+            _ => client,
+        }
+    }
+
+    /// Set the default headers of the request.
+    #[cfg(all(not(feature = "spoof"), not(feature = "cache")))]
+    fn default_headers(&self, client: crate::ClientBuilder) -> crate::ClientBuilder {
+        match &self.configuration.headers {
+            Some(headers) => client.default_headers(*headers.to_owned()),
+            _ => client,
+        }
+    }
+
+    /// Set the default headers of the request.
+    #[cfg(all(not(feature = "spoof"), feature = "cache"))]
+    fn default_headers(&self, client: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        match &self.configuration.headers {
+            Some(headers) => client.default_headers(*headers.to_owned()),
+            _ => client,
+        }
+    }
+
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
@@ -722,10 +792,7 @@ impl Website {
             client
         };
 
-        let client = match &self.configuration.headers {
-            Some(headers) => client.default_headers(*headers.to_owned()),
-            _ => client,
-        };
+        let client = self.default_headers(client);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -772,10 +839,7 @@ impl Website {
             client
         };
 
-        let client = match &self.configuration.headers {
-            Some(headers) => client.default_headers(*headers.to_owned()),
-            _ => client,
-        };
+        let client = self.default_headers(client);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
