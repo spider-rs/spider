@@ -704,6 +704,8 @@ impl Website {
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
+        use crate::utils::header_utils::setup_default_headers;
+
         let policy = self.setup_redirect_policy();
 
         let client = Client::builder()
@@ -722,10 +724,7 @@ impl Website {
             client
         };
 
-        let client = match &self.configuration.headers {
-            Some(headers) => client.default_headers(*headers.to_owned()),
-            _ => client,
-        };
+        let client = setup_default_headers(client, &self.configuration);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -772,10 +771,7 @@ impl Website {
             client
         };
 
-        let client = match &self.configuration.headers {
-            Some(headers) => client.default_headers(*headers.to_owned()),
-            _ => client,
-        };
+        let client = crate::utils::header_utils::setup_default_headers(client, &self.configuration);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),

@@ -1,3 +1,6 @@
+/// Utils to modify the HTTP header.
+pub mod header_utils;
+
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 use log::{info, log_enabled, Level};

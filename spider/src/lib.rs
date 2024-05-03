@@ -102,6 +102,7 @@
 //! - `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env var `OPENAI_API_KEY`.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
+//! - `spoof`: Spoof HTTP headers for the request.
 //! - `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
 //! - `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO. This is needed if `headers` is set in both [spider](https://docs.rs/spider/latest/spider/) and [spider_worker](https://docs.rs/crate/spider_worker/latest).
 //!
