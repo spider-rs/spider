@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.93.22"
+version = "1.93.24"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -35,7 +35,7 @@ hashbrown = { version = "0.14.3", default-features = true }
 log = "0.4"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.4", optional = true }
-ua_generator = { version = "0.3.6", optional = true }
+ua_generator = { version = "^0.4.1", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1.4.0"
 compact_str = "0.7.1"
@@ -86,7 +86,7 @@ moka = { version = "0.12.1", features = ["future"], optional = true }
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync", "reqwest/native-tls-alpn", "cookies"]
+default = ["sync", "reqwest/native-tls-alpn", "cookies", "ua_generator"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
