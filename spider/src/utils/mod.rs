@@ -65,7 +65,7 @@ async fn cf_handle(
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
 async fn cf_handle(
-    b: &mut bytes::Bytes,
+    _b: &mut bytes::Bytes,
     _page: &chromiumoxide::Page,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     Ok(())

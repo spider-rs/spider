@@ -124,28 +124,33 @@ pub fn get_browser_config(
     }
 }
 
-/// launch a chromium browser and wait until the instance is up.
-pub async fn launch_browser(
-    config: &Configuration,
-) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
-    let proxies = &config.proxies;
+/// create the browser handler configuration
+fn create_handler_config(config: &Configuration) -> HandlerConfig {
+    HandlerConfig {
+        request_timeout: match config.request_timeout.as_ref() {
+            Some(timeout) => **timeout,
+            _ => Default::default(),
+        },
+        request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
+        cache_enabled: config.cache,
+        viewport: config.viewport.clone(),
+        ..HandlerConfig::default()
+    }
+}
 
-    let browser_configuration = match std::env::var("CHROME_URL") {
-        Ok(v) => match Browser::connect_with_config(
-            &v,
-            HandlerConfig {
-                request_timeout: match config.request_timeout.as_ref() {
-                    Some(timeout) => **timeout,
-                    _ => Default::default(),
-                },
-                request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
-                cache_enabled: config.cache,
-                viewport: config.viewport.clone(),
-                ..HandlerConfig::default()
-            },
-        )
-        .await
-        {
+/// Setup the browser configuration.
+pub async fn setup_browser_configuration(
+    config: &Configuration,
+) -> Option<(Browser, chromiumoxide::Handler)> {
+    let proxies = &config.proxies;
+    let chrome_base = std::env::var("CHROME_URL").ok();
+
+    match if config.chrome_connection_url.is_some() {
+        config.chrome_connection_url.as_ref()
+    } else {
+        chrome_base.as_ref()
+    } {
+        Some(v) => match Browser::connect_with_config(&*v, create_handler_config(&config)).await {
             Ok(browser) => Some(browser),
             Err(err) => {
                 log::error!("{:?}", err);
@@ -165,12 +170,18 @@ pub async fn launch_browser(
             },
             _ => None,
         },
-    };
+    }
+}
+
+/// Launch a chromium browser with configurations and wait until the instance is up.
+pub async fn launch_browser(
+    config: &Configuration,
+) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
+    let browser_configuration = setup_browser_configuration(&config).await;
 
     match browser_configuration {
         Some(c) => {
             let (browser, mut handler) = c;
-
             // spawn a new task that continuously polls the handler
             let handle = task::spawn(async move {
                 while let Some(h) = handler.next().await {

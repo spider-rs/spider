@@ -4226,12 +4226,6 @@ impl Website {
         self
     }
 
-    /// Set the configuration for the website directly.
-    pub fn with_config(&mut self, config: Configuration) -> &mut Self {
-        self.configuration = config.into();
-        self
-    }
-
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.configuration.with_limit(limit);
@@ -4254,6 +4248,19 @@ impl Website {
     ) -> &mut Self {
         self.configuration
             .with_auth_challenge_response(auth_challenge_response);
+        self
+    }
+
+    /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_connection(&mut self, chrome_connection_url: Option<String>) -> &mut Self {
+        self.configuration
+            .with_chrome_connection(chrome_connection_url);
+        self
+    }
+
+    /// Set the configuration for the website directly.
+    pub fn with_config(&mut self, config: Configuration) -> &mut Self {
+        self.configuration = config.into();
         self
     }
 
