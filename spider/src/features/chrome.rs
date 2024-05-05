@@ -130,7 +130,13 @@ pub async fn launch_browser(
 ) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
     let proxies = &config.proxies;
 
-    let browser_configuration = match std::env::var("CHROME_URL") {
+    let chrome_connection = if config.chrome_connection_url.is_some() {
+        config.chrome_connection_url
+    } else {
+        std::env::var("CHROME_URL")
+    };
+
+    let browser_configuration = match chrome_connection {
         Ok(v) => match Browser::connect_with_config(
             &v,
             HandlerConfig {

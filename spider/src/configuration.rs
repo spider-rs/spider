@@ -124,6 +124,9 @@ pub struct Configuration {
     /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub fingerprint: bool,
+    /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
+    #[cfg(feature = "chrome")]
+    pub chrome_connection_url: Option<String>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -578,6 +581,23 @@ impl Configuration {
         _chrome_intercept: bool,
         _block_images: bool,
     ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_connection(
+        &mut self,
+        chrome_connection_url: Option<String>,
+        block_images: bool,
+    ) -> &mut Self {
+        self.chrome_connection_url = chrome_connection_url;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_connection(&mut self, _chrome_connection_url: Option<String>) -> &mut Self {
         self
     }
 
