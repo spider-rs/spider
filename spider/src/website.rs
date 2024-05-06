@@ -1727,11 +1727,13 @@ impl Website {
 
     /// Set the crawl status depending on crawl state.
     fn set_crawl_status(&mut self) {
-        self.status = if self.domain_parsed.is_none() {
-            CrawlStatus::Invalid
-        } else {
-            CrawlStatus::Idle
-        };
+        if self.status != CrawlStatus::Blocked {
+            self.status = if self.domain_parsed.is_none() {
+                CrawlStatus::Invalid
+            } else {
+                CrawlStatus::Idle
+            };
+        }
     }
 
     /// Start to crawl website with async concurrency.
