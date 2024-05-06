@@ -341,17 +341,23 @@ pub async fn fetch_page_html_chrome_base(
                 {
                     Some(http_request) => match http_request.response {
                         Some(ref response) => {
+                            println!("{:?}", response);
+
                             if !response.url.starts_with(target_url) {
-                                match response.security_details {
+                                waf_check = match response.security_details {
                                     Some(ref security_details) => {
                                         if security_details.subject_name
                                             == "challenges.cloudflare.com"
                                         {
-                                            waf_check = true;
+                                            true
+                                        } else {
+                                            false
                                         }
                                     }
-                                    _ => (),
-                                }
+                                    _ => response.url.starts_with(
+                                        "https://openai.com/cdn-cgi/challenge-platform",
+                                    ),
+                                };
                             }
                             status_code = StatusCode::from_u16(response.status as u16)
                                 .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
