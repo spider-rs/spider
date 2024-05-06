@@ -319,6 +319,9 @@ pub async fn fetch_page_html_chrome_base(
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    let mut status_code = StatusCode::OK;
+    let mut waf_check = false;
+
     let page = {
         // the active page was already set prior. No need to re-navigate or set the content.
         if !page_set {
@@ -326,7 +329,38 @@ pub async fn fetch_page_html_chrome_base(
             if content {
                 page.set_content(target_url).await?
             } else {
-                page.goto(target_url).await?
+                match page
+                    .http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+                        url: target_url.to_string(),
+                        transition_type: None,
+                        frame_id: None,
+                        referrer: None,
+                        referrer_policy: None,
+                    })?
+                    .await?
+                {
+                    Some(http_request) => match http_request.response {
+                        Some(ref response) => {
+                            if !response.url.starts_with(target_url) {
+                                match response.security_details {
+                                    Some(ref security_details) => {
+                                        if security_details.subject_name
+                                            == "challenges.cloudflare.com"
+                                        {
+                                            waf_check = true;
+                                        }
+                                    }
+                                    _ => (),
+                                }
+                            }
+                            status_code = StatusCode::from_u16(response.status as u16)
+                                .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                            page
+                        }
+                        _ => page,
+                    },
+                    _ => page,
+                }
             }
         } else {
             page
@@ -346,6 +380,7 @@ pub async fn fetch_page_html_chrome_base(
     page_wait(&page, &wait_for).await;
 
     let page = page.activate().await?;
+
     let mut res: bytes::Bytes = page.content_bytes().await?;
 
     if cfg!(feature = "real_browser") {
@@ -354,14 +389,13 @@ pub async fn fetch_page_html_chrome_base(
 
     let ok = res.len() > 0;
 
+    if waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
+        status_code = StatusCode::FORBIDDEN;
+    }
+
     let mut page_response = PageResponse {
         content: if ok { Some(res) } else { None },
-        // todo: get the cdp error to status code.
-        status_code: if ok {
-            StatusCode::OK
-        } else {
-            Default::default()
-        },
+        status_code,
         final_url,
         ..Default::default()
     };

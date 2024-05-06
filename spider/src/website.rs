@@ -1255,58 +1255,59 @@ impl Website {
         _: bool,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> =
-            if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
-                let page = Page::new_page(self.url.inner(), client).await;
+        if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
+            let page = Page::new_page(self.url.inner(), client).await;
 
-                // allow initial page mutation
-                match page.final_redirect_destination.as_deref() {
-                    Some(domain) => {
-                        self.domain_parsed = match url::Url::parse(domain) {
-                            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                            _ => None,
-                        };
-                        self.url = Box::new(domain.into());
-                        match self.setup_selectors() {
-                            Some(s) => {
-                                base.0 = s.0;
-                                base.1 = s.1;
-                            }
-                            _ => (),
-                        }
-                    }
-                    _ => (),
-                };
-
-                let links = if !page.is_empty() {
-                    self.links_visited.insert(match self.on_link_find_callback {
-                        Some(cb) => {
-                            let c = cb(*self.url.clone(), None);
-                            c.0
-                        }
-                        _ => *self.url.clone(),
-                    });
-                    page.links(base).await
-                } else {
-                    self.status = CrawlStatus::Empty;
-                    Default::default()
-                };
-
-                if scrape {
-                    match self.pages.as_mut() {
-                        Some(p) => p.push(page.clone()),
-                        _ => (),
+            // allow initial page mutation
+            match page.final_redirect_destination.as_deref() {
+                Some(domain) => {
+                    self.domain_parsed = match url::Url::parse(domain) {
+                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                        _ => None,
                     };
+                    self.url = Box::new(domain.into());
+                    match self.setup_selectors() {
+                        Some(s) => {
+                            base.0 = s.0;
+                            base.1 = s.1;
+                        }
+                        _ => (),
+                    }
                 }
-
-                channel_send_page(&self.channel, page, &self.channel_guard);
-
-                links
-            } else {
-                HashSet::new()
+                _ => (),
             };
 
-        links
+            let links = if !page.is_empty() {
+                self.links_visited.insert(match self.on_link_find_callback {
+                    Some(cb) => {
+                        let c = cb(*self.url.clone(), None);
+                        c.0
+                    }
+                    _ => *self.url.clone(),
+                });
+                page.links(base).await
+            } else {
+                self.status = CrawlStatus::Empty;
+                Default::default()
+            };
+
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
+            if page.status_code == 403 && links.len() == 0 {
+                self.status = CrawlStatus::Blocked;
+            }
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
+
+            links
+        } else {
+            HashSet::new()
+        }
     }
 
     /// Expand links for crawl.
@@ -1335,9 +1336,9 @@ impl Website {
         chrome_page: &chromiumoxide::Page,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
-        {
+        use reqwest::StatusCode;
+
+        if self.is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist()) {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
                 let _ = chrome_page.enable_stealth_mode_with_agent(&if self
                     .configuration
@@ -1401,6 +1402,10 @@ impl Website {
                 Default::default()
             };
 
+            if page.status_code == StatusCode::FORBIDDEN && links.len() == 0 {
+                self.status = CrawlStatus::Blocked;
+            }
+
             if scrape {
                 match self.pages.as_mut() {
                     Some(p) => p.push(page.clone()),
@@ -1413,9 +1418,7 @@ impl Website {
             links
         } else {
             HashSet::new()
-        };
-
-        links
+        }
     }
 
     /// Expand links for crawl.
