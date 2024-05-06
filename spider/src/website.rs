@@ -1298,7 +1298,7 @@ impl Website {
                 };
             }
 
-            if page.status_code == 403 && links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             }
 
@@ -1336,8 +1336,6 @@ impl Website {
         chrome_page: &chromiumoxide::Page,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        use reqwest::StatusCode;
-
         if self.is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist()) {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
                 let _ = chrome_page.enable_stealth_mode_with_agent(&if self
@@ -1402,7 +1400,7 @@ impl Website {
                 Default::default()
             };
 
-            if page.status_code == StatusCode::FORBIDDEN && links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             }
 
@@ -1479,6 +1477,10 @@ impl Website {
                 Default::default()
             };
 
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
+                self.status = CrawlStatus::Blocked;
+            }
+
             if scrape {
                 match self.pages.as_mut() {
                     Some(p) => p.push(page.clone()),
@@ -1529,6 +1531,10 @@ impl Website {
                 }
                 _ => *self.url.to_owned(),
             });
+
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && page.links.len() == 0 {
+                self.status = CrawlStatus::Blocked;
+            }
 
             let page_links = HashSet::from(page.links.clone());
 
