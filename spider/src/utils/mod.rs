@@ -352,11 +352,16 @@ pub async fn fetch_page_html_chrome_base(
                                             false
                                         }
                                     }
-                                    _ => response.url.starts_with(
-                                        "https://openai.com/cdn-cgi/challenge-platform",
-                                    ),
+                                    _ => response.url.contains("/cdn-cgi/challenge-platform"),
                                 };
+                                if !waf_check {
+                                    waf_check = match response.protocol {
+                                        Some(ref protocol) => protocol == "blob",
+                                        _ => false,
+                                    }
+                                }
                             }
+
                             status_code = StatusCode::from_u16(response.status as u16)
                                 .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
                             page
