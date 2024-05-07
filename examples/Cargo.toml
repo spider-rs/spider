@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.93.37"
+version = "1.93.38"
 authors = [
     "j-mendez <jeff@a11ywatch.com>",
 ]
@@ -56,6 +56,11 @@ path = "serde.rs"
 name = "subscribe"
 path = "subscribe.rs"
 required-features = ["spider/sync"]
+
+[[example]]
+name = "cache"
+path = "cache.rs"
+required-features = ["spider/sync", "spider/cache"]
 
 [[example]]
 name = "rss"

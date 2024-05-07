@@ -308,9 +308,60 @@ pub fn handle_ai_data(_js: &str) -> Option<JsonResponse> {
 }
 
 #[cfg(feature = "chrome")]
+/// Perform a http future with chrome.
+pub async fn perform_chrome_http_request(
+    page: &chromiumoxide::Page,
+    source: &str,
+) -> Result<(bool, StatusCode), chromiumoxide::error::CdpError> {
+    let mut waf_check = false;
+    let mut status_code = StatusCode::OK;
+
+    match page
+        .http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+            url: source.to_string(),
+            transition_type: None,
+            frame_id: None,
+            referrer: None,
+            referrer_policy: None,
+        })?
+        .await?
+    {
+        Some(http_request) => match http_request.response {
+            Some(ref response) => {
+                if !response.url.starts_with(source) {
+                    waf_check = match response.security_details {
+                        Some(ref security_details) => {
+                            if security_details.subject_name == "challenges.cloudflare.com" {
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                    };
+                    if !waf_check {
+                        waf_check = match response.protocol {
+                            Some(ref protocol) => protocol == "blob",
+                            _ => false,
+                        }
+                    }
+                }
+
+                status_code = StatusCode::from_u16(response.status as u16)
+                    .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+            }
+            _ => (),
+        },
+        _ => (),
+    };
+
+    Ok((waf_check, status_code))
+}
+
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
-    target_url: &str,
+    source: &str,
     page: &chromiumoxide::Page,
     content: bool,
     wait_for_navigation: bool,
@@ -327,49 +378,12 @@ pub async fn fetch_page_html_chrome_base(
         if !page_set {
             // used for smart mode re-rendering direct assigning html
             if content {
-                page.set_content(target_url).await?
+                page.set_content(source).await?
             } else {
-                match page
-                    .http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
-                        url: target_url.to_string(),
-                        transition_type: None,
-                        frame_id: None,
-                        referrer: None,
-                        referrer_policy: None,
-                    })?
-                    .await?
-                {
-                    Some(http_request) => match http_request.response {
-                        Some(ref response) => {
-                            if !response.url.starts_with(target_url) {
-                                waf_check = match response.security_details {
-                                    Some(ref security_details) => {
-                                        if security_details.subject_name
-                                            == "challenges.cloudflare.com"
-                                        {
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    }
-                                    _ => response.url.contains("/cdn-cgi/challenge-platform"),
-                                };
-                                if !waf_check {
-                                    waf_check = match response.protocol {
-                                        Some(ref protocol) => protocol == "blob",
-                                        _ => false,
-                                    }
-                                }
-                            }
-
-                            status_code = StatusCode::from_u16(response.status as u16)
-                                .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
-                            page
-                        }
-                        _ => page,
-                    },
-                    _ => page,
-                }
+                let r = perform_chrome_http_request(&page, source).await?;
+                waf_check = r.0;
+                status_code = r.1;
+                page
             }
         } else {
             page
@@ -379,7 +393,7 @@ pub async fn fetch_page_html_chrome_base(
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !content {
         match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&target_url, &u),
+            Ok(u) => get_last_redirect(&source, &u),
             _ => None,
         }
     } else {
@@ -413,11 +427,10 @@ pub async fn fetch_page_html_chrome_base(
         Some(gpt_configs) => {
             let gpt_configs = match gpt_configs.prompt_url_map {
                 Some(ref h) => {
-                    let c =
-                        h.get::<case_insensitive_string::CaseInsensitiveString>(&target_url.into());
+                    let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
 
                     if !c.is_some() && gpt_configs.paths_map {
-                        match url::Url::parse(target_url) {
+                        match url::Url::parse(source) {
                             Ok(u) => h.get::<case_insensitive_string::CaseInsensitiveString>(
                                 &u.path().into(),
                             ),
@@ -442,7 +455,7 @@ pub async fn fetch_page_html_chrome_base(
                                     Some(html) => String::from_utf8_lossy(html).to_string(),
                                     _ => Default::default(),
                                 },
-                                &target_url,
+                                &source,
                                 &prompt,
                             )
                             .await
@@ -519,14 +532,14 @@ pub async fn fetch_page_html_chrome_base(
 
                                 match page.screenshot(screenshot_configs.build()).await {
                                     Ok(b) => {
-                                        log::debug!("took screenshot: {:?}", target_url);
+                                        log::debug!("took screenshot: {:?}", source);
                                         Some(b)
                                     }
                                     Err(e) => {
                                         log::error!(
                                             "failed to take screenshot: {:?} - {:?}",
                                             e,
-                                            target_url
+                                            source
                                         );
                                         None
                                     }
@@ -551,7 +564,7 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
-        perform_screenshot(target_url, page, screenshot, &mut page_response).await;
+        perform_screenshot(source, page, screenshot, &mut page_response).await;
     }
 
     if cfg!(not(feature = "chrome_store_page")) {

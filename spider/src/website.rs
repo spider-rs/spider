@@ -23,10 +23,19 @@ use url::Url;
 #[cfg(feature = "chrome")]
 use crate::features::chrome::{configure_browser, launch_browser};
 
+#[cfg(feature = "cache")]
+use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
 #[cfg(feature = "napi")]
 use napi::bindgen_prelude::*;
+
+#[cfg(feature = "cache")]
+lazy_static! {
+    /// Cache manager for request.
+    pub static ref CACACHE_MANAGER: CACacheManager = CACacheManager::default();
+}
 
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
@@ -750,7 +759,6 @@ impl Website {
     /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
-        use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
         use reqwest_middleware::ClientBuilder;
 
         let policy = self.setup_redirect_policy();
@@ -797,7 +805,7 @@ impl Website {
         if self.configuration.cache {
             client.with(Cache(HttpCache {
                 mode: CacheMode::Default,
-                manager: CACacheManager::default(),
+                manager: CACACHE_MANAGER.clone(),
                 options: HttpCacheOptions::default(),
             }))
         } else {
@@ -1014,7 +1022,7 @@ impl Website {
         })
         .with(Cache(HttpCache {
             mode: CacheMode::Default,
-            manager: CACacheManager::default(),
+            manager: CACACHE_MANAGER.clone(),
             options: HttpCacheOptions::default(),
         }));
 
