@@ -9,7 +9,7 @@ use crate::Client;
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
-use std::sync::atomic::{AtomicI8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
@@ -3950,7 +3950,7 @@ impl Website {
             Some(channel) => {
                 if !channel.1.is_empty() {
                     match &self.channel_guard {
-                        Some(guard_counter) => guard_counter.lock(self.get_links().len()),
+                        Some(guard_counter) => guard_counter.lock(),
                         _ => (),
                     }
                 }
@@ -4342,10 +4342,7 @@ impl Website {
 
     /// Setup subscription for data.
     #[cfg(not(feature = "sync"))]
-    pub fn subscribe(
-        &mut self,
-        capacity: usize,
-    ) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
+    pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         None
     }
 
@@ -4496,42 +4493,63 @@ fn channel_send_page(
     channel_guard: &Option<ChannelGuard>,
 ) {
     match channel {
-        Some(c) => match c.0.send(page) {
-            Err(_) => match channel_guard {
-                Some(guard) => ChannelGuard::inc_guard(&guard.0),
+        Some(c) => {
+            match c.0.send(page) {
+                Ok(_) => match channel_guard {
+                    Some(guard) => ChannelGuard::inc_guard(&guard.0 .1),
+                    _ => (),
+                },
                 _ => (),
-            },
-            _ => (),
-        },
+            };
+        }
         _ => (),
     };
 }
 
 /// Guard a channel from closing until all concurrent operations are done.
 #[derive(Debug, Clone)]
-pub struct ChannelGuard(Arc<AtomicUsize>);
+pub struct ChannelGuard(Arc<(AtomicBool, AtomicUsize)>);
 
 impl ChannelGuard {
-    /// Create a new channel guard.
+    /// Create a new channel guard. The tuple has the guard control and the counter.
     pub(crate) fn new() -> ChannelGuard {
-        ChannelGuard(Arc::new(AtomicUsize::new(0)))
+        ChannelGuard(Arc::new((AtomicBool::new(true), AtomicUsize::new(0))))
     }
     /// Lock the channel until complete.
-    pub(crate) fn lock(&self, current: usize) {
-        while self
-            .0
-            .compare_exchange_weak(current, 0, Ordering::Relaxed, Ordering::Relaxed)
-            .is_err()
-        {}
+    pub(crate) fn lock(&self) {
+        if self.0 .0.load(Ordering::Relaxed) {
+            while self
+                .0
+                 .1
+                .compare_exchange_weak(0, 0, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                std::hint::spin_loop();
+            }
+        }
         std::sync::atomic::fence(Ordering::Acquire);
     }
-    /// Increment the guard channel completions.
-    pub fn inc(&mut self) {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Release);
+
+    /// Set the guard control manually. If this is set to false the loop will not enter.
+    pub fn guard(&mut self, guard: bool) {
+        self.0 .0.store(guard, Ordering::Release);
     }
+
+    /// Increment the guard channel completions.
+    // rename on next major since logic is now flow-controlled.
+    pub fn inc(&mut self) {
+        self.0 .1.fetch_sub(1, std::sync::atomic::Ordering::Release);
+    }
+
     /// Increment a guard channel completions.
-    pub(crate) fn inc_guard(guard: &Arc<AtomicUsize>) {
+    pub(crate) fn inc_guard(guard: &AtomicUsize) {
         guard.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+}
+
+impl Drop for ChannelGuard {
+    fn drop(&mut self) {
+        self.0 .0.store(false, Ordering::Release);
     }
 }
 
