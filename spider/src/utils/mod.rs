@@ -358,71 +358,28 @@ pub async fn perform_chrome_http_request(
     Ok((waf_check, status_code))
 }
 
-#[cfg(feature = "chrome")]
-/// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome_base(
+/// Use OpenAI to extend the crawl. This does nothing without 'openai' feature flag.
+#[cfg(all(feature = "chrome", not(feature = "openai")))]
+pub async fn run_openai_request(
+    _source: &str,
+    _page: &chromiumoxide::Page,
+    _wait_for: &Option<crate::configuration::WaitFor>,
+    _openai_config: &Option<crate::configuration::GPTConfigs>,
+    _page_response: &mut PageResponse,
+    _ok: bool,
+) {
+}
+
+/// Use OpenAI to extend the crawl. This does nothing without 'openai' feature flag.
+#[cfg(all(feature = "chrome", feature = "openai"))]
+pub async fn run_openai_request(
     source: &str,
     page: &chromiumoxide::Page,
-    content: bool,
-    wait_for_navigation: bool,
     wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
-    page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
-) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    let mut status_code = StatusCode::OK;
-    let mut waf_check = false;
-
-    let page = {
-        // the active page was already set prior. No need to re-navigate or set the content.
-        if !page_set {
-            // used for smart mode re-rendering direct assigning html
-            if content {
-                page.set_content(source).await?
-            } else {
-                let r = perform_chrome_http_request(&page, source).await?;
-                waf_check = r.0;
-                status_code = r.1;
-                page
-            }
-        } else {
-            page
-        }
-    };
-
-    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !content {
-        match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&source, &u),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    page_wait(&page, &wait_for).await;
-
-    let page = page.activate().await?;
-
-    let mut res: bytes::Bytes = page.content_bytes().await?;
-
-    if cfg!(feature = "real_browser") {
-        let _ = cf_handle(&mut res, &page).await;
-    };
-
-    let ok = res.len() > 0;
-
-    if waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
-        status_code = StatusCode::FORBIDDEN;
-    }
-
-    let mut page_response = PageResponse {
-        content: if ok { Some(res) } else { None },
-        status_code,
-        final_url,
-        ..Default::default()
-    };
-
+    mut page_response: &mut PageResponse,
+    ok: bool,
+) {
     match &openai_config {
         Some(gpt_configs) => {
             let gpt_configs = match gpt_configs.prompt_url_map {
@@ -449,7 +406,7 @@ pub async fn fetch_page_html_chrome_base(
 
                     while let Some(prompt) = prompts.next() {
                         let (js_script, tokens_used) = if !gpt_configs.model.is_empty() && ok {
-                            crate::utils::openai_request(
+                            openai_request(
                                 gpt_configs,
                                 match page_response.content.as_ref() {
                                     Some(html) => String::from_utf8_lossy(html).to_string(),
@@ -549,7 +506,7 @@ pub async fn fetch_page_html_chrome_base(
                             };
 
                             handle_extra_ai_data(
-                                &mut page_response,
+                                page_response,
                                 &prompt,
                                 json_res,
                                 screenshot_bytes,
@@ -562,6 +519,82 @@ pub async fn fetch_page_html_chrome_base(
         }
         _ => (),
     };
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html_chrome_base(
+    source: &str,
+    page: &chromiumoxide::Page,
+    content: bool,
+    wait_for_navigation: bool,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
+) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    let mut status_code = StatusCode::OK;
+    let mut waf_check = false;
+
+    let page = {
+        // the active page was already set prior. No need to re-navigate or set the content.
+        if !page_set {
+            // used for smart mode re-rendering direct assigning html
+            if content {
+                page.set_content(source).await?
+            } else {
+                let r = perform_chrome_http_request(&page, source).await?;
+                waf_check = r.0;
+                status_code = r.1;
+                page
+            }
+        } else {
+            page
+        }
+    };
+
+    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    let final_url = if wait_for_navigation && !content {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&source, &u),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    page_wait(&page, &wait_for).await;
+
+    let page = page.activate().await?;
+
+    let mut res: bytes::Bytes = page.content_bytes().await?;
+
+    if cfg!(feature = "real_browser") {
+        let _ = cf_handle(&mut res, &page).await;
+    };
+
+    let ok = res.len() > 0;
+
+    if waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
+        status_code = StatusCode::FORBIDDEN;
+    }
+
+    let mut page_response = PageResponse {
+        content: if ok { Some(res) } else { None },
+        status_code,
+        final_url,
+        ..Default::default()
+    };
+
+    run_openai_request(
+        source,
+        page,
+        wait_for,
+        openai_config,
+        &mut page_response,
+        ok,
+    )
+    .await;
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
         perform_screenshot(source, page, screenshot, &mut page_response).await;
@@ -1129,9 +1162,30 @@ pub async fn openai_request_base(
             let resource = if output_tokens_count > max_tokens {
                 let r = clean_html(&resource);
 
-                if cfg!(feature = "openai_slim_fit") {
-                    r
-                } else {
+                let max_tokens = crate::features::openai::calculate_max_tokens(
+                    &gpt_configs.model,
+                    gpt_configs.max_tokens,
+                    &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                    &r,
+                    &prompt,
+                );
+
+                let (tokens, prompt_tokens) = match core_bpe {
+                    Some(ref core_bpe) => (
+                        core_bpe.encode_with_special_tokens(&r),
+                        core_bpe.encode_with_special_tokens(&prompt),
+                    ),
+                    _ => (
+                        CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&r),
+                        CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
+                    ),
+                };
+
+                let output_tokens_count = tokens.len() + prompt_tokens.len();
+
+                if output_tokens_count > max_tokens {
+                    let r = clean_html_slim(&r);
+
                     let max_tokens = crate::features::openai::calculate_max_tokens(
                         &gpt_configs.model,
                         gpt_configs.max_tokens,
@@ -1139,6 +1193,7 @@ pub async fn openai_request_base(
                         &r,
                         &prompt,
                     );
+
                     let (tokens, prompt_tokens) = match core_bpe {
                         Some(ref core_bpe) => (
                             core_bpe.encode_with_special_tokens(&r),
@@ -1149,12 +1204,16 @@ pub async fn openai_request_base(
                             CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
                         ),
                     };
+
                     let output_tokens_count = tokens.len() + prompt_tokens.len();
+
                     if output_tokens_count > max_tokens {
-                        clean_html_slim(&r)
+                        clean_html_full(&r)
                     } else {
                         r
                     }
+                } else {
+                    r
                 }
             } else {
                 resource
@@ -1354,6 +1413,10 @@ pub fn clean_html_base(html: &str) -> String {
                     el.remove();
                     Ok(())
                 }),
+                element!("iframe", |el| {
+                    el.remove();
+                    Ok(())
+                }),
             ],
             document_content_handlers: vec![doc_comments!(|c| {
                 c.remove();
@@ -1383,7 +1446,15 @@ pub fn clean_html_slim(html: &str) -> String {
                     el.remove();
                     Ok(())
                 }),
-                element!("svgs", |el| {
+                element!("svg", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("canvas", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("video", |el| {
                     el.remove();
                     Ok(())
                 }),
@@ -1393,6 +1464,66 @@ pub fn clean_html_slim(html: &str) -> String {
                             el.remove();
                         }
                     }
+                    Ok(())
+                }),
+                element!("picture", |el| {
+                    if let Some(src) = el.get_attribute("src") {
+                        if src.starts_with("data:image") {
+                            el.remove();
+                        }
+                    }
+                    Ok(())
+                }),
+            ],
+            document_content_handlers: vec![doc_comments!(|c| {
+                c.remove();
+                Ok(())
+            })],
+            ..RewriteStrSettings::default()
+        },
+    ) {
+        Ok(r) => r,
+        _ => clean_html_raw(html),
+    }
+}
+
+/// Clean the most of the extra properties in the html to fit the context.
+#[cfg(feature = "openai")]
+pub fn clean_html_full(html: &str) -> String {
+    use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+
+    match rewrite_str(
+        html,
+        RewriteStrSettings {
+            element_content_handlers: vec![
+                element!("nav, footer", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("meta", |el| {
+                    let name = el.get_attribute("name").map(|n| n.to_lowercase());
+
+                    if !matches!(name.as_deref(), Some("viewport") | Some("charset")) {
+                        el.remove();
+                    }
+
+                    Ok(())
+                }),
+                element!("*", |el| {
+                    let attrs_to_keep = ["id", "data-", "class"];
+                    let attributes_list = el.attributes().iter();
+                    let mut remove_list = Vec::new();
+
+                    for attr in attributes_list {
+                        if !attrs_to_keep.contains(&attr.name().as_str()) {
+                            remove_list.push(attr.name());
+                        }
+                    }
+
+                    for attr in remove_list {
+                        el.remove_attribute(&attr);
+                    }
+
                     Ok(())
                 }),
             ],
