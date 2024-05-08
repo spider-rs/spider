@@ -4340,17 +4340,62 @@ impl Website {
     /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the `budget` flag enabled.
     fn determine_limits(&mut self) {}
 
-    /// Setup subscription for data.
     #[cfg(not(feature = "sync"))]
+    /// Set up a subscription to receive concurrent data. This will panic if it is larger than usize::MAX / 2. Set the value to 0 to use the semaphore permits.
+    /// If the subscription is going to block or use async methods, make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
+    ///
+    /// Subscribe and receive messages.
+    /// ```rust
+    /// use spider::{tokio, website::Website};
+    ///
+    /// let mut website = Website::new("http://example.com");
+    /// let mut rx2 = website.subscribe(0).unwrap();
+    ///
+    /// tokio::spawn(async move {
+    ///     while let Ok(page) = rx2.recv().await {
+    ///       tokio::spawn(async move {
+    ///             // do something with the page.
+    ///             // if you are not performing blocking tasks or a lot of memory and a high subscription count set.
+    ///        });  
+    ///     }
+    /// });
+    /// website.crawl().await;
+    /// ```
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         None
     }
 
-    /// Setup subscription for data. This will panic if capacity is equal to 0 or larger than usize::MAX / 2. This does nothing without the `sync` flag enabled.
+    /// Set up a subscription to receive concurrent data. This will panic if it is larger than usize::MAX / 2. Set the value to 0 to use the semaphore permits.
+    /// If the subscription is going to block or use async methods, make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
+    ///
+    /// Subscribe and receive messages.
+    /// ```rust
+    /// use spider::{tokio, website::Website};
+    ///
+    /// let mut website = Website::new("http://example.com");
+    /// let mut rx2 = website.subscribe(0).unwrap();
+    ///
+    /// tokio::spawn(async move {
+    ///     while let Ok(page) = rx2.recv().await {
+    ///       tokio::spawn(async move {
+    ///             // do something with the page.
+    ///             // if you are not performing blocking tasks or a lot of memory and a high subscription count set.
+    ///        });  
+    ///     }
+    /// });
+    /// website.crawl().await;
+    /// ```
     #[cfg(feature = "sync")]
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         let channel = self.channel.get_or_insert_with(|| {
-            let (tx, rx) = broadcast::channel(capacity);
+            let (tx, rx) = broadcast::channel(
+                (if capacity == 0 {
+                    SEM.available_permits()
+                } else {
+                    capacity
+                })
+                .max(1),
+            );
             (tx, Arc::new(rx))
         });
 
@@ -4359,7 +4404,7 @@ impl Website {
         Some(rx2)
     }
 
-    /// Get a sender for queueing extra links mid crawl.
+    /// Get a sender for queueing extra links mid crawl. This does nothing unless the `sync` flag is enabled.
     #[cfg(feature = "sync")]
     pub fn queue(&mut self, capacity: usize) -> Option<broadcast::Sender<String>> {
         let channel = self.channel_queue.get_or_insert_with(|| {
@@ -4370,7 +4415,7 @@ impl Website {
         Some(channel.0.to_owned())
     }
 
-    /// Get a sender for queueing extra links mid crawl.
+    /// Get a sender for queueing extra links mid crawl. This does nothing unless the `sync` flag is enabled.
     #[cfg(not(feature = "sync"))]
     pub fn queue(
         &mut self,
