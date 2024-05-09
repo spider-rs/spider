@@ -3,6 +3,9 @@ pub mod header_utils;
 
 use crate::tokio_stream::StreamExt;
 use crate::Client;
+#[cfg(feature = "cache_chrome_hybrid")]
+use http_cache_semantics::{RequestLike, ResponseLike};
+
 use log::{info, log_enabled, Level};
 #[cfg(feature = "headers")]
 use reqwest::header::HeaderMap;
@@ -226,7 +229,7 @@ pub async fn page_wait(
 
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg(any(feature = "openai", feature = "chrome"))]
+#[cfg(feature = "openai")]
 /// The json response from OpenAI.
 pub struct JsonResponse {
     /// The content returned.
@@ -282,16 +285,6 @@ pub fn handle_extra_ai_data(
     };
 }
 
-#[cfg(all(not(feature = "openai"), feature = "chrome"))]
-/// Handle extra OpenAI data used. This does nothing without 'openai' feature flag.
-pub fn handle_extra_ai_data(
-    _page_response: &mut PageResponse,
-    _prompt: &str,
-    _x: JsonResponse,
-    _screenshot_output: Option<Vec<u8>>,
-) {
-}
-
 /// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
 pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
@@ -301,10 +294,18 @@ pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
     }
 }
 
-#[cfg(all(not(feature = "openai"), feature = "chrome"))]
-/// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
-pub fn handle_ai_data(_js: &str) -> Option<JsonResponse> {
-    None
+#[cfg(feature = "chrome")]
+#[derive(Default, Clone, Debug)]
+/// The chrome HTTP response.
+pub struct ChromeHTTPResponse {
+    /// Is the request blocked by a firewall?
+    waf_check: bool,
+    /// The http status code.
+    status_code: StatusCode,
+    /// The http method of the request.
+    method: String,
+    /// The http headers for the request.
+    headers: std::collections::HashMap<String, String>,
 }
 
 #[cfg(feature = "chrome")]
@@ -312,9 +313,11 @@ pub fn handle_ai_data(_js: &str) -> Option<JsonResponse> {
 pub async fn perform_chrome_http_request(
     page: &chromiumoxide::Page,
     source: &str,
-) -> Result<(bool, StatusCode), chromiumoxide::error::CdpError> {
+) -> Result<ChromeHTTPResponse, chromiumoxide::error::CdpError> {
     let mut waf_check = false;
     let mut status_code = StatusCode::OK;
+    let mut method = String::from("GET");
+    let mut headers = std::collections::HashMap::default();
 
     match page
         .http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
@@ -326,36 +329,52 @@ pub async fn perform_chrome_http_request(
         })?
         .await?
     {
-        Some(http_request) => match http_request.response {
-            Some(ref response) => {
-                if !response.url.starts_with(source) {
-                    waf_check = match response.security_details {
-                        Some(ref security_details) => {
-                            if security_details.subject_name == "challenges.cloudflare.com" {
-                                true
-                            } else {
-                                false
+        Some(http_request) => {
+            match http_request.method.as_deref() {
+                Some(http_method) => {
+                    method = http_method.into();
+                }
+                _ => (),
+            }
+
+            headers.clone_from(&http_request.headers);
+
+            match http_request.response {
+                Some(ref response) => {
+                    if !response.url.starts_with(source) {
+                        waf_check = match response.security_details {
+                            Some(ref security_details) => {
+                                if security_details.subject_name == "challenges.cloudflare.com" {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                        };
+                        if !waf_check {
+                            waf_check = match response.protocol {
+                                Some(ref protocol) => protocol == "blob",
+                                _ => false,
                             }
                         }
-                        _ => response.url.contains("/cdn-cgi/challenge-platform"),
-                    };
-                    if !waf_check {
-                        waf_check = match response.protocol {
-                            Some(ref protocol) => protocol == "blob",
-                            _ => false,
-                        }
                     }
-                }
 
-                status_code = StatusCode::from_u16(response.status as u16)
-                    .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                    status_code = StatusCode::from_u16(response.status as u16)
+                        .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                }
+                _ => (),
             }
-            _ => (),
-        },
+        }
         _ => (),
     };
 
-    Ok((waf_check, status_code))
+    Ok(ChromeHTTPResponse {
+        waf_check,
+        status_code,
+        method,
+        headers,
+    })
 }
 
 /// Use OpenAI to extend the crawl. This does nothing without 'openai' feature flag.
@@ -521,6 +540,134 @@ pub async fn run_openai_request(
     };
 }
 
+/// Represents an HTTP version
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HttpVersion {
+    /// HTTP Version 0.9
+    Http09,
+    /// HTTP Version 1.0
+    Http10,
+    /// HTTP Version 1.1
+    Http11,
+    /// HTTP Version 2.0
+    H2,
+    /// HTTP Version 3.0
+    H3,
+}
+
+/// A basic generic type that represents an HTTP response.
+#[derive(Debug, Clone)]
+pub struct HttpResponse {
+    /// HTTP response body
+    pub body: Vec<u8>,
+    /// HTTP response headers
+    pub headers: std::collections::HashMap<String, String>,
+    /// HTTP response status code
+    pub status: u16,
+    /// HTTP response url
+    pub url: url::Url,
+    /// HTTP response version
+    pub version: HttpVersion,
+}
+
+/// A HTTP request type for caching.
+#[cfg(feature = "cache_chrome_hybrid")]
+pub struct HttpRequestLike {
+    ///  The URI component of a request.
+    pub uri: http::uri::Uri,
+    /// The http method.
+    pub method: reqwest::Method,
+    /// The http headers.
+    pub headers: http::HeaderMap,
+}
+
+#[cfg(feature = "cache_chrome_hybrid")]
+/// A HTTP response type for caching.
+pub struct HttpResponseLike {
+    /// The http status code.
+    pub status: StatusCode,
+    /// The http headers.
+    pub headers: http::HeaderMap,
+}
+
+#[cfg(feature = "cache_chrome_hybrid")]
+impl RequestLike for HttpRequestLike {
+    fn uri(&self) -> http::uri::Uri {
+        self.uri.clone()
+    }
+    fn is_same_uri(&self, other: &http::Uri) -> bool {
+        &self.uri == other
+    }
+    fn method(&self) -> &reqwest::Method {
+        &self.method
+    }
+    fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+}
+
+#[cfg(feature = "cache_chrome_hybrid")]
+impl ResponseLike for HttpResponseLike {
+    fn status(&self) -> StatusCode {
+        self.status
+    }
+    fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+}
+
+#[cfg(feature = "cache_chrome_hybrid")]
+/// Store the page to cache to be re-used across HTTP request.
+pub async fn put_hybrid_cache(cache_key: &str, http_response: HttpResponse, method: &str) {
+    use crate::http_cache_reqwest::CacheManager;
+    use http_cache_semantics::CachePolicy;
+
+    match http_response.url.as_str().parse::<http::uri::Uri>() {
+        Ok(u) => {
+            let req = HttpRequestLike {
+                uri: u,
+                method: reqwest::Method::from_bytes(method.as_bytes())
+                    .unwrap_or(reqwest::Method::GET),
+                headers: Default::default(),
+            };
+
+            let res = HttpResponseLike {
+                status: StatusCode::from_u16(http_response.status)
+                    .unwrap_or(StatusCode::EXPECTATION_FAILED),
+                headers: Default::default(),
+            };
+
+            let policy = CachePolicy::new(&req, &res);
+
+            let _ = crate::website::CACACHE_MANAGER
+                .put(
+                    cache_key.into(),
+                    http_cache_reqwest::HttpResponse {
+                        url: http_response.url,
+                        body: http_response.body,
+                        headers: http_response.headers,
+                        version: match http_response.version {
+                            HttpVersion::H2 => http_cache::HttpVersion::H2,
+                            HttpVersion::Http10 => http_cache::HttpVersion::Http10,
+                            HttpVersion::H3 => http_cache::HttpVersion::H3,
+                            HttpVersion::Http09 => http_cache::HttpVersion::Http09,
+                            HttpVersion::Http11 => http_cache::HttpVersion::Http11,
+                        },
+                        status: http_response.status,
+                    },
+                    policy,
+                )
+                .await;
+        }
+        _ => (),
+    }
+}
+
+#[cfg(not(feature = "cache_chrome_hybrid"))]
+/// Store the page to cache to be re-used across HTTP request.
+pub async fn put_hybrid_cache(_cache_key: &str, _http_response: HttpResponse) {}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -533,8 +680,11 @@ pub async fn fetch_page_html_chrome_base(
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use std::collections::HashMap;
     let mut status_code = StatusCode::OK;
     let mut waf_check = false;
+    let mut method = String::from("GET");
+    let mut headers = HashMap::default();
 
     let page = {
         // the active page was already set prior. No need to re-navigate or set the content.
@@ -544,8 +694,10 @@ pub async fn fetch_page_html_chrome_base(
                 page.set_content(source).await?
             } else {
                 let r = perform_chrome_http_request(&page, source).await?;
-                waf_check = r.0;
-                status_code = r.1;
+                waf_check = r.waf_check;
+                status_code = r.status_code;
+                method = r.method;
+                headers = r.headers;
                 page
             }
         } else {
@@ -598,6 +750,26 @@ pub async fn fetch_page_html_chrome_base(
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
         perform_screenshot(source, page, screenshot, &mut page_response).await;
+    }
+
+    if !page_set && cfg!(feature = "cache_chrome_hybrid") {
+        match url::Url::parse(source) {
+            Ok(u) => {
+                let http_response = HttpResponse {
+                    url: u,
+                    body: match page_response.content.as_ref() {
+                        Some(b) => b.clone().to_vec(),
+                        _ => Default::default(),
+                    },
+                    status: status_code.into(),
+                    version: HttpVersion::Http11,
+                    headers,
+                };
+                put_hybrid_cache(&string_concat!(method, ":", source), http_response, &method)
+                    .await;
+            }
+            _ => (),
+        }
     }
 
     if cfg!(not(feature = "chrome_store_page")) {

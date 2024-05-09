@@ -82,12 +82,15 @@ serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.31.0", features = ["serde", "serialize", "async-tokio"]}
 moka = { version = "0.12.1", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
+http-cache-semantics = { version = "2", optional = true }
+http-cache = { version = "0.19.0", optional = true, default-features = false }
+http = { version = "1", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync", "reqwest/native-tls-alpn", "cookies", "ua_generator"]
+default = ["sync", "reqwest/native-tls-alpn", "cookies", "ua_generator", "cache_chrome_hybrid"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
@@ -108,6 +111,7 @@ budget = []
 cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]
+cache_chrome_hybrid = ["cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
 chrome = ["dep:chromiumoxide"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
