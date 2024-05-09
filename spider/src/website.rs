@@ -946,7 +946,7 @@ impl Website {
     /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", feature = "cache"))]
     pub fn configure_http_client(&mut self) -> Client {
-        use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+        use http_cache_reqwest::{CacheMode, HttpCacheOptions};
         use reqwest::header::HeaderMap;
         use reqwest::header::HeaderValue;
         use reqwest_middleware::ClientBuilder;
@@ -4341,49 +4341,65 @@ impl Website {
     fn determine_limits(&mut self) {}
 
     #[cfg(not(feature = "sync"))]
-    /// Set up a subscription to receive concurrent data. This will panic if it is larger than usize::MAX / 2. Set the value to 0 to use the semaphore permits.
-    /// If the subscription is going to block or use async methods, make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
+   /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
+    /// Set the value to `0` to use the semaphore permits. If the subscription is going to block or use async methods,
+    /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
     ///
-    /// Subscribe and receive messages.
+    /// # Examples
+    /// 
+    /// Subscribe and receive messages using an async tokio environment:
+    ///
     /// ```rust
     /// use spider::{tokio, website::Website};
     ///
-    /// let mut website = Website::new("http://example.com");
-    /// let mut rx2 = website.subscribe(0).unwrap();
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut website = Website::new("http://example.com");
+    ///     let mut rx = website.subscribe(0).unwrap();
     ///
-    /// tokio::spawn(async move {
-    ///     while let Ok(page) = rx2.recv().await {
-    ///       tokio::spawn(async move {
-    ///             // do something with the page.
-    ///             // if you are not performing blocking tasks or a lot of memory and a high subscription count set.
-    ///        });  
-    ///     }
-    /// });
-    /// website.crawl().await;
+    ///     tokio::spawn(async move {
+    ///         while let Ok(page) = rx.recv().await {
+    ///             tokio::spawn(async move {
+    ///                 // Process the received page.
+    ///                 // If performing non-blocking tasks or managing a high subscription count, configure accordingly.
+    ///             });
+    ///         }
+    ///     });
+    ///
+    ///     website.crawl().await;
+    /// }
     /// ```
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
         None
     }
 
-    /// Set up a subscription to receive concurrent data. This will panic if it is larger than usize::MAX / 2. Set the value to 0 to use the semaphore permits.
-    /// If the subscription is going to block or use async methods, make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
+    /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
+    /// Set the value to `0` to use the semaphore permits. If the subscription is going to block or use async methods,
+    /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
     ///
-    /// Subscribe and receive messages.
+    /// # Examples
+    /// 
+    /// Subscribe and receive messages using an async tokio environment:
+    ///
     /// ```rust
     /// use spider::{tokio, website::Website};
     ///
-    /// let mut website = Website::new("http://example.com");
-    /// let mut rx2 = website.subscribe(0).unwrap();
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let mut website = Website::new("http://example.com");
+    ///     let mut rx = website.subscribe(0).unwrap();
     ///
-    /// tokio::spawn(async move {
-    ///     while let Ok(page) = rx2.recv().await {
-    ///       tokio::spawn(async move {
-    ///             // do something with the page.
-    ///             // if you are not performing blocking tasks or a lot of memory and a high subscription count set.
-    ///        });  
-    ///     }
-    /// });
-    /// website.crawl().await;
+    ///     tokio::spawn(async move {
+    ///         while let Ok(page) = rx.recv().await {
+    ///             tokio::spawn(async move {
+    ///                 // Process the received page.
+    ///                 // If performing non-blocking tasks or managing a high subscription count, configure accordingly.
+    ///             });
+    ///         }
+    ///     });
+    ///
+    ///     website.crawl().await;
+    /// }
     /// ```
     #[cfg(feature = "sync")]
     pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {

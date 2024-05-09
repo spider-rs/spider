@@ -66,6 +66,11 @@ Use different encodings for the page. [Encoding](./encoding.rs).
 
 Use advanced configuration re-use. [Advanced Configuration](./advanced_configuration.rs).
 
+- `cargo run --example cache_chrome_hybrid --features="spider/sync spider/chrome spider/cache_chrome_hybrid"`
+
+Use chrome hybrid caching. [Chrome Cache Hybrid](./cache_chrome_hybrid.rs).
+
+
 - `cargo run --example advanced_configuration`
 
 Use URL globbing for a domain. [URL Globbing](./url_glob.rs).

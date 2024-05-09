@@ -1,4 +1,4 @@
-//! `cargo run --example cache --features="spider/sync spider/cache"`
+//! cargo run --example cache_chrome_hybrid --features="spider/sync spider/chrome spider/cache_chrome_hybrid"
 extern crate spider;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,15 +18,23 @@ async fn main() {
         .with_caching(true)
         .build()
         .unwrap();
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(16).unwrap();
+    let mut rx2=  website.subscribe(500).unwrap();
 
     let start = std::time::Instant::now();
 
-    let mut website1 = website.clone();
-    let mut website2 = website.clone();
+    tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
 
-    let duration: Duration = start.elapsed();
+        while let Ok(res) = rx2.recv().await {
+            let message = format!("CACHING - {:?}\n", res.get_url());
+            let _ = stdout.write_all(message.as_bytes()).await;
+        }
+    });
+
+    website.crawl().await;
+    website.unsubscribe();
+
+    let mut rx2 = website.subscribe(500).unwrap();
 
     let subscription = async move {
         while let Ok(res) = rx2.recv().await {
@@ -58,12 +66,16 @@ async fn main() {
             });
         }
     };
+    
+    let crawl = async move {
+        website.crawl_raw().await;
+        website.unsubscribe();
+    };
 
     tokio::pin!(subscription);
 
     tokio::select! {
-        _ = website1.crawl() => (),
-        _ = website2.crawl() => (),
+        _ = crawl => (),
         _ = subscription => (),
     };
 

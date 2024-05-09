@@ -63,6 +63,11 @@ path = "cache.rs"
 required-features = ["spider/sync", "spider/cache"]
 
 [[example]]
+name = "cache_chrome_hybrid"
+path = "cache_chrome_hybrid.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/cache_chrome_hybrid"]
+
+[[example]]
 name = "rss"
 path = "rss.rs"
 required-features = ["spider/sync"]

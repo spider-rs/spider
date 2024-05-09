@@ -87,6 +87,7 @@
 //! - `time`: Enables duration tracking per page.
 //! - `cache`: Enables HTTP caching request to disk.
 //! - `cache_mem`: Enables HTTP caching request to persist in memory.
+//! - `cache_chrome_hybrid`: Enables hybrid chrome request caching between HTTP.
 //! - `cache_openai`: Enables caching the OpenAI request. This can drastically save costs when developing AI workflows.
 //! - `chrome`: Enables chrome headless rendering, use the env var `CHROME_URL` to connect remotely.
 //! - `chrome_headed`: Enables chrome rendering headful rendering.
