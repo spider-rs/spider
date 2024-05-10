@@ -713,15 +713,22 @@ impl Website {
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
-        use crate::utils::header_utils::setup_default_headers;
+        use reqwest::header::HeaderMap;
 
         let policy = self.setup_redirect_policy();
+        let mut headers = HeaderMap::new();
+
+        let user_agent = match &self.configuration.user_agent {
+            Some(ua) => ua.as_str(),
+            _ => &get_ua(),
+        };
+
+        if cfg!(feature = "real_browser") {
+            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
+        }
 
         let client = Client::builder()
-            .user_agent(match &self.configuration.user_agent {
-                Some(ua) => ua.as_str(),
-                _ => get_ua(),
-            })
+            .user_agent(user_agent)
             .redirect(policy)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_millis(500))
@@ -733,7 +740,8 @@ impl Website {
             client
         };
 
-        let client = setup_default_headers(client, &self.configuration);
+        let client =
+            crate::utils::header_utils::setup_default_headers(client, &self.configuration, headers);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -759,15 +767,23 @@ impl Website {
     /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
+        use reqwest::header::HeaderMap;
         use reqwest_middleware::ClientBuilder;
 
+        let mut headers = HeaderMap::new();
+
         let policy = self.setup_redirect_policy();
+        let user_agent = match &self.configuration.user_agent {
+            Some(ua) => ua.as_str(),
+            _ => &get_ua(),
+        };
+
+        if cfg!(feature = "real_browser") {
+            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
+        }
 
         let client = reqwest::Client::builder()
-            .user_agent(match &self.configuration.user_agent {
-                Some(ua) => ua.as_str(),
-                _ => &get_ua(),
-            })
+            .user_agent(user_agent)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500))
@@ -779,7 +795,8 @@ impl Website {
             client
         };
 
-        let client = crate::utils::header_utils::setup_default_headers(client, &self.configuration);
+        let client =
+            crate::utils::header_utils::setup_default_headers(client, &self.configuration, headers);
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -4341,12 +4358,12 @@ impl Website {
     fn determine_limits(&mut self) {}
 
     #[cfg(not(feature = "sync"))]
-   /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
+    /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
     /// Set the value to `0` to use the semaphore permits. If the subscription is going to block or use async methods,
     /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
     ///
     /// # Examples
-    /// 
+    ///
     /// Subscribe and receive messages using an async tokio environment:
     ///
     /// ```rust
@@ -4378,7 +4395,7 @@ impl Website {
     /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
     ///
     /// # Examples
-    /// 
+    ///
     /// Subscribe and receive messages using an async tokio environment:
     ///
     /// ```rust

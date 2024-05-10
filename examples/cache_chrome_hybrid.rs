@@ -18,7 +18,7 @@ async fn main() {
         .with_caching(true)
         .build()
         .unwrap();
-    let mut rx2=  website.subscribe(500).unwrap();
+    let mut rx2 = website.subscribe(500).unwrap();
 
     let start = std::time::Instant::now();
 
@@ -66,7 +66,7 @@ async fn main() {
             });
         }
     };
-    
+
     let crawl = async move {
         website.crawl_raw().await;
         website.unsubscribe();
