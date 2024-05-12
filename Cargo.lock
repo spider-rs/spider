@@ -1159,9 +1159,9 @@ dependencies = [
 
 [[package]]
 name = "fast_html5ever"
-version = "0.26.4"
+version = "0.26.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75f48c7fbaf50f16347bd85e9e43fdf1c7ee15a54bf294af4f1ed92d0a5e8b6b"
+checksum = "5a94e4ab2b2ea11242b3e0d5d5e5c6059a121176a5541177a5c8ee4338195560"
 dependencies = [
  "fast_markup5ever",
  "log",
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.94.2"
+version = "1.94.3"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3421,7 +3421,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.94.2"
+version = "1.94.3"
 dependencies = [
  "clap",
  "env_logger",
@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.94.2"
+version = "1.94.3"
 dependencies = [
  "env_logger",
  "lazy_static",
