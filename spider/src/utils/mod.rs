@@ -1681,6 +1681,10 @@ pub fn clean_html_base(html: &str) -> String {
                     el.remove();
                     Ok(())
                 }),
+                element!("link", |el| {
+                    el.remove();
+                    Ok(())
+                }),
                 element!("iframe", |el| {
                     el.remove();
                     Ok(())
@@ -1715,6 +1719,18 @@ pub fn clean_html_slim(html: &str) -> String {
                     Ok(())
                 }),
                 element!("svg", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("noscript", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("link", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("iframe", |el| {
                     el.remove();
                     Ok(())
                 }),
