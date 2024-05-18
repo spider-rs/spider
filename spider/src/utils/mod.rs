@@ -1469,7 +1469,7 @@ pub async fn openai_request_base(
                     r
                 }
             } else {
-                resource
+                clean_html(&resource)
             };
 
             let mut tokens_used = crate::features::openai_common::OpenAIUsage::default();
