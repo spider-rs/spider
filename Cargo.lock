@@ -172,9 +172,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11e97f9c5e0ee3260caee9700ba1bb61a6fdc34d2b6786a31e018c5de5198491"
+checksum = "007f03f7e27271451af57ced242d6adfa04204d1275a91ec0952bf441fd8d102"
 dependencies = [
  "async-convert",
  "backoff",
@@ -3335,7 +3335,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.94.5"
+version = "1.94.8"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3390,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.94.5"
+version = "1.94.8"
 dependencies = [
  "clap",
  "env_logger",
@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.94.5"
+version = "1.94.8"
 dependencies = [
  "env_logger",
  "lazy_static",

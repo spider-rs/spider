@@ -118,8 +118,20 @@ pub struct OpenAIUsage {
     pub cached: bool,
 }
 
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// The results from OpenAI.
+pub struct OpenAIReturn {
+    /// The response of the AI.
+    pub response: String,
+    /// The usage of the request.
+    pub usage: OpenAIUsage,
+    /// The error of the request if any.
+    pub error: Option<String>,
+}
+
 /// The OpenAI return type
-pub type OpenAIReturn = (String, OpenAIUsage);
+// pub type OpenAIReturn = (String, OpenAIUsage);
 
 #[cfg(feature = "cache_openai")]
 /// The OpenAI cache to use.

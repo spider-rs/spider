@@ -268,6 +268,7 @@ pub fn handle_extra_ai_data(
     prompt: &str,
     x: JsonResponse,
     screenshot_output: Option<Vec<u8>>,
+    error: Option<String>,
 ) {
     let ai_response = crate::page::AIResults {
         input: prompt.into(),
@@ -278,7 +279,9 @@ pub fn handle_extra_ai_data(
             .map(|c| c.trim_start().into())
             .collect::<Vec<_>>(),
         screenshot_output,
+        error,
     };
+
     match page_response.extra_ai_data.as_mut() {
         Some(v) => v.push(ai_response),
         None => page_response.extra_ai_data = Some(Vec::from([ai_response])),
@@ -448,7 +451,7 @@ pub async fn run_openai_request(
                     let mut prompts = gpt_configs.prompt.clone();
 
                     while let Some(prompt) = prompts.next() {
-                        let (js_script, tokens_used) = if !gpt_configs.model.is_empty() && ok {
+                        let gpt_results = if !gpt_configs.model.is_empty() && ok {
                             openai_request(
                                 gpt_configs,
                                 match page_response.content.as_ref() {
@@ -462,6 +465,10 @@ pub async fn run_openai_request(
                         } else {
                             Default::default()
                         };
+
+                        let js_script = gpt_results.response;
+                        let tokens_used = gpt_results.usage;
+                        let gpt_error = gpt_results.error;
 
                         // set the credits used for the request
                         handle_openai_credits(&mut page_response, tokens_used);
@@ -553,6 +560,7 @@ pub async fn run_openai_request(
                                 &prompt,
                                 json_res,
                                 screenshot_bytes,
+                                gpt_error,
                             );
                         }
                     }
@@ -1550,12 +1558,28 @@ pub async fn openai_request_base(
 
                     drop(permit);
 
-                    (v, tokens_used)
+                    crate::features::openai_common::OpenAIReturn {
+                        response: v,
+                        usage: tokens_used,
+                        error: None,
+                    }
                 }
-                _ => Default::default(),
+                Err(e) => {
+                    let mut d = crate::features::openai_common::OpenAIReturn::default();
+
+                    d.error = Some(e.to_string());
+
+                    d
+                }
             }
         }
-        _ => Default::default(),
+        Err(e) => {
+            let mut d = crate::features::openai_common::OpenAIReturn::default();
+
+            d.error = Some(e.to_string());
+
+            d
+        }
     }
 }
 
@@ -1595,10 +1619,9 @@ pub async fn openai_request(
 
             match cache.get(&key).await {
                 Some(cache) => {
-                    let mut usage = cache.1;
-                    usage.cached = true;
-
-                    (cache.0, usage)
+                    let mut c = cache;
+                    c.usage.cached = true;
+                    c
                 }
                 _ => {
                     let r = openai_request_base(gpt_configs, resource, url, prompt).await;
