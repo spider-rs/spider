@@ -26,8 +26,6 @@ async fn main() {
     let mut website1 = website.clone();
     let mut website2 = website.clone();
 
-    let duration: Duration = start.elapsed();
-
     let subscription = async move {
         while let Ok(res) = rx2.recv().await {
             let mut stdout = tokio::io::stdout();

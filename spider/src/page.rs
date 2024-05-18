@@ -28,7 +28,7 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
 }
 
-#[cfg(any(feature = "smart", feature = "js", feature = "chrome_intercept"))]
+#[cfg(any(feature = "smart", feature = "chrome_intercept"))]
 lazy_static! {
     /// popular js frameworks and libs
     pub static ref JS_FRAMEWORK_ASSETS: HashSet<&'static str> = {
@@ -872,7 +872,6 @@ impl Page {
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
-        not(feature = "js"),
     ))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
@@ -885,7 +884,6 @@ impl Page {
     #[cfg(all(
         not(feature = "decentralized"),
         not(feature = "full_resources"),
-        not(feature = "js"),
         feature = "smart"
     ))]
     #[inline(always)]
@@ -985,6 +983,7 @@ impl Page {
                                         let uu = self.get_html();
                                         let browser = browser.to_owned();
                                         let configuration = configuration.clone();
+                                        let target_url = self.url.clone();
 
                                         tokio::task::spawn(async move {
                                             // we need to use about:blank here since we set the HTML content directly
@@ -1054,6 +1053,7 @@ impl Page {
                                                             &configuration.screenshot,
                                                             false,
                                                             &configuration.openai_config,
+                                                            Some(target_url)
                                                         )
                                                         .await;
 
@@ -1139,175 +1139,6 @@ impl Page {
                         crate::utils::log("receiver error", e.to_string());
                     }
                 };
-            }
-        }
-
-        map
-    }
-
-    /// Find the links as a stream using string resource validation
-    #[cfg(all(
-        not(feature = "decentralized"),
-        not(feature = "full_resources"),
-        not(feature = "smart"),
-        feature = "js"
-    ))]
-    #[inline(always)]
-    pub async fn links_stream<
-        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
-    >(
-        &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
-    ) -> HashSet<A> {
-        use jsdom::extract::extract_links;
-
-        let mut map = HashSet::new();
-        let html = Box::new(self.get_html());
-
-        if html.starts_with("<?xml") {
-            self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
-                .await;
-        } else {
-            let base_domain = &selectors.0;
-            let parent_frags = &selectors.1; // todo: allow mix match tpt
-            let parent_host = &parent_frags[0];
-            let parent_host_scheme = &parent_frags[1];
-
-            if !base_domain.is_empty() && !html.starts_with("<") {
-                let links: HashSet<CaseInsensitiveString> = extract_links(&html).await;
-                let mut stream = tokio_stream::iter(&links);
-
-                while let Some(href) = stream.next().await {
-                    let mut abs = self.abs_path(href.inner());
-                    let host_name = abs.host_str();
-                    let mut can_process = parent_host_match(host_name, &base_domain, parent_host);
-                    let mut external_domain = false;
-
-                    if !can_process
-                        && host_name.is_some()
-                        && !self.external_domains_caseless.is_empty()
-                    {
-                        can_process = self
-                            .external_domains_caseless
-                            .contains::<CaseInsensitiveString>(
-                                &host_name.unwrap_or_default().into(),
-                            );
-                        external_domain = can_process;
-                    }
-
-                    if can_process {
-                        if abs.scheme() != parent_host_scheme.as_str() {
-                            let _ = abs.set_scheme(parent_host_scheme.as_str());
-                        }
-                        let hchars = abs.path();
-
-                        if let Some(position) = hchars.rfind('.') {
-                            let resource_ext = &hchars[position + 1..hchars.len()];
-
-                            if !ONLY_RESOURCES
-                                .contains::<CaseInsensitiveString>(&resource_ext.into())
-                            {
-                                can_process = false;
-                            }
-                        }
-
-                        if can_process
-                            && (base_domain.is_empty()
-                                || external_domain
-                                || base_domain.as_str() == domain_name(&abs))
-                        {
-                            map.insert(abs.as_str().to_string().into());
-                        }
-                    }
-                }
-            } else {
-                let html = Box::new(Html::parse_document(&html));
-                let mut stream = tokio_stream::iter(html.tree);
-
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        let element_name = element.name();
-
-                        if element_name == "script" {
-                            match element.attr("src") {
-                                Some(src) => {
-                                    if src.starts_with("/")
-                                        && element.attr("id") != Some("gatsby-chunk-mapping")
-                                    {
-                                        // check special framework paths todo: customize path segments to build for framework
-                                        // IGNORE: next.js pre-rendering pages since html is already rendered
-                                        if !src.starts_with("/_next/static/chunks/pages/")
-                                            && !src.starts_with("/webpack-runtime-")
-                                        {
-                                            let abs = self.abs_path(src);
-                                            // determine if script can run
-                                            let mut insertable = true;
-
-                                            match abs
-                                                .path_segments()
-                                                .ok_or_else(|| "cannot be base")
-                                            {
-                                                Ok(mut paths) => {
-                                                    while let Some(p) = paths.next() {
-                                                        // todo: get the path last before None instead of checking for ends_with
-                                                        if p.ends_with(".js")
-                                                            && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                        {
-                                                            insertable = false;
-                                                        }
-                                                    }
-                                                }
-                                                _ => (),
-                                            };
-
-                                            if insertable {
-                                                map.insert(abs.as_str().to_string().into());
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => (),
-                            }
-                        }
-                        if element_name == "a" {
-                            match element.attr("href") {
-                                Some(href) => {
-                                    let mut abs = self.abs_path(href);
-                                    let mut can_process = parent_host_match(
-                                        abs.host_str(),
-                                        &base_domain,
-                                        parent_host,
-                                    );
-
-                                    if can_process {
-                                        if abs.scheme() != parent_host_scheme.as_str() {
-                                            let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                        }
-                                        let hchars = abs.path();
-
-                                        if let Some(position) = hchars.rfind('.') {
-                                            let resource_ext = &hchars[position + 1..hchars.len()];
-
-                                            if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(
-                                                &resource_ext.into(),
-                                            ) {
-                                                can_process = false;
-                                            }
-                                        }
-
-                                        if can_process
-                                            && (base_domain.is_empty()
-                                                || base_domain.as_str() == domain_name(&abs))
-                                        {
-                                            map.insert(abs.as_str().to_string().into());
-                                        }
-                                    }
-                                }
-                                _ => (),
-                            };
-                        }
-                    }
-                }
             }
         }
 

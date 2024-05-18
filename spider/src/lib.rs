@@ -83,7 +83,6 @@
 //! - `glob`: Enables [url glob](https://everything.curl.dev/cmdline/globbing) support.
 //! - `fs`: Enables storing resources to disk for parsing (may greatly increases performance at the cost of temp storage). Enabled by default.
 //! - `sitemap`: Include sitemap pages in results.
-//! - `js`: Enables javascript parsing links created with the alpha [jsdom](https://github.com/a11ywatch/jsdom) crate.
 //! - `time`: Enables duration tracking per page.
 //! - `cache`: Enables HTTP caching request to disk.
 //! - `cache_mem`: Enables HTTP caching request to persist in memory.

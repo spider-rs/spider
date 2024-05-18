@@ -1437,12 +1437,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hash-chain"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae1e9c6caefb8e1fb1be731642c99a7d5803d2282ee890f78dce35aeee988b2"
-
-[[package]]
 name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1884,19 +1878,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c15563dc2726973df627357ce0c9ddddbea194836909d655df6a75d2cf296d"
 dependencies = [
  "wasm-bindgen",
-]
-
-[[package]]
-name = "jsdom"
-version = "0.0.11-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80d964f807a622d1acdac795847627f4797167a3f2ff4ce1e400afbe90f34e69"
-dependencies = [
- "hashbrown 0.13.2",
- "resast",
- "ressa",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -2924,46 +2905,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "res-regex"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b977fb62928f6f93f31afa8d8fcc504156fbf816b7bec69c60c0f0bd18a47b1"
-dependencies = [
- "log",
- "unic-ucd-ident",
-]
-
-[[package]]
-name = "resast"
-version = "0.6.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7cd9dee72f077e2dd0fb3b815d3bb5e634dde9761a24404e2903a966a9842fd"
-
-[[package]]
-name = "ress"
-version = "0.11.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a0d2b029f0282482c7586e273d261df825ee1cf6c6608c3aef80c9d25534c71"
-dependencies = [
- "log",
- "unicode-xid",
-]
-
-[[package]]
-name = "ressa"
-version = "0.9.0-alpha.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb11820c8d8266d83601a7600367db2b4c80d0e343d3527d8055b7f9f341d15"
-dependencies = [
- "hash-chain",
- "log",
- "res-regex",
- "resast",
- "ress",
- "tracing",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3335,7 +3276,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.94.9"
+version = "1.95.0"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3360,7 +3301,6 @@ dependencies = [
  "http-cache-reqwest",
  "http-cache-semantics",
  "itertools 0.12.1",
- "jsdom",
  "lazy_static",
  "log",
  "lol_html",
@@ -3390,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.94.9"
+version = "1.95.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -3413,7 +3353,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.94.9"
+version = "1.95.0"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -3977,47 +3917,6 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
-]
-
-[[package]]
-name = "unic-char-property"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8c57a407d9b6fa02b4795eb81c5b6652060a15a7903ea981f3d723e6c0be221"
-dependencies = [
- "unic-char-range",
-]
-
-[[package]]
-name = "unic-char-range"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0398022d5f700414f6b899e10b8348231abf9173fa93144cbc1a43b9793c1fbc"
-
-[[package]]
-name = "unic-common"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80d7ff825a6a654ee85a63e80f92f054f904f21e7d12da4e22f9834a4aaa35bc"
-
-[[package]]
-name = "unic-ucd-ident"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e230a37c0381caa9219d67cf063aa3a375ffed5bf541a452db16e744bdab6987"
-dependencies = [
- "unic-char-property",
- "unic-char-range",
- "unic-ucd-version",
-]
-
-[[package]]
-name = "unic-ucd-version"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4"
-dependencies = [
- "unic-common",
 ]
 
 [[package]]

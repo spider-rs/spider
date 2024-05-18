@@ -963,7 +963,6 @@ impl Website {
     /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", feature = "cache"))]
     pub fn configure_http_client(&mut self) -> Client {
-        use http_cache_reqwest::{CacheMode, HttpCacheOptions};
         use reqwest::header::HeaderMap;
         use reqwest::header::HeaderValue;
         use reqwest_middleware::ClientBuilder;
