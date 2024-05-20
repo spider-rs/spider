@@ -869,10 +869,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(
-        not(feature = "decentralized"),
-        not(feature = "full_resources"),
-    ))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources"),))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),

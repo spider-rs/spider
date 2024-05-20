@@ -22,13 +22,13 @@ async fn main() {
     let prompt_url_map = HashMap::from([
         (
             CaseInsensitiveString::new(website_url),
-            GPTConfigs::new("gpt-4-1106-preview", "Search for Movies", 500),
+            GPTConfigs::new("gpt-4o", "Search for Movies", 500),
         ),
         (
             CaseInsensitiveString::new(
                 &((website_url.to_owned()) + "/search/howsearchworks/?fg=1"),
             ),
-            GPTConfigs::new("gpt-4-1106-preview", "Change the background blue", 500),
+            GPTConfigs::new("gpt-4o", "Change the background blue", 500),
         ),
     ]);
 

@@ -749,7 +749,7 @@ pub async fn fetch_page_html_chrome_base(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
-    url_target: Option<String>
+    url_target: Option<String>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -781,8 +781,6 @@ pub async fn fetch_page_html_chrome_base(
 
     page_wait(&page, &wait_for).await;
 
-    let page = page.activate().await?;
-
     let mut res: bytes::Bytes = page.content_bytes().await?;
 
     if cfg!(feature = "real_browser") {
@@ -805,8 +803,8 @@ pub async fn fetch_page_html_chrome_base(
     run_openai_request(
         match url_target {
             Some(ref ut) => ut,
-            _ => source
-        }, 
+            _ => source,
+        },
         page,
         wait_for,
         openai_config,
@@ -969,7 +967,7 @@ pub async fn fetch_page_html(
         screenshot,
         page_set,
         openai_config,
-        None
+        None,
     )
     .await
     {
@@ -1267,7 +1265,7 @@ pub async fn fetch_page_html_chrome(
                 screenshot,
                 page_set,
                 openai_config,
-                None
+                None,
             )
             .await
             {
@@ -1476,7 +1474,7 @@ pub async fn openai_request_base(
             let json_mode = gpt_configs.extra_ai_data;
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
-                .content(&string_concat!("URL:", url, "\n", "HTML:", resource))
+                .content(&string_concat!("URL: ", url, "\n", "HTML: ", resource))
                 .build()
             {
                 Ok(resource_completion) => {

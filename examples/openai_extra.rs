@@ -16,12 +16,12 @@ async fn main() {
         spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
 
     let mut gpt_config: GPTConfigs = GPTConfigs::new_multi(
-        "gpt-4-1106-preview",
+        "gpt-4o",
         vec!["Search for Movies", "Extract the hrefs found."],
         3000,
     );
 
-    gpt_config.screenshot = true;
+    gpt_config.screenshot = false;
     gpt_config.set_extra(true);
 
     let mut website: Website = Website::new("https://www.bing.com")
