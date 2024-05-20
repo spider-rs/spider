@@ -1658,12 +1658,6 @@ pub fn clean_html_raw(html: &str) -> String {
 }
 
 /// Clean the html removing css and js
-#[cfg(not(feature = "openai"))]
-pub fn clean_html(html: &str) -> String {
-    clean_html_raw(html)
-}
-
-/// Clean the html removing css and js
 #[cfg(feature = "openai")]
 pub fn clean_html_base(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
@@ -1684,6 +1678,10 @@ pub fn clean_html_base(html: &str) -> String {
                     Ok(())
                 }),
                 element!("iframe", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[style*='display:none']", |el| {
                     el.remove();
                     Ok(())
                 }),
@@ -1819,6 +1817,12 @@ pub fn clean_html_full(html: &str) -> String {
         Ok(r) => r,
         _ => clean_html_raw(html),
     }
+}
+
+/// Clean the html removing css and js
+#[cfg(not(feature = "openai"))]
+pub fn clean_html(html: &str) -> String {
+    clean_html_raw(html)
 }
 
 /// Clean the html removing css and js
