@@ -1661,6 +1661,7 @@ pub fn clean_html_raw(html: &str) -> String {
 #[cfg(feature = "openai")]
 pub fn clean_html_base(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+
     match rewrite_str(
         html,
         RewriteStrSettings {
@@ -1683,6 +1684,32 @@ pub fn clean_html_base(html: &str) -> String {
                 }),
                 element!("[style*='display:none']", |el| {
                     el.remove();
+                    Ok(())
+                }),
+                element!("[id*='ad']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[class*='ad']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[id*='tracking']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[class*='tracking']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("meta", |el| {
+                    if let Some(attribute) = el.get_attribute("name") {
+                        if attribute != "title" && attribute != "description" {
+                            el.remove();
+                        }
+                    } else {
+                        el.remove();
+                    }
                     Ok(())
                 }),
             ],
@@ -1751,6 +1778,36 @@ pub fn clean_html_slim(html: &str) -> String {
                         if src.starts_with("data:image") {
                             el.remove();
                         }
+                    }
+                    Ok(())
+                }),
+                element!("[style*='display:none']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[id*='ad']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[class*='ad']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[id*='tracking']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("[class*='tracking']", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("meta", |el| {
+                    if let Some(attribute) = el.get_attribute("name") {
+                        if attribute != "title" && attribute != "description" {
+                            el.remove();
+                        }
+                    } else {
+                        el.remove();
                     }
                     Ok(())
                 }),

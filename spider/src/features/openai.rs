@@ -7,7 +7,7 @@ Exec-in-browser, no extra fmt/annot.\n
 Only raw-js for function/applic.\n
 Ex: window.location.href='https://www.google.com/search?q=Movies';"#;
 
-const PROMPT_EXTRA: &str = r#"Follow user instructions, return content in JSON: {"content": ["Something"], "js": "window.location.href = 'https://www.google.com/search?q=Movies';"}. Always use this structure. If no JS is needed, set "js" to an empty string."#;
+const PROMPT_EXTRA: &str = r#"Return content in JSON: {"content": ["Something"], "js": "window.location.href = 'https://www.google.com/search?q=Movies';"}. Always use this structure. If no JS is needed, set "js" to an empty string."#;
 
 lazy_static! {
     /// The base system prompt for driving the browser.
