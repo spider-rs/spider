@@ -1,10 +1,11 @@
 use async_openai::types::ChatCompletionRequestSystemMessageArgs;
 use tiktoken_rs::{get_chat_completion_max_tokens, ChatCompletionRequestMessage};
 
-const PROMPT: &str = r#"You are tasked with generating pure JavaScript code snippets in response to user-provided scenarios involving web page interactions.\n
-Upon receipt of specific HTML content, the website’s URL, and a detailed user prompt describing the action to be performed, you are to supply an unembellished JavaScript code string.\n
-This code should be immediately executable in a browser's console or script environment, achieving the described objectives without any extraneous formatting or annotations.\n
-Respond exclusively with the raw JavaScript code to ensure seamless functionality and applicability. Ex: window.location.href = 'https://www.google.com/search?q=Movies';"#;
+const PROMPT: &str = r#"task-js-snippet-web-int.\n
+HTML, URL, user-prompt-action -> provide pure js.\n
+Exec-in-browser, no extra fmt/annot.\n
+Only raw-js for function/applic.\n
+Ex: window.location.href='https://www.google.com/search?q=Movies';"#;
 
 const PROMPT_EXTRA: &str = r#"Follow user instructions, return content in JSON: {"content": ["Something"], "js": "window.location.href = 'https://www.google.com/search?q=Movies';"}. Always use this structure. If no JS is needed, set "js" to an empty string."#;
 
