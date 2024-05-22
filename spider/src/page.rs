@@ -574,6 +574,18 @@ impl Page {
         self.html = html;
     }
 
+    /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn set_url(&mut self, url: String) {
+        self.url = url;
+    }
+
+    /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn set_url_parsed(&mut self, url_parsed: Url) {
+        self.base = url_parsed;
+    }
+
     /// Parsed URL getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_parsed(&self) -> &Url {
