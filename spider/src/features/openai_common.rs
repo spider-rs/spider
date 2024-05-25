@@ -70,14 +70,19 @@ impl Default for Prompt {
 pub struct GPTConfigs {
     /// The prompt to use for the Chat. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
     pub prompt: Prompt,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The model to use. Example: gpt-4-1106-preview or gpt-3.5-turbo-16k
     pub model: String,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The max tokens to use for the request.
     pub max_tokens: u16,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The temperature between 0 - 2.
     pub temperature: Option<f32>,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The user for the request.
     pub user: Option<String>,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// The top priority for the request.
     pub top_p: Option<f32>,
     /// Prompts to use for certain urls. If this is set only the urls that match exactly are ran.
