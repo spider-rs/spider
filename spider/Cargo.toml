@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.95.17"
+version = "1.95.19"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -32,7 +32,7 @@ tokio = { version = "1", features = [
     "parking_lot"
 ] }
 tokio-stream = "0.1.14"
-hashbrown = { version = "0.14.3", default-features = true }
+hashbrown = { version = "0.14.5", default-features = true }
 log = "0.4"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.4", optional = true }
@@ -48,12 +48,12 @@ cssparser = "0.31.2"
 smallvec = "1.11.2"
 ego-tree = "0.6.2"
 num_cpus = "1.16.0"
-bytes = { version = "1.5.0", features = ["serde"] }
+bytes = { version = "1", features = ["serde"] }
 serde = { version = "1", optional = true, features = ["derive"] }
 flexbuffers = { version = "2.0.0", optional = true }
 itertools = { version = "0.12.0", optional = true }
 case_insensitive_string = { version = "0.2.2", features = ["compact", "serde"] }
-chromiumoxide = { version = "0.5.7", optional = true, features = [
+chromiumoxide = { version = "0.6.0", optional = true, features = [
     "tokio-runtime",
     "bytes",
 ], default-features = false }
@@ -73,7 +73,7 @@ http-cache-reqwest = { version = "0.14.0", optional = true }
 encoding_rs = { version = "0.8.33", optional = true }
 const_format = { version = "0.2.32", optional = true }
 async-openai = { version = "0.21.0", optional = true }
-tiktoken-rs = { version = "0.5.8", optional = true }
+tiktoken-rs = { version = "0.5.9", optional = true }
 lol_html = { version = "1.2.1", optional = true }
 serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.31.0", features = ["serde", "serialize", "async-tokio"]}
