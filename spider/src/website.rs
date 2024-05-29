@@ -60,7 +60,17 @@ lazy_static! {
             sem_limit / 2
         };
 
-        Semaphore::const_new(sem_limit.max(sem_max))
+        let base_limit = sem_limit.max(sem_max);
+
+        let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
+            Ok(multiplier) => match multiplier.parse::<usize>() {
+                Ok(parsed_value) => base_limit * parsed_value.max(1),
+                Err(_) => base_limit,
+            },
+            _ => base_limit,
+        };
+
+        Semaphore::const_new(base_limit)
     };
 }
 

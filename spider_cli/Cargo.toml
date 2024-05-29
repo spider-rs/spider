@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "1.95.19"
+version = "1.95.20"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -28,7 +28,7 @@ quote = "1"
 failure_derive = "0.1.8"
 
 [dependencies.spider]
-version = "1.95.19"
+version = "1.95.20"
 path = "../spider"
 
 [[bin]]

@@ -226,12 +226,8 @@ impl Configuration {
     /// Max time to wait for request. By default request times out in 15s. Set to None to disable.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         match request_timeout {
-            Some(timeout) => {
-                self.request_timeout = Some(timeout.into());
-            }
-            _ => {
-                self.request_timeout = None;
-            }
+            Some(timeout) => self.request_timeout = Some(timeout.into()),
+            _ => self.request_timeout = None,
         };
 
         self
