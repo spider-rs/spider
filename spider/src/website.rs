@@ -414,7 +414,13 @@ impl Website {
                 self.robot_file_parser
                     .as_ref()
                     .unwrap_unchecked()
-                    .can_fetch("*", link)
+                    .can_fetch(
+                        match self.configuration.user_agent {
+                            Some(ref ua) => ua,
+                            _ => "*",
+                        },
+                        link,
+                    )
             } // unwrap will always return
         } else {
             true

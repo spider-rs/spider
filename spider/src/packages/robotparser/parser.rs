@@ -179,6 +179,23 @@ impl Default for Entry {
     }
 }
 
+/// extract the path of a string
+fn extract_path(url: &str) -> &str {
+    let prefix = if url.starts_with("https://") {
+        8
+    } else if url.starts_with("http://") {
+        7
+    } else {
+        0
+    };
+
+    if let Some(path_start) = url[prefix..].find('/') {
+        &url[prefix + path_start..]
+    } else {
+        "/"
+    }
+}
+
 impl RobotFileParser {
     /// Establish a new robotparser for a website domain
     pub fn new() -> Box<RobotFileParser> {
@@ -366,8 +383,6 @@ impl RobotFileParser {
 
     /// Using the parsed robots.txt decide if useragent can fetch url
     pub fn can_fetch<T: AsRef<str>>(&self, useragent: T, url: &str) -> bool {
-        use percent_encoding::percent_decode;
-
         if self.disallow_all {
             return false;
         }
@@ -383,10 +398,8 @@ impl RobotFileParser {
         }
         // search for given user agent matches
         // the first match counts
-        let decoded_url = percent_decode(url.trim().as_bytes()).decode_utf8_lossy();
-
-        let url_str = match decoded_url {
-            ref u if !u.is_empty() => u,
+        let url_str = match url {
+            ref u if !u.is_empty() => extract_path(&u),
             _ => "/",
         };
 
