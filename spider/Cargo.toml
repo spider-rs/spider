@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.95.21"
+version = "1.95.22"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -45,7 +45,7 @@ selectors = "0.25.0"
 tendril = "0.4.3"
 ahash = "0.8.11"
 cssparser = "0.31.2"
-smallvec = "1.11.2"
+smallvec = "1"
 ego-tree = "0.6.2"
 num_cpus = "1.16.0"
 bytes = { version = "1", features = ["serde"] }
