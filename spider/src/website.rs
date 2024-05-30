@@ -147,6 +147,18 @@ pub enum CrawlStatus {
     Paused,
 }
 
+/// The link activity for the crawl.
+#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+pub enum ProcessLinkStatus {
+    /// The link can process.
+    #[default]
+    Allowed,
+    /// The link is blocked.
+    Blocked,
+    /// The budget is exceeded for the crawl.
+    BudgetExceeded,
+}
+
 /// The type of cron job to run
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 pub enum CronType {
@@ -256,88 +268,6 @@ impl Website {
         self
     }
 
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)
-    #[inline]
-    #[cfg(all(not(feature = "regex"), not(feature = "budget")))]
-    pub fn is_allowed(
-        &self,
-        link: &CaseInsensitiveString,
-        blacklist_url: &Box<Vec<CompactString>>,
-    ) -> bool {
-        if self.links_visited.contains(link) {
-            false
-        } else {
-            self.is_allowed_default(&link.inner(), blacklist_url)
-        }
-    }
-
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not over crawl budget
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)
-    #[inline]
-    #[cfg(all(not(feature = "regex"), feature = "budget"))]
-    pub fn is_allowed(
-        &mut self,
-        link: &CaseInsensitiveString,
-        blacklist_url: &Box<Vec<CompactString>>,
-    ) -> bool {
-        if self.links_visited.contains(link) {
-            false
-        } else if self.is_over_budget(link) {
-            false
-        } else {
-            self.is_allowed_default(link.inner(), blacklist_url)
-        }
-    }
-
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)
-    #[inline]
-    #[cfg(all(feature = "regex", not(feature = "budget")))]
-    pub fn is_allowed(
-        &self,
-        link: &CaseInsensitiveString,
-        blacklist_url: &Box<regex::RegexSet>,
-    ) -> bool {
-        if self.links_visited.contains(link) {
-            false
-        } else {
-            self.is_allowed_default(link, blacklist_url)
-        }
-    }
-
-    /// return `true` if URL:
-    ///
-    /// - is not already crawled
-    /// - is not over crawl budget
-    /// - is not blacklisted
-    /// - is not forbidden in robot.txt file (if parameter is defined)
-    #[inline]
-    #[cfg(all(feature = "regex", feature = "budget"))]
-    pub fn is_allowed(
-        &mut self,
-        link: &CaseInsensitiveString,
-        blacklist_url: &Box<regex::RegexSet>,
-    ) -> bool {
-        if self.links_visited.contains(link) {
-            false
-        } else if self.is_over_budget(&link) {
-            false
-        } else {
-            self.is_allowed_default(link, blacklist_url)
-        }
-    }
-
     /// Return `false` if the crawl should shutdown. Process in between each link.
     async fn handle_process<T>(
         &self,
@@ -371,6 +301,98 @@ impl Website {
 
     /// return `true` if URL:
     ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(not(feature = "regex"), not(feature = "budget")))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<Vec<CompactString>>,
+    ) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else {
+            self.is_allowed_default(&link.inner(), blacklist_url)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over crawl budget
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(not(feature = "regex"), feature = "budget"))]
+    pub fn is_allowed(
+        &mut self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<Vec<CompactString>>,
+    ) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else if self.is_over_budget(link) {
+            ProcessLinkStatus::BudgetExceeded
+        } else {
+            self.is_allowed_default(link.inner(), blacklist_url)
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(feature = "regex", not(feature = "budget")))]
+    pub fn is_allowed(
+        &self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<regex::RegexSet>,
+    ) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else if self
+            .is_allowed_default(link, blacklist_url)
+            .eq(&ProcessLinkStatus::Allowed)
+        {
+            ProcessLinkStatus::Allowed
+        } else {
+            ProcessLinkStatus::Blocked
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over crawl budget
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(all(feature = "regex", feature = "budget"))]
+    pub fn is_allowed(
+        &mut self,
+        link: &CaseInsensitiveString,
+        blacklist_url: &Box<regex::RegexSet>,
+    ) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else if self.is_over_budget(&link) {
+            ProcessLinkStatus::BudgetExceeded
+        } else if self
+            .is_allowed_default(link, blacklist_url)
+            .eq(&ProcessLinkStatus::Allowed)
+        {
+            ProcessLinkStatus::Allowed
+        } else {
+            ProcessLinkStatus::Blocked
+        }
+    }
+
+    /// return `true` if URL:
+    ///
     /// - is not blacklisted
     /// - is not forbidden in robot.txt file (if parameter is defined)
     #[inline]
@@ -379,11 +401,17 @@ impl Website {
         &self,
         link: &CaseInsensitiveString,
         blacklist_url: &Box<regex::RegexSet>,
-    ) -> bool {
+    ) -> ProcessLinkStatus {
         if !blacklist_url.is_empty() {
-            !contains(blacklist_url, &link.inner())
+            if !contains(blacklist_url, &link.inner()) {
+                ProcessLinkStatus::Allowed
+            } else {
+                ProcessLinkStatus::Blocked
+            }
+        } else if self.is_allowed_robots(&link.as_ref()) {
+            ProcessLinkStatus::Allowed
         } else {
-            self.is_allowed_robots(&link.as_ref())
+            ProcessLinkStatus::Blocked
         }
     }
 
@@ -397,11 +425,13 @@ impl Website {
         &self,
         link: &CompactString,
         blacklist_url: &Box<Vec<CompactString>>,
-    ) -> bool {
+    ) -> ProcessLinkStatus {
         if contains(blacklist_url, link) {
-            false
+            ProcessLinkStatus::Blocked
+        } else if self.is_allowed_robots(link) {
+            ProcessLinkStatus::Allowed
         } else {
-            self.is_allowed_robots(link)
+            ProcessLinkStatus::Blocked
         }
     }
 
@@ -410,18 +440,16 @@ impl Website {
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed_robots(&self, link: &str) -> bool {
         if self.configuration.respect_robots_txt {
-            unsafe {
-                self.robot_file_parser
-                    .as_ref()
-                    .unwrap_unchecked()
-                    .can_fetch(
-                        match self.configuration.user_agent {
-                            Some(ref ua) => ua,
-                            _ => "*",
-                        },
-                        link,
-                    )
-            } // unwrap will always return
+            match self.robot_file_parser.as_ref() {
+                Some(r) => r.can_fetch(
+                    match self.configuration.user_agent {
+                        Some(ref ua) => ua,
+                        _ => "*",
+                    },
+                    link,
+                ),
+                _ => true,
+            }
         } else {
             true
         }
@@ -1295,7 +1323,10 @@ impl Website {
         _: bool,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
+        if self
+            .is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist())
+            .eq(&ProcessLinkStatus::Allowed)
+        {
             let url = self.url.inner();
             let page = Page::new_page(url, client).await;
             log("fetch", &url);
@@ -1379,7 +1410,10 @@ impl Website {
         chrome_page: &chromiumoxide::Page,
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        if self.is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist()) {
+        if self
+            .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+            .eq(&ProcessLinkStatus::Allowed)
+        {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
                 let _ = chrome_page.enable_stealth_mode_with_agent(&if self
                     .configuration
@@ -1478,6 +1512,7 @@ impl Website {
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+            .eq(&ProcessLinkStatus::Allowed)
         {
             let page = Page::new_page(&self.url.inner(), &client).await;
 
@@ -1553,6 +1588,7 @@ impl Website {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link(), &self.configuration.get_blacklist())
+            .eq(&ProcessLinkStatus::Allowed)
         {
             let link = self.url.inner();
 
@@ -1612,40 +1648,47 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
-            if self.is_allowed(&link, &blacklist_url) {
-                let page = Page::new(
-                    &if http_worker && link.as_ref().starts_with("https") {
-                        link.inner().replacen("https", "http", 1).to_string()
-                    } else {
-                        link.inner().to_string()
-                    },
-                    &client,
-                )
-                .await;
+            let allowed = self.is_allowed(&link, &blacklist_url);
 
-                let u = page.get_url();
-                let u = if u.is_empty() { link } else { u.into() };
-
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u, None),
-                    _ => (u, None),
-                };
-
-                self.links_visited.insert(link_result.0);
-
-                if scrape {
-                    match self.pages.as_mut() {
-                        Some(p) => p.push(page.clone()),
-                        _ => (),
-                    };
-                }
-
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-                let page_links = HashSet::from(page.links);
-
-                links.extend(page_links);
+            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                break;
             }
+            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                continue;
+            }
+
+            let page = Page::new(
+                &if http_worker && link.as_ref().starts_with("https") {
+                    link.inner().replacen("https", "http", 1).to_string()
+                } else {
+                    link.inner().to_string()
+                },
+                &client,
+            )
+            .await;
+
+            let u = page.get_url();
+            let u = if u.is_empty() { link } else { u.into() };
+
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u, None),
+                _ => (u, None),
+            };
+
+            self.links_visited.insert(link_result.0);
+
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
+            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+            let page_links = HashSet::from(page.links);
+
+            links.extend(page_links);
         }
 
         links
@@ -1666,37 +1709,44 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
-            if self.is_allowed(&link, &blacklist_url) {
-                let page = Page::new(
-                    &link.inner().as_str(),
-                    &client,
-                    &page,
-                    &self.configuration.wait_for,
-                )
-                .await;
-                let u = page.get_url();
-                let u = if u.is_empty() { link } else { u.into() };
+            let allowed = self.is_allowed(&link, &blacklist_url);
 
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u, None),
-                    _ => (u, None),
-                };
-
-                self.links_visited.insert(link_result.0);
-
-                if scrape {
-                    match self.pages.as_mut() {
-                        Some(p) => p.push(page.clone()),
-                        _ => (),
-                    };
-                }
-
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-                let page_links = HashSet::from(page.links(&base).await);
-
-                links.extend(page_links);
+            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                break;
             }
+            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                continue;
+            }
+
+            let page = Page::new(
+                &link.inner().as_str(),
+                &client,
+                &page,
+                &self.configuration.wait_for,
+            )
+            .await;
+            let u = page.get_url();
+            let u = if u.is_empty() { link } else { u.into() };
+
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u, None),
+                _ => (u, None),
+            };
+
+            self.links_visited.insert(link_result.0);
+
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
+            }
+
+            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+            let page_links = HashSet::from(page.links(&base).await);
+
+            links.extend(page_links);
         }
 
         links
@@ -1722,53 +1772,61 @@ impl Website {
         let blacklist_url = self.configuration.get_blacklist();
 
         for link in expanded {
-            if self.is_allowed_default(&link.inner(), &blacklist_url) {
-                let page = Page::new(&link.inner(), &client).await;
+            let allowed = self.is_allowed(&link, &blacklist_url);
 
-                match page.final_redirect_destination {
-                    Some(ref domain) => {
-                        let domain: Box<CaseInsensitiveString> =
-                            CaseInsensitiveString::new(&domain).into();
-                        self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                            _ => None,
-                        };
-                        self.url = domain;
-                        match self.setup_selectors() {
-                            Some(s) => {
-                                base.0 = s.0;
-                                base.1 = s.1;
-                            }
-                            _ => (),
-                        }
-                    }
-                    _ => (),
-                }
+            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                break;
+            }
 
-                if !page.is_empty() {
-                    let u = page.get_url().into();
-                    let link_result = match self.on_link_find_callback {
-                        Some(cb) => cb(u, None),
-                        _ => (u, None),
+            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                continue;
+            }
+
+            let page = Page::new(&link.inner(), &client).await;
+
+            match page.final_redirect_destination {
+                Some(ref domain) => {
+                    let domain: Box<CaseInsensitiveString> =
+                        CaseInsensitiveString::new(&domain).into();
+                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                        _ => None,
                     };
+                    self.url = domain;
+                    match self.setup_selectors() {
+                        Some(s) => {
+                            base.0 = s.0;
+                            base.1 = s.1;
+                        }
+                        _ => (),
+                    }
+                }
+                _ => (),
+            }
 
-                    self.links_visited.insert(link_result.0);
-                    let page_links = HashSet::from(page.links(&base).await);
-
-                    links.extend(page_links);
-                } else {
-                    self.status = CrawlStatus::Empty;
+            if !page.is_empty() {
+                let u = page.get_url().into();
+                let link_result = match self.on_link_find_callback {
+                    Some(cb) => cb(u, None),
+                    _ => (u, None),
                 };
 
-                if scrape {
-                    match self.pages.as_mut() {
-                        Some(p) => p.push(page.clone()),
-                        _ => (),
-                    };
-                }
+                self.links_visited.insert(link_result.0);
+                let page_links = HashSet::from(page.links(&base).await);
 
-                channel_send_page(&self.channel, page, &self.channel_guard);
+                links.extend(page_links);
+            } else {
+                self.status = CrawlStatus::Empty;
+            };
+
+            if scrape {
+                match self.pages.as_mut() {
+                    Some(p) => p.push(page.clone()),
+                    _ => (),
+                };
             }
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
         }
 
         links
@@ -1944,7 +2002,12 @@ impl Website {
                                         break;
                                     }
 
-                                    if !self.is_allowed(&link, &blacklist_url) {
+                                    let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                        break;
+                                    }
+                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
                                         continue;
                                     }
 
@@ -1989,7 +2052,12 @@ impl Website {
                                         Some(q) => {
                                             while let Ok(link) = q.try_recv() {
                                                 let s = link.into();
-                                                if !self.is_allowed(&s, &blacklist_url) {
+                                                let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                    break;
+                                                }
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
                                                 }
                                                 links.extend(
@@ -2006,9 +2074,7 @@ impl Website {
 
                         while let Some(res) = set.join_next().await {
                             match res {
-                                Ok(msg) => {
-                                    links.extend(&msg - &self.links_visited);
-                                }
+                                Ok(msg) => links.extend(&msg - &self.links_visited),
                                 _ => (),
                             };
                         }
@@ -2082,7 +2148,12 @@ impl Website {
                             {
                                 break;
                             }
-                            if !self.is_allowed(&link, &blacklist_url) {
+                            let allowed = self.is_allowed(&link, &blacklist_url);
+
+                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                break;
+                            }
+                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                 continue;
                             }
                             self.links_visited.insert(link.clone());
@@ -2125,7 +2196,12 @@ impl Website {
                                 Some(q) => {
                                     while let Ok(link) = q.try_recv() {
                                         let s = link.into();
-                                        if !self.is_allowed(&s, &blacklist_url) {
+                                        let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                            break;
+                                        }
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
                                         }
                                         links.extend(&HashSet::from([s]) - &self.links_visited);
@@ -2250,7 +2326,12 @@ impl Website {
                                                 break;
                                             }
 
-                                            if !self.is_allowed(&link, &blacklist_url) {
+                                            let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
                                             }
 
@@ -2353,7 +2434,15 @@ impl Website {
                                                 Some(q) => {
                                                     while let Ok(link) = q.try_recv() {
                                                         let s = link.into();
-                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                        let allowed =
+                                                            self.is_allowed(&s, &blacklist_url);
+
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                        {
+                                                            break;
+                                                        }
+                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                             continue;
                                                         }
                                                         links.extend(
@@ -2464,7 +2553,12 @@ impl Website {
                                                 break;
                                             }
 
-                                            if !self.is_allowed(&link, &blacklist_url) {
+                                            let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
                                             }
 
@@ -2555,7 +2649,15 @@ impl Website {
                                                 Some(q) => {
                                                     while let Ok(link) = q.try_recv() {
                                                         let s = link.into();
-                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                        let allowed =
+                                                            self.is_allowed(&s, &blacklist_url);
+
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                        {
+                                                            break;
+                                                        }
+                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                             continue;
                                                         }
                                                         links.extend(
@@ -2651,7 +2753,12 @@ impl Website {
                                     break;
                                 }
 
-                                if !self.is_allowed(&link, &blacklist_url) {
+                                let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                    break;
+                                }
+                                if allowed.eq(&ProcessLinkStatus::Blocked) {
                                     continue;
                                 }
 
@@ -2692,7 +2799,12 @@ impl Website {
                                     Some(q) => {
                                         while let Ok(link) = q.try_recv() {
                                             let s = link.into();
-                                            if !self.is_allowed(&s, &blacklist_url) {
+                                            let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
                                             }
                                             links.extend(&HashSet::from([s]) - &self.links_visited);
@@ -2778,7 +2890,12 @@ impl Website {
                                             break;
                                         }
 
-                                        if !self.is_allowed(&link, &blacklist_url) {
+                                        let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                            break;
+                                        }
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
                                         }
 
@@ -2823,7 +2940,15 @@ impl Website {
                                             Some(q) => {
                                                 while let Ok(link) = q.try_recv() {
                                                     let s = link.into();
-                                                    if !self.is_allowed(&s, &blacklist_url) {
+                                                    let allowed =
+                                                        self.is_allowed(&s, &blacklist_url);
+
+                                                    if allowed
+                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                    {
+                                                        break;
+                                                    }
+                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                         continue;
                                                     }
                                                     links.extend(
@@ -2924,7 +3049,12 @@ impl Website {
                             {
                                 break;
                             }
-                            if !self.is_allowed(&link, &blacklist_url) {
+                            let allowed = self.is_allowed(&link, &blacklist_url);
+
+                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                break;
+                            }
+                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                 continue;
                             }
                             self.links_visited.insert(link.clone());
@@ -2966,7 +3096,12 @@ impl Website {
                                 Some(q) => {
                                     while let Ok(link) = q.try_recv() {
                                         let s = link.into();
-                                        if !self.is_allowed(&s, &blacklist_url) {
+                                        let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                            break;
+                                        }
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
                                         }
                                         links.extend(&HashSet::from([s]) - &self.links_visited);
@@ -3098,7 +3233,12 @@ impl Website {
                                             {
                                                 break;
                                             }
-                                            if !self.is_allowed(&link, &blacklist_url) {
+                                            let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
                                             }
                                             self.links_visited.insert(link.clone());
@@ -3213,7 +3353,15 @@ impl Website {
                                                 Some(q) => {
                                                     while let Ok(link) = q.try_recv() {
                                                         let s = link.into();
-                                                        if !self.is_allowed(&s, &blacklist_url) {
+                                                        let allowed =
+                                                            self.is_allowed(&s, &blacklist_url);
+
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                        {
+                                                            break;
+                                                        }
+                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                             continue;
                                                         }
                                                         links.extend(
@@ -3321,7 +3469,12 @@ impl Website {
                                     {
                                         break;
                                     }
-                                    if !self.is_allowed(&link, &blacklist_url) {
+                                    let allowed = self.is_allowed(&link, &blacklist_url);
+
+                                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                        break;
+                                    }
+                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
                                         continue;
                                     }
                                     self.links_visited.insert(link.clone());
@@ -3422,7 +3575,12 @@ impl Website {
                                         Some(q) => {
                                             while let Ok(link) = q.try_recv() {
                                                 let s = link.into();
-                                                if !self.is_allowed(&s, &blacklist_url) {
+                                                let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                    break;
+                                                }
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
                                                 }
                                                 links.extend(
@@ -3593,8 +3751,16 @@ impl Website {
                                                             let link: CaseInsensitiveString =
                                                                 url.as_str().into();
 
-                                                            if !self
-                                                                .is_allowed(&link, &blacklist_url)
+                                                            let allowed = self
+                                                                .is_allowed(&link, &blacklist_url);
+
+                                                            if allowed.eq(
+                                                                &ProcessLinkStatus::BudgetExceeded,
+                                                            ) {
+                                                                break;
+                                                            }
+                                                            if allowed
+                                                                .eq(&ProcessLinkStatus::Blocked)
                                                             {
                                                                 continue;
                                                             }
@@ -3665,7 +3831,12 @@ impl Website {
                                 Some(q) => {
                                     while let Ok(link) = q.try_recv() {
                                         let s = link.into();
-                                        if !self.is_allowed(&s, &blacklist_url) {
+                                        let allowed = self.is_allowed(&s, &blacklist_url);
+
+                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                            break;
+                                        }
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
                                         }
                                         self.extra_links
@@ -3810,9 +3981,16 @@ impl Website {
                                                                     let link: CaseInsensitiveString =
                                                                         url.as_str().into();
 
-                                                                    if !self.is_allowed(
+                                                                    let allowed = self.is_allowed(
                                                                         &link,
                                                                         &blacklist_url,
+                                                                    );
+
+                                                                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                                            break;
+                                                                        }
+                                                                    if allowed.eq(
+                                                                        &ProcessLinkStatus::Blocked,
                                                                     ) {
                                                                         continue;
                                                                     }
@@ -4872,10 +5050,12 @@ async fn test_respect_robots_txt() {
 
     assert_eq!(website.configuration.delay, 0);
 
-    assert!(!&website.is_allowed(
-        &"https://stackoverflow.com/posts/".into(),
-        &Default::default()
-    ));
+    assert!(!&website
+        .is_allowed(
+            &"https://stackoverflow.com/posts/".into(),
+            &Default::default()
+        )
+        .eq(&ProcessLinkStatus::Allowed));
 
     // test match for bing bot
     let mut website_second: Website = Website::new("https://www.mongodb.com");
