@@ -1296,7 +1296,9 @@ impl Website {
         scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         if self.is_allowed_default(self.get_base_link(), &self.configuration.get_blacklist()) {
-            let page = Page::new_page(self.url.inner(), client).await;
+            let url = self.url.inner();
+            let page = Page::new_page(url, client).await;
+            log("fetch", &url);
 
             // allow initial page mutation
             match page.final_redirect_destination.as_deref() {
@@ -1325,6 +1327,7 @@ impl Website {
                     }
                     _ => *self.url.clone(),
                 });
+
                 page.links(base).await
             } else {
                 self.status = CrawlStatus::Empty;
