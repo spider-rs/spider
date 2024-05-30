@@ -43,16 +43,16 @@ async fn main() {
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(cli.block_images, true)
         .with_danger_accept_invalid_certs(cli.accept_invalid_certs)
-        .with_limit(cli.limit.unwrap_or(0))
-        .with_tld(cli.tld)
-        .with_depth(cli.depth.unwrap_or(0))
-        .with_user_agent(cli.user_agent.as_deref())
         .with_budget(cli.budget.as_ref().map(|budget| budget
                     .split(',')
                     .collect::<Vec<_>>()
                     .chunks(2)
                     .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
                     .collect::<HashMap<&str, u32>>()))
+        .with_limit(cli.limit.unwrap_or(0))
+        .with_tld(cli.tld)
+        .with_depth(cli.depth.unwrap_or(0))
+        .with_user_agent(cli.user_agent.as_deref())
         .with_blacklist_url(cli.blacklist_url.map(|blacklist_url| blacklist_url.split(',').map(|l| l.into()).collect()))
         .with_external_domains(Some(cli.external_domains.unwrap_or_default().into_iter()))
         .build()
@@ -71,6 +71,7 @@ async fn main() {
                             .iter()
                             .map(|l| l.inner().to_string())
                             .collect();
+
                         io::stdout()
                             .write_all(format!("{:?}", links).as_bytes())
                             .unwrap();
