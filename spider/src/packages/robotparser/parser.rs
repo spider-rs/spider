@@ -109,14 +109,13 @@ impl Entry {
             .nth(0)
             .unwrap_or_default()
             .to_lowercase();
+
         for agent in &self.useragents {
-            if agent == "*" {
-                return true;
-            }
-            if ua.contains(agent) {
+            if agent == "*" || ua.contains(agent) {
                 return true;
             }
         }
+
         false
     }
 
