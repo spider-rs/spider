@@ -678,10 +678,14 @@ impl Website {
                         .read(&client, &string_concat!(host_str, "/"))
                         .await;
                 }
-                self.configuration.delay = robot_file_parser
-                    .get_crawl_delay(&self.configuration.user_agent) // returns the crawl delay in seconds
-                    .unwrap_or_else(|| self.get_delay())
-                    .as_millis() as u64;
+
+                match robot_file_parser.get_crawl_delay(&self.configuration.user_agent) {
+                    Some(delay) => {
+                        // 60 seconds should be the longest to respect for efficiency.
+                        self.configuration.delay = delay.as_millis().max(60000) as u64;
+                    }
+                    _ => (),
+                }
             }
         }
 
