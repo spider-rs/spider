@@ -24,6 +24,9 @@ pr-run-mode = "plan"
 # Whether to install an updater program
 install-updater = true
 
+# we need extra openssl build deps for linux musl
+allow-dirty = ["ci"]
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"

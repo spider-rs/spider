@@ -1256,7 +1256,7 @@ impl Website {
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
 
-        if self.status == CrawlStatus::Idle {
+        if self.status != CrawlStatus::Active {
             self.clear();
         }
 
@@ -1276,7 +1276,7 @@ impl Website {
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
 
-        if self.status == CrawlStatus::Idle {
+        if self.status != CrawlStatus::Active {
             self.clear();
         }
 
@@ -1836,9 +1836,9 @@ impl Website {
         links
     }
 
-    /// Set the crawl status depending on crawl state.
+    /// Set the crawl status depending on crawl state. The crawl that only changes if the state is Start or Active.
     fn set_crawl_status(&mut self) {
-        if self.status != CrawlStatus::Blocked {
+        if self.status == CrawlStatus::Start || self.status == CrawlStatus::Active {
             self.status = if self.domain_parsed.is_none() {
                 CrawlStatus::Invalid
             } else {
