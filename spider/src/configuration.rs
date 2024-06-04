@@ -68,10 +68,8 @@ pub struct Configuration {
     #[cfg(feature = "cron")]
     /// The type of cron to run either crawl or scrape.
     pub cron_type: CronType,
-    #[cfg(feature = "budget")]
     /// The max depth to crawl for a website.
     pub depth: usize,
-    #[cfg(feature = "budget")]
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
     /// Cache the page following HTTP caching rules.
@@ -98,10 +96,8 @@ pub struct Configuration {
     /// Set a custom script to eval on each new document. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub evaluate_on_new_document: Option<Box<String>>,
-    #[cfg(feature = "budget")]
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
-    #[cfg(feature = "budget")]
     /// If wild card budgeting is found for the website.
     pub wild_card_budgeting: bool,
     /// External domains to include case-insensitive.
@@ -377,16 +373,9 @@ impl Configuration {
         self
     }
 
-    #[cfg(feature = "budget")]
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.with_budget(Some(hashbrown::HashMap::from([("*", limit)])));
-        self
-    }
-
-    #[cfg(not(feature = "budget"))]
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
-    pub fn with_limit(&mut self, _limit: u32) -> &mut Self {
         self
     }
 
@@ -428,16 +417,9 @@ impl Configuration {
         self
     }
 
-    #[cfg(feature = "budget")]
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.depth = depth;
-        self
-    }
-
-    #[cfg(not(feature = "budget"))]
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
-    pub fn with_depth(&mut self, _depth: usize) -> &mut Self {
         self
     }
 
@@ -593,7 +575,6 @@ impl Configuration {
         self
     }
 
-    #[cfg(feature = "budget")]
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
         self.budget = match budget {
@@ -614,12 +595,6 @@ impl Configuration {
             }
             _ => None,
         };
-        self
-    }
-
-    #[cfg(not(feature = "budget"))]
-    /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
-    pub fn with_budget(&mut self, _budget: Option<hashbrown::HashMap<&str, u32>>) -> &mut Self {
         self
     }
 
