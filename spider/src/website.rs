@@ -123,6 +123,115 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
+/// Setup interception for chrome request.
+#[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
+async fn setup_chrome_interception_base(
+    page: &chromiumoxide::Page,
+    chrome_intercept: bool,
+    auth_challenge_response: &Option<configuration::AuthChallengeResponse>,
+    ignore_visuals: bool,
+    host_name: &str,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if chrome_intercept {
+        use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+
+        match auth_challenge_response {
+            Some(ref auth_challenge_response) => {
+                match page
+                        .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                        .await
+                        {
+                            Ok(mut rp) => {
+                                let intercept_page = page.clone();
+                                let auth_challenge_response = auth_challenge_response.clone();
+
+                                // we may need return for polling
+                                task::spawn(async move {
+                                    while let Some(event) = rp.next().await {
+                                        let u = &event.request.url;
+                                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+
+                                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                                        .request_id(event.request_id.clone())
+                                        .auth_challenge_response(acr)
+                                        .build() {
+                                            Ok(c) => {
+                                                if let Err(e) = intercept_page.execute(c).await
+                                                {
+                                                    log("Failed to fullfill auth challege request: ", e.to_string());
+                                                }
+                                            }
+                                            _ => {
+                                                log("Failed to get auth challege request handle ", &u);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            _ => (),
+                        }
+            }
+            _ => (),
+        }
+
+        match page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+            .await
+        {
+            Ok(mut rp) => {
+                let mut host_name = host_name.to_string();
+                let intercept_page = page.clone();
+
+                let ih = task::spawn(async move {
+                    let mut first_rq = true;
+                    while let Some(event) = rp.next().await {
+                        let u = &event.request.url;
+
+                        if first_rq {
+                            if ResourceType::Document == event.resource_type {
+                                host_name = u.into();
+                            }
+                            first_rq = false;
+                        }
+
+                        if
+                                    ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
+                                    ResourceType::Prefetch == event.resource_type ||
+                                    ResourceType::Ping == event.resource_type ||
+                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
+                                {
+                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                    .request_id(event.request_id.clone())
+                                    .response_code(200)
+                                    .build() {
+                                        Ok(c) => {
+                                            if let Err(e) = intercept_page.execute(c).await
+                                            {
+                                                log("Failed to fullfill request: ", e.to_string());
+                                            }
+                                        }
+                                        _ => {
+                                            log("Failed to get request handle ", &host_name);
+                                        }
+                                    }
+                            } else if let Err(e) = intercept_page
+                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                                .await
+                                {
+                                    log("Failed to continue request: ", e.to_string());
+                                }
+                    }
+                });
+
+                Some(ih)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 /// Semaphore low priority tasks to run
 #[cfg(not(feature = "cowboy"))]
 async fn run_task<F, Fut>(
@@ -1163,105 +1272,14 @@ impl Website {
         &self,
         page: &chromiumoxide::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
-        if self.configuration.chrome_intercept {
-            use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-
-            match self.configuration.auth_challenge_response {
-                Some(ref auth_challenge_response) => {
-                    match page
-                    .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
-                    .await
-                    {
-                        Ok(mut rp) => {
-                            let intercept_page = page.clone();
-                            let auth_challenge_response = auth_challenge_response.clone();
-
-                            // we may need return for polling
-                            task::spawn(async move {
-                                while let Some(event) = rp.next().await {
-                                    let u = &event.request.url;
-                                    let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
-
-                                    match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
-                                    .request_id(event.request_id.clone())
-                                    .auth_challenge_response(acr)
-                                    .build() {
-                                        Ok(c) => {
-                                            if let Err(e) = intercept_page.execute(c).await
-                                            {
-                                                log("Failed to fullfill auth challege request: ", e.to_string());
-                                            }
-                                        }
-                                        _ => {
-                                            log("Failed to get auth challege request handle ", &u);
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                        _ => (),
-                    }
-                }
-                _ => (),
-            }
-
-            match page
-                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
-                .await
-            {
-                Ok(mut rp) => {
-                    let mut host_name = self.url.inner().to_string();
-                    let ignore_visuals = self.configuration.chrome_intercept_block_visuals;
-                    let intercept_page = page.clone();
-
-                    let ih = task::spawn(async move {
-                        let mut first_rq = true;
-                        while let Some(event) = rp.next().await {
-                            let u = &event.request.url;
-
-                            if first_rq {
-                                if ResourceType::Document == event.resource_type {
-                                    host_name = u.into();
-                                }
-                                first_rq = false;
-                            }
-
-                            if
-                                ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
-                                ResourceType::Prefetch == event.resource_type ||
-                                ResourceType::Ping == event.resource_type ||
-                                ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
-                            {
-                                match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
-                                .request_id(event.request_id.clone())
-                                .response_code(200)
-                                .build() {
-                                    Ok(c) => {
-                                        if let Err(e) = intercept_page.execute(c).await
-                                        {
-                                            log("Failed to fullfill request: ", e.to_string());
-                                        }
-                                    }
-                                    _ => {
-                                        log("Failed to get request handle ", &host_name);
-                                    }
-                                }
-                        } else if let Err(e) = intercept_page
-                            .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
-                            .await
-                            {
-                                log("Failed to continue request: ", e.to_string());
-                            }
-                        }
-                    });
-
-                    Some(ih)
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
+        setup_chrome_interception_base(
+            page,
+            self.configuration.chrome_intercept,
+            &self.configuration.auth_challenge_response,
+            self.configuration.chrome_intercept_block_visuals,
+            &self.url.inner().to_string(),
+        )
+        .await
     }
 
     /// Setup interception for chrome request
@@ -2536,7 +2554,16 @@ impl Website {
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                         let chandle = Handle::current();
 
-                        let shared = Arc::new((
+                        let shared: Arc<(
+                            reqwest::Client,
+                            (CompactString, smallvec::SmallVec<[CompactString; 2]>),
+                            Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
+                            Box<HashSet<CaseInsensitiveString>>,
+                            Option<ChannelGuard>,
+                            Arc<chromiumoxide::Browser>,
+                            Box<Configuration>,
+                            String,
+                        )> = Arc::new((
                             client.to_owned(),
                             selectors,
                             self.channel.clone(),
@@ -2544,12 +2571,14 @@ impl Website {
                             self.channel_guard.clone(),
                             browser,
                             self.configuration.clone(),
+                            self.url.inner().to_string(),
                         ));
 
                         let add_external = shared.3.len() > 0;
                         let blacklist_url = self.configuration.get_blacklist();
                         let on_link_find_callback = self.on_link_find_callback;
                         let full_resources = self.configuration.full_resources;
+                        let chrome_intercept = self.configuration.chrome_intercept;
 
                         while !links.is_empty() {
                             loop {
@@ -2587,88 +2616,79 @@ impl Website {
 
                                             let shared = shared.clone();
 
-                                            match semaphore.clone().acquire_owned().await {
-                                                Ok(permit) => {
-                                                    let shared = shared.clone();
-
+                                            set.spawn_on(
+                                                run_task(semaphore.clone(), move || async move {
                                                     match shared.5.new_page("about:blank").await {
                                                         Ok(new_page) => {
-                                                            let _ = self
-                                                                .setup_chrome_interception(
-                                                                    &new_page,
-                                                                )
-                                                                .await;
 
-                                                            set.spawn_on(
-                                                                async move {
-                                                                    match shared.5.new_page("about:blank").await {
-                                                                        Ok(new_page) => {
-                                                                            let link_result =
-                                                                                match on_link_find_callback {
-                                                                                    Some(cb) => cb(link, None),
-                                                                                    _ => (link, None),
-                                                                                };
+                                                            let _ = setup_chrome_interception_base(
+                                                                &new_page,
+                                                                shared.6.chrome_intercept,
+                                                                &shared.6.auth_challenge_response,
+                                                                shared.6.chrome_intercept_block_visuals,
+                                                                &shared.7
+                                                            )
+                                                            .await;
 
-                                                                            let target_url = link_result.0.as_ref();
 
-                                                                            let new_page = configure_browser(
-                                                                                new_page, &shared.6,
-                                                                            )
-                                                                            .await;
+                                                            let link_result =
+                                                                match on_link_find_callback {
+                                                                    Some(cb) => cb(link, None),
+                                                                    _ => (link, None),
+                                                                };
 
-                                                                            if cfg!(feature = "chrome_stealth")
-                                                                                || shared.6.stealth_mode
-                                                                            {
-                                                                                match shared.6.user_agent.as_ref() {
-                                                                                    Some(agent) => {
-                                                                                        let _ = new_page.enable_stealth_mode_with_agent(agent).await;
-                                                                                    },
-                                                                                    _ => {
-                                                                                        let _ = new_page.enable_stealth_mode().await;
-                                                                                    },
-                                                                                }
-                                                                            }
+                                                            let target_url = link_result.0.as_ref();
 
-                                                                            let mut page = Page::new(
-                                                                                &target_url,
-                                                                                &shared.0,
-                                                                                &new_page,
-                                                                                &shared.6.wait_for,
-                                                                                &shared.6.screenshot,
-                                                                                false,
-                                                                                &shared.6.openai_config,
-                                                                            )
-                                                                            .await;
+                                                            let new_page = configure_browser(
+                                                                new_page, &shared.6,
+                                                            )
+                                                            .await;
 
-                                                                            if add_external {
-                                                                                page.set_external(shared.3.clone());
-                                                                            }
-
-                                                                            let page_links = if full_resources {
-                                                                                page.links_full(&shared.1).await
-                                                                            } else {
-                                                                                page.links(&shared.1).await
-                                                                            };
-
-                                                                            channel_send_page(
-                                                                                &shared.2, page, &shared.4,
-                                                                            );
-
-                                                                            drop(permit);
-
-                                                                            page_links
-                                                                        }
-                                                                        _ => Default::default(),
-                                                                    }
+                                                            if cfg!(feature = "chrome_stealth")
+                                                                || shared.6.stealth_mode
+                                                            {
+                                                                match shared.6.user_agent.as_ref() {
+                                                                    Some(agent) => {
+                                                                        let _ = new_page.enable_stealth_mode_with_agent(agent).await;
                                                                     },
-                                                                &chandle,
+                                                                    _ => {
+                                                                        let _ = new_page.enable_stealth_mode().await;
+                                                                    },
+                                                                }
+                                                            }
+
+                                                            let mut page = Page::new(
+                                                                &target_url,
+                                                                &shared.0,
+                                                                &new_page,
+                                                                &shared.6.wait_for,
+                                                                &shared.6.screenshot,
+                                                                false,
+                                                                &shared.6.openai_config,
+                                                            )
+                                                            .await;
+
+                                                            if add_external {
+                                                                page.set_external(shared.3.clone());
+                                                            }
+
+                                                            let page_links = if full_resources {
+                                                                page.links_full(&shared.1).await
+                                                            } else {
+                                                                page.links(&shared.1).await
+                                                            };
+
+                                                            channel_send_page(
+                                                                &shared.2, page, &shared.4,
                                                             );
+
+                                                            page_links
                                                         }
-                                                        _ => (),
+                                                        _ => Default::default(),
                                                     }
-                                                }
-                                                _ => (),
-                                            }
+                                                    }),
+                                                &chandle,
+                                            );
 
                                             match q.as_mut() {
                                                 Some(q) => {
