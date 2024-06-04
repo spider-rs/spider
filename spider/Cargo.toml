@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.96.0"
+version = "1.97.2"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -137,6 +137,7 @@ reqwest_native_tls_webpki_roots = ["reqwest/rustls-tls-webpki-roots"]
 reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_history_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
+cowboy = []
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]

@@ -58,6 +58,11 @@ path = "subscribe.rs"
 required-features = ["spider/sync"]
 
 [[example]]
+name = "loop"
+path = "loop.rs"
+required-features = ["spider/sync", "spider/smart"]
+
+[[example]]
 name = "cache"
 path = "cache.rs"
 required-features = ["spider/sync", "spider/cache"]

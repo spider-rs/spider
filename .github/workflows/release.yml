@@ -70,7 +70,7 @@ jobs:
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates libssl-dev
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates openssl
           cargo dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
           echo "cargo dist ran successfully"
           cat plan-dist-manifest.json
