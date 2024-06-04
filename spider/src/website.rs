@@ -50,14 +50,9 @@ lazy_static! {
         };
 
         let (sem_limit, sem_max) = if logical == physical {
-            (sem_limit * physical, 28)
+            (sem_limit * physical, 30)
         } else {
-            (sem_limit * 2, 18)
-        };
-        let sem_limit = if cfg!(feature = "chrome") {
-            sem_limit / 4
-        } else {
-            sem_limit / 2
+            (sem_limit * 2, 20)
         };
 
         let base_limit = sem_limit.max(sem_max);
@@ -1419,14 +1414,13 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
-                let _ = chrome_page.enable_stealth_mode_with_agent(&if self
+                let _ = chrome_page.enable_stealth_mode_with_agent(&match self
                     .configuration
                     .user_agent
-                    .is_some()
+                    .as_ref()
                 {
-                    &self.configuration.user_agent.as_ref().unwrap().as_str()
-                } else {
-                    ""
+                    Some(agent) => agent,
+                    _ => Default::default(),
                 });
             }
 
@@ -2341,118 +2335,118 @@ impl Website {
 
                                             log("fetch", &link);
                                             self.links_visited.insert(link.clone());
-                                            let permit = SEM.acquire().await.unwrap();
-                                            let shared = shared.clone();
 
-                                            set.spawn_on(
-                                                async move {
-                                                    let link_result = match on_link_find_callback {
-                                                        Some(cb) => cb(link, None),
-                                                        _ => (link, None),
-                                                    };
+                                            match SEM.acquire().await {
+                                                Ok(permit) => {
+                                                    let shared = shared.clone();
 
-                                                    let target_url = link_result.0.as_ref();
-
-                                                    match shared.4.new_page(target_url).await {
-                                                        Ok(new_page) => {
-                                                            match shared.5.evaluate_on_new_document
-                                                            {
-                                                                Some(ref script) => {
-                                                                    let _ = new_page
-                                                                        .evaluate_on_new_document(
-                                                                            script.as_str(),
-                                                                        )
-                                                                        .await;
-                                                                }
-                                                                _ => (),
-                                                            }
-
-                                                            let new_page = configure_browser(
-                                                                new_page, &shared.5,
-                                                            )
-                                                            .await;
-
-                                                            if cfg!(feature = "chrome_stealth")
-                                                                || shared.5.stealth_mode
-                                                            {
-                                                                let _ = new_page
-                                                                    .enable_stealth_mode_with_agent(
-                                                                        &if shared
-                                                                            .5
-                                                                            .user_agent
-                                                                            .is_some()
-                                                                        {
-                                                                            &shared
-                                                                                .5
-                                                                                .user_agent
-                                                                                .as_ref()
-                                                                                .unwrap()
-                                                                                .as_str()
-                                                                        } else {
-                                                                            ""
-                                                                        },
-                                                                    );
-                                                            }
-
-                                                            let mut page = Page::new(
-                                                                &target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.5.wait_for,
-                                                                &shared.5.screenshot,
-                                                                true,
-                                                                &shared.5.openai_config,
-                                                            )
-                                                            .await;
-
-                                                            if add_external {
-                                                                page.set_external(
-                                                                    shared
-                                                                        .5
-                                                                        .external_domains_caseless
-                                                                        .clone(),
-                                                                );
-                                                            }
-
-                                                            let page_links = if full_resources {
-                                                                page.links_full(&shared.1).await
-                                                            } else {
-                                                                page.links(&shared.1).await
+                                                    set.spawn_on(
+                                                        async move {
+                                                            let link_result = match on_link_find_callback {
+                                                                Some(cb) => cb(link, None),
+                                                                _ => (link, None),
                                                             };
 
-                                                            channel_send_page(
-                                                                &shared.2, page, &shared.3,
-                                                            );
+                                                            let target_url = link_result.0.as_ref();
 
-                                                            drop(permit);
+                                                            match shared.4.new_page(target_url).await {
+                                                                Ok(new_page) => {
+                                                                    match shared.5.evaluate_on_new_document
+                                                                    {
+                                                                        Some(ref script) => {
+                                                                            let _ = new_page
+                                                                                .evaluate_on_new_document(
+                                                                                    script.as_str(),
+                                                                                )
+                                                                                .await;
+                                                                        }
+                                                                        _ => (),
+                                                                    }
 
-                                                            page_links
+                                                                    let new_page = configure_browser(
+                                                                        new_page, &shared.5,
+                                                                    )
+                                                                    .await;
+
+                                                                    if cfg!(feature = "chrome_stealth")
+                                                                        || shared.5.stealth_mode
+                                                                    {
+                                                                        let _ = new_page
+                                                                            .enable_stealth_mode_with_agent(
+                                                                                match shared
+                                                                                .5
+                                                                                .user_agent
+                                                                                .as_ref() {
+                                                                                    Some(agent) => agent,
+                                                                                    _ => Default::default()
+                                                                                },
+                                                                            );
+                                                                    }
+
+                                                                    let mut page = Page::new(
+                                                                        &target_url,
+                                                                        &shared.0,
+                                                                        &new_page,
+                                                                        &shared.5.wait_for,
+                                                                        &shared.5.screenshot,
+                                                                        true,
+                                                                        &shared.5.openai_config,
+                                                                    )
+                                                                    .await;
+
+                                                                    if add_external {
+                                                                        page.set_external(
+                                                                            shared
+                                                                                .5
+                                                                                .external_domains_caseless
+                                                                                .clone(),
+                                                                        );
+                                                                    }
+
+                                                                    let page_links = if full_resources {
+                                                                        page.links_full(&shared.1).await
+                                                                    } else {
+                                                                        page.links(&shared.1).await
+                                                                    };
+
+                                                                    channel_send_page(
+                                                                        &shared.2, page, &shared.3,
+                                                                    );
+
+                                                                    drop(permit);
+
+                                                                    page_links
+                                                                }
+                                                                _ => Default::default(),
+                                                            }
+                                                        },
+                                                        &chandle,
+                                                    );
+
+                                                    match q.as_mut() {
+                                                        Some(q) => {
+                                                            while let Ok(link) = q.try_recv() {
+                                                                let s = link.into();
+                                                                let allowed = self
+                                                                    .is_allowed(&s, &blacklist_url);
+
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                                {
+                                                                    break;
+                                                                }
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::Blocked)
+                                                                {
+                                                                    continue;
+                                                                }
+                                                                links.extend(
+                                                                    &HashSet::from([s])
+                                                                        - &self.links_visited,
+                                                                );
+                                                            }
                                                         }
-                                                        _ => Default::default(),
-                                                    }
-                                                },
-                                                &chandle,
-                                            );
-
-                                            match q.as_mut() {
-                                                Some(q) => {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed =
-                                                            self.is_allowed(&s, &blacklist_url);
-
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                        {
-                                                            break;
-                                                        }
-                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                            continue;
-                                                        }
-                                                        links.extend(
-                                                            &HashSet::from([s])
-                                                                - &self.links_visited,
-                                                        );
+                                                        _ => (),
                                                     }
                                                 }
                                                 _ => (),
@@ -2568,106 +2562,108 @@ impl Website {
 
                                             log("fetch", &link);
                                             self.links_visited.insert(link.clone());
-                                            let permit = SEM.acquire().await.unwrap();
-                                            let shared = shared.clone();
 
-                                            match shared.5.new_page("about:blank").await {
-                                                Ok(new_page) => {
-                                                    let _ = self
-                                                        .setup_chrome_interception(&new_page)
-                                                        .await;
+                                            match SEM.acquire().await {
+                                                Ok(permit) => {
+                                                    let shared = shared.clone();
 
-                                                    set.spawn_on(
-                                                        async move {
-                                                            let link_result =
-                                                                match on_link_find_callback {
-                                                                    Some(cb) => cb(link, None),
-                                                                    _ => (link, None),
-                                                                };
+                                                    match shared.5.new_page("about:blank").await {
+                                                        Ok(new_page) => {
+                                                            let _ = self
+                                                                .setup_chrome_interception(
+                                                                    &new_page,
+                                                                )
+                                                                .await;
 
-                                                            let target_url = link_result.0.as_ref();
+                                                            set.spawn_on(
+                                                                async move {
+                                                                    let link_result =
+                                                                        match on_link_find_callback {
+                                                                            Some(cb) => cb(link, None),
+                                                                            _ => (link, None),
+                                                                        };
 
-                                                            let new_page = configure_browser(
-                                                                new_page, &shared.6,
-                                                            )
-                                                            .await;
+                                                                    let target_url = link_result.0.as_ref();
 
-                                                            if cfg!(feature = "chrome_stealth")
-                                                                || shared.6.stealth_mode
-                                                            {
-                                                                let _ = new_page
-                                                                    .enable_stealth_mode_with_agent(
-                                                                        &if shared
-                                                                            .6
-                                                                            .user_agent
-                                                                            .is_some()
-                                                                        {
-                                                                            &shared
+                                                                    let new_page = configure_browser(
+                                                                        new_page, &shared.6,
+                                                                    )
+                                                                    .await;
+
+                                                                    if cfg!(feature = "chrome_stealth")
+                                                                        || shared.6.stealth_mode
+                                                                    {
+                                                                        let _ = new_page
+                                                                            .enable_stealth_mode_with_agent(
+                                                                                match shared
                                                                                 .6
                                                                                 .user_agent
-                                                                                .as_ref()
-                                                                                .unwrap()
-                                                                                .as_str()
-                                                                        } else {
-                                                                            ""
-                                                                        },
+                                                                                .as_ref() {
+                                                                                    Some(agent) => agent,
+                                                                                    _ => Default::default()
+                                                                                },
+                                                                            );
+                                                                    }
+
+                                                                    let mut page = Page::new(
+                                                                        &target_url,
+                                                                        &shared.0,
+                                                                        &new_page,
+                                                                        &shared.6.wait_for,
+                                                                        &shared.6.screenshot,
+                                                                        false,
+                                                                        &shared.6.openai_config,
+                                                                    )
+                                                                    .await;
+
+                                                                    if add_external {
+                                                                        page.set_external(shared.3.clone());
+                                                                    }
+
+                                                                    let page_links = if full_resources {
+                                                                        page.links_full(&shared.1).await
+                                                                    } else {
+                                                                        page.links(&shared.1).await
+                                                                    };
+
+                                                                    channel_send_page(
+                                                                        &shared.2, page, &shared.4,
                                                                     );
-                                                            }
 
-                                                            let mut page = Page::new(
-                                                                &target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
-                                                                false,
-                                                                &shared.6.openai_config,
-                                                            )
-                                                            .await;
+                                                                    drop(permit);
 
-                                                            if add_external {
-                                                                page.set_external(shared.3.clone());
-                                                            }
-
-                                                            let page_links = if full_resources {
-                                                                page.links_full(&shared.1).await
-                                                            } else {
-                                                                page.links(&shared.1).await
-                                                            };
-
-                                                            channel_send_page(
-                                                                &shared.2, page, &shared.4,
+                                                                    page_links
+                                                                },
+                                                                &chandle,
                                                             );
-
-                                                            drop(permit);
-
-                                                            page_links
-                                                        },
-                                                        &chandle,
-                                                    );
-                                                }
-                                                _ => (),
-                                            }
-
-                                            match q.as_mut() {
-                                                Some(q) => {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed =
-                                                            self.is_allowed(&s, &blacklist_url);
-
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                        {
-                                                            break;
                                                         }
-                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                            continue;
+                                                        _ => (),
+                                                    }
+
+                                                    match q.as_mut() {
+                                                        Some(q) => {
+                                                            while let Ok(link) = q.try_recv() {
+                                                                let s = link.into();
+                                                                let allowed = self
+                                                                    .is_allowed(&s, &blacklist_url);
+
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                                {
+                                                                    break;
+                                                                }
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::Blocked)
+                                                                {
+                                                                    continue;
+                                                                }
+                                                                links.extend(
+                                                                    &HashSet::from([s])
+                                                                        - &self.links_visited,
+                                                                );
+                                                            }
                                                         }
-                                                        links.extend(
-                                                            &HashSet::from([s])
-                                                                - &self.links_visited,
-                                                        );
+                                                        _ => (),
                                                     }
                                                 }
                                                 _ => (),
@@ -2769,49 +2765,61 @@ impl Website {
                                 log("fetch", &link);
 
                                 self.links_visited.insert(link.clone());
-                                let permit = SEM.acquire().await.unwrap();
-                                let client = client.clone();
-                                task::yield_now().await;
 
-                                set.spawn_on(
-                                    async move {
-                                        let link_results = match on_link_find_callback {
-                                            Some(cb) => cb(link, None),
-                                            _ => (link, None),
-                                        };
-                                        let link_results = link_results.0.as_ref();
-                                        let page = Page::new_links_only(
-                                            &if http_worker && link_results.starts_with("https") {
-                                                link_results
-                                                    .replacen("https", "http", 1)
-                                                    .to_string()
-                                            } else {
-                                                link_results.to_string()
+                                match SEM.acquire().await {
+                                    Ok(permit) => {
+                                        let client = client.clone();
+                                        task::yield_now().await;
+
+                                        set.spawn_on(
+                                            async move {
+                                                let link_results = match on_link_find_callback {
+                                                    Some(cb) => cb(link, None),
+                                                    _ => (link, None),
+                                                };
+                                                let link_results = link_results.0.as_ref();
+                                                let page = Page::new_links_only(
+                                                    &if http_worker
+                                                        && link_results.starts_with("https")
+                                                    {
+                                                        link_results
+                                                            .replacen("https", "http", 1)
+                                                            .to_string()
+                                                    } else {
+                                                        link_results.to_string()
+                                                    },
+                                                    &client,
+                                                )
+                                                .await;
+
+                                                drop(permit);
+
+                                                page.links
                                             },
-                                            &client,
-                                        )
-                                        .await;
+                                            &chandle,
+                                        );
 
-                                        drop(permit);
+                                        match q.as_mut() {
+                                            Some(q) => {
+                                                while let Ok(link) = q.try_recv() {
+                                                    let s = link.into();
+                                                    let allowed =
+                                                        self.is_allowed(&s, &blacklist_url);
 
-                                        page.links
-                                    },
-                                    &chandle,
-                                );
-
-                                match q.as_mut() {
-                                    Some(q) => {
-                                        while let Ok(link) = q.try_recv() {
-                                            let s = link.into();
-                                            let allowed = self.is_allowed(&s, &blacklist_url);
-
-                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                break;
+                                                    if allowed
+                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                    {
+                                                        break;
+                                                    }
+                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                        continue;
+                                                    }
+                                                    links.extend(
+                                                        &HashSet::from([s]) - &self.links_visited,
+                                                    );
+                                                }
                                             }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                continue;
-                                            }
-                                            links.extend(&HashSet::from([s]) - &self.links_visited);
+                                            _ => (),
                                         }
                                     }
                                     _ => (),
@@ -2905,59 +2913,74 @@ impl Website {
 
                                         log("fetch", &link);
                                         self.links_visited.insert(link.clone());
-                                        let permit = SEM.acquire().await.unwrap();
-                                        let shared = shared.clone();
+                                        match SEM.acquire().await {
+                                            Ok(permit) => {
+                                                let shared = shared.clone();
 
-                                        set.spawn_on(
-                                            async move {
-                                                let link_result = match on_link_find_callback {
-                                                    Some(cb) => cb(link, None),
-                                                    _ => (link, None),
-                                                };
+                                                set.spawn_on(
+                                                    async move {
+                                                        let link_result =
+                                                            match on_link_find_callback {
+                                                                Some(cb) => cb(link, None),
+                                                                _ => (link, None),
+                                                            };
 
-                                                let mut page = Page::new_page(
-                                                    &link_result.0.as_ref(),
-                                                    &shared.0,
-                                                )
-                                                .await;
+                                                        let mut page = Page::new_page(
+                                                            &link_result.0.as_ref(),
+                                                            &shared.0,
+                                                        )
+                                                        .await;
 
-                                                if add_external {
-                                                    page.set_external(
-                                                        shared.5.external_domains_caseless.clone(),
-                                                    );
-                                                }
+                                                        if add_external {
+                                                            page.set_external(
+                                                                shared
+                                                                    .5
+                                                                    .external_domains_caseless
+                                                                    .clone(),
+                                                            );
+                                                        }
 
-                                                let page_links = page
-                                                    .smart_links(&shared.1, &shared.4, &shared.5)
-                                                    .await;
+                                                        let page_links = page
+                                                            .smart_links(
+                                                                &shared.1, &shared.4, &shared.5,
+                                                            )
+                                                            .await;
 
-                                                channel_send_page(&shared.2, page, &shared.3);
+                                                        channel_send_page(
+                                                            &shared.2, page, &shared.3,
+                                                        );
 
-                                                drop(permit);
+                                                        drop(permit);
 
-                                                page_links
-                                            },
-                                            &chandle,
-                                        );
+                                                        page_links
+                                                    },
+                                                    &chandle,
+                                                );
 
-                                        match q.as_mut() {
-                                            Some(q) => {
-                                                while let Ok(link) = q.try_recv() {
-                                                    let s = link.into();
-                                                    let allowed =
-                                                        self.is_allowed(&s, &blacklist_url);
+                                                match q.as_mut() {
+                                                    Some(q) => {
+                                                        while let Ok(link) = q.try_recv() {
+                                                            let s = link.into();
+                                                            let allowed =
+                                                                self.is_allowed(&s, &blacklist_url);
 
-                                                    if allowed
-                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                    {
-                                                        break;
+                                                            if allowed.eq(
+                                                                &ProcessLinkStatus::BudgetExceeded,
+                                                            ) {
+                                                                break;
+                                                            }
+                                                            if allowed
+                                                                .eq(&ProcessLinkStatus::Blocked)
+                                                            {
+                                                                continue;
+                                                            }
+                                                            links.extend(
+                                                                &HashSet::from([s])
+                                                                    - &self.links_visited,
+                                                            );
+                                                        }
                                                     }
-                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                        continue;
-                                                    }
-                                                    links.extend(
-                                                        &HashSet::from([s]) - &self.links_visited,
-                                                    );
+                                                    _ => (),
                                                 }
                                             }
                                             _ => (),
@@ -3184,15 +3207,12 @@ impl Website {
                                 }
 
                                 if cfg!(feature = "chrome_stealth") {
-                                    let _ = new_page.enable_stealth_mode_with_agent(&if self
-                                        .configuration
-                                        .user_agent
-                                        .is_some()
-                                    {
-                                        &self.configuration.user_agent.as_ref().unwrap().as_str()
-                                    } else {
-                                        ""
-                                    });
+                                    let _ = new_page.enable_stealth_mode_with_agent(
+                                        match self.configuration.user_agent.as_ref() {
+                                            Some(agent) => agent,
+                                            _ => Default::default(),
+                                        },
+                                    );
                                 }
 
                                 let (mut interval, throttle) = self.setup_crawl();
@@ -3247,131 +3267,130 @@ impl Website {
                                             }
                                             self.links_visited.insert(link.clone());
                                             log("fetch", &link);
-                                            let permit = SEM.acquire().await.unwrap();
-                                            let shared = shared.clone();
+                                            match SEM.acquire().await {
+                                                Ok(permit) => {
+                                                    let shared = shared.clone();
 
-                                            set.spawn(async move {
-                                                let target_url = link.as_ref();
+                                                    set.spawn(async move {
+                                                        let target_url = link.as_ref();
 
-                                                let r = match shared.4.new_page(target_url).await {
-                                                    Ok(new_page) => {
-                                                        match shared.5.evaluate_on_new_document {
-                                                            Some(ref script) => {
-                                                                let _ = new_page
-                                                                    .evaluate_on_new_document(
-                                                                        script.as_str(),
-                                                                    )
-                                                                    .await;
-                                                            }
-                                                            _ => (),
-                                                        }
-                                                        if shared.5.fingerprint {
-                                                            let _ = new_page
-                                                                .evaluate_on_new_document(
-                                                                    crate::features::chrome::FP_JS,
-                                                                )
-                                                                .await;
-                                                        }
-                                                        let new_page =
-                                                            configure_browser(new_page, &shared.5)
-                                                                .await;
+                                                        let r = match shared.4.new_page(target_url).await {
+                                                            Ok(new_page) => {
+                                                                match shared.5.evaluate_on_new_document {
+                                                                    Some(ref script) => {
+                                                                        let _ = new_page
+                                                                            .evaluate_on_new_document(
+                                                                                script.as_str(),
+                                                                            )
+                                                                            .await;
+                                                                    }
+                                                                    _ => (),
+                                                                }
+                                                                if shared.5.fingerprint {
+                                                                    let _ = new_page
+                                                                        .evaluate_on_new_document(
+                                                                            crate::features::chrome::FP_JS,
+                                                                        )
+                                                                        .await;
+                                                                }
+                                                                let new_page =
+                                                                    configure_browser(new_page, &shared.5)
+                                                                        .await;
 
-                                                        if cfg!(feature = "chrome_stealth")
-                                                            || shared.5.stealth_mode
-                                                        {
-                                                            let _ = new_page
-                                                                .enable_stealth_mode_with_agent(
-                                                                    &if shared
-                                                                        .5
-                                                                        .user_agent
-                                                                        .is_some()
-                                                                    {
-                                                                        &shared
+                                                                if cfg!(feature = "chrome_stealth")
+                                                                    || shared.5.stealth_mode
+                                                                {
+                                                                    let _ = new_page
+                                                                        .enable_stealth_mode_with_agent(
+                                                                            match shared
                                                                             .5
                                                                             .user_agent
-                                                                            .as_ref()
-                                                                            .unwrap()
-                                                                            .as_str()
-                                                                    } else {
-                                                                        ""
-                                                                    },
+                                                                            .as_ref() {
+                                                                                Some(agent) => agent,
+                                                                                _ => Default::default()
+                                                                            },
+                                                                        );
+                                                                }
+
+                                                                let page =
+                                                                    crate::utils::fetch_page_html_chrome(
+                                                                        &target_url,
+                                                                        &shared.0,
+                                                                        &new_page,
+                                                                        &shared.5.wait_for,
+                                                                        &shared.5.screenshot,
+                                                                        true,
+                                                                        &shared.5.openai_config,
+                                                                    )
+                                                                    .await;
+                                                                let mut page = build(&target_url, page);
+
+                                                                // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
+                                                                let (link, _) = match on_link_find_callback
+                                                                {
+                                                                    Some(cb) => {
+                                                                        let c =
+                                                                            cb(link, Some(page.get_html()));
+
+                                                                        c
+                                                                    }
+                                                                    _ => (link, None),
+                                                                };
+
+                                                                channel_send_page(
+                                                                    &shared.2,
+                                                                    page.clone(),
+                                                                    &shared.3,
                                                                 );
-                                                        }
 
-                                                        let page =
-                                                            crate::utils::fetch_page_html_chrome(
-                                                                &target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.5.wait_for,
-                                                                &shared.5.screenshot,
-                                                                true,
-                                                                &shared.5.openai_config,
-                                                            )
-                                                            .await;
-                                                        let mut page = build(&target_url, page);
+                                                                page.set_external(
+                                                                    shared
+                                                                        .5
+                                                                        .external_domains_caseless
+                                                                        .clone(),
+                                                                );
+                                                                let page_links =
+                                                                    page.links(&shared.1).await;
 
-                                                        // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
-                                                        let (link, _) = match on_link_find_callback
-                                                        {
-                                                            Some(cb) => {
-                                                                let c =
-                                                                    cb(link, Some(page.get_html()));
-
-                                                                c
+                                                                (link, page, page_links)
                                                             }
-                                                            _ => (link, None),
+                                                            _ => {
+                                                                let page = build(
+                                                                    &link.inner(),
+                                                                    Default::default(),
+                                                                );
+
+                                                                (link, page, Default::default())
+                                                            }
                                                         };
+                                                        drop(permit);
+                                                        r
+                                                    });
 
-                                                        channel_send_page(
-                                                            &shared.2,
-                                                            page.clone(),
-                                                            &shared.3,
-                                                        );
+                                                    match q.as_mut() {
+                                                        Some(q) => {
+                                                            while let Ok(link) = q.try_recv() {
+                                                                let s = link.into();
+                                                                let allowed = self
+                                                                    .is_allowed(&s, &blacklist_url);
 
-                                                        page.set_external(
-                                                            shared
-                                                                .5
-                                                                .external_domains_caseless
-                                                                .clone(),
-                                                        );
-                                                        let page_links =
-                                                            page.links(&shared.1).await;
-
-                                                        (link, page, page_links)
-                                                    }
-                                                    _ => {
-                                                        let page = build(
-                                                            &link.inner(),
-                                                            Default::default(),
-                                                        );
-
-                                                        (link, page, Default::default())
-                                                    }
-                                                };
-                                                drop(permit);
-                                                r
-                                            });
-
-                                            match q.as_mut() {
-                                                Some(q) => {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed =
-                                                            self.is_allowed(&s, &blacklist_url);
-
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                        {
-                                                            break;
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                                {
+                                                                    break;
+                                                                }
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::Blocked)
+                                                                {
+                                                                    continue;
+                                                                }
+                                                                links.extend(
+                                                                    &HashSet::from([s])
+                                                                        - &self.links_visited,
+                                                                );
+                                                            }
                                                         }
-                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                            continue;
-                                                        }
-                                                        links.extend(
-                                                            &HashSet::from([s])
-                                                                - &self.links_visited,
-                                                        );
+                                                        _ => (),
                                                     }
                                                 }
                                                 _ => (),
@@ -3483,113 +3502,117 @@ impl Website {
                                     }
                                     self.links_visited.insert(link.clone());
                                     log("fetch", &link);
-                                    let permit = SEM.acquire().await.unwrap();
-                                    let shared = shared.clone();
 
-                                    match shared.5.new_page("about:blank").await {
-                                        Ok(new_page) => {
-                                            let _ = self.setup_chrome_interception(&new_page).await;
+                                    match SEM.acquire().await {
+                                        Ok(permit) => {
+                                            let shared = shared.clone();
 
-                                            set.spawn(async move {
-                                                let target_url = link.as_ref();
+                                            match shared.5.new_page("about:blank").await {
+                                                Ok(new_page) => {
+                                                    let _ = self
+                                                        .setup_chrome_interception(&new_page)
+                                                        .await;
 
-                                                let r = match shared.5.new_page(target_url).await {
-                                                    Ok(new_page) => {
-                                                        let new_page =
-                                                            configure_browser(new_page, &shared.6)
-                                                                .await;
+                                                    set.spawn(async move {
+                                                        let target_url = link.as_ref();
 
-                                                        if cfg!(feature = "chrome_stealth")
-                                                            || shared.6.stealth_mode
-                                                        {
-                                                            let _ = new_page
-                                                                .enable_stealth_mode_with_agent(
-                                                                    &if shared
-                                                                        .6
-                                                                        .user_agent
-                                                                        .is_some()
-                                                                    {
-                                                                        &shared
+                                                        let r = match shared.5.new_page(target_url).await {
+                                                            Ok(new_page) => {
+                                                                let new_page =
+                                                                    configure_browser(new_page, &shared.6)
+                                                                        .await;
+
+                                                                if cfg!(feature = "chrome_stealth")
+                                                                    || shared.6.stealth_mode
+                                                                {
+                                                                    let _ = new_page
+                                                                        .enable_stealth_mode_with_agent(
+                                                                            match shared
                                                                             .6
                                                                             .user_agent
-                                                                            .as_ref()
-                                                                            .unwrap()
-                                                                            .as_str()
-                                                                    } else {
-                                                                        ""
-                                                                    },
+                                                                            .as_ref() {
+                                                                                Some(agent) => agent,
+                                                                                _ => Default::default()
+                                                                            },
+                                                                        );
+                                                                }
+
+                                                                let page =
+                                                                    crate::utils::fetch_page_html_chrome(
+                                                                        &target_url,
+                                                                        &shared.0,
+                                                                        &new_page,
+                                                                        &shared.6.wait_for,
+                                                                        &shared.6.screenshot,
+                                                                        true,
+                                                                        &shared.6.openai_config,
+                                                                    )
+                                                                    .await;
+                                                                let mut page = build(&target_url, page);
+
+                                                                // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
+                                                                let (link, _) = match on_link_find_callback
+                                                                {
+                                                                    Some(cb) => {
+                                                                        let c =
+                                                                            cb(link, Some(page.get_html()));
+
+                                                                        c
+                                                                    }
+                                                                    _ => (link, None),
+                                                                };
+
+                                                                channel_send_page(
+                                                                    &shared.2,
+                                                                    page.clone(),
+                                                                    &shared.4,
                                                                 );
-                                                        }
 
-                                                        let page =
-                                                            crate::utils::fetch_page_html_chrome(
-                                                                &target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
-                                                                true,
-                                                                &shared.6.openai_config,
-                                                            )
-                                                            .await;
-                                                        let mut page = build(&target_url, page);
+                                                                page.set_external(shared.3.clone());
+                                                                let page_links =
+                                                                    page.links(&shared.1).await;
 
-                                                        // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
-                                                        let (link, _) = match on_link_find_callback
-                                                        {
-                                                            Some(cb) => {
-                                                                let c =
-                                                                    cb(link, Some(page.get_html()));
-
-                                                                c
+                                                                (link, page, page_links)
                                                             }
-                                                            _ => (link, None),
+                                                            _ => {
+                                                                let page = build(
+                                                                    &link.inner(),
+                                                                    Default::default(),
+                                                                );
+
+                                                                (link, page, Default::default())
+                                                            }
                                                         };
+                                                        drop(permit);
 
-                                                        channel_send_page(
-                                                            &shared.2,
-                                                            page.clone(),
-                                                            &shared.4,
-                                                        );
-
-                                                        page.set_external(shared.3.clone());
-                                                        let page_links =
-                                                            page.links(&shared.1).await;
-
-                                                        (link, page, page_links)
-                                                    }
-                                                    _ => {
-                                                        let page = build(
-                                                            &link.inner(),
-                                                            Default::default(),
-                                                        );
-
-                                                        (link, page, Default::default())
-                                                    }
-                                                };
-                                                drop(permit);
-
-                                                r
-                                            });
-                                        }
-                                        _ => (),
-                                    }
-
-                                    match q.as_mut() {
-                                        Some(q) => {
-                                            while let Ok(link) = q.try_recv() {
-                                                let s = link.into();
-                                                let allowed = self.is_allowed(&s, &blacklist_url);
-
-                                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                    break;
+                                                        r
+                                                    });
                                                 }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                    continue;
+                                                _ => (),
+                                            }
+
+                                            match q.as_mut() {
+                                                Some(q) => {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        let allowed =
+                                                            self.is_allowed(&s, &blacklist_url);
+
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                        {
+                                                            break;
+                                                        }
+                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                            continue;
+                                                        }
+                                                        links.extend(
+                                                            &HashSet::from([s])
+                                                                - &self.links_visited,
+                                                        );
+                                                    }
                                                 }
-                                                links.extend(
-                                                    &HashSet::from([s]) - &self.links_visited,
-                                                );
+                                                _ => (),
                                             }
                                         }
                                         _ => (),
