@@ -1433,6 +1433,12 @@ impl Website {
                 }
             }
 
+            if self.configuration.fingerprint {
+                let _ = chrome_page
+                    .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                    .await;
+            }
+
             let _ = self.setup_chrome_interception(&chrome_page).await;
 
             let page = Page::new(
