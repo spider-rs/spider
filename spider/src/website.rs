@@ -1414,14 +1414,14 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
-                let _ = chrome_page.enable_stealth_mode_with_agent(&match self
-                    .configuration
-                    .user_agent
-                    .as_ref()
-                {
-                    Some(agent) => agent,
-                    _ => Default::default(),
-                });
+                match self.configuration.user_agent.as_ref() {
+                    Some(agent) => {
+                        let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                    }
+                    _ => {
+                        let _ = chrome_page.enable_stealth_mode().await;
+                    }
+                }
             }
 
             let _ = self.setup_chrome_interception(&chrome_page).await;
@@ -2371,16 +2371,14 @@ impl Website {
                                                                     if cfg!(feature = "chrome_stealth")
                                                                         || shared.5.stealth_mode
                                                                     {
-                                                                        let _ = new_page
-                                                                            .enable_stealth_mode_with_agent(
-                                                                                match shared
-                                                                                .5
-                                                                                .user_agent
-                                                                                .as_ref() {
-                                                                                    Some(agent) => agent,
-                                                                                    _ => Default::default()
-                                                                                },
-                                                                            );
+                                                                        match shared.5.user_agent.as_ref() {
+                                                                            Some(agent) => {
+                                                                                let _ = new_page.enable_stealth_mode_with_agent(agent).await;
+                                                                            },
+                                                                            _ => {
+                                                                                let _ = new_page.enable_stealth_mode().await;
+                                                                            },
+                                                                        }
                                                                     }
 
                                                                     let mut page = Page::new(
@@ -2593,16 +2591,14 @@ impl Website {
                                                                     if cfg!(feature = "chrome_stealth")
                                                                         || shared.6.stealth_mode
                                                                     {
-                                                                        let _ = new_page
-                                                                            .enable_stealth_mode_with_agent(
-                                                                                match shared
-                                                                                .6
-                                                                                .user_agent
-                                                                                .as_ref() {
-                                                                                    Some(agent) => agent,
-                                                                                    _ => Default::default()
-                                                                                },
-                                                                            );
+                                                                        match shared.6.user_agent.as_ref() {
+                                                                            Some(agent) => {
+                                                                                let _ = new_page.enable_stealth_mode_with_agent(agent).await;
+                                                                            },
+                                                                            _ => {
+                                                                                let _ = new_page.enable_stealth_mode().await;
+                                                                            },
+                                                                        }
                                                                     }
 
                                                                     let mut page = Page::new(
@@ -3207,12 +3203,16 @@ impl Website {
                                 }
 
                                 if cfg!(feature = "chrome_stealth") {
-                                    let _ = new_page.enable_stealth_mode_with_agent(
-                                        match self.configuration.user_agent.as_ref() {
-                                            Some(agent) => agent,
-                                            _ => Default::default(),
-                                        },
-                                    );
+                                    match self.configuration.user_agent.as_ref() {
+                                        Some(agent) => {
+                                            let _ = new_page
+                                                .enable_stealth_mode_with_agent(agent)
+                                                .await;
+                                        }
+                                        _ => {
+                                            let _ = new_page.enable_stealth_mode().await;
+                                        }
+                                    }
                                 }
 
                                 let (mut interval, throttle) = self.setup_crawl();
@@ -3300,16 +3300,14 @@ impl Website {
                                                                 if cfg!(feature = "chrome_stealth")
                                                                     || shared.5.stealth_mode
                                                                 {
-                                                                    let _ = new_page
-                                                                        .enable_stealth_mode_with_agent(
-                                                                            match shared
-                                                                            .5
-                                                                            .user_agent
-                                                                            .as_ref() {
-                                                                                Some(agent) => agent,
-                                                                                _ => Default::default()
-                                                                            },
-                                                                        );
+                                                                    match shared.5.user_agent.as_ref() {
+                                                                        Some(agent) => {
+                                                                            let _ = new_page.enable_stealth_mode_with_agent(agent).await;
+                                                                        },
+                                                                        _ => {
+                                                                            let _ = new_page.enable_stealth_mode().await;
+                                                                        },
+                                                                    }
                                                                 }
 
                                                                 let page =
@@ -3525,16 +3523,14 @@ impl Website {
                                                                 if cfg!(feature = "chrome_stealth")
                                                                     || shared.6.stealth_mode
                                                                 {
-                                                                    let _ = new_page
-                                                                        .enable_stealth_mode_with_agent(
-                                                                            match shared
-                                                                            .6
-                                                                            .user_agent
-                                                                            .as_ref() {
-                                                                                Some(agent) => agent,
-                                                                                _ => Default::default()
-                                                                            },
-                                                                        );
+                                                                    match shared.6.user_agent.as_ref() {
+                                                                        Some(agent) => {
+                                                                            let _ = new_page.enable_stealth_mode_with_agent(agent).await;
+                                                                        },
+                                                                        _ => {
+                                                                            let _ = new_page.enable_stealth_mode().await;
+                                                                        },
+                                                                    }
                                                                 }
 
                                                                 let page =
