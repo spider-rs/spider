@@ -93,12 +93,12 @@ path = "configuration.rs"
 [[example]]
 name = "budget"
 path = "budget.rs"
-required-features = ["spider/budget", "spider/sync"]
+required-features = ["spider/sync"]
 
 [[example]]
 name = "depth"
 path = "depth.rs"
-required-features = ["spider/budget", "spider/sync"]
+required-features = ["spider/sync"]
 
 [[example]]
 name = "cron"

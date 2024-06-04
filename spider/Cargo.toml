@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.97.3"
+version = "1.97.6"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -103,7 +103,6 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-budget = []
 cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]

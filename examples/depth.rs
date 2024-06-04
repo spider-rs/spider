@@ -1,4 +1,4 @@
-//! `cargo run --example depth --features budget`
+//! `cargo run --example depth`
 extern crate spider;
 
 use spider::tokio;
