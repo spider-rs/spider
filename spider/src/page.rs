@@ -87,7 +87,7 @@ pub struct Page {
     /// The bytes of the resource.
     html: Option<Bytes>,
     /// Base absolute url for page.
-    base: Url,
+    base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
     url: String,
     #[cfg(feature = "headers")]
@@ -260,7 +260,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         },
         #[cfg(feature = "headers")]
         headers: res.headers,
-        base: Url::parse(url).expect("Invalid page URL"),
+        base: match Url::parse(url) {
+            Ok(u) => Some(u),
+            _ => None,
+        },
         url: url.into(),
         #[cfg(feature = "time")]
         duration: Instant::now(),
@@ -583,12 +586,12 @@ impl Page {
     /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
     #[cfg(not(feature = "decentralized"))]
     pub fn set_url_parsed(&mut self, url_parsed: Url) {
-        self.base = url_parsed;
+        self.base = Some(url_parsed);
     }
 
     /// Parsed URL getter for page.
     #[cfg(not(feature = "decentralized"))]
-    pub fn get_url_parsed(&self) -> &Url {
+    pub fn get_url_parsed(&self) -> &Option<Url> {
         &self.base
     }
 
@@ -724,43 +727,48 @@ impl Page {
         parent_host: &CompactString,
         parent_host_scheme: &CompactString,
     ) {
-        let mut abs = self.abs_path(href);
-        let host_name = abs.host_str();
-        let mut can_process = parent_host_match(host_name, base_domain, parent_host);
-        let mut external_domain = false;
+        match self.abs_path(href) {
+            Some(mut abs) => {
+                let host_name = abs.host_str();
+                let mut can_process = parent_host_match(host_name, base_domain, parent_host);
+                let mut external_domain = false;
 
-        if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty() {
-            can_process = self
-                .external_domains_caseless
-                .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                || self
-                    .external_domains_caseless
-                    .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-            external_domain = can_process;
-        }
+                if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
+                {
+                    can_process = self
+                        .external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                        || self
+                            .external_domains_caseless
+                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+                    external_domain = can_process;
+                }
 
-        if can_process {
-            if abs.scheme() != parent_host_scheme.as_str() {
-                let _ = abs.set_scheme(parent_host_scheme.as_str());
-            }
+                if can_process {
+                    if abs.scheme() != parent_host_scheme.as_str() {
+                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                    }
 
-            let hchars = abs.path();
+                    let hchars = abs.path();
 
-            if let Some(position) = hchars.rfind('.') {
-                let resource_ext = &hchars[position + 1..hchars.len()];
+                    if let Some(position) = hchars.rfind('.') {
+                        let resource_ext = &hchars[position + 1..hchars.len()];
 
-                if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
-                    can_process = false;
+                        if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
+                            can_process = false;
+                        }
+                    }
+
+                    if can_process
+                        && (base_domain.is_empty()
+                            || external_domain
+                            || base_domain.as_str() == domain_name(&abs))
+                    {
+                        map.insert(abs.as_str().to_string().into());
+                    }
                 }
             }
-
-            if can_process
-                && (base_domain.is_empty()
-                    || external_domain
-                    || base_domain.as_str() == domain_name(&abs))
-            {
-                map.insert(abs.as_str().to_string().into());
-            }
+            _ => (),
         }
     }
 
@@ -939,150 +947,159 @@ impl Page {
                                         static_app = true;
                                         continue;
                                     }
-                                    match self
-                                        .abs_path(src)
-                                        .path_segments()
-                                        .ok_or_else(|| "cannot be base")
-                                    {
-                                        Ok(mut paths) => {
-                                            while let Some(p) = paths.next() {
-                                                // todo: get the path last before None instead of checking for ends_with
-                                                if p.ends_with(".js")
-                                                    && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                {
-                                                    rerender = true;
-                                                } else {
-                                                    match node.as_text() {
-                                                        Some(text) => {
-                                                            lazy_static! {
-                                                                static ref DOM_WATCH_METHODS: regex::RegexSet = {
-                                                                    let set = unsafe {
-                                                                        regex::RegexSet::new(&[
-                                                                            r"/.createElementNS/gm",
-                                                                            r"/.removeChild/gm",
-                                                                            r"/.insertBefore/gm",
-                                                                            r"/.createElement/gm",
-                                                                            r"/.setAttribute/gm",
-                                                                            r"/.createTextNode/gm",
-                                                                            r"/.replaceChildren/gm",
-                                                                            r"/.prepend/gm",
-                                                                            r"/.append/gm",
-                                                                            r"/.appendChild/gm",
-                                                                            r"/.write/gm",
-                                                                        ])
-                                                                        .unwrap_unchecked()
-                                                                    };
 
-                                                                    set
-                                                                };
+                                    match self.abs_path(src) {
+                                        Some(mut abs) => {
+                                            match abs
+                                                .path_segments()
+                                                .ok_or_else(|| "cannot be base")
+                                            {
+                                                Ok(mut paths) => {
+                                                    while let Some(p) = paths.next() {
+                                                        // todo: get the path last before None instead of checking for ends_with
+                                                        if p.ends_with(".js")
+                                                            && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                        {
+                                                            rerender = true;
+                                                        } else {
+                                                            match node.as_text() {
+                                                                Some(text) => {
+                                                                    lazy_static! {
+                                                                        static ref DOM_WATCH_METHODS: regex::RegexSet = {
+                                                                            let set = unsafe {
+                                                                                regex::RegexSet::new(&[
+                                                                                r"/.createElementNS/gm",
+                                                                                r"/.removeChild/gm",
+                                                                                r"/.insertBefore/gm",
+                                                                                r"/.createElement/gm",
+                                                                                r"/.setAttribute/gm",
+                                                                                r"/.createTextNode/gm",
+                                                                                r"/.replaceChildren/gm",
+                                                                                r"/.prepend/gm",
+                                                                                r"/.append/gm",
+                                                                                r"/.appendChild/gm",
+                                                                                r"/.write/gm",
+                                                                            ])
+                                                                            .unwrap_unchecked()
+                                                                            };
+
+                                                                            set
+                                                                        };
+                                                                    }
+                                                                    rerender = DOM_WATCH_METHODS
+                                                                        .is_match(text);
+                                                                }
+                                                                _ => (),
                                                             }
-                                                            rerender =
-                                                                DOM_WATCH_METHODS.is_match(text);
+                                                        }
+                                                    }
+                                                }
+                                                _ => (),
+                                            };
+
+                                            if rerender {
+                                                // we should re-use the html content instead with events.
+                                                let uu = self.get_html();
+                                                let browser = browser.to_owned();
+                                                let configuration = configuration.clone();
+                                                let target_url = self.url.clone();
+
+                                                tokio::task::spawn(async move {
+                                                    // we need to use about:blank here since we set the HTML content directly
+                                                    match browser.new_page("about:blank").await {
+                                                        Ok(new_page) => {
+                                                            match configuration
+                                                                .evaluate_on_new_document
+                                                            {
+                                                                Some(ref script) => {
+                                                                    let _ = new_page
+                                                                        .evaluate_on_new_document(
+                                                                            script.as_str(),
+                                                                        )
+                                                                        .await;
+                                                                }
+                                                                _ => (),
+                                                            }
+                                                            if configuration.fingerprint {
+                                                                let _ = new_page
+                                                                .evaluate_on_new_document(
+                                                                    crate::features::chrome::FP_JS,
+                                                                )
+                                                                .await;
+                                                            }
+                                                            let new_page =
+                                                            crate::features::chrome::configure_browser(
+                                                                new_page,
+                                                                &configuration,
+                                                            )
+                                                            .await;
+
+                                                            if cfg!(feature = "chrome_stealth")
+                                                                || configuration.stealth_mode
+                                                            {
+                                                                let _ = new_page
+                                                                    .enable_stealth_mode_with_agent(
+                                                                        &if configuration
+                                                                            .user_agent
+                                                                            .is_some()
+                                                                        {
+                                                                            &configuration
+                                                                                .user_agent
+                                                                                .as_ref()
+                                                                                .unwrap()
+                                                                                .as_str()
+                                                                        } else {
+                                                                            ""
+                                                                        },
+                                                                    );
+                                                            }
+
+                                                            let page_resource =
+                                                            crate::utils::fetch_page_html_chrome_base(
+                                                                &uu,
+                                                                &new_page,
+                                                                true,
+                                                                false,
+                                                                &Some(crate::configuration::WaitFor::new(
+                                                                    Some(
+                                                                        core::time::Duration::from_secs(
+                                                                            120,
+                                                                        ), // default a duration for smart handling. (maybe expose later on.)
+                                                                    ),
+                                                                    None,
+                                                                    true,
+                                                                    true,
+                                                                    None,
+                                                                )),
+                                                                &configuration.screenshot,
+                                                                false,
+                                                                &configuration.openai_config,
+                                                                Some(target_url)
+                                                            )
+                                                            .await;
+
+                                                            match page_resource {
+                                                                Ok(resource) => {
+                                                                    if let Err(_) =
+                                                                        tx.send(resource)
+                                                                    {
+                                                                        crate::utils::log(
+                                                                            "the receiver dropped",
+                                                                            "",
+                                                                        );
+                                                                    }
+                                                                }
+                                                                _ => (),
+                                                            };
                                                         }
                                                         _ => (),
                                                     }
-                                                }
+                                                });
+
+                                                break;
                                             }
                                         }
                                         _ => (),
-                                    };
-
-                                    if rerender {
-                                        // we should re-use the html content instead with events.
-                                        let uu = self.get_html();
-                                        let browser = browser.to_owned();
-                                        let configuration = configuration.clone();
-                                        let target_url = self.url.clone();
-
-                                        tokio::task::spawn(async move {
-                                            // we need to use about:blank here since we set the HTML content directly
-                                            match browser.new_page("about:blank").await {
-                                                Ok(new_page) => {
-                                                    match configuration.evaluate_on_new_document {
-                                                        Some(ref script) => {
-                                                            let _ = new_page
-                                                                .evaluate_on_new_document(
-                                                                    script.as_str(),
-                                                                )
-                                                                .await;
-                                                        }
-                                                        _ => (),
-                                                    }
-                                                    if configuration.fingerprint {
-                                                        let _ = new_page
-                                                            .evaluate_on_new_document(
-                                                                crate::features::chrome::FP_JS,
-                                                            )
-                                                            .await;
-                                                    }
-                                                    let new_page =
-                                                        crate::features::chrome::configure_browser(
-                                                            new_page,
-                                                            &configuration,
-                                                        )
-                                                        .await;
-
-                                                    if cfg!(feature = "chrome_stealth")
-                                                        || configuration.stealth_mode
-                                                    {
-                                                        let _ = new_page
-                                                            .enable_stealth_mode_with_agent(
-                                                                &if configuration
-                                                                    .user_agent
-                                                                    .is_some()
-                                                                {
-                                                                    &configuration
-                                                                        .user_agent
-                                                                        .as_ref()
-                                                                        .unwrap()
-                                                                        .as_str()
-                                                                } else {
-                                                                    ""
-                                                                },
-                                                            );
-                                                    }
-
-                                                    let page_resource =
-                                                        crate::utils::fetch_page_html_chrome_base(
-                                                            &uu,
-                                                            &new_page,
-                                                            true,
-                                                            false,
-                                                            &Some(crate::configuration::WaitFor::new(
-                                                                Some(
-                                                                    core::time::Duration::from_secs(
-                                                                        120,
-                                                                    ), // default a duration for smart handling. (maybe expose later on.)
-                                                                ),
-                                                                None,
-                                                                true,
-                                                                true,
-                                                                None,
-                                                            )),
-                                                            &configuration.screenshot,
-                                                            false,
-                                                            &configuration.openai_config,
-                                                            Some(target_url)
-                                                        )
-                                                        .await;
-
-                                                    match page_resource {
-                                                        Ok(resource) => {
-                                                            if let Err(_) = tx.send(resource) {
-                                                                crate::utils::log(
-                                                                    "the receiver dropped",
-                                                                    "",
-                                                                );
-                                                            }
-                                                        }
-                                                        _ => (),
-                                                    };
-                                                }
-                                                _ => (),
-                                            }
-                                        });
-
-                                        break;
                                     }
                                 }
                             }
@@ -1093,36 +1110,38 @@ impl Page {
                     if element_name == "a" {
                         // add fullresources?
                         match element.attr("href") {
-                            Some(href) => {
-                                let mut abs = self.abs_path(href);
-                                let host_name = abs.host_str();
-                                let mut can_process =
-                                    parent_host_match(host_name, &base_domain, parent_host);
+                            Some(href) => match self.abs_path(href) {
+                                Some(mut abs) => {
+                                    let host_name = abs.host_str();
+                                    let mut can_process =
+                                        parent_host_match(host_name, &base_domain, parent_host);
 
-                                if can_process {
-                                    if abs.scheme() != parent_host_scheme.as_str() {
-                                        let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                    }
-                                    let hchars = abs.path();
+                                    if can_process {
+                                        if abs.scheme() != parent_host_scheme.as_str() {
+                                            let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                        }
+                                        let hchars = abs.path();
 
-                                    if let Some(position) = hchars.rfind('.') {
-                                        let resource_ext = &hchars[position + 1..hchars.len()];
+                                        if let Some(position) = hchars.rfind('.') {
+                                            let resource_ext = &hchars[position + 1..hchars.len()];
 
-                                        if !ONLY_RESOURCES
-                                            .contains::<CaseInsensitiveString>(&resource_ext.into())
+                                            if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(
+                                                &resource_ext.into(),
+                                            ) {
+                                                can_process = false;
+                                            }
+                                        }
+
+                                        if can_process
+                                            && (base_domain.is_empty()
+                                                || base_domain.as_str() == domain_name(&abs))
                                         {
-                                            can_process = false;
+                                            map.insert(abs.as_str().to_string().into());
                                         }
                                     }
-
-                                    if can_process
-                                        && (base_domain.is_empty()
-                                            || base_domain.as_str() == domain_name(&abs))
-                                    {
-                                        map.insert(abs.as_str().to_string().into());
-                                    }
                                 }
-                            }
+                                _ => (),
+                            },
                             _ => (),
                         };
                     }
@@ -1188,45 +1207,48 @@ impl Page {
                     };
 
                     match element.attr(ele_attribute) {
-                        Some(href) => {
-                            let mut abs = self.abs_path(href);
-                            let host_name = abs.host_str();
-                            let mut can_process =
-                                parent_host_match(host_name, base_domain, parent_host);
+                        Some(href) => match self.abs_path(href) {
+                            Some(mut abs) => {
+                                let host_name = abs.host_str();
+                                let mut can_process =
+                                    parent_host_match(host_name, base_domain, parent_host);
 
-                            let mut external_domain = false;
+                                let mut external_domain = false;
 
-                            if !can_process
-                                && host_name.is_some()
-                                && !self.external_domains_caseless.is_empty()
-                            {
-                                can_process = self
-                                    .external_domains_caseless
-                                    .contains::<CaseInsensitiveString>(
-                                        &host_name.unwrap_or_default().into(),
-                                    )
-                                    || self
-                                        .external_domains_caseless
-                                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                                external_domain = can_process;
-                            }
-
-                            if can_process {
-                                if abs.scheme() != parent_host_scheme.as_str() {
-                                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                }
-
-                                let h = abs.as_str();
-
-                                if can_process
-                                    && (base_domain.is_empty()
-                                        || external_domain
-                                        || base_domain.as_str() == domain_name(&abs))
+                                if !can_process
+                                    && host_name.is_some()
+                                    && !self.external_domains_caseless.is_empty()
                                 {
-                                    map.insert(h.to_string().into());
+                                    can_process = self
+                                        .external_domains_caseless
+                                        .contains::<CaseInsensitiveString>(
+                                        &host_name.unwrap_or_default().into(),
+                                    ) || self
+                                        .external_domains_caseless
+                                        .contains::<CaseInsensitiveString>(
+                                        &CASELESS_WILD_CARD,
+                                    );
+                                    external_domain = can_process;
+                                }
+
+                                if can_process {
+                                    if abs.scheme() != parent_host_scheme.as_str() {
+                                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                                    }
+
+                                    let h = abs.as_str();
+
+                                    if can_process
+                                        && (base_domain.is_empty()
+                                            || external_domain
+                                            || base_domain.as_str() == domain_name(&abs))
+                                    {
+                                        map.insert(h.to_string().into());
+                                    }
                                 }
                             }
-                        }
+                            _ => (),
+                        },
                         _ => (),
                     };
                 }
@@ -1324,15 +1346,21 @@ impl Page {
     /// Convert a URL to its absolute path without any fragments or params.
     #[inline]
     #[cfg(not(feature = "decentralized"))]
-    fn abs_path(&self, href: &str) -> Url {
-        convert_abs_path(&self.base, href)
+    fn abs_path(&self, href: &str) -> Option<Url> {
+        match &self.base {
+            Some(b) => Some(convert_abs_path(&b, href)),
+            _ => None,
+        }
     }
 
     /// Convert a URL to its absolute path without any fragments or params. [unused in the worker atm by default all is returned]
     #[inline(never)]
     #[cfg(feature = "decentralized")]
-    fn abs_path(&self, href: &str) -> Url {
-        convert_abs_path(&Url::parse(&href).unwrap(), href)
+    fn abs_path(&self, href: &str) -> Option<Url> {
+        match Url::parse(&href) {
+            Ok(u) => Some(convert_abs_path(&u, href)),
+            _ => None,
+        }
     }
 }
 
@@ -1428,33 +1456,33 @@ async fn test_abs_path() {
     let client = Client::builder()
         .user_agent(TEST_AGENT_NAME)
         .build()
-        .unwrap();
+        .expect("a valid agent");
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new(link_result, &client).await;
 
     assert_eq!(
-        page.abs_path("/page"),
-        Url::parse("https://choosealicense.com/page").unwrap()
+        page.abs_path("/page").expect("a valid url"),
+        Url::parse("https://choosealicense.com/page").expect("a valid url")
     );
     assert_eq!(
-        page.abs_path("/page?query=keyword"),
+        page.abs_path("/page?query=keyword").expect("a valid url"),
+        Url::parse("https://choosealicense.com/page?query=keyword").expect("a valid url")
+    );
+    assert_eq!(
+        page.abs_path("/page#hash").expect("a valid url"),
+        Url::parse("https://choosealicense.com/page").expect("a valid url")
+    );
+    assert_eq!(
+        page.abs_path("/page?query=keyword#hash").expect("a valid url"),
         Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
     );
     assert_eq!(
-        page.abs_path("/page#hash"),
-        Url::parse("https://choosealicense.com/page").unwrap()
+        page.abs_path("#hash").unwrap(),
+        Url::parse("https://choosealicense.com/").expect("a valid url")
     );
     assert_eq!(
-        page.abs_path("/page?query=keyword#hash"),
-        Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
-    );
-    assert_eq!(
-        page.abs_path("#hash"),
-        Url::parse("https://choosealicense.com/").unwrap()
-    );
-    assert_eq!(
-        page.abs_path("tel://+212 3456"),
-        Url::parse("https://choosealicense.com/").unwrap()
+        page.abs_path("tel://+212 3456").unwrap(),
+        Url::parse("https://choosealicense.com/").expect("a valid url")
     );
 }
 
