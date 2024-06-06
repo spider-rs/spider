@@ -37,24 +37,59 @@ async fn main() {
         string_concat!("https://", cli.url)
     };
 
-    match Website::new(&url)
+    let mut website = Website::new(&url);
+
+    website
         .with_respect_robots_txt(cli.respect_robots_txt)
-        .with_delay(cli.delay.unwrap_or_default())
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(cli.block_images, true)
         .with_danger_accept_invalid_certs(cli.accept_invalid_certs)
-        .with_budget(cli.budget.as_ref().map(|budget| budget
-                    .split(',')
-                    .collect::<Vec<_>>()
-                    .chunks(2)
-                    .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
-                    .collect::<HashMap<&str, u32>>()))
-        .with_limit(cli.limit.unwrap_or(0))
         .with_tld(cli.tld)
-        .with_depth(cli.depth.unwrap_or(0))
-        .with_user_agent(cli.user_agent.as_deref())
-        .with_blacklist_url(cli.blacklist_url.map(|blacklist_url| blacklist_url.split(',').map(|l| l.into()).collect()))
-        .with_external_domains(Some(cli.external_domains.unwrap_or_default().into_iter()))
+        .with_blacklist_url(
+            cli.blacklist_url
+                .map(|blacklist_url| blacklist_url.split(',').map(|l| l.into()).collect()),
+        )
+        .with_budget(cli.budget.as_ref().map(|budget| {
+            budget
+                .split(',')
+                .collect::<Vec<_>>()
+                .chunks(2)
+                .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
+                .collect::<HashMap<&str, u32>>()
+        }));
+
+    match cli.user_agent {
+        Some(agent) => {
+            website.with_user_agent(Some(&agent));
+        }
+        _ => (),
+    }
+    match cli.delay {
+        Some(delay) => {
+            website.with_delay(delay);
+        }
+        _ => (),
+    }
+    match cli.limit {
+        Some(limit) => {
+            website.with_limit(limit);
+        }
+        _ => (),
+    }
+    match cli.depth {
+        Some(depth) => {
+            website.with_depth(depth);
+        }
+        _ => (),
+    }
+    match cli.external_domains {
+        Some(domains) => {
+            website.with_external_domains(Some(domains.into_iter()));
+        }
+        _ => (),
+    }
+
+    match website
         .build()
     {
         Ok(mut website) => {
