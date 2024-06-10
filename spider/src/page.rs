@@ -1473,7 +1473,8 @@ async fn test_abs_path() {
         Url::parse("https://choosealicense.com/page").expect("a valid url")
     );
     assert_eq!(
-        page.abs_path("/page?query=keyword#hash").expect("a valid url"),
+        page.abs_path("/page?query=keyword#hash")
+            .expect("a valid url"),
         Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
     );
     assert_eq!(

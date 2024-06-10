@@ -2938,8 +2938,7 @@ impl Website {
                             self.drain_extra_links().collect();
 
                         let (mut interval, throttle) = self.setup_crawl();
-                        let blacklist_url: Box<Vec<CompactString>> =
-                            self.configuration.get_blacklist();
+                        let blacklist_url = self.configuration.get_blacklist();
                         let on_link_find_callback = self.on_link_find_callback;
 
                         let semaphore = Arc::new(Semaphore::const_new(*DEFAULT_PERMITS));
