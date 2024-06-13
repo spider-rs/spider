@@ -3394,7 +3394,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.97.12"
+version = "1.97.13"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3448,7 +3448,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.97.12"
+version = "1.97.13"
 dependencies = [
  "clap",
  "env_logger",
@@ -3471,7 +3471,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.97.12"
+version = "1.97.13"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4008,9 +4008,9 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
 name = "ua_generator"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22bac46ad1e2506fa063cef945b7aaaceebe28b534d6df16771fae9d57cf3f5a"
+checksum = "617fa52b4f244f645c4f3d2bb699847ba06ae71cde016c87795947385fc3274f"
 dependencies = [
  "fastrand",
  "serde",

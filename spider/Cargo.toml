@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.97.12"
+version = "1.97.13"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -36,7 +36,7 @@ hashbrown = { version = "0.14.5", default-features = true }
 log = "0.4"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.4", optional = true }
-ua_generator = { version = "^0.4.2", optional = true }
+ua_generator = { version = "^0.5", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1.4.0"
 compact_str = "0.7.1"

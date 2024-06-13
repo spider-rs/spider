@@ -853,6 +853,22 @@ impl Website {
         }
     }
 
+    /// Determine if the agent should be set to a Chrome Agent.
+    #[cfg(not(feature = "chrome"))]
+    fn only_chrome_agent(&self) -> bool {
+        false
+    }
+
+    /// Determine if the agent should be set to a Chrome Agent.
+    #[cfg(feature = "chrome")]
+    fn only_chrome_agent(&self) -> bool {
+        self.configuration.chrome_connection_url.is_some()
+            || self.configuration.wait_for.is_some()
+            || self.configuration.chrome_intercept
+            || self.configuration.stealth_mode
+            || self.configuration.fingerprint
+    }
+
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
@@ -863,7 +879,7 @@ impl Website {
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
-            _ => &get_ua(),
+            _ => &get_ua(self.only_chrome_agent()),
         };
 
         if cfg!(feature = "real_browser") {
@@ -918,7 +934,7 @@ impl Website {
         let policy = self.setup_redirect_policy();
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
-            _ => &get_ua(),
+            _ => &get_ua(self.only_chrome_agent()),
         };
 
         if cfg!(feature = "real_browser") {
@@ -1038,7 +1054,7 @@ impl Website {
         let mut client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(),
+                _ => &get_ua(self.only_chrome_agent()),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500))
@@ -1117,7 +1133,7 @@ impl Website {
         let mut client = reqwest::Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(),
+                _ => &get_ua(self.only_chrome_agent()),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500))
@@ -5127,7 +5143,7 @@ async fn not_crawl_blacklist_regex() {
 #[test]
 #[cfg(feature = "ua_generator")]
 fn randomize_website_agent() {
-    assert_eq!(get_ua().is_empty(), false);
+    assert_eq!(get_ua(false).is_empty(), false);
 }
 
 #[tokio::test]

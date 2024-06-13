@@ -1043,11 +1043,22 @@ impl Page {
                                                                             .user_agent
                                                                             .is_some()
                                                                         {
-                                                                            &configuration
-                                                                                .user_agent
-                                                                                .as_ref()
-                                                                                .unwrap()
-                                                                                .as_str()
+                                                                            match configuration
+                                                                            .user_agent
+                                                                            .as_ref() {
+                                                                                Some(agent) => {
+                                                                                    if !agent.contains("Chrome")  {
+                                                                                        if cfg!(feature = "ua_generator") {
+                                                                                            crate::configuration::get_ua(true)
+                                                                                        } else {
+                                                                                           ""
+                                                                                        }
+                                                                                    } else {
+                                                                                        agent
+                                                                                    }
+                                                                                }
+                                                                                _ => ""
+                                                                            }
                                                                         } else {
                                                                             ""
                                                                         },

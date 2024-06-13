@@ -127,13 +127,17 @@ pub struct Configuration {
 
 /// Get the user agent from the top agent list randomly.
 #[cfg(any(feature = "ua_generator"))]
-pub fn get_ua() -> &'static str {
-    ua_generator::ua::spoof_ua()
+pub fn get_ua(chrome: bool) -> &'static str {
+    if chrome {
+        ua_generator::ua::spoof_chrome_ua()
+    } else {
+        ua_generator::ua::spoof_ua()
+    }
 }
 
 /// Get the user agent via cargo package + version.
 #[cfg(not(any(feature = "ua_generator")))]
-pub fn get_ua() -> &'static str {
+pub fn get_ua(_chrome: bool) -> &'static str {
     use std::env;
 
     lazy_static! {
