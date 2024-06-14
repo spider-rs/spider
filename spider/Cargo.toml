@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.97.13"
+version = "1.97.14"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -32,7 +32,7 @@ tokio = { version = "1", features = [
     "parking_lot"
 ] }
 tokio-stream = "0.1"
-hashbrown = { version = "0.14.5", default-features = true }
+hashbrown = { version = "0.14", default-features = true }
 log = "0.4"
 percent-encoding = "2.3.1"
 regex = { version = "1.10.4", optional = true }
@@ -43,7 +43,7 @@ compact_str = "0.7.1"
 fast_html5ever = "0.26.6"
 selectors = "0.25.0"
 tendril = "0.4.3"
-ahash = "0.8.11"
+ahash = "0.8"
 cssparser = "0.31.2"
 smallvec = "1"
 ego-tree = "0.6.2"
@@ -58,7 +58,7 @@ chromiumoxide = { version = "0.6.0", optional = true, features = [
     "bytes",
 ], default-features = false }
 sitemap = { version = "0.4.1", optional = true }
-chrono = { version = "0.4.31", optional = true }
+chrono = { version = "0.4", optional = true }
 cron = { version = "0.12.0", optional = true }
 async-trait = { version = "0.1.75", optional = true }
 napi = { version = "2", features = [
@@ -70,11 +70,11 @@ strum = { version = "0.26.2", features = ["derive"] }
 async_job = { version = "0.1.4", optional = true }
 reqwest-middleware = { version = "0.3.0", optional = true }
 http-cache-reqwest = { version = "0.14.0", optional = true }
-encoding_rs = { version = "0.8.33", optional = true }
+encoding_rs = { version = "0.8", optional = true }
 const_format = { version = "0.2.32", optional = true }
 async-openai = { version = "0.21.0", optional = true }
 tiktoken-rs = { version = "0.5.9", optional = true }
-lol_html = { version = "1.2.1", optional = true }
+lol_html = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.31.0", features = ["serde", "serialize", "async-tokio"]}
 moka = { version = "0.12.1", features = ["future"], optional = true }

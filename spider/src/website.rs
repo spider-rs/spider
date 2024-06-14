@@ -243,7 +243,10 @@ where
 {
     match semaphore.acquire_owned().await {
         Ok(_permit) => task().await,
-        _ => Default::default(),
+        _ => {
+            task().await;
+            Default::default()
+        }
     }
 }
 
@@ -1998,7 +2001,11 @@ impl Website {
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
                     let (mut interval, throttle) = self.setup_crawl();
-                    let semaphore = Arc::new(Semaphore::const_new(*DEFAULT_PERMITS));
+                    let semaphore = if self.configuration.shared_queue {
+                        SEM_SHARED.clone()
+                    } else {
+                        Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                    };
 
                     links.extend(
                         self._crawl_establish(client, &mut selector, false, false)
@@ -2297,7 +2304,11 @@ impl Website {
                 Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
                     Ok(new_page) => {
                         let new_page = configure_browser(new_page, &self.configuration).await;
-
+                        let semaphore = if self.configuration.shared_queue {
+                            SEM_SHARED.clone()
+                        } else {
+                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                        };
                         let mut q = match &self.channel_queue {
                             Some(q) => Some(q.0.subscribe()),
                             _ => None,
@@ -2404,7 +2415,7 @@ impl Website {
 
                                                 set.spawn_on(
                                                     run_task(
-                                                        SEM_SHARED.clone(),
+                                                        semaphore.clone(),
                                                         move || async move {
                                                             let link_result = match on_link_find_callback {
                                                                 Some(cb) => cb(link, None),
@@ -2570,7 +2581,11 @@ impl Website {
                                 self.subscription_guard().await;
                             }
                         } else {
-                            let semaphore = Arc::new(Semaphore::const_new(*DEFAULT_PERMITS));
+                            let semaphore = if self.configuration.shared_queue {
+                                SEM_SHARED.clone()
+                            } else {
+                                Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                            };
                             let new_page = configure_browser(new_page, &self.configuration).await;
                             let mut q = match &self.channel_queue {
                                 Some(q) => Some(q.0.subscribe()),
@@ -2957,8 +2972,11 @@ impl Website {
                         let blacklist_url = self.configuration.get_blacklist();
                         let on_link_find_callback = self.on_link_find_callback;
 
-                        let semaphore = Arc::new(Semaphore::const_new(*DEFAULT_PERMITS));
-
+                        let semaphore = if self.configuration.shared_queue {
+                            SEM_SHARED.clone()
+                        } else {
+                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                        };
                         links.extend(
                             self.crawl_establish_smart(
                                 &client,
@@ -4588,6 +4606,12 @@ impl Website {
         self
     }
 
+    /// Use a shared semaphore to evenly handle workloads. The default is false.
+    pub fn with_shared_queue(&mut self, shared_queue: bool) -> &mut Self {
+        self.configuration.with_shared_queue(shared_queue);
+        self
+    }
+
     /// Set the authentiation challenge response. This does nothing without the feat flag `chrome` enabled.
     pub fn with_auth_challenge_response(
         &mut self,
@@ -4729,7 +4753,7 @@ impl Website {
         let channel = self.channel.get_or_insert_with(|| {
             let (tx, rx) = broadcast::channel(
                 (if capacity == 0 {
-                    SEM.available_permits()
+                    DEFAULT_PERMITS.clone()
                 } else {
                     capacity
                 })

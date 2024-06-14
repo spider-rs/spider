@@ -123,6 +123,8 @@ pub struct Configuration {
     /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
     #[cfg(feature = "chrome")]
     pub chrome_connection_url: Option<String>,
+    /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
+    pub shared_queue: bool,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -321,6 +323,12 @@ impl Configuration {
             Some(p) => self.proxies = Some(p.into()),
             _ => self.proxies = None,
         };
+        self
+    }
+
+    /// Use a shared semaphore to evenly handle workloads. The default is false.
+    pub fn with_shared_queue(&mut self, shared_queue: bool) -> &mut Self {
+        self.shared_queue = shared_queue;
         self
     }
 
