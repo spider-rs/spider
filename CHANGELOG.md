@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.97.15
+
+1. feat(regex_full): use regex with backreferences and lookaround.
+
 ## v1.85.0
 
 1. feat(openai): use OpenAI to dynamically drive the browser.

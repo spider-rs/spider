@@ -590,6 +590,8 @@ impl Website {
                                         Some(budget) => {
                                             if budget.abs_diff(0) == 1 {
                                                 true
+                                            } else if budget == &0 {
+                                                true
                                             } else {
                                                 *budget -= 1;
                                                 false
@@ -601,7 +603,8 @@ impl Website {
                                     false
                                 };
 
-                                // set this up prior to crawl to avoid checks per link
+                                // set this up prior to crawl to avoid checks per link.
+                                // If only the wild card budget is set we can safely skip all checks.
                                 let skip_paths =
                                     self.configuration.wild_card_budgeting && budget.len() == 1;
 

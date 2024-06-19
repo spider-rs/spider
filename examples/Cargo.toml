@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.93.40"
+version = "1.97.15"
 authors = [
     "j-mendez <jeff@a11ywatch.com>",
 ]
@@ -89,6 +89,10 @@ required-features = ["spider/sitemap"]
 [[example]]
 name = "configuration"
 path = "configuration.rs"
+
+[[example]]
+name = "blacklist"
+path = "blacklist.rs"
 
 [[example]]
 name = "budget"

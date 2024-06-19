@@ -1169,6 +1169,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fast_html5ever"
 version = "0.26.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3394,7 +3405,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.97.14"
+version = "1.97.15"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3410,6 +3421,7 @@ dependencies = [
  "cssparser 0.31.2",
  "ego-tree",
  "encoding_rs",
+ "fancy-regex 0.13.0",
  "fast_html5ever",
  "fastrand",
  "flexbuffers",
@@ -3448,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.97.14"
+version = "1.97.15"
 dependencies = [
  "clap",
  "env_logger",
@@ -3460,7 +3472,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "1.93.40"
+version = "1.97.15"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3471,7 +3483,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.97.14"
+version = "1.97.15"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -3711,7 +3723,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bstr",
- "fancy-regex",
+ "fancy-regex 0.12.0",
  "lazy_static",
  "parking_lot",
  "rustc-hash",
