@@ -1,15 +1,14 @@
-//! `cargo run --example blacklist --features regex`
+//! `cargo run --example whitelist --features regex`
 extern crate spider;
 
-use spider::tokio;
-use spider::website::Website;
+use spider::{tokio, website::Website};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr/en/");
 
-    website.with_blacklist_url(Some(vec!["/books".into(), "/blog".into(), "/tag".into()]));
+    website.with_whitelist_url(Some(vec!["/books".into()]));
 
     let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
         website.subscribe(0).unwrap();

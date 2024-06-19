@@ -18,6 +18,12 @@ pub enum RedirectPolicy {
     Strict,
 }
 
+#[cfg(not(feature = "regex"))]
+type AllowList = Box<Vec<CompactString>>;
+
+#[cfg(feature = "regex")]
+type AllowList = Box<regex::RegexSet>;
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -37,6 +43,8 @@ pub struct Configuration {
     pub tld: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Option<Box<Vec<CompactString>>>,
+    /// List of pages to only crawl. [optional: regex pattern matching]
+    pub whitelist_url: Option<Box<Vec<CompactString>>>,
     /// User-Agent for request.
     pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
@@ -125,6 +133,10 @@ pub struct Configuration {
     pub chrome_connection_url: Option<String>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
+    /// The blacklist urls.
+    blacklist: AllowList,
+    /// The whitelist urls.
+    whitelist: AllowList,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -191,6 +203,53 @@ impl Configuration {
     pub fn get_blacklist(&self) -> Box<Vec<CompactString>> {
         match &self.blacklist_url {
             Some(blacklist) => blacklist.to_owned(),
+            _ => Default::default(),
+        }
+    }
+
+    /// Set the blacklist
+    pub(crate) fn set_blacklist(&mut self) {
+        self.blacklist = self.get_blacklist();
+    }
+
+    /// Set the whitelist
+    pub(crate) fn set_whitelist(&mut self) {
+        self.whitelist = self.get_whitelist();
+    }
+
+    /// Configure the allow list.
+    pub(crate) fn configure_allowlist(&mut self) {
+        self.set_whitelist();
+        self.set_blacklist();
+    }
+
+    /// Get the blacklist compiled.
+    pub(crate) fn get_blacklist_compiled(&self) -> &AllowList {
+        &self.blacklist
+    }
+
+    /// Get the whitelist compiled.
+    pub(crate) fn get_whitelist_compiled(&self) -> &AllowList {
+        &self.whitelist
+    }
+
+    #[cfg(feature = "regex")]
+    /// Compile the regex for the whitelist.
+    pub fn get_whitelist(&self) -> Box<regex::RegexSet> {
+        match &self.whitelist_url {
+            Some(whitelist) => match regex::RegexSet::new(&**whitelist) {
+                Ok(s) => Box::new(s),
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        }
+    }
+
+    #[cfg(not(feature = "regex"))]
+    /// Handle the whitelist options.
+    pub fn get_whitelist(&self) -> Box<Vec<CompactString>> {
+        match &self.whitelist_url {
+            Some(whitelist) => whitelist.to_owned(),
             _ => Default::default(),
         }
     }
@@ -340,6 +399,18 @@ impl Configuration {
         match blacklist_url {
             Some(p) => self.blacklist_url = Some(Box::new(p.into())),
             _ => self.blacklist_url = None,
+        };
+        self
+    }
+
+    /// Add whitelist urls to allow.
+    pub fn with_whitelist_url<T>(&mut self, whitelist_url: Option<Vec<T>>) -> &mut Self
+    where
+        Vec<CompactString>: From<Vec<T>>,
+    {
+        match whitelist_url {
+            Some(p) => self.whitelist_url = Some(Box::new(p.into())),
+            _ => self.whitelist_url = None,
         };
         self
     }

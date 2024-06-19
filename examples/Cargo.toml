@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.97.15"
+version = "1.98.0"
 authors = [
     "j-mendez <jeff@a11ywatch.com>",
 ]
@@ -93,6 +93,10 @@ path = "configuration.rs"
 [[example]]
 name = "blacklist"
 path = "blacklist.rs"
+
+[[example]]
+name = "whitelist"
+path = "whitelist.rs"
 
 [[example]]
 name = "budget"

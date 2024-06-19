@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## v1.97.15
+## v1.98.0
 
-1. feat(regex_full): use regex with backreferences and lookaround.
+1. feat(whitelist): whitelist routes to only crawl.
 
 ## v1.85.0
 
