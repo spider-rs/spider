@@ -35,7 +35,7 @@ See [EXAMPLES](./examples/).
 
 This project is licensed under the [MIT license].
 
-[MIT license]: https://github.com/spider-rs/spider/blob/master/LICENSE
+[MIT license]: https://github.com/spider-rs/spider/blob/main/LICENSE
 
 ## Contributing
 
