@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "1.98.2"
+version = "1.98.3"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -20,7 +20,7 @@ maintenance = { status = "as-is" }
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-env_logger = "0.11.3"
+env_logger = "0.11"
 serde_json = "1"
 
 [build-dependencies]
@@ -43,3 +43,4 @@ regex = ["spider/regex"]
 full_resources = ["spider/full_resources"]
 chrome_intercept = ["spider/chrome_intercept"]
 chrome = ["spider/chrome"]
+smart = ["spider/smart"]

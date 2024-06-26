@@ -15,7 +15,14 @@ On Linux
 The CLI is a binary so do not add it to your `Cargo.toml` file.
 
 ```sh
+# without headless
 cargo install spider_cli
+# with headless
+cargo install spider_cli --chrome
+# with smart mode defaults to HTTP and Headless when needed
+cargo install spider_cli --smart
+# with full resources not just web pages
+cargo install spider_cli --full_resources
 ```
 
 ## Cli
