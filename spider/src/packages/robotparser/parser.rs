@@ -87,7 +87,7 @@ impl RuleLine {
     }
 
     fn applies_to(&self, filename: &str) -> bool {
-        self.path == "*" || filename.starts_with(&self.path)
+        self.path == "*" || self.path.starts_with(filename)
     }
 }
 
@@ -180,16 +180,28 @@ impl Default for Entry {
 
 /// extract the path of a string
 fn extract_path(url: &str) -> &str {
-    let prefix = if url.starts_with("https://") {
-        8
-    } else if url.starts_with("http://") {
-        7
-    } else {
-        0
-    };
+    if !url.is_empty() {
+        let prefix = if url.starts_with("https://") {
+            8
+        } else if url.starts_with("http://") {
+            7
+        } else {
+            0
+        };
 
-    if let Some(path_start) = url[prefix..].find('/') {
-        &url[prefix + path_start..]
+        let url_slice = &url[prefix..];
+
+        if let Some(path_start) = url_slice.find('/') {
+            let path = &url_slice[path_start..];
+
+            if let Some(query_start) = path.find('?') {
+                &path[..query_start]
+            } else {
+                path
+            }
+        } else {
+            "/"
+        }
     } else {
         "/"
     }
@@ -382,40 +394,35 @@ impl RobotFileParser {
 
     /// Using the parsed robots.txt decide if useragent can fetch url
     pub fn can_fetch<T: AsRef<str>>(&self, useragent: T, url: &str) -> bool {
-        if self.disallow_all {
-            return false;
-        }
-        if self.allow_all {
-            return true;
-        }
         // Until the robots.txt file has been read or found not
         // to exist, we must assume that no url is allowable.
         // This prevents false positives when a user erronenously
         // calls can_fetch() before calling read().
-        if self.last_checked == 0 {
-            return false;
-        }
-        // search for given user agent matches
-        // the first match counts
-        let url_str = match url {
-            ref u if !u.is_empty() => extract_path(&u),
-            _ => "/",
-        };
+        if self.allow_all {
+            true
+        } else if self.last_checked == 0 || self.disallow_all {
+            false
+        } else {
+            // search for given user agent matches
+            // the first match counts
+            let url_str = extract_path(&url);
 
-        for entry in &self.entries {
-            if entry.applies_to(useragent.as_ref()) {
-                return entry.allowance(url_str);
+            for entry in &self.entries {
+                if entry.applies_to(useragent.as_ref()) {
+                    return entry.allowance(url_str);
+                }
+            }
+
+            // try the default entry last
+            let default_entry = &self.default_entry;
+
+            if !default_entry.is_empty() {
+                default_entry.allowance(url_str)
+            } else {
+                // agent not found ==> access granted
+                true
             }
         }
-
-        // try the default entry last
-        let default_entry = &self.default_entry;
-
-        if !default_entry.is_empty() {
-            return default_entry.allowance(url_str);
-        }
-        // agent not found ==> access granted
-        true
     }
 
     /// Returns the crawl delay for this user agent as a `Duration`, or None if no crawl delay is defined.
