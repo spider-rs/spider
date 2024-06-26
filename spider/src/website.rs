@@ -494,7 +494,7 @@ impl Website {
     pub fn is_allowed_default(&self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
         let blacklist = self.configuration.get_blacklist_compiled();
         let whitelist = self.configuration.get_whitelist_compiled();
-        
+
         if !whitelist.is_empty() && !contains(&whitelist, &link.inner()) {
             ProcessLinkStatus::Blocked
         } else if !blacklist.is_empty() {
@@ -4110,10 +4110,8 @@ impl Website {
                                                                     let link: CaseInsensitiveString =
                                                                         url.as_str().into();
 
-                                                                    let allowed = self.is_allowed(
-                                                                        &link,
-                                                                        &blacklist_url,
-                                                                    );
+                                                                    let allowed =
+                                                                        self.is_allowed(&link);
 
                                                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                                                                             break;
