@@ -1,6 +1,6 @@
 [package]
 name = "spider_worker"
-version = "1.98.3"
+version = "1.98.4"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -24,7 +24,7 @@ lazy_static = "1.4.0"
 env_logger = "0.11.3"
 
 [dependencies.spider]
-version = "1.98.3"
+version = "1.98.4"
 path = "../spider"
 features = ["serde", "flexbuffers"]
 

@@ -11,6 +11,26 @@ use log::{info, log_enabled, Level};
 use reqwest::header::HeaderMap;
 use reqwest::{Error, Response, StatusCode};
 
+lazy_static! {
+    /// Prevent fetching resources beyond the bytes limit.
+    static ref MAX_SIZE_BYTES: usize = {
+        match std::env::var("SPIDER_MAX_SIZE_BYTES") {
+            Ok(b) => {
+                const DEFAULT_MAX_SIZE_BYTES: usize = 1_073_741_824; // 1GB in bytes
+
+                let b = b.parse::<usize>().unwrap_or(DEFAULT_MAX_SIZE_BYTES);
+
+                if b == 0 {
+                    0
+                } else {
+                    b.max(1_048_576) // min 1mb
+                }
+            },
+            _ => 0
+        }
+    };
+}
+
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
@@ -1023,7 +1043,15 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
 
             while let Some(item) = stream.next().await {
                 match item {
-                    Ok(text) => data.put(text),
+                    Ok(text) => {
+                        let limit = *MAX_SIZE_BYTES;
+
+                        if limit > 0 && data.len() + text.len() > limit {
+                            break;
+                        }
+
+                        data.put(text)
+                    }
                     _ => (),
                 }
             }
@@ -1289,7 +1317,14 @@ pub async fn fetch_page_html_chrome(
 
                             while let Some(item) = stream.next().await {
                                 match item {
-                                    Ok(text) => data.put(text),
+                                    Ok(text) => {
+                                        let limit = *MAX_SIZE_BYTES;
+
+                                        if limit > 0 && data.len() + text.len() > limit {
+                                            break;
+                                        }
+                                        data.put(text)
+                                    }
                                     _ => (),
                                 }
                             }
