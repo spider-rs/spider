@@ -4,6 +4,12 @@
 [![Crates.io](https://img.shields.io/crates/v/spider.svg)](https://crates.io/crates/spider)
 [![Documentation](https://docs.rs/spider/badge.svg)](https://docs.rs/spider)
 [![Rust](https://img.shields.io/badge/rust-1.56.1%2B-blue.svg?maxAge=3600)](https://github.com/spider-rs/spider)
+[![Discord chat](https://img.shields.io/discord/1254585814021832755.svg?logo=discord&style=flat-square)](https://discord.spider.cloud)
+
+[Website](https://spider.cloud) |
+[Guides](https://spider.cloud/guides) |
+[API Docs](https://docs.rs/spider/latest/spider) |
+[Chat](https://discord.spider.cloud)
 
 The fastest web crawler and indexer. Foundational building blocks for data curation workloads.
 
