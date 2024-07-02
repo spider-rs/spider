@@ -3,7 +3,7 @@ use std::process::Command;
 pub mod go_crolly;
 pub mod node_crawler;
 
-/// build executables for bench marks
+/// build executables for benchmarks
 pub fn main() {
     node_crawler::gen_crawl();
     go_crolly::gen_crawl();
@@ -40,10 +40,55 @@ pub fn main() {
         .output()
         .expect("npm install crawler failed");
 
+    // Install wget based on the operating system
     if cfg!(target_os = "linux") {
-        Command::new("apt-get")
+        if is_debian_based() {
+            Command::new("apt-get")
+                .args(["install", "-y", "wget"])
+                .output()
+                .expect("apt-get install wget failed");
+        } else if is_rpm_based() {
+            Command::new("yum")
+                .args(["install", "-y", "wget"])
+                .output()
+                .expect("yum install wget failed");
+        }
+    } else if cfg!(target_os = "macos") {
+        Command::new("brew")
             .args(["install", "wget"])
             .output()
-            .expect("wget install failed");
+            .expect("brew install wget failed");
     }
+}
+
+#[cfg(target_os = "linux")]
+/// Is Debian OS?
+fn is_debian_based() -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg("grep -Ei 'debian|buntu' /etc/*release")
+        .output()
+        .map_or(false, |output| output.status.success())
+}
+
+#[cfg(target_os = "linux")]
+/// Is Red Hat Package Manager?
+fn is_rpm_based() -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg("grep -Ei 'fedora|redhat|centos' /etc/*release")
+        .output()
+        .map_or(false, |output| output.status.success())
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Is Debian OS?
+fn is_debian_based() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Is Red Hat Package Manager?
+fn is_rpm_based() -> bool {
+    false
 }
