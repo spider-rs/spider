@@ -86,8 +86,36 @@ impl RuleLine {
         }
     }
 
-    fn applies_to(&self, filename: &str) -> bool {
-        self.path == "*" || self.path.starts_with(filename)
+    #[cfg(not(feature = "regex"))]
+    fn applies_to(&self, pathname: &str) -> bool {
+        if self.path == "*" {
+            true
+        } else if self.path == "/" && pathname == "/" {
+            true
+        } else if self.path.ends_with("/") && pathname.starts_with(&self.path) {
+            true
+        } else {
+            self.path
+                .strip_suffix('*')
+                .map_or(false, |prefix| pathname.starts_with(prefix))
+                || pathname == self.path
+        }
+    }
+
+    #[cfg(feature = "regex")]
+    fn applies_to(&self, pathname: &str) -> bool {
+        if self.path == "*" {
+            true
+        } else if self.path == "/" && pathname == "/" {
+            true
+        } else if self.path.ends_with("/") && pathname.starts_with(&self.path) {
+            true
+        } else {
+            match regex::Regex::new(&self.path) {
+                Ok(reg) => reg.is_match(pathname),
+                _ => true,
+            }
+        }
     }
 }
 
@@ -231,11 +259,12 @@ impl RobotFileParser {
     /// Sets the time the robots.txt file was last fetched to the
     /// current time.
     pub fn modified(&mut self) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        self.last_checked = now;
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(time) => {
+                self.last_checked = time.as_secs() as i64;
+            }
+            _ => (),
+        }
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
@@ -251,6 +280,7 @@ impl RobotFileParser {
             }
         };
         let status = res.status();
+
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 self.disallow_all = true;
@@ -268,9 +298,15 @@ impl RobotFileParser {
 
     /// Reads the HTTP response and feeds it to the parser.
     pub async fn from_response(&mut self, response: Response) {
-        let buf = response.text().await.unwrap();
-        let lines: Vec<&str> = buf.split('\n').collect();
-        self.parse(&lines);
+        match response.text().await {
+            Ok(buf) => {
+                let lines: Vec<&str> = buf.split('\n').collect();
+                self.parse(&lines);
+            }
+            _ => {
+                self.allow_all = true;
+            }
+        }
     }
 
     fn _add_entry(&mut self, entry: Entry) {
