@@ -34,9 +34,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
 /// (allowance==False) followed by a path."""
 #[derive(Debug, Eq, PartialEq, Clone)]
+#[cfg(not(feature = "regex"))]
 struct RuleLine {
     /// Path of the rule
     path: String,
+    /// Is the rule allowed?
+    allowance: bool,
+}
+
+/// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
+/// (allowance==False) followed by a path."""
+#[derive(Debug, Clone)]
+#[cfg(feature = "regex")]
+struct RuleLine {
+    /// Path of the rule
+    path: Option<regex::Regex>,
     /// Is the rule allowed?
     allowance: bool,
 }
@@ -51,7 +63,8 @@ pub struct RequestRate {
 }
 
 /// An entry has one or more user-agents and zero or more rulelines
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "regex"), derive(Eq, PartialEq))]
 struct Entry {
     /// Multiple user agents to use
     useragents: Vec<String>,
@@ -64,7 +77,8 @@ struct Entry {
 }
 
 /// robots.txt file parser
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "regex"), derive(Eq, PartialEq))]
 pub struct RobotFileParser {
     /// Entire robots.txt list of urls
     entries: Vec<Entry>,
@@ -79,6 +93,20 @@ pub struct RobotFileParser {
 }
 
 impl RuleLine {
+    #[cfg(feature = "regex")]
+    fn new(path: &str, allowance: bool) -> RuleLine {
+        use regex::Regex;
+
+        RuleLine {
+            path: match Regex::new(path) {
+                Ok(r) => Some(r),
+                _ => None,
+            },
+            allowance: path.is_empty() && !allowance || allowance,
+        }
+    }
+
+    #[cfg(not(feature = "regex"))]
     fn new(path: &str, allowance: bool) -> RuleLine {
         RuleLine {
             path: path.into(),
@@ -86,8 +114,28 @@ impl RuleLine {
         }
     }
 
-    fn applies_to(&self, filename: &str) -> bool {
-        self.path == "*" || self.path.starts_with(filename)
+    #[cfg(not(feature = "regex"))]
+    fn applies_to(&self, pathname: &str) -> bool {
+        if self.path == "*" {
+            true
+        } else if self.path == "/" && pathname == "/" {
+            true
+        } else if self.path.ends_with("/") && pathname.starts_with(&self.path) {
+            true
+        } else {
+            self.path
+                .strip_suffix('*')
+                .map_or(false, |prefix| pathname.starts_with(prefix))
+                || pathname == self.path
+        }
+    }
+
+    #[cfg(feature = "regex")]
+    fn applies_to(&self, pathname: &str) -> bool {
+        match self.path {
+            Some(ref regex) => regex.is_match(pathname),
+            _ => false,
+        }
     }
 }
 
@@ -231,11 +279,12 @@ impl RobotFileParser {
     /// Sets the time the robots.txt file was last fetched to the
     /// current time.
     pub fn modified(&mut self) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        self.last_checked = now;
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(time) => {
+                self.last_checked = time.as_secs() as i64;
+            }
+            _ => (),
+        }
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.
@@ -251,6 +300,7 @@ impl RobotFileParser {
             }
         };
         let status = res.status();
+
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 self.disallow_all = true;
@@ -268,9 +318,15 @@ impl RobotFileParser {
 
     /// Reads the HTTP response and feeds it to the parser.
     pub async fn from_response(&mut self, response: Response) {
-        let buf = response.text().await.unwrap();
-        let lines: Vec<&str> = buf.split('\n').collect();
-        self.parse(&lines);
+        match response.text().await {
+            Ok(buf) => {
+                let lines: Vec<&str> = buf.split('\n').collect();
+                self.parse(&lines);
+            }
+            _ => {
+                self.allow_all = true;
+            }
+        }
     }
 
     fn _add_entry(&mut self, entry: Entry) {
