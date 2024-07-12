@@ -55,6 +55,7 @@ pub struct WaitFor {
     pub idle_network: Option<WaitForIdleNetwork>,
     /// Wait for delay. Should only be used for testing.
     pub delay: Option<WaitForDelay>,
+    #[cfg_attr(feature = "serde", serde(default))]
     /// Wait for page navigations.
     pub page_navigations: bool,
 }
