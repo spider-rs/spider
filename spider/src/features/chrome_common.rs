@@ -1,4 +1,5 @@
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for network request with optional timeout. This does nothing without the `chrome` flag enabled.
 pub struct WaitForIdleNetwork {
     /// The max time to wait for the network. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
@@ -13,6 +14,7 @@ impl WaitForIdleNetwork {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for a selector with optional timeout. This does nothing without the `chrome` flag enabled.
 pub struct WaitForSelector {
     /// The max time to wait for the selector. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
@@ -29,6 +31,7 @@ impl WaitForSelector {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for with a delay. Should only be used for testing purposes. This does nothing without the `chrome` flag enabled.
 pub struct WaitForDelay {
     /// The max time to wait. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
@@ -43,6 +46,7 @@ impl WaitForDelay {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// The wait for options for the page. Multiple options can be set. This does nothing without the `chrome` flag enabled.
 pub struct WaitFor {
     /// The max time to wait for the selector.

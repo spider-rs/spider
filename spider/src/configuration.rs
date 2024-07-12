@@ -10,6 +10,7 @@ use std::time::Duration;
 
 /// Redirect policy configuration for request
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RedirectPolicy {
     #[default]
     /// A loose policy that allows all request up to the redirect limit.
