@@ -134,9 +134,9 @@ where
                     tokio::select! {
                         _ = &mut sleep => break,
                         v = events.next() => {
-                              if v.is_none () {
-                              break;
-                          }
+                            if !v.is_none () {
+                                break;
+                            }
                         }
                     }
                 }
@@ -164,7 +164,7 @@ pub async fn wait_for_selector(
             tokio::select! {
                 _ = &mut sleep => (),
                 v = page.find_element(selector) => {
-                    if !v.is_ok() {
+                    if v.is_ok() {
                         break
                     }
                 }
