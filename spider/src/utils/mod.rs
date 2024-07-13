@@ -133,10 +133,8 @@ where
                     tokio::pin!(sleep);
                     tokio::select! {
                         _ = &mut sleep => break,
-                        v = events.next() => {
-                              if v.is_none () {
-                              break;
-                          }
+                        _ = events.next() => {
+                            break
                         }
                     }
                 }
@@ -163,10 +161,8 @@ pub async fn wait_for_selector(
             tokio::pin!(sleep);
             tokio::select! {
                 _ = &mut sleep => (),
-                v = page.find_element(selector) => {
-                    if !v.is_ok() {
-                        break
-                    }
+                _ = page.find_element(selector) => {
+                    break
                 }
             }
         }
