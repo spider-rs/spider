@@ -1027,6 +1027,7 @@ impl Page {
                                                                 )
                                                                 .await;
                                                             }
+
                                                             let new_page =
                                                             crate::features::chrome::configure_browser(
                                                                 new_page,
@@ -1085,9 +1086,27 @@ impl Page {
                                                                 &configuration.screenshot,
                                                                 false,
                                                                 &configuration.openai_config,
-                                                                Some(target_url)
+                                                                Some(&target_url)
                                                             )
                                                             .await;
+
+                                                            match configuration.execution_scripts {
+                                                                Some(ref scripts) => {
+                                                                    match scripts
+                                                                        .get(target_url.as_str())
+                                                                    {
+                                                                        Some(script) => {
+                                                                            let _ = new_page
+                                                                                .evaluate(
+                                                                                    script.as_str(),
+                                                                                )
+                                                                                .await;
+                                                                        }
+                                                                        _ => (),
+                                                                    }
+                                                                }
+                                                                _ => (),
+                                                            }
 
                                                             match page_resource {
                                                                 Ok(resource) => {

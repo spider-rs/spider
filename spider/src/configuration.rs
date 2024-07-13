@@ -6,6 +6,7 @@ pub use crate::features::chrome_common::{
 pub use crate::features::openai_common::GPTConfigs;
 use crate::website::CronType;
 use compact_str::CompactString;
+use hashbrown::HashMap;
 use std::time::Duration;
 
 /// Redirect policy configuration for request
@@ -132,6 +133,9 @@ pub struct Configuration {
     /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
     #[cfg(feature = "chrome")]
     pub chrome_connection_url: Option<String>,
+    /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
+    #[cfg(feature = "chrome")]
+    pub execution_scripts: Option<HashMap<String, String>>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
     /// The blacklist urls.
@@ -656,6 +660,25 @@ impl Configuration {
     #[cfg(not(feature = "chrome"))]
     /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
     pub fn with_chrome_connection(&mut self, _chrome_connection_url: Option<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_execution_scripts(
+        &mut self,
+        _execution_scripts: Option<HashMap<String, String>>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_execution_scripts(
+        &mut self,
+        execution_scripts: Option<HashMap<String, String>>,
+    ) -> &mut Self {
+        self.execution_scripts = execution_scripts;
         self
     }
 

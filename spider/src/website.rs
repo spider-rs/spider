@@ -1491,6 +1491,16 @@ impl Website {
                 _ => (),
             }
 
+            match self.configuration.execution_scripts {
+                Some(ref scripts) => match scripts.get(self.url.inner().as_str()) {
+                    Some(script) => {
+                        let _ = chrome_page.evaluate(script.as_str()).await;
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
                     Some(cb) => {
@@ -2465,6 +2475,22 @@ impl Website {
                                                                     )
                                                                     .await;
 
+                                                                    match shared.5.execution_scripts {
+                                                                        Some(ref scripts) => {
+                                                                           match scripts.get(target_url) {
+                                                                            Some(script) => {
+                                                                                let _ = new_page
+                                                                                .evaluate(
+                                                                                    script.as_str(),
+                                                                                )
+                                                                                .await;
+                                                                            }
+                                                                            _ => ()
+                                                                           }
+                                                                        }
+                                                                        _ => ()
+                                                                    }
+
                                                                     if add_external {
                                                                         page.set_external(
                                                                             shared
@@ -3300,6 +3326,7 @@ impl Website {
                                         .evaluate_on_new_document(crate::features::chrome::FP_JS)
                                         .await;
                                 }
+
                                 let mut q = match &self.channel_queue {
                                     Some(q) => Some(q.0.subscribe()),
                                     _ => None,
@@ -3395,6 +3422,7 @@ impl Website {
                                                                     }
                                                                     _ => (),
                                                                 }
+
                                                                 if shared.5.fingerprint {
                                                                     let _ = new_page
                                                                         .evaluate_on_new_document(
@@ -3402,6 +3430,7 @@ impl Website {
                                                                         )
                                                                         .await;
                                                                 }
+
                                                                 let new_page =
                                                                     configure_browser(new_page, &shared.5)
                                                                         .await;
@@ -3430,6 +3459,23 @@ impl Website {
                                                                         &shared.5.openai_config,
                                                                     )
                                                                     .await;
+
+                                                                match shared.5.execution_scripts {
+                                                                    Some(ref scripts) => {
+                                                                        match scripts.get(target_url) {
+                                                                        Some(script) => {
+                                                                            let _ = new_page
+                                                                            .evaluate(
+                                                                                script.as_str(),
+                                                                            )
+                                                                            .await;
+                                                                        }
+                                                                        _ => ()
+                                                                        }
+                                                                    }
+                                                                    _ => ()
+                                                                }
+
                                                                 let mut page = build(&target_url, page);
 
                                                                 // we prob want to remove callback handling returning the page html. Makes the API harder to work with.
@@ -4624,6 +4670,25 @@ impl Website {
     pub fn with_chrome_connection(&mut self, chrome_connection_url: Option<String>) -> &mut Self {
         self.configuration
             .with_chrome_connection(chrome_connection_url);
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_execution_scripts(
+        &mut self,
+        _execution_scripts: Option<HashMap<String, String>>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_execution_scripts(
+        &mut self,
+        execution_scripts: Option<HashMap<String, String>>,
+    ) -> &mut Self {
+        self.configuration.with_execution_scripts(execution_scripts);
         self
     }
 
