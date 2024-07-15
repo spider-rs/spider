@@ -27,6 +27,8 @@
 
 use crate::Client;
 use compact_str::CompactString;
+#[cfg(feature = "regex")]
+use regex::RegexSet;
 use reqwest::Response;
 use reqwest::StatusCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -90,6 +92,21 @@ pub struct RobotFileParser {
     allow_all: bool,
     /// Time last checked robots.txt file
     last_checked: i64,
+    /// Disallow list of regex paths to ignore.
+    #[cfg(feature = "regex")]
+    disallow_paths_regex: RegexSet,
+    /// Disallow list of paths to ignore.
+    #[cfg(feature = "regex")]
+    disallow_paths: Vec<String>,
+    /// Disallow list of regex agents to ignore.
+    #[cfg(feature = "regex")]
+    disallow_agents_regex: RegexSet,
+    /// Wild card agent provided.
+    #[cfg(feature = "regex")]
+    wild_card_agent: bool,
+    /// Disallow list of agents to ignore.
+    #[cfg(feature = "regex")]
+    disallow_agents: Vec<String>,
 }
 
 impl RuleLine {
@@ -257,11 +274,30 @@ fn extract_path(url: &str) -> &str {
 
 impl RobotFileParser {
     /// Establish a new robotparser for a website domain
+    #[cfg(not(feature = "regex"))]
     pub fn new() -> Box<RobotFileParser> {
         RobotFileParser {
             entries: vec![],
             default_entry: Entry::new(),
             disallow_all: false,
+            allow_all: false,
+            last_checked: 0i64,
+        }
+        .into()
+    }
+
+    /// Establish a new robotparser for a website domain
+    #[cfg(feature = "regex")]
+    pub fn new() -> Box<RobotFileParser> {
+        RobotFileParser {
+            entries: vec![],
+            default_entry: Entry::new(),
+            disallow_all: false,
+            disallow_paths_regex: RegexSet::default(),
+            disallow_paths: Default::default(),
+            disallow_agents_regex: RegexSet::default(),
+            disallow_agents: Default::default(),
+            wild_card_agent: false,
             allow_all: false,
             last_checked: 0i64,
         }
@@ -321,6 +357,7 @@ impl RobotFileParser {
         match response.text().await {
             Ok(buf) => {
                 let lines: Vec<&str> = buf.split('\n').collect();
+
                 self.parse(&lines);
             }
             _ => {
@@ -382,6 +419,7 @@ impl RobotFileParser {
                 continue;
             }
             let parts: Vec<&str> = ln.splitn(2, ':').collect();
+
             if parts.len() == 2 {
                 let part0 = parts[0].trim().to_lowercase();
                 let part1 = String::from_utf8(percent_decode(parts[1].trim().as_bytes()).collect())
@@ -394,11 +432,13 @@ impl RobotFileParser {
                         }
                         entry.push_useragent(&part1);
                         state = 1;
+                        self.set_disallow_agents_list(&part1);
                     }
                     ref x if x.to_lowercase() == "disallow" => {
                         if state != 0 {
                             entry.push_ruleline(RuleLine::new(&part1, false));
                             state = 2;
+                            self.set_disallow_list(&part1);
                         }
                     }
                     ref x if x.to_lowercase() == "allow" => {
@@ -414,7 +454,6 @@ impl RobotFileParser {
                                 let delay_nanoseconds = delay.fract() * 10f64.powi(9);
                                 let delay =
                                     Duration::new(delay_seconds as u64, delay_nanoseconds as u32);
-
                                 entry.set_crawl_delay(delay);
                             }
                             state = 2;
@@ -443,8 +482,59 @@ impl RobotFileParser {
                 }
             }
         }
+
         if state == 2 {
             self._add_entry(entry);
+        }
+
+        self.build_disallow_list()
+    }
+
+    /// Include the disallow paths in the regex set. This does nothing without the 'regex' feature.
+    #[cfg(not(feature = "regex"))]
+    pub fn set_disallow_list(&mut self, _path: &str) {}
+
+    /// Include the disallow  paths in the regex set. This does nothing without the 'regex' feature.
+    #[cfg(feature = "regex")]
+    pub fn set_disallow_list(&mut self, path: &str) {
+        if !path.is_empty() {
+            self.disallow_paths.push(path.into())
+        }
+    }
+
+    /// Include the disallow agents in the regex set. This does nothing without the 'regex' feature.
+    #[cfg(not(feature = "regex"))]
+    pub fn set_disallow_agents_list(&mut self, _agent: &str) {}
+
+    /// Include the disallow agents in the regex set. This does nothing without the 'regex' feature.
+    #[cfg(feature = "regex")]
+    pub fn set_disallow_agents_list(&mut self, agent: &str) {
+        if !agent.is_empty() {
+            if agent == "*" {
+                self.wild_card_agent = true;
+            }
+            self.disallow_agents.push(agent.into())
+        }
+    }
+
+    /// Build the regex disallow list. This does nothing without the 'regex' feature.
+    #[cfg(not(feature = "regex"))]
+    pub fn build_disallow_list(&mut self) {}
+
+    /// Build the regex disallow list. This does nothing without the 'regex' feature.
+    #[cfg(feature = "regex")]
+    pub fn build_disallow_list(&mut self) {
+        if !self.disallow_paths.is_empty() {
+            match RegexSet::new(&self.disallow_paths) {
+                Ok(s) => self.disallow_paths_regex = s,
+                _ => (),
+            }
+        }
+        if !self.disallow_agents.is_empty() {
+            match RegexSet::new(&self.disallow_agents) {
+                Ok(s) => self.disallow_agents_regex = s,
+                _ => (),
+            }
         }
     }
 
@@ -463,22 +553,48 @@ impl RobotFileParser {
             // the first match counts
             let url_str = extract_path(&url);
 
+            if self.entry_allowed(&useragent, url_str) {
+                true
+            } else {
+                // try the default entry last
+                let default_entry = &self.default_entry;
+
+                if !default_entry.is_empty() {
+                    default_entry.allowance(url_str)
+                } else {
+                    // agent not found ==> access granted
+                    true
+                }
+            }
+        }
+    }
+
+    /// Is the entry apply to the robots.txt?
+    #[cfg(not(feature = "regex"))]
+    pub fn entry_allowed<T: AsRef<str>>(&self, useragent: &T, url_str: &str) -> bool {
+        for entry in &self.entries {
+            if entry.applies_to(useragent.as_ref()) {
+                return entry.allowance(url_str);
+            }
+        }
+        false
+    }
+
+    /// Is the entry apply to the robots.txt?
+    #[cfg(feature = "regex")]
+    pub fn entry_allowed<T: AsRef<str>>(&self, useragent: &T, url_str: &str) -> bool {
+        let agent_checked =
+            self.wild_card_agent || self.disallow_agents_regex.is_match(useragent.as_ref());
+
+        if agent_checked && self.disallow_paths_regex.is_match(url_str) {
             for entry in &self.entries {
                 if entry.applies_to(useragent.as_ref()) {
                     return entry.allowance(url_str);
                 }
             }
-
-            // try the default entry last
-            let default_entry = &self.default_entry;
-
-            if !default_entry.is_empty() {
-                default_entry.allowance(url_str)
-            } else {
-                // agent not found ==> access granted
-                true
-            }
         }
+
+        false
     }
 
     /// Returns the crawl delay for this user agent as a `Duration`, or None if no crawl delay is defined.

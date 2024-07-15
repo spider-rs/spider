@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.99.2"
+version = "1.99.3"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3507,7 +3507,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.99.2"
+version = "1.99.3"
 dependencies = [
  "clap",
  "env_logger",
@@ -3530,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.99.2"
+version = "1.99.3"
 dependencies = [
  "env_logger",
  "lazy_static",
