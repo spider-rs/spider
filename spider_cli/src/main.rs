@@ -15,7 +15,6 @@ use spider::string_concat::string_concat_impl;
 use spider::tokio;
 use spider::utils::log;
 use spider::website::Website;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[tokio::main]
@@ -93,29 +92,33 @@ async fn main() {
         .build()
     {
         Ok(mut website) => {
+            let mut rx2 = website.subscribe(0).expect("sync feature required");
+
             match cli.command {
                 Some(Commands::CRAWL {
-                    sync: _,
+                    sync,
                     output_links,
                 }) => {
-                    website.crawl().await;
+                    if sync {
+                        // remove concurrency
+                        website.with_delay(1);
+                    }
+
+                    let mut stdout = tokio::io::stdout();
+
+                    tokio::spawn(async move {
+                        website.crawl().await;
+                    });
 
                     if output_links {
-                        let links: Vec<String> = website
-                            .get_links()
-                            .iter()
-                            .map(|l| l.inner().to_string())
-                            .collect();
-
-                        match io::stdout()
-                        .write_all(format!("{:?}", links).as_bytes()) {
-                            _ => ()
+                        while let Ok(res) = rx2.recv().await {
+                            match stdout.write_all(string_concat!(res.get_url(), "\n").as_bytes()).await {
+                                _ => ()
+                            }
                         }
                     }
                 }
                 Some(Commands::DOWNLOAD { target_destination }) => {
-                    let mut rx2 = website.subscribe(0).expect("sync feature required");
-
                     let tmp_dir = target_destination
                         .to_owned()
                         .unwrap_or(String::from("./_temp_spider_downloads/"));
@@ -194,7 +197,6 @@ async fn main() {
                     output_html,
                     output_links,
                 }) => {
-                    let mut rx2 = website.subscribe(0).expect("sync feature required");
                     let mut stdout = tokio::io::stdout();
 
                     let selectors: Option<(spider::compact_str::CompactString, spider::smallvec::SmallVec<[spider::compact_str::CompactString; 2]>)> = if output_links {
