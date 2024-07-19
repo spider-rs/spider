@@ -4,19 +4,19 @@ extern crate spider;
 
 pub mod options;
 
+use crate::spider::tokio::io::AsyncWriteExt;
 use clap::Parser;
 use options::{Cli, Commands};
+use serde_json::json;
 use spider::hashbrown::HashMap;
 use spider::page::get_page_selectors;
 use spider::string_concat::string_concat;
 use spider::string_concat::string_concat_impl;
 use spider::tokio;
-use spider::url::Url;
 use spider::utils::log;
 use spider::website::Website;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -107,140 +107,131 @@ async fn main() {
                             .map(|l| l.inner().to_string())
                             .collect();
 
-                        io::stdout()
-                            .write_all(format!("{:?}", links).as_bytes())
-                            .unwrap();
+                        match io::stdout()
+                        .write_all(format!("{:?}", links).as_bytes()) {
+                            _ => ()
+                        }
                     }
                 }
                 Some(Commands::DOWNLOAD { target_destination }) => {
-                    let tmp_dir: String = target_destination
+                    let mut rx2 = website.subscribe(0).expect("sync feature required");
+
+                    let tmp_dir = target_destination
                         .to_owned()
                         .unwrap_or(String::from("./_temp_spider_downloads/"));
+
                     let tmp_path = Path::new(&tmp_dir);
 
                     if !Path::new(&tmp_path).exists() {
-                        match std::fs::create_dir_all(tmp_path) {
+                        match tokio::fs::create_dir_all(tmp_path).await {
                             _ => (),
                         };
                     }
 
-                    website.scrape().await;
+                    let download_path = PathBuf::from(tmp_path);
 
-                    let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
+                    tokio::spawn(async move {
+                        website.scrape().await;
+                    });
 
-                    if selectors.is_some() {
-                        match website.get_pages() {
-                            Some(pages) => {
-                                for page in pages.iter() {
-                                    let page_url = page.get_url();
+                    while let Ok(res) = rx2.recv().await {
+                        match res.get_url_parsed() {
+                            Some(parsed_url) => {
+                                log("Storing", parsed_url);
 
-                                    match Url::parse(page_url) {
-                                        Ok(parsed_url) => {
-                                            let url_path = parsed_url.path();
-                                            log("- ", page_url);
+                                let url_path = parsed_url.path();
 
-                                            let split_paths: Vec<&str> = url_path.split('/').collect();
-                                            let it = split_paths.iter();
-                                            let last_item = split_paths.last().unwrap_or(&"");
+                                let split_paths: Vec<&str> = url_path.split('/').collect();
+                                let it = split_paths.iter();
+                                let last_item = split_paths.last().unwrap_or(&"");
+                                let mut download_path = download_path.clone();
 
-                                            let mut download_path = PathBuf::from(tmp_path);
+                                for p in it {
+                                    if p != last_item {
+                                        download_path.push(p);
 
-                                            for p in it {
-                                                if p != last_item {
-                                                    download_path.push(p);
-
-                                                    if !Path::new(&download_path).exists() {
-                                                        match std::fs::create_dir_all(&download_path) {
-                                                            _ => (),
-                                                        };
-                                                    }
-                                                } else {
-                                                    let mut file = std::fs::OpenOptions::new()
-                                                        .write(true)
-                                                        .create(true)
-                                                        .truncate(true)
-                                                        .open(&download_path.join(if p.contains('.') {
-                                                            p.to_string()
-                                                        } else {
-                                                            string_concat!(
-                                                                if p.is_empty() { "index" } else { p },
-                                                                ".html"
-                                                            )
-                                                        }))
-                                                        .expect("Unable to open file");
-
-                                                    match page.get_bytes() {
-                                                        Some(b) => {
-                                                            file.write_all(b).unwrap_or_default();
+                                        if !Path::new(&download_path).exists() {
+                                            match tokio::fs::create_dir_all(&download_path).await {
+                                                _ => (),
+                                            };
+                                        }
+                                    } else {
+                                        match tokio::fs::OpenOptions::new()
+                                        .write(true)
+                                        .create(true)
+                                        .truncate(true)
+                                        .open(&download_path.join(if p.contains('.') {
+                                            p.to_string()
+                                        } else {
+                                            string_concat!(
+                                                if p.is_empty() { "index" } else { p },
+                                                ".html"
+                                            )
+                                        })).await {
+                                            Ok(mut file) => {
+                                                match res.get_bytes() {
+                                                    Some(b) => {
+                                                        match file.write_all(b).await {
+                                                            _ => ()
                                                         }
-                                                        _ => (),
                                                     }
+                                                    _ => (),
                                                 }
                                             }
+                                            _ => {
+                                                eprintln!("Unable to open file.")
+                                            }
                                         }
-                                        _ => (),
                                     }
                                 }
                             }
-                            None => {}
+                            _ => ()
                         }
+
                     }
                 }
                 Some(Commands::SCRAPE {
                     output_html,
                     output_links,
                 }) => {
-                    use serde_json::json;
+                    let mut rx2 = website.subscribe(0).expect("sync feature required");
+                    let mut stdout = tokio::io::stdout();
 
-                    website.scrape().await;
+                    let selectors: Option<(spider::compact_str::CompactString, spider::smallvec::SmallVec<[spider::compact_str::CompactString; 2]>)> = if output_links {
+                        get_page_selectors(&url, cli.subdomains, cli.tld)
+                    } else {
+                        None
+                    };
 
-                    let mut page_objects: Vec<_> = vec![];
+                    tokio::spawn(async move {
+                        website.scrape().await;
+                    });
 
-                    let selectors = get_page_selectors(&url, cli.subdomains, cli.tld);
+                    while let Ok(res) = rx2.recv().await {
+                        let page_json = json!({
+                            "url": res.get_url(),
+                            "html": if output_html {
+                                res.get_html()
+                            } else {
+                                Default::default()
+                            },
+                            "links": match selectors {
+                                Some(ref s) => res.links(&s).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
+                                _ => Default::default()
+                            }
+                        });
 
-                    if selectors.is_some() {
-                        let selectors = Arc::new(unsafe { selectors.unwrap_unchecked() });
-
-                        match website.get_pages() {
-                            Some(pages) => {
-                                for page in pages.iter() {
-                                    let mut links: Vec<String> = vec![];
-
-                                    if output_links {
-                                        let page_links = page.links(&selectors).await;
-
-                                        for link in page_links {
-                                            links.push(link.as_ref().to_string());
-                                        }
+                        match serde_json::to_string_pretty(&page_json) {
+                            Ok(j) => {
+                                match stdout.write_all(j.as_bytes()).await {
+                                    Err(e) => {
+                                        println!("{:?}", e)
                                     }
-
-                                    let page_json = json!({
-                                        "url": page.get_url(),
-                                        "links": links,
-                                        "html": if output_html {
-                                            page.get_html()
-                                        } else {
-                                            Default::default()
-                                        },
-                                    });
-                                    page_objects.push(page_json);
+                                    _ => ()
                                 }
                             }
-                            _ => (),
+                            Err(e) =>  println!("{:?}", e)
                         }
-                    }
-
-                    match serde_json::to_string_pretty(&page_objects) {
-                        Ok(j) => {
-                            match io::stdout().write_all(j.as_bytes()) {
-                                Err(e) => {
-                                    println!("{:?}", e)
-                                }
-                                _ => ()
-                            }
-                            io::stdout().write_all(j.as_bytes()).unwrap();
-                        }
-                        Err(e) =>  println!("{:?}", e)
                     }
                 }
                 None => ()
