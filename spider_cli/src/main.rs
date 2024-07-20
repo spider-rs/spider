@@ -134,7 +134,7 @@ async fn main() {
                     let download_path = PathBuf::from(tmp_path);
 
                     tokio::spawn(async move {
-                        website.scrape().await;
+                        website.crawl().await;
                     });
 
                     while let Ok(res) = rx2.recv().await {
@@ -206,7 +206,7 @@ async fn main() {
                     };
 
                     tokio::spawn(async move {
-                        website.scrape().await;
+                        website.crawl().await;
                     });
 
                     while let Ok(res) = rx2.recv().await {
@@ -225,14 +225,11 @@ async fn main() {
 
                         match serde_json::to_string_pretty(&page_json) {
                             Ok(j) => {
-                                match stdout.write_all(j.as_bytes()).await {
-                                    Err(e) => {
-                                        println!("{:?}", e)
-                                    }
-                                    _ => ()
-                                }
+                               if let Err(e) = stdout.write_all(string_concat!(j, "\n").as_bytes()).await {
+                                    eprintln!("{:?}", e)
+                               }
                             }
-                            Err(e) =>  println!("{:?}", e)
+                            Err(e) =>  eprintln!("{:?}", e)
                         }
                     }
                 }

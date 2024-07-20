@@ -11,7 +11,7 @@ pub enum Commands {
         #[clap(short, long)]
         output_links: bool,
     },
-    /// Scrape the website extracting html and links.
+    /// Scrape the website extracting html and links returning the output as jsonl.
     SCRAPE {
         /// stdout all pages links crawled
         #[clap(short, long)]
