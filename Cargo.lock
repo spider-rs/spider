@@ -435,9 +435,9 @@ dependencies = [
 
 [[package]]
 name = "case_insensitive_string"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc229be27b394115abdc89e09500d5030407734d21a143a833eae5f136821bcd"
+checksum = "a5bfe56e827a49ac21d3673ac12ac08b3034d787253b398e5bf6cf50443847a8"
 dependencies = [
  "compact_str",
  "serde",
@@ -451,9 +451,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "castaway"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a17ed5635fc8536268e5d4de1e22e81ac34419e5f052d4d51f4e01dcc263fcc"
+checksum = "0abae9be0aaf9ea96a3b1b8b1b55c602ca751eba1b1500220cea4ecbafe7c0d5"
 dependencies = [
  "rustversion",
 ]
@@ -640,13 +640,14 @@ checksum = "0b6a852b24ab71dffc585bcb46eaf7959d175cb865a7152e35b348d1b2960422"
 
 [[package]]
 name = "compact_str"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86b9c4c00838774a6d902ef931eff7470720c51d90c2e32cfe15dc304737b3f"
+checksum = "6050c3a16ddab2e412160b31f2c871015704239bca62f72f6e5f0be631d3f644"
 dependencies = [
  "castaway",
  "cfg-if",
  "itoa 1.0.11",
+ "rustversion",
  "ryu",
  "serde",
  "static_assertions",
@@ -2168,9 +2169,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.12.7"
+version = "0.12.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e0d88686dc561d743b40de8269b26eaf0dc58781bde087b0984646602021d08"
+checksum = "32cf62eb4dd975d2dde76432fb1075c49e3ee2331cf36f1f8fd4b66550d32b6f"
 dependencies = [
  "async-lock",
  "async-trait",
@@ -3453,7 +3454,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.99.8"
+version = "1.99.9"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3507,7 +3508,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.99.8"
+version = "1.99.9"
 dependencies = [
  "clap",
  "env_logger",
@@ -3530,7 +3531,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.99.8"
+version = "1.99.9"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4034,9 +4035,9 @@ dependencies = [
 
 [[package]]
 name = "triomphe"
-version = "0.1.13"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6631e42e10b40c0690bf92f404ebcfe6e1fdb480391d15f17cc8e96eeed5369"
+checksum = "859eb650cfee7434994602c3a68b25d77ad9e68c8a6cd491616ef86661382eb3"
 
 [[package]]
 name = "try-lock"
