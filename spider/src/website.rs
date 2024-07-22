@@ -495,10 +495,10 @@ impl Website {
         let blacklist = self.configuration.get_blacklist_compiled();
         let whitelist = self.configuration.get_whitelist_compiled();
 
-        if !whitelist.is_empty() && !contains(&whitelist, &link.inner()) {
+        if !whitelist.is_empty() && !contains(&whitelist, link.inner()) {
             ProcessLinkStatus::Blocked
         } else if !blacklist.is_empty() {
-            if !contains(&blacklist, &link.inner()) {
+            if !contains(&blacklist, link.inner()) {
                 ProcessLinkStatus::Allowed
             } else {
                 ProcessLinkStatus::Blocked
