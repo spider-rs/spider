@@ -6,8 +6,7 @@ use spider::{
     packages::scraper::{Html, Selector},
     tokio,
 };
-use std::fmt::Debug;
-use std::hash::Hash;
+use std::{fmt::Debug, hash::Hash};
 
 /// Extracted content from CSS query selectors.
 type CSSQueryMap = HashMap<String, Vec<String>>;
@@ -66,7 +65,7 @@ where
         name.to_string()
     };
 
-    let text = element.text().collect::<Vec<_>>().concat();
+    let text = clean_element_text(&element);
 
     match map.entry(entry_name) {
         Entry::Occupied(mut entry) => entry.get_mut().push(text),
@@ -74,6 +73,11 @@ where
             entry.insert(vec![text]);
         }
     }
+}
+
+/// get the text extracted.
+pub fn clean_element_text(element: &ElementRef) -> String {
+    element.text().collect::<Vec<_>>().join(" ")
 }
 
 /// Build valid css selectors for extracting. The hashmap takes items with the key for the object key and the value is the css selector.
