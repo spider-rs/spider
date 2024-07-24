@@ -3,8 +3,8 @@ members = [
     "spider",
     "spider_worker",
     "spider_cli",
+    "spider_utils",
     # internal
     "examples",
-    "benches"
-]
+    "benches"]
 resolver = "2"

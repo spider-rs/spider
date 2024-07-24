@@ -21,8 +21,9 @@ The fastest web crawler and indexer. Foundational building blocks for data curat
 - Cron Jobs
 - Subscriptions
 - Smart Mode
-- Blacklisting and Budgeting Depth
-- Dynamic AI Prompt Scripting Headless
+- Blacklisting, Whitelisting, and Budgeting Depth
+- Dynamic AI Prompt Scripting Headless with Step Caching
+- CSS Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
 - [Changelog](CHANGELOG.md)
 
 ## Getting Started
