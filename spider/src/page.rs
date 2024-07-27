@@ -595,6 +595,18 @@ impl Page {
         &self.base
     }
 
+    /// Take the parsed url.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn take_url(&mut self) -> Option<Url> {
+        self.base.take()
+    }
+
+    /// Take the parsed url.
+    #[cfg(feature = "decentralized")]
+    pub fn take_url(&mut self) -> Option<Url> {
+        None
+    }
+
     #[cfg(feature = "decentralized")]
     /// URL getter for page.
     pub fn get_url(&self) -> &str {
