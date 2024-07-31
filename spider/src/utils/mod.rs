@@ -348,71 +348,78 @@ pub async fn perform_chrome_http_request(
     let mut request_headers = std::collections::HashMap::default();
     let mut protocol = String::from("http/1.1");
 
-    match page
-        .http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+    let page_base =
+        page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
             transition_type: None,
             frame_id: None,
             referrer: None,
             referrer_policy: None,
-        })?
-        .await?
-    {
-        Some(http_request) => {
-            match http_request.method.as_deref() {
-                Some(http_method) => {
-                    method = http_method.into();
-                }
-                _ => (),
-            }
+        })?;
 
-            request_headers.clone_from(&http_request.headers);
-
-            match http_request.response {
-                Some(ref response) => {
-                    match response.protocol {
-                        Some(ref p) => {
-                            protocol.clone_from(p);
+    match page_base.await {
+        Ok(page_base) => {
+            match page_base {
+                Some(http_request) => {
+                    match http_request.method.as_deref() {
+                        Some(http_method) => {
+                            method = http_method.into();
                         }
                         _ => (),
                     }
 
-                    match response.headers.inner().as_object() {
-                        Some(res_headers) => {
-                            for (k, v) in res_headers {
-                                response_headers.insert(k.to_string(), v.to_string());
+                    request_headers.clone_from(&http_request.headers);
+
+                    match http_request.response {
+                        Some(ref response) => {
+                            match response.protocol {
+                                Some(ref p) => {
+                                    protocol.clone_from(p);
+                                }
+                                _ => (),
                             }
-                        }
-                        _ => (),
-                    }
 
-                    if !response.url.starts_with(source) {
-                        waf_check = match response.security_details {
-                            Some(ref security_details) => {
-                                if security_details.subject_name == "challenges.cloudflare.com" {
-                                    true
-                                } else {
-                                    false
+                            match response.headers.inner().as_object() {
+                                Some(res_headers) => {
+                                    for (k, v) in res_headers {
+                                        response_headers.insert(k.to_string(), v.to_string());
+                                    }
+                                }
+                                _ => (),
+                            }
+
+                            if !response.url.starts_with(source) {
+                                waf_check = match response.security_details {
+                                    Some(ref security_details) => {
+                                        if security_details.subject_name
+                                            == "challenges.cloudflare.com"
+                                        {
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                                };
+                                if !waf_check {
+                                    waf_check = match response.protocol {
+                                        Some(ref protocol) => protocol == "blob",
+                                        _ => false,
+                                    }
                                 }
                             }
-                            _ => response.url.contains("/cdn-cgi/challenge-platform"),
-                        };
-                        if !waf_check {
-                            waf_check = match response.protocol {
-                                Some(ref protocol) => protocol == "blob",
-                                _ => false,
-                            }
-                        }
-                    }
 
-                    status_code = StatusCode::from_u16(response.status as u16)
-                        .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                            status_code = StatusCode::from_u16(response.status as u16)
+                                .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                        }
+                        _ => (),
+                    }
                 }
                 _ => (),
-            }
+            };
         }
         _ => (),
-    };
+    }
 
     Ok(ChromeHTTPReqRes {
         waf_check,
