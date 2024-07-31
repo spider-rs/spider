@@ -1443,7 +1443,7 @@ pub async fn openai_request_base(
             // // we can use the output count later to perform concurrent actions.
             let output_tokens_count = tokens.len() + prompt_tokens.len();
 
-            let max_tokens = crate::features::openai::calculate_max_tokens(
+            let mut max_tokens = crate::features::openai::calculate_max_tokens(
                 &gpt_configs.model,
                 gpt_configs.max_tokens,
                 &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
@@ -1455,7 +1455,7 @@ pub async fn openai_request_base(
             let resource = if output_tokens_count > max_tokens {
                 let r = clean_html(&resource);
 
-                let max_tokens = crate::features::openai::calculate_max_tokens(
+                max_tokens = crate::features::openai::calculate_max_tokens(
                     &gpt_configs.model,
                     gpt_configs.max_tokens,
                     &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
@@ -1479,7 +1479,7 @@ pub async fn openai_request_base(
                 if output_tokens_count > max_tokens {
                     let r = clean_html_slim(&r);
 
-                    let max_tokens = crate::features::openai::calculate_max_tokens(
+                    max_tokens = crate::features::openai::calculate_max_tokens(
                         &gpt_configs.model,
                         gpt_configs.max_tokens,
                         &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
@@ -1545,7 +1545,7 @@ pub async fn openai_request_base(
                     }
 
                     let v = match gpt_base
-                        .max_tokens(max_tokens.max(1) as u16)
+                        .max_tokens(max_tokens as u32)
                         .messages(messages)
                         .response_format(async_openai::types::ChatCompletionResponseFormat {
                             r#type: if json_mode {
