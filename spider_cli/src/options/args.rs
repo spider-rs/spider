@@ -30,7 +30,7 @@ pub struct Cli {
     #[clap(long)]
     pub limit: Option<u32>,
     /// Comma seperated string list of pages to not crawl or regex with feature enabled
-    #[clap(short, long)]
+    #[clap(long)]
     pub blacklist_url: Option<String>,
     /// User-Agent
     #[clap(short, long)]
