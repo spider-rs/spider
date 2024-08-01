@@ -1019,20 +1019,25 @@ impl Page {
                                                                 .evaluate_on_new_document
                                                             {
                                                                 Some(ref script) => {
-                                                                    let _ = new_page
-                                                                        .evaluate_on_new_document(
-                                                                            script.as_str(),
-                                                                        )
-                                                                        .await;
+                                                                    if configuration.fingerprint {
+                                                                        let _ = new_page
+                                                                            .evaluate_on_new_document(string_concat!(
+                                                                                crate::features::chrome::FP_JS,
+                                                                                script.as_str()
+                                                                            ))
+                                                                            .await;
+                                                                    } else {
+                                                                        let _ =
+                                                                            new_page.evaluate_on_new_document(script.as_str()).await;
+                                                                    }
                                                                 }
-                                                                _ => (),
-                                                            }
-                                                            if configuration.fingerprint {
-                                                                let _ = new_page
-                                                                .evaluate_on_new_document(
-                                                                    crate::features::chrome::FP_JS,
-                                                                )
-                                                                .await;
+                                                                _ => {
+                                                                    if configuration.fingerprint {
+                                                                        let _ = new_page
+                                                                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                                                                            .await;
+                                                                    }
+                                                                }
                                                             }
 
                                                             let new_page =
