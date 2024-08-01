@@ -48,6 +48,6 @@ pub struct Cli {
     #[clap(short, long)]
     pub depth: Option<usize>,
     /// Dangerously accept invalid certficates
-    #[clap(short, long)]
+    #[clap(long)]
     pub accept_invalid_certs: bool,
 }
