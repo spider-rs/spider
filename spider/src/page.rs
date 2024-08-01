@@ -31,34 +31,44 @@ lazy_static! {
 #[cfg(any(feature = "smart", feature = "chrome_intercept"))]
 lazy_static! {
     /// popular js frameworks and libs
-    pub static ref JS_FRAMEWORK_ASSETS: HashSet<&'static str> = {
-        let mut m: HashSet<&'static str> = HashSet::with_capacity(23);
-
-        m.extend::<[&'static str; 23]>([
+    pub static ref JS_FRAMEWORK_ASSETS: phf::Set<&'static str> = {
+        phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
             "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js",
-        ].map(|s| s.into()));
-
-        m
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js"
+        }
     };
 }
 
 #[cfg(any(feature = "chrome_intercept"))]
 lazy_static! {
-    /// popular js frameworks and libs
-    pub static ref JS_FRAMEWORK_ALLOW: HashSet<&'static str> = {
-        let mut m: HashSet<&'static str> = HashSet::with_capacity(20);
+    /// allowed js frameworks and libs excluding some and adding additional URLs
+    pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
+        phf::phf_set! {
+            // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
+            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js",
+            "react.development.js", "react-dom.development.js", "react.production.min.js",
+            "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
+            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
+            "d3.js",
+            // Verified 3rd parties for request
+            "https://m.stripe.network/inner.html",
+            "https://m.stripe.network/out-4.5.43.js",
+            "https://challenges.cloudflare.com/turnstile"
+        }
+    };
+}
 
-        m.extend(JS_FRAMEWORK_ASSETS.iter().filter_map(|v| {
-            if vec!["material-components-web.min.js", "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js"].contains(v) {
-                None
-            } else {
-                Some(v)
-            }
-        }));
-        m.extend(["https://m.stripe.network/inner.html", "https://m.stripe.network/out-4.5.43.js"]);
-        m.insert("https://challenges.cloudflare.com/turnstile");
+lazy_static! {
+    /// include only list of resources
+    static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(20);
+
+        m.extend([
+            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp", "cfm",
+            // handle .. prefix for urls ending with an extra ending
+            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp", ".cfm"
+        ].map(|s| s.into()));
 
         m
     };
@@ -146,21 +156,6 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
-}
-
-lazy_static! {
-    /// include only list of resources
-    static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(20);
-
-        m.extend([
-            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp", "cfm",
-            // handle .. prefix for urls ending with an extra ending
-            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp", ".cfm"
-        ].map(|s| s.into()));
-
-        m
-    };
 }
 
 /// get the clean domain name
