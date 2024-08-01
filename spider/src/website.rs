@@ -1452,10 +1452,26 @@ impl Website {
                 }
             }
 
-            if self.configuration.fingerprint {
-                let _ = chrome_page
-                    .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                    .await;
+            match self.configuration.evaluate_on_new_document {
+                Some(ref script) => {
+                    if self.configuration.fingerprint {
+                        let _ = chrome_page
+                            .evaluate_on_new_document(string_concat!(
+                                crate::features::chrome::FP_JS,
+                                script.as_str()
+                            ))
+                            .await;
+                    } else {
+                        let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
+                    }
+                }
+                _ => {
+                    if self.configuration.fingerprint {
+                        let _ = chrome_page
+                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                            .await;
+                    }
+                }
             }
 
             let _ = self.setup_chrome_interception(&chrome_page).await;
@@ -2322,19 +2338,6 @@ impl Website {
                             Some(q) => Some(q.0.subscribe()),
                             _ => None,
                         };
-
-                        match self.configuration.evaluate_on_new_document {
-                            Some(ref script) => {
-                                let _ = new_page.evaluate_on_new_document(script.as_str()).await;
-                            }
-                            _ => (),
-                        }
-
-                        if self.configuration.fingerprint {
-                            let _ = new_page
-                                .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                                .await;
-                        }
 
                         if match self.configuration.budget {
                             Some(ref b) => match b.get(&*WILD_CARD_PATH) {
@@ -3315,16 +3318,28 @@ impl Website {
                             Ok(new_page) => {
                                 match self.configuration.evaluate_on_new_document {
                                     Some(ref script) => {
-                                        let _ = new_page
-                                            .evaluate_on_new_document(script.as_str())
-                                            .await;
+                                        if self.configuration.fingerprint {
+                                            let _ = new_page
+                                                .evaluate_on_new_document(string_concat!(
+                                                    crate::features::chrome::FP_JS,
+                                                    script.as_str()
+                                                ))
+                                                .await;
+                                        } else {
+                                            let _ = new_page
+                                                .evaluate_on_new_document(script.as_str())
+                                                .await;
+                                        }
                                     }
-                                    _ => (),
-                                }
-                                if self.configuration.fingerprint {
-                                    let _ = new_page
-                                        .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                                        .await;
+                                    _ => {
+                                        if self.configuration.fingerprint {
+                                            let _ = new_page
+                                                .evaluate_on_new_document(
+                                                    crate::features::chrome::FP_JS,
+                                                )
+                                                .await;
+                                        }
+                                    }
                                 }
 
                                 let mut q = match &self.channel_queue {
@@ -3414,21 +3429,25 @@ impl Website {
                                                             Ok(new_page) => {
                                                                 match shared.5.evaluate_on_new_document {
                                                                     Some(ref script) => {
-                                                                        let _ = new_page
-                                                                            .evaluate_on_new_document(
-                                                                                script.as_str(),
-                                                                            )
-                                                                            .await;
+                                                                        if shared.5.fingerprint {
+                                                                            let _ = new_page
+                                                                                .evaluate_on_new_document(string_concat!(
+                                                                                    crate::features::chrome::FP_JS,
+                                                                                    script.as_str()
+                                                                                ))
+                                                                                .await;
+                                                                        } else {
+                                                                            let _ =
+                                                                                new_page.evaluate_on_new_document(script.as_str()).await;
+                                                                        }
                                                                     }
-                                                                    _ => (),
-                                                                }
-
-                                                                if shared.5.fingerprint {
-                                                                    let _ = new_page
-                                                                        .evaluate_on_new_document(
-                                                                            crate::features::chrome::FP_JS,
-                                                                        )
-                                                                        .await;
+                                                                    _ => {
+                                                                        if shared.5.fingerprint {
+                                                                            let _ = new_page
+                                                                                .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                                                                                .await;
+                                                                        }
+                                                                    }
                                                                 }
 
                                                                 let new_page =
