@@ -30,11 +30,11 @@ pub struct Cli {
     #[clap(long)]
     pub limit: Option<u32>,
     /// Comma seperated string list of pages to not crawl or regex with feature enabled
-    #[clap(short, long)]
+    #[clap(long)]
     pub blacklist_url: Option<String>,
     /// User-Agent
     #[clap(short, long)]
-    pub user_agent: Option<String>,
+    pub agent: Option<String>,
     /// Crawl Budget preventing extra paths from being crawled. Use commas to split the path followed by the limit ex: "*,1" - to only allow one page.
     #[clap(short = 'B', long)]
     pub budget: Option<String>,
@@ -48,6 +48,6 @@ pub struct Cli {
     #[clap(short, long)]
     pub depth: Option<usize>,
     /// Dangerously accept invalid certficates
-    #[clap(short, long)]
+    #[clap(long)]
     pub accept_invalid_certs: bool,
 }
