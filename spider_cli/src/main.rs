@@ -57,7 +57,7 @@ async fn main() {
                 .collect::<HashMap<&str, u32>>()
         }));
 
-    match cli.user_agent {
+    match cli.agent {
         Some(agent) => {
             website.with_user_agent(Some(&agent));
         }
