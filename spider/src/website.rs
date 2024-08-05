@@ -1,4 +1,5 @@
 use crate::black_list::contains;
+use crate::compact_str::CompactString;
 use crate::configuration::{self, get_ua, Configuration, RedirectPolicy};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
@@ -6,7 +7,6 @@ use crate::utils::log;
 use crate::CaseInsensitiveString;
 use crate::Client;
 
-use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
 use std::future::Future;
@@ -31,8 +31,6 @@ use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheO
 
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
-#[cfg(feature = "napi")]
-use napi::bindgen_prelude::*;
 
 #[cfg(feature = "cache")]
 lazy_static! {
@@ -4718,23 +4716,9 @@ impl Website {
     }
 
     /// Build the website configuration when using with_builder.
-    #[cfg(not(feature = "napi"))]
-    pub fn build(&self) -> Result<Self, std::io::Error> {
+    pub fn build(&self) -> Result<Self, Self> {
         if self.domain_parsed.is_none() {
-            Err(std::io::ErrorKind::NotFound.into())
-        } else {
-            Ok(self.to_owned())
-        }
-    }
-
-    /// Build the website configuration when using with_builder with napi error handling.
-    #[cfg(feature = "napi")]
-    pub fn build(&self) -> Result<Self, WebsiteBuilderError> {
-        if self.domain_parsed.is_none() {
-            Err(napi::Error::new(
-                WebsiteBuilderError::ValidationError("domain cannot parse"),
-                "incorrect domain name",
-            ))
+            Err(self.to_owned())
         } else {
             Ok(self.to_owned())
         }
@@ -5075,34 +5059,12 @@ impl Job for Website {
     }
 }
 
-/// builder pattern error handling
-#[cfg(feature = "napi")]
-#[derive(Debug)]
-pub enum WebsiteBuilderError {
-    /// Uninitialized field
-    UninitializedField(&'static str),
-    /// Custom validation error
-    ValidationError(&'static str),
-}
-
-#[cfg(feature = "napi")]
-impl AsRef<str> for WebsiteBuilderError {
-    fn as_ref(&self) -> &str {
-        match self {
-            Self::UninitializedField(s) => s,
-            Self::ValidationError(s) => s,
-        }
-    }
-}
-
-#[cfg(feature = "napi")]
 impl std::fmt::Display for Website {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "`{}`", self)
     }
 }
 
-#[cfg(feature = "napi")]
 impl std::error::Error for Website {}
 
 #[cfg(not(feature = "decentralized"))]

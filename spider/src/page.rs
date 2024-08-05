@@ -1,3 +1,4 @@
+use crate::compact_str::CompactString;
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 use crate::utils::log;
@@ -5,7 +6,6 @@ use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
 use crate::Client;
 use bytes::Bytes;
-use compact_str::CompactString;
 use hashbrown::HashSet;
 use reqwest::StatusCode;
 use smallvec::SmallVec;

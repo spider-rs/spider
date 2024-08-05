@@ -1,3 +1,4 @@
+use crate::compact_str::CompactString;
 pub use crate::features::chrome_common::{
     AuthChallengeResponse, AuthChallengeResponseResponse, CaptureScreenshotFormat,
     CaptureScreenshotParams, ClipViewport, ScreenShotConfig, ScreenshotParams, Viewport, WaitFor,
@@ -5,7 +6,6 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::website::CronType;
-use compact_str::CompactString;
 use hashbrown::HashMap;
 use std::time::Duration;
 

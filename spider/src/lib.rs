@@ -121,7 +121,6 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 pub extern crate bytes;
 pub extern crate case_insensitive_string;
-pub extern crate compact_str;
 pub extern crate hashbrown;
 extern crate log;
 pub extern crate percent_encoding;
@@ -169,6 +168,7 @@ pub mod utils;
 /// A website to crawl.
 pub mod website;
 
+pub use case_insensitive_string::compact_str;
 pub use case_insensitive_string::CaseInsensitiveString;
 
 #[cfg(feature = "chrome")]
@@ -177,7 +177,7 @@ pub use chromiumoxide;
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
 pub mod black_list {
-    use compact_str::CompactString;
+    use crate::compact_str::CompactString;
     /// check if link exist in blacklists with regex.
     pub fn contains(blacklist_url: &regex::RegexSet, link: &CompactString) -> bool {
         blacklist_url.is_match(link)
@@ -187,7 +187,7 @@ pub mod black_list {
 #[cfg(not(feature = "regex"))]
 /// Black list checking url exist.
 pub mod black_list {
-    use compact_str::CompactString;
+    use crate::compact_str::CompactString;
     /// check if link exist in blacklists.
     pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
         blacklist_url.contains(link)

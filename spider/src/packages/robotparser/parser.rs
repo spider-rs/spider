@@ -25,8 +25,8 @@
 //! }
 //! ```
 
+use crate::compact_str::CompactString;
 use crate::Client;
-use compact_str::CompactString;
 #[cfg(feature = "regex")]
 use hashbrown::HashSet;
 #[cfg(feature = "regex")]
