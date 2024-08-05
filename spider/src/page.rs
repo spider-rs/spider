@@ -358,30 +358,6 @@ impl Page {
         Self::new_links_only(url, client).await
     }
 
-    /// Instantiate a new page and gather the links.
-    #[cfg(all(feature = "decentralized"))]
-    pub async fn new_links_only(url: &str, client: &Client) -> Self {
-        use crate::serde::Deserialize;
-        use bytes::Buf;
-
-        let links = match crate::utils::fetch_page(&url, &client).await {
-            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
-                Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
-                    Ok(link) => link,
-                    _ => Default::default(),
-                },
-                _ => Default::default(),
-            },
-            _ => Default::default(),
-        };
-
-        Page {
-            html: None,
-            links,
-            ..Default::default()
-        }
-    }
-
     /// Instantiate a new page and gather the headers and links.
     #[cfg(all(feature = "decentralized", feature = "headers"))]
     pub async fn new(url: &str, client: &Client) -> Self {
@@ -412,6 +388,30 @@ impl Page {
                 ..Default::default()
             },
             FetchPageResult::FetchError => Default::default(),
+        }
+    }
+
+    /// Instantiate a new page and gather the links.
+    #[cfg(all(feature = "decentralized"))]
+    pub async fn new_links_only(url: &str, client: &Client) -> Self {
+        use crate::serde::Deserialize;
+        use bytes::Buf;
+
+        let links = match crate::utils::fetch_page(&url, &client).await {
+            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+                Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
+                    Ok(link) => link,
+                    _ => Default::default(),
+                },
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+
+        Page {
+            html: None,
+            links,
+            ..Default::default()
         }
     }
 
@@ -1413,7 +1413,7 @@ const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_P
 #[cfg(all(
     feature = "headers",
     not(feature = "decentralized"),
-    not(feature = "cache")
+    not(feature = "cache"),
 ))]
 #[tokio::test]
 async fn test_headers() {
@@ -1426,7 +1426,7 @@ async fn test_headers() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(link_result, &client).await;
+    let page: Page = Page::new_page(link_result, &client).await;
 
     let headers = page.headers.expect("There should be some headers!");
 

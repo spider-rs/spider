@@ -11,6 +11,31 @@ use log::{info, log_enabled, Level};
 use reqwest::header::HeaderMap;
 use reqwest::{Error, Response, StatusCode};
 
+#[cfg(feature = "fs")]
+lazy_static! {
+    static ref TMP_DIR: String = {
+        use std::fs;
+        let mut tmp = std::env::temp_dir();
+
+        tmp.push("spider/");
+
+        // make sure spider dir is created.
+        match fs::create_dir_all(&tmp) {
+            Ok(_) => {
+                let dir_name = tmp.display().to_string();
+
+                match std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH) {
+                    Ok(dur) => {
+                        string_concat!(dir_name, dur.as_secs().to_string())
+                    }
+                    _ => dir_name,
+                }
+            }
+            _ => "/tmp/".to_string()
+        }
+    };
+}
+
 lazy_static! {
     /// Prevent fetching resources beyond the bytes limit.
     static ref MAX_SIZE_BYTES: usize = {
@@ -974,38 +999,6 @@ pub async fn perform_screenshot(
     }
 }
 
-#[cfg(all(not(feature = "fs"), feature = "chrome"))]
-/// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
-    target_url: &str,
-    client: &Client,
-    page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
-    page_set: bool,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
-) -> PageResponse {
-    match fetch_page_html_chrome_base(
-        &target_url,
-        &page,
-        false,
-        true,
-        wait_for,
-        screenshot,
-        page_set,
-        openai_config,
-        None,
-    )
-    .await
-    {
-        Ok(page) => page,
-        Err(err) => {
-            log::error!("{:?}", err);
-            fetch_page_html_raw(&target_url, &client).await
-        }
-    }
-}
-
 #[cfg(feature = "chrome")]
 /// Check if url matches the last item in a redirect chain for chrome CDP
 pub fn get_last_redirect(
@@ -1085,12 +1078,6 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
     }
 }
 
-#[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
-/// Perform a network request to a resource extracting all content as text streaming.
-pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw(target_url, client).await
-}
-
 /// Perform a network request to a resource extracting all content as text.
 #[cfg(feature = "decentralized")]
 pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
@@ -1144,8 +1131,14 @@ pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchP
     }
 }
 
+#[cfg(all(not(feature = "fs"), not(feature = "chrome")))]
 /// Perform a network request to a resource extracting all content as text streaming.
-#[cfg(feature = "fs")]
+pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
+    fetch_page_html_raw(target_url, client).await
+}
+
+/// Perform a network request to a resource extracting all content as text streaming.
+#[cfg(all(feature = "fs", not(feature = "chrome")))]
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use crate::tokio::io::AsyncReadExt;
@@ -1155,30 +1148,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
     use percent_encoding::NON_ALPHANUMERIC;
     use std::time::SystemTime;
     use tendril::fmt::Slice;
-
-    lazy_static! {
-        static ref TMP_DIR: String = {
-            use std::fs;
-            let mut tmp = std::env::temp_dir();
-
-            tmp.push("spider/");
-
-            // make sure spider dir is created.
-            match fs::create_dir_all(&tmp) {
-                Ok(_) => {
-                    let dir_name = tmp.display().to_string();
-
-                    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                        Ok(dur) => {
-                            string_concat!(dir_name, dur.as_secs().to_string())
-                        }
-                        _ => dir_name,
-                    }
-                }
-                _ => "/tmp/".to_string()
-            }
-        };
-    };
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
@@ -1274,6 +1243,181 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
         Err(_) => {
             log("- error parsing html text {}", &target_url);
             Default::default()
+        }
+    }
+}
+
+/// Perform a network request to a resource extracting all content as text streaming.
+#[cfg(all(feature = "fs", feature = "chrome"))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
+) -> PageResponse {
+    use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use percent_encoding::utf8_percent_encode;
+    use percent_encoding::NON_ALPHANUMERIC;
+    use tendril::fmt::Slice;
+
+    match &page {
+        page => {
+            match fetch_page_html_chrome_base(
+                &target_url,
+                &page,
+                false,
+                true,
+                wait_for,
+                screenshot,
+                page_set,
+                openai_config,
+                None,
+            )
+            .await
+            {
+                Ok(page) => page,
+                _ => {
+                    log(
+                        "- error parsing html text defaulting to raw http request {}",
+                        &target_url,
+                    );
+
+                    use crate::bytes::BufMut;
+                    use bytes::BytesMut;
+
+                    match client.get(target_url).send().await {
+                        Ok(res) if res.status().is_success() => {
+                            #[cfg(feature = "headers")]
+                            let headers = res.headers().clone();
+                            let status_code = res.status();
+                            let mut stream = res.bytes_stream();
+                            let mut data: BytesMut = BytesMut::new();
+
+                            let mut file: Option<tokio::fs::File> = None;
+                            let mut file_path = String::new();
+
+                            while let Some(item) = stream.next().await {
+                                match item {
+                                    Ok(text) => {
+                                        let wrote_disk = file.is_some();
+
+                                        // perform operations entire in memory to build resource
+                                        if !wrote_disk && data.capacity() < 8192 {
+                                            data.put(text);
+                                        } else {
+                                            if !wrote_disk {
+                                                file_path = string_concat!(
+                                                    TMP_DIR,
+                                                    &utf8_percent_encode(
+                                                        target_url,
+                                                        NON_ALPHANUMERIC
+                                                    )
+                                                    .to_string()
+                                                );
+                                                match tokio::fs::File::create(&file_path).await {
+                                                    Ok(f) => {
+                                                        let file = file.insert(f);
+
+                                                        data.put(text);
+
+                                                        match file.write_all(data.as_bytes()).await
+                                                        {
+                                                            Ok(_) => {
+                                                                data.clear();
+                                                            }
+                                                            _ => (),
+                                                        };
+                                                    }
+                                                    _ => data.put(text),
+                                                };
+                                            } else {
+                                                match &file.as_mut().unwrap().write_all(&text).await
+                                                {
+                                                    Ok(_) => (),
+                                                    _ => data.put(text),
+                                                };
+                                            }
+                                        }
+                                    }
+                                    _ => (),
+                                }
+                            }
+
+                            PageResponse {
+                                #[cfg(feature = "headers")]
+                                headers: Some(headers),
+                                content: Some(if file.is_some() {
+                                    let mut buffer = vec![];
+
+                                    match tokio::fs::File::open(&file_path).await {
+                                        Ok(mut b) => match b.read_to_end(&mut buffer).await {
+                                            _ => (),
+                                        },
+                                        _ => (),
+                                    };
+
+                                    match tokio::fs::remove_file(file_path).await {
+                                        _ => (),
+                                    };
+
+                                    buffer.into()
+                                } else {
+                                    data.into()
+                                }),
+                                status_code,
+                                ..Default::default()
+                            }
+                        }
+
+                        Ok(res) => PageResponse {
+                            #[cfg(feature = "headers")]
+                            headers: Some(res.headers().clone()),
+                            status_code: res.status(),
+                            ..Default::default()
+                        },
+                        Err(_) => {
+                            log("- error parsing html text {}", &target_url);
+                            Default::default()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<crate::configuration::GPTConfigs>,
+) -> PageResponse {
+    match fetch_page_html_chrome_base(
+        &target_url,
+        &page,
+        false,
+        true,
+        wait_for,
+        screenshot,
+        page_set,
+        openai_config,
+        None,
+    )
+    .await
+    {
+        Ok(page) => page,
+        Err(err) => {
+            log::error!("{:?}", err);
+            fetch_page_html_raw(&target_url, &client).await
         }
     }
 }
