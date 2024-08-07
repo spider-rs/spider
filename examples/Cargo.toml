@@ -134,6 +134,11 @@ path = "chrome_screenshot_with_config.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
+name = "chrome_web_automation"
+path = "chrome_web_automation.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
 name = "smart"
 path = "smart.rs"
 required-features = ["spider/sync", "spider/smart"]

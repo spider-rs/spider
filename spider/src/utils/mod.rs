@@ -1,6 +1,7 @@
 /// Utils to modify the HTTP header.
 pub mod header_utils;
-
+#[cfg(feature = "chrome")]
+use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 #[cfg(feature = "cache_chrome_hybrid")]
@@ -802,7 +803,11 @@ pub async fn fetch_page_html_chrome_base(
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
     url_target: Option<&str>,
+    execution_scripts: &ExecutionScripts,
+    automation_scripts: &AutomationScripts,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use crate::features::chrome_common::{eval_automation_scripts, eval_execution_scripts};
+
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let page = {
@@ -832,6 +837,22 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     page_wait(&page, &wait_for).await;
+
+    let target_url = if final_url.is_some() {
+        match final_url.as_ref() {
+            Some(ref u) => u.to_string(),
+            _ => Default::default(),
+        }
+    } else if url_target.is_some() {
+        url_target.unwrap_or_default().to_string()
+    } else {
+        source.to_string()
+    };
+
+    tokio::join!(
+        eval_execution_scripts(&page, &target_url, &execution_scripts),
+        eval_automation_scripts(&page, &target_url, &automation_scripts)
+    );
 
     let mut res: bytes::Bytes = page.content_bytes().await?;
 
@@ -1258,6 +1279,8 @@ pub async fn fetch_page_html(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
+    execution_scripts: &ExecutionScripts,
+    automation_scripts: &AutomationScripts,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::utf8_percent_encode;
@@ -1276,6 +1299,8 @@ pub async fn fetch_page_html(
                 page_set,
                 openai_config,
                 None,
+                execution_scripts,
+                automation_scripts,
             )
             .await
             {
@@ -1400,6 +1425,8 @@ pub async fn fetch_page_html(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
+    execution_scripts: &ExecutionScripts,
+    automation_scripts: &AutomationScripts,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -1411,6 +1438,8 @@ pub async fn fetch_page_html(
         page_set,
         openai_config,
         None,
+        execution_scripts,
+        automation_scripts,
     )
     .await
     {
@@ -1432,6 +1461,8 @@ pub async fn fetch_page_html_chrome(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
+    execution_scripts: &ExecutionScripts,
+    automation_scripts: &AutomationScripts,
 ) -> PageResponse {
     match &page {
         page => {
@@ -1445,6 +1476,8 @@ pub async fn fetch_page_html_chrome(
                 page_set,
                 openai_config,
                 None,
+                execution_scripts,
+                automation_scripts,
             )
             .await
             {

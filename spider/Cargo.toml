@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.99.21"
+version = "1.99.23"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]

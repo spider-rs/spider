@@ -1,6 +1,9 @@
 use crate::compact_str::CompactString;
+#[cfg(feature = "chrome")]
+use crate::configuration::{AutomationScripts, ExecutionScripts};
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
+
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
@@ -332,6 +335,8 @@ impl Page {
         screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
         openai_config: &Option<crate::configuration::GPTConfigs>,
+        execution_scripts: &ExecutionScripts,
+        automation_scripts: &AutomationScripts,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -341,6 +346,8 @@ impl Page {
             screenshot,
             page_set,
             openai_config,
+            execution_scripts,
+            automation_scripts,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -957,7 +964,7 @@ impl Page {
                                     }
 
                                     match self.abs_path(src) {
-                                        Some(mut abs) => {
+                                        Some(abs) => {
                                             match abs
                                                 .path_segments()
                                                 .ok_or_else(|| "cannot be base")
@@ -1099,27 +1106,13 @@ impl Page {
                                                                 &configuration.screenshot,
                                                                 false,
                                                                 &configuration.openai_config,
-                                                                Some(&target_url)
+                                                                Some(&target_url),
+                                                                &configuration
+                                                                        .execution_scripts,
+                                                                        &configuration
+                                                                        .automation_scripts
                                                             )
                                                             .await;
-
-                                                            match configuration.execution_scripts {
-                                                                Some(ref scripts) => {
-                                                                    match scripts
-                                                                        .get(target_url.as_str())
-                                                                    {
-                                                                        Some(script) => {
-                                                                            let _ = new_page
-                                                                                .evaluate(
-                                                                                    script.as_str(),
-                                                                                )
-                                                                                .await;
-                                                                        }
-                                                                        _ => (),
-                                                                    }
-                                                                }
-                                                                _ => (),
-                                                            }
 
                                                             match page_resource {
                                                                 Ok(resource) => {
