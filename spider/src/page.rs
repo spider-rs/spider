@@ -54,7 +54,8 @@ lazy_static! {
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
-            "https://challenges.cloudflare.com/turnstile"
+            "https://challenges.cloudflare.com/turnstile",
+            "https://js.stripe.com/v3/"
         }
     };
 }
