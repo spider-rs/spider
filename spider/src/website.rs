@@ -121,7 +121,11 @@ lazy_static! {
 }
 
 /// Setup interception for chrome request.
-#[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
+#[cfg(all(
+    feature = "chrome",
+    feature = "chrome_intercept",
+    not(feature = "adblock")
+))]
 async fn setup_chrome_interception_base(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
@@ -195,7 +199,150 @@ async fn setup_chrome_interception_base(
                                     ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
                                     ResourceType::Prefetch == event.resource_type ||
                                     ResourceType::Ping == event.resource_type ||
-                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()) || u.starts_with("https://js.stripe.com/v3/")) // add one off stripe framework check for now...
+                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str())) // add one off stripe framework check for now...
+                                {
+                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+                                    .request_id(event.request_id.clone())
+                                    .response_code(200)
+                                    .build() {
+                                        Ok(c) => {
+                                            if let Err(e) = intercept_page.execute(c).await
+                                            {
+                                                log("Failed to fullfill request: ", e.to_string());
+                                            }
+                                        }
+                                        _ => {
+                                            log("Failed to get request handle ", &host_name);
+                                        }
+                                    }
+                            } else if let Err(e) = intercept_page
+                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                                .await
+                                {
+                                    log("Failed to continue request: ", e.to_string());
+                                }
+                    }
+                });
+
+                Some(ih)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Setup interception for chrome request with advertisement blocking.
+#[cfg(all(feature = "chrome", feature = "chrome_intercept", feature = "adblock"))]
+async fn setup_chrome_interception_base(
+    page: &chromiumoxide::Page,
+    chrome_intercept: bool,
+    auth_challenge_response: &Option<configuration::AuthChallengeResponse>,
+    ignore_visuals: bool,
+    host_name: &str,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if chrome_intercept {
+        use adblock::{
+            lists::{FilterSet, ParseOptions},
+            Engine,
+        };
+        use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+
+        lazy_static! {
+            static ref AD_ENGINE: Engine = {
+                let mut filter_set = FilterSet::new(false);
+                filter_set.add_filters(
+                    &vec![
+                        String::from("-advertisement."),
+                        String::from("-ads."),
+                        String::from("-ad."),
+                        String::from("-advertisement-icon."),
+                        String::from("-advertisement-management/"),
+                        String::from("-advertisement/script."),
+                        String::from("-ads/script."),
+                    ],
+                    ParseOptions::default(),
+                );
+                Engine::from_filter_set(filter_set, true)
+            };
+        }
+
+        match auth_challenge_response {
+            Some(ref auth_challenge_response) => {
+                match page
+                        .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                        .await
+                        {
+                            Ok(mut rp) => {
+                                let intercept_page = page.clone();
+                                let auth_challenge_response = auth_challenge_response.clone();
+
+                                // we may need return for polling
+                                task::spawn(async move {
+                                    while let Some(event) = rp.next().await {
+                                        let u = &event.request.url;
+                                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+
+                                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                                        .request_id(event.request_id.clone())
+                                        .auth_challenge_response(acr)
+                                        .build() {
+                                            Ok(c) => {
+                                                if let Err(e) = intercept_page.execute(c).await
+                                                {
+                                                    log("Failed to fullfill auth challege request: ", e.to_string());
+                                                }
+                                            }
+                                            _ => {
+                                                log("Failed to get auth challege request handle ", &u);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            _ => (),
+                        }
+            }
+            _ => (),
+        }
+
+        match page
+            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+            .await
+        {
+            Ok(mut rp) => {
+                let mut host_name = host_name.to_string();
+                let source_url = page.url().await.unwrap_or_default().unwrap_or_default();
+                let intercept_page = page.clone();
+
+                let ih = task::spawn(async move {
+                    let mut first_rq = true;
+                    while let Some(event) = rp.next().await {
+                        let u = &event.request.url;
+
+                        if first_rq {
+                            if ResourceType::Document == event.resource_type {
+                                host_name = u.into();
+                            }
+                            first_rq = false;
+                        }
+
+                        let asset = ResourceType::Image == event.resource_type
+                            || ResourceType::Media == event.resource_type
+                            || ResourceType::Stylesheet == event.resource_type;
+
+                        if
+                                    ignore_visuals && asset ||
+                                    ResourceType::Prefetch == event.resource_type ||
+                                    ResourceType::Ping == event.resource_type ||
+                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str())) ||
+                                    !ignore_visuals && (asset || event.resource_type == ResourceType::Fetch || event.resource_type == ResourceType::Xhr) && match adblock::request::Request::new(&u, &source_url,  &event.resource_type.as_ref()) {
+                                        Ok(adblock_request) => {
+                                            AD_ENGINE.check_network_request(&adblock_request).matched
+                                        }
+                                        _ => false
+                                    }
                                 {
                                     match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
                                     .request_id(event.request_id.clone())
