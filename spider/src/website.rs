@@ -1,6 +1,6 @@
 use crate::black_list::contains;
 use crate::compact_str::CompactString;
-use crate::configuration::{self, get_ua, Configuration, RedirectPolicy};
+use crate::configuration::{self, get_ua, Configuration, RedirectPolicy, WebAutomation};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
@@ -1628,6 +1628,8 @@ impl Website {
                 &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
                 &self.configuration.openai_config,
+                &self.configuration.execution_scripts,
+                &self.configuration.automation_scripts,
             )
             .await;
 
@@ -1648,16 +1650,6 @@ impl Website {
                         _ => (),
                     }
                 }
-                _ => (),
-            }
-
-            match self.configuration.execution_scripts {
-                Some(ref scripts) => match scripts.get(self.url.inner().as_str()) {
-                    Some(script) => {
-                        let _ = chrome_page.evaluate(script.as_str()).await;
-                    }
-                    _ => (),
-                },
                 _ => (),
             }
 
@@ -2619,24 +2611,10 @@ impl Website {
                                                                         &shared.5.screenshot,
                                                                         true,
                                                                         &shared.5.openai_config,
+                                                                        &shared.5.execution_scripts,
+                                                                        &shared.5.automation_scripts,
                                                                     )
                                                                     .await;
-
-                                                                    match shared.5.execution_scripts {
-                                                                        Some(ref scripts) => {
-                                                                           match scripts.get(target_url) {
-                                                                            Some(script) => {
-                                                                                let _ = new_page
-                                                                                .evaluate(
-                                                                                    script.as_str(),
-                                                                                )
-                                                                                .await;
-                                                                            }
-                                                                            _ => ()
-                                                                           }
-                                                                        }
-                                                                        _ => ()
-                                                                    }
 
                                                                     if add_external {
                                                                         page.set_external(
@@ -2879,6 +2857,8 @@ impl Website {
                                                                     &shared.6.screenshot,
                                                                     false,
                                                                     &shared.6.openai_config,
+                                                                    &shared.6.execution_scripts,
+                                                                    &shared.6.automation_scripts,
                                                                 )
                                                                 .await;
 
@@ -3620,24 +3600,10 @@ impl Website {
                                                                         &shared.5.screenshot,
                                                                         true,
                                                                         &shared.5.openai_config,
+                                                                        &shared.5.execution_scripts,
+                                                                        &shared.5.automation_scripts
                                                                     )
                                                                     .await;
-
-                                                                match shared.5.execution_scripts {
-                                                                    Some(ref scripts) => {
-                                                                        match scripts.get(target_url) {
-                                                                        Some(script) => {
-                                                                            let _ = new_page
-                                                                            .evaluate(
-                                                                                script.as_str(),
-                                                                            )
-                                                                            .await;
-                                                                        }
-                                                                        _ => ()
-                                                                        }
-                                                                    }
-                                                                    _ => ()
-                                                                }
 
                                                                 let mut page = build(&target_url, page);
 
@@ -3859,6 +3825,8 @@ impl Website {
                                                                         &shared.6.screenshot,
                                                                         true,
                                                                         &shared.6.openai_config,
+                                                                        &shared.6.execution_scripts,
+                                                                        &shared.6.automation_scripts,
                                                                     )
                                                                     .await;
                                                                 let mut page = build(&target_url, page);
@@ -4357,7 +4325,9 @@ impl Website {
                                                                                     &shared.3.wait_for,
                                                                                     &shared.3.screenshot,
                                                                                     false,
-                                                                                    &shared.3.openai_config
+                                                                                    &shared.3.openai_config,
+                                                                                    &shared.3.execution_scripts,
+                                                                                    &shared.3.automation_scripts,
                                                                                 )
                                                                                 .await;
 
@@ -4852,6 +4822,26 @@ impl Website {
         execution_scripts: Option<HashMap<String, String>>,
     ) -> &mut Self {
         self.configuration.with_execution_scripts(execution_scripts);
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_automation_scripts(
+        &mut self,
+        _automation_scripts: Option<HashMap<String, WebAutomation>>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
+    pub fn with_automation_scripts(
+        &mut self,
+        automation_scripts: Option<HashMap<String, Vec<WebAutomation>>>,
+    ) -> &mut Self {
+        self.configuration
+            .with_automation_scripts(automation_scripts);
         self
     }
 
