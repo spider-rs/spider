@@ -1,5 +1,5 @@
 /// The type of prompt to use.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Prompt {
     /// A single prompt to run.
@@ -67,6 +67,7 @@ impl Default for Prompt {
 /// The GPT configs to use for dynamic Javascript execution and other functionality.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(all(not(feature = "regex"), not(feature = "openai"), not(feature = "cache_openai")), derive(PartialEq))]
 pub struct GPTConfigs {
     /// The prompt to use for the Chat. Example: Search for movies. This will attempt to get the code required to perform the action on the page.
     pub prompt: Prompt,

@@ -13,7 +13,7 @@ async fn main() {
     let mut automation_scripts = HashMap::new();
 
     automation_scripts.insert(
-        "https://rsseau.fr/en/blog".into(),
+        "/en/blog".into(),
         Vec::from([
             WebAutomation::Evaluate(r#"document.body.style.background = "blue";"#.into()),
             WebAutomation::ScrollY(2000),

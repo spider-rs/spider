@@ -133,7 +133,12 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         },
         request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
         cache_enabled: config.cache,
-        viewport: config.viewport.clone(),
+        viewport: match config.viewport {
+            Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
+                v.to_owned(),
+            )),
+            _ => None,
+        },
         ..HandlerConfig::default()
     }
 }
@@ -161,7 +166,12 @@ pub async fn setup_browser_configuration(
             &proxies,
             config.chrome_intercept,
             config.cache,
-            config.viewport.clone(),
+            match config.viewport {
+                Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
+                    v.to_owned(),
+                )),
+                _ => None,
+            },
             &config.request_timeout,
         ) {
             Some(browser_config) => match Browser::launch(browser_config).await {
