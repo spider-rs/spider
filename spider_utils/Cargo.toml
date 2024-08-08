@@ -17,7 +17,7 @@ edition = "2018"
 indexmap = { version = "1", optional = true }
 
 [dependencies.spider]
-version = "1.99.24"
+version = "1.99.28"
 path = "../spider"
 
 [features]
