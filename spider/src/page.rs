@@ -335,8 +335,8 @@ impl Page {
         screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
         openai_config: &Option<crate::configuration::GPTConfigs>,
-        execution_scripts: &ExecutionScripts,
-        automation_scripts: &AutomationScripts,
+        execution_scripts: &Option<ExecutionScripts>,
+        automation_scripts: &Option<AutomationScripts>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -1402,7 +1402,7 @@ impl Page {
 
 #[cfg(test)]
 #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
-const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(all(
     feature = "headers",
