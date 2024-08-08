@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.99.24"
+version = "1.99.25"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -84,7 +84,7 @@ phf_codegen = "0.11"
 tikv-jemallocator = { version = "0.5.0", optional = true }
 
 [features]
-default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator"]
+default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator", "chrome"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]

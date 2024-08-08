@@ -1,16 +1,16 @@
 use crate::compact_str::CompactString;
 pub use crate::features::chrome_common::{
-    AuthChallengeResponse, AuthChallengeResponseResponse, AutomationScripts,
+    AuthChallengeResponse, AuthChallengeResponseResponse, AutomationScripts, AutomationScriptsMap,
     CaptureScreenshotFormat, CaptureScreenshotParams, ClipViewport, ExecutionScripts,
-    ScreenShotConfig, ScreenshotParams, Viewport, WaitFor, WaitForDelay, WaitForIdleNetwork,
-    WaitForSelector, WebAutomation,
+    ExecutionScriptsMap, ScreenShotConfig, ScreenshotParams, Viewport, WaitFor, WaitForDelay,
+    WaitForIdleNetwork, WaitForSelector, WebAutomation,
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::website::CronType;
 use std::time::Duration;
 
 /// Redirect policy configuration for request
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RedirectPolicy {
     #[default]
@@ -35,7 +35,7 @@ type AllowList = Box<regex::RegexSet>;
 /// website.configuration.subdomains = true;
 /// website.configuration.tld = true;
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files. This may slow down crawls if robots.txt file has a delay included.
     pub respect_robots_txt: bool,
@@ -93,7 +93,7 @@ pub struct Configuration {
     pub chrome_intercept: bool,
     /// Configure the viewport for chrome. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
-    pub viewport: Option<chromiumoxide::handler::viewport::Viewport>,
+    pub viewport: Option<Viewport>,
     /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
     #[cfg(feature = "chrome")]
     pub chrome_intercept_block_visuals: bool,
@@ -135,10 +135,10 @@ pub struct Configuration {
     pub chrome_connection_url: Option<String>,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
-    pub execution_scripts: ExecutionScripts,
+    pub execution_scripts: Option<ExecutionScripts>,
     /// Web automation scripts to run up to a duration of 60 seconds.
     #[cfg(feature = "chrome")]
-    pub automation_scripts: AutomationScripts,
+    pub automation_scripts: Option<AutomationScripts>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
     /// The blacklist urls.
@@ -668,27 +668,41 @@ impl Configuration {
 
     #[cfg(not(feature = "chrome"))]
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_execution_scripts(&mut self, _execution_scripts: ExecutionScripts) -> &mut Self {
+    pub fn with_execution_scripts(
+        &mut self,
+        _execution_scripts: Option<ExecutionScriptsMap>,
+    ) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome")]
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_execution_scripts(&mut self, execution_scripts: ExecutionScripts) -> &mut Self {
-        self.execution_scripts = execution_scripts;
+    pub fn with_execution_scripts(
+        &mut self,
+        execution_scripts: Option<ExecutionScriptsMap>,
+    ) -> &mut Self {
+        self.execution_scripts =
+            crate::features::chrome_common::convert_to_trie_execution_scripts(&execution_scripts);
         self
     }
 
     #[cfg(not(feature = "chrome"))]
     /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_automation_scripts(&mut self, _automation_scripts: AutomationScripts) -> &mut Self {
+    pub fn with_automation_scripts(
+        &mut self,
+        _automation_scripts: Option<AutomationScriptsMap>,
+    ) -> &mut Self {
         self
     }
 
     #[cfg(feature = "chrome")]
     /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_automation_scripts(&mut self, automation_scripts: AutomationScripts) -> &mut Self {
-        self.automation_scripts = automation_scripts;
+    pub fn with_automation_scripts(
+        &mut self,
+        automation_scripts: Option<AutomationScriptsMap>,
+    ) -> &mut Self {
+        self.automation_scripts =
+            crate::features::chrome_common::convert_to_trie_automation_scripts(&automation_scripts);
         self
     }
 

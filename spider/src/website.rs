@@ -1,6 +1,8 @@
 use crate::black_list::contains;
 use crate::compact_str::CompactString;
-use crate::configuration::{self, get_ua, Configuration, RedirectPolicy, WebAutomation};
+use crate::configuration::{
+    self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
+};
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{build, get_page_selectors, Page};
 use crate::utils::log;
@@ -4810,7 +4812,7 @@ impl Website {
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
         &mut self,
-        _execution_scripts: Option<HashMap<String, String>>,
+        _execution_scripts: Option<AutomationScriptsMap>,
     ) -> &mut Self {
         self
     }
@@ -4819,7 +4821,7 @@ impl Website {
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
         &mut self,
-        execution_scripts: Option<HashMap<String, String>>,
+        execution_scripts: Option<ExecutionScriptsMap>,
     ) -> &mut Self {
         self.configuration.with_execution_scripts(execution_scripts);
         self
@@ -4829,7 +4831,7 @@ impl Website {
     /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_automation_scripts(
         &mut self,
-        _automation_scripts: Option<HashMap<String, WebAutomation>>,
+        _automation_scripts: Option<AutomationScriptsMap>,
     ) -> &mut Self {
         self
     }
@@ -4838,7 +4840,7 @@ impl Website {
     /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_automation_scripts(
         &mut self,
-        automation_scripts: Option<HashMap<String, Vec<WebAutomation>>>,
+        automation_scripts: Option<AutomationScriptsMap>,
     ) -> &mut Self {
         self.configuration
             .with_automation_scripts(automation_scripts);
@@ -5416,17 +5418,27 @@ async fn test_with_configuration() {
         .with_delay(0)
         .with_request_timeout(None)
         .with_http2_prior_knowledge(false)
-        .with_ignore_sitemap(true)
-        .with_user_agent(Some("myapp/version"))
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME))
         .with_headers(None)
         .with_proxies(None);
 
-    website.crawl().await;
+    let mut configuration = Box::new(configuration::Configuration::new());
+
+    configuration.respect_robots_txt = true;
+    configuration.subdomains = true;
+    configuration.tld = false;
+    configuration.delay = 0;
+    configuration.request_timeout = None;
+    configuration.http2_prior_knowledge = false;
+    configuration.user_agent = Some(Box::new(CompactString::new(crate::page::TEST_AGENT_NAME)));
+    configuration.headers = None;
+    configuration.proxies = None;
 
     assert!(
-        website.links_visited.len() >= 1,
-        "{:?}",
-        website.links_visited
+        website.configuration == configuration,
+        "Left\n{:?}\n\nRight\n{:?}",
+        website.configuration,
+        configuration
     );
 }
 

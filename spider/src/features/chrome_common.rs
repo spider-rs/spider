@@ -1,4 +1,6 @@
-#[derive(Debug, Default, Clone)]
+use crate::utils::trie::Trie;
+
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for network request with optional timeout. This does nothing without the `chrome` flag enabled.
 pub struct WaitForIdleNetwork {
@@ -13,7 +15,7 @@ impl WaitForIdleNetwork {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for a selector with optional timeout. This does nothing without the `chrome` flag enabled.
 pub struct WaitForSelector {
@@ -30,7 +32,7 @@ impl WaitForSelector {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for with a delay. Should only be used for testing purposes. This does nothing without the `chrome` flag enabled.
 pub struct WaitForDelay {
@@ -45,7 +47,7 @@ impl WaitForDelay {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// The wait for options for the page. Multiple options can be set. This does nothing without the `chrome` flag enabled.
 pub struct WaitFor {
@@ -130,7 +132,7 @@ impl From<CaptureScreenshotFormat>
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// View port handling for chrome.
 pub struct Viewport {
@@ -203,7 +205,7 @@ impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
 }
 
 #[doc = "Capture page screenshot.\n[captureScreenshot](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-captureScreenshot)"]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CaptureScreenshotParams {
     #[doc = "Image compression format (defaults to png)."]
@@ -253,7 +255,7 @@ impl From<ClipViewport> for chromiumoxide::cdp::browser_protocol::page::Viewport
 }
 
 /// Screenshot configuration.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScreenShotConfig {
     /// The screenshot params.
@@ -284,7 +286,7 @@ impl ScreenShotConfig {
 }
 
 /// The screenshot params for the page.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScreenshotParams {
     /// Chrome DevTools Protocol screenshot options.
@@ -566,19 +568,56 @@ pub fn set_dynamic_scroll(timeout: u32) -> String {
 }
 
 /// Execution scripts to run on the page when using chrome by url.
-pub type ExecutionScripts = Option<hashbrown::HashMap<String, String>>;
+pub type ExecutionScriptsMap = hashbrown::HashMap<String, String>;
 /// Automation scripts to run on the page when using chrome by url.
-pub type AutomationScripts = Option<hashbrown::HashMap<String, Vec<WebAutomation>>>;
+pub type AutomationScriptsMap = hashbrown::HashMap<String, Vec<WebAutomation>>;
+
+/// Execution scripts to run on the page when using chrome by url.
+pub type ExecutionScripts = Trie<String>;
+/// Automation scripts to run on the page when using chrome by url.
+pub type AutomationScripts = Trie<Vec<WebAutomation>>;
+
+/// Convert ExecutionScripts to Trie.
+pub fn convert_to_trie_execution_scripts(
+    input: &Option<ExecutionScriptsMap>,
+) -> Option<Trie<String>> {
+    match input {
+        Some(ref scripts) => {
+            let mut trie = Trie::new();
+            for (path, script) in scripts {
+                trie.insert(path, script.clone());
+            }
+            Some(trie)
+        }
+        None => None,
+    }
+}
+
+/// Convert AutomationScripts to Trie.
+pub fn convert_to_trie_automation_scripts(
+    input: &Option<AutomationScriptsMap>,
+) -> Option<Trie<Vec<WebAutomation>>> {
+    match input {
+        Some(ref scripts) => {
+            let mut trie = Trie::new();
+            for (path, script_list) in scripts {
+                trie.insert(path, script_list.clone());
+            }
+            Some(trie)
+        }
+        None => None,
+    }
+}
 
 /// Eval execution scripts.
 #[cfg(feature = "chrome")]
 pub async fn eval_execution_scripts(
     page: &chromiumoxide::Page,
     target_url: &str,
-    execution_scripts: &ExecutionScripts,
+    execution_scripts: &Option<ExecutionScripts>,
 ) {
     match execution_scripts {
-        Some(ref scripts) => match scripts.get(target_url) {
+        Some(ref scripts) => match scripts.search(target_url) {
             Some(script) => {
                 let _ = page.evaluate(script.as_str()).await;
             }
@@ -593,10 +632,10 @@ pub async fn eval_execution_scripts(
 pub async fn eval_automation_scripts(
     page: &chromiumoxide::Page,
     target_url: &str,
-    automation_scripts: &AutomationScripts,
+    automation_scripts: &Option<AutomationScripts>,
 ) {
     if let Some(script_map) = automation_scripts {
-        if let Some(scripts) = script_map.get(target_url) {
+        if let Some(scripts) = script_map.search(target_url) {
             for script in scripts {
                 let result =
                     tokio::time::timeout(tokio::time::Duration::from_secs(60), script.run(page))

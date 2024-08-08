@@ -1,5 +1,8 @@
 /// Utils to modify the HTTP header.
 pub mod header_utils;
+/// A trie struct.
+pub mod trie;
+
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
 use crate::tokio_stream::StreamExt;
@@ -803,8 +806,8 @@ pub async fn fetch_page_html_chrome_base(
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
     url_target: Option<&str>,
-    execution_scripts: &ExecutionScripts,
-    automation_scripts: &AutomationScripts,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -1433,8 +1436,8 @@ pub async fn fetch_page_html(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
-    execution_scripts: &ExecutionScripts,
-    automation_scripts: &AutomationScripts,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -1469,8 +1472,8 @@ pub async fn fetch_page_html_chrome(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
-    execution_scripts: &ExecutionScripts,
-    automation_scripts: &AutomationScripts,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
 ) -> PageResponse {
     match &page {
         page => {
