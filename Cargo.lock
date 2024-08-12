@@ -56,7 +56,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
- "getrandom 0.2.15",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -1215,6 +1214,9 @@ name = "fastrand"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fc0510504f03c51ada170672ac806f1f105a88aa97a5281117e1ddc3368e51a"
+dependencies = [
+ "getrandom 0.2.15",
+]
 
 [[package]]
 name = "flate2"
@@ -1411,8 +1413,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4567c8db10ae91089c99af84c68c38da3ec2f087c3f82960bcdbf3656b6f4d7"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3495,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "1.99.30"
+version = "1.99.35"
 dependencies = [
  "adblock",
  "ahash",
@@ -3550,7 +3554,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "1.99.30"
+version = "1.99.35"
 dependencies = [
  "clap",
  "env_logger",
@@ -3581,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "1.99.30"
+version = "1.99.35"
 dependencies = [
  "env_logger",
  "lazy_static",
