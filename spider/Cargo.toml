@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "1.99.35"
+version = "1.99.36"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -64,7 +64,7 @@ async-openai = { version = "0.23", optional = true }
 tiktoken-rs = { version = "0.5", optional = true }
 lol_html = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
-quick-xml = { version = "0.31.0", features = ["serde", "serialize", "async-tokio"]}
+quick-xml = { version = "0.36.0", features = ["serde", "serialize", "async-tokio"]}
 moka = { version = "0.12.8", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
 http-cache-semantics = { version = "2", optional = true }
