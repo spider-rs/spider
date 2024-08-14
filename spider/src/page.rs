@@ -533,6 +533,12 @@ impl Page {
         .await
     }
 
+    #[cfg(feature = "chrome")]
+    /// Get the chrome page used. The feature flag `chrome` is required.
+    pub fn get_chrome_page(&self) -> Option<&chromiumoxide::Page> {
+        self.chrome_page.as_ref()
+    }
+
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Close the chrome page used. Useful when storing the page with subscription usage. The feature flag `chrome_store_page` is required.
     pub async fn close_page(&mut self) {
