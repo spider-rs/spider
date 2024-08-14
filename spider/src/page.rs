@@ -805,7 +805,7 @@ impl Page {
 
         let mut buf = Vec::new();
 
-        let parent_host: &CompactString = &selectors.1[0];
+        let parent_host = &selectors.1[0];
         let parent_host_scheme = &selectors.1[1];
 
         let mut is_link_tag = false;
