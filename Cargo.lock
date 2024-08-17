@@ -3506,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "adblock",
  "ahash",
@@ -3561,7 +3561,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "clap",
  "env_logger",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3592,7 +3592,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "env_logger",
  "lazy_static",

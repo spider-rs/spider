@@ -2109,12 +2109,10 @@ impl Website {
 
         match self.pages.as_mut() {
             Some(p) => {
-
                 while let Ok(res) = rx2.recv().await {
                     self.links_visited.insert(res.get_url().into());
                     p.push(res);
                 }
-
             }
             _ => (),
         };
