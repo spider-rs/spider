@@ -1407,7 +1407,7 @@ pub fn get_html_encoded(html: &Option<Bytes>, label: &str) -> String {
 }
 
 #[cfg(test)]
-#[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+#[cfg(all(not(feature = "decentralized")))]
 pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(all(
