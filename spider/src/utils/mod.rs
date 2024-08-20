@@ -3,6 +3,8 @@ pub mod header_utils;
 /// A trie struct.
 pub mod trie;
 
+use std::str::FromStr;
+
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
 use crate::tokio_stream::StreamExt;
@@ -11,9 +13,11 @@ use crate::Client;
 use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
-#[cfg(feature = "headers")]
-use reqwest::header::HeaderMap;
-use reqwest::{Error, Response, StatusCode};
+
+use reqwest::{
+    header::{HeaderName, HeaderValue},
+    Error, Response, StatusCode,
+};
 
 #[cfg(feature = "fs")]
 lazy_static! {
@@ -130,7 +134,10 @@ pub struct PageResponse {
     pub content: Option<bytes::Bytes>,
     #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
-    pub headers: Option<HeaderMap>,
+    pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "cookies")]
+    /// The cookies of the response.
+    pub cookies: Option<reqwest::header::HeaderMap>,
     /// The status code of the request.
     pub status_code: StatusCode,
     /// The final url destination after any redirects.
@@ -1053,6 +1060,36 @@ pub fn get_last_redirect(
     }
 }
 
+/// The response cookies mapped. This does nothing without the cookies feature flag enabled.
+#[cfg(feature = "cookies")]
+pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    for cookie in res.cookies() {
+        match HeaderValue::from_str(cookie.value()) {
+            Ok(h) => match HeaderName::from_str(cookie.name()) {
+                Ok(n) => {
+                    headers.insert(n, h);
+                }
+                _ => (),
+            },
+            _ => (),
+        }
+    }
+
+    if !headers.is_empty() {
+        Some(headers)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(feature = "cookies"))]
+/// The response cookies mapped. This does nothing without the cookies feature flag enabled.
+pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
+    None
+}
+
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
@@ -1067,9 +1104,11 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             } else {
                 None
             };
-            let status_code = res.status();
+            let status_code: StatusCode = res.status();
             #[cfg(feature = "headers")]
             let headers = res.headers().clone();
+            let cookies = get_cookies(&res);
+
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
 
@@ -1091,6 +1130,8 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             PageResponse {
                 #[cfg(feature = "headers")]
                 headers: Some(headers),
+                #[cfg(feature = "cookies")]
+                cookies,
                 content: Some(data.into()),
                 final_url: rd,
                 status_code,
@@ -1100,6 +1141,7 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
         Ok(res) => PageResponse {
             #[cfg(feature = "headers")]
             headers: Some(res.headers().clone()),
+            cookies: get_cookies(&res),
             status_code: res.status(),
             ..Default::default()
         },
@@ -1133,9 +1175,9 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 /// Fetch a page with the headers returned.
 pub enum FetchPageResult {
     /// Success extracting contents of the page
-    Success(HeaderMap, Option<bytes::Bytes>),
+    Success(reqwest::header::HeaderMap, Option<bytes::Bytes>),
     /// No success extracting content
-    NoSuccess(HeaderMap),
+    NoSuccess(reqwest::header::HeaderMap),
     /// A network error occured.
     FetchError,
 }
@@ -1192,6 +1234,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             };
 
             let status_code = res.status();
+            let cookies = get_cookies(&res);
             #[cfg(feature = "headers")]
             let headers = res.headers().clone();
             let mut stream = res.bytes_stream();
@@ -1243,6 +1286,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             PageResponse {
                 #[cfg(feature = "headers")]
                 headers: Some(headers),
+                #[cfg(feature = "cookies")]
+                cookies,
                 content: Some(if file.is_some() {
                     let mut buffer = vec![];
 
@@ -1269,6 +1314,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
         Ok(res) => PageResponse {
             #[cfg(feature = "headers")]
             headers: Some(res.headers().clone()),
+            #[cfg(feature = "cookies")]
+            cookies: get_cookies(&res),
             status_code: res.status(),
             ..Default::default()
         },
@@ -1290,8 +1337,8 @@ pub async fn fetch_page_html(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
     openai_config: &Option<crate::configuration::GPTConfigs>,
-    execution_scripts: &ExecutionScripts,
-    automation_scripts: &AutomationScripts,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::utf8_percent_encode;
@@ -1329,6 +1376,7 @@ pub async fn fetch_page_html(
                         Ok(res) if res.status().is_success() => {
                             #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
+                            let cookies = get_cookies(&res);
                             let status_code = res.status();
                             let mut stream = res.bytes_stream();
                             let mut data: BytesMut = BytesMut::new();
@@ -1386,6 +1434,8 @@ pub async fn fetch_page_html(
                             PageResponse {
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
+                                #[cfg(feature = "cookies")]
+                                cookies,
                                 content: Some(if file.is_some() {
                                     let mut buffer = vec![];
 
@@ -1412,6 +1462,8 @@ pub async fn fetch_page_html(
                         Ok(res) => PageResponse {
                             #[cfg(feature = "headers")]
                             headers: Some(res.headers().clone()),
+                            #[cfg(feature = "cookies")]
+                            cookies: get_cookies(&res),
                             status_code: res.status(),
                             ..Default::default()
                         },
@@ -1506,6 +1558,7 @@ pub async fn fetch_page_html_chrome(
                         Ok(res) if res.status().is_success() => {
                             #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
+                            let cookies = get_cookies(&res);
                             let status_code = res.status();
                             let mut stream = res.bytes_stream();
                             let mut data: BytesMut = BytesMut::new();
@@ -1527,6 +1580,8 @@ pub async fn fetch_page_html_chrome(
                             PageResponse {
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
+                                #[cfg(feature = "cookies")]
+                                cookies,
                                 content: Some(data.into()),
                                 status_code,
                                 ..Default::default()
@@ -1535,6 +1590,8 @@ pub async fn fetch_page_html_chrome(
                         Ok(res) => PageResponse {
                             #[cfg(feature = "headers")]
                             headers: Some(res.headers().clone()),
+                            #[cfg(feature = "cookies")]
+                            cookies: get_cookies(&res),
                             status_code: res.status(),
                             ..Default::default()
                         },

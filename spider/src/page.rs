@@ -20,9 +20,6 @@ use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
-#[cfg(feature = "headers")]
-use reqwest::header::HeaderMap;
-
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -106,7 +103,10 @@ pub struct Page {
     url: String,
     #[cfg(feature = "headers")]
     /// The headers of the page request response.
-    pub headers: Option<HeaderMap>,
+    pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "cookies")]
+    /// The cookies of the page request response.
+    pub cookies: Option<reqwest::header::HeaderMap>,
     /// The status code of the page request.
     pub status_code: StatusCode,
     /// The error of the request if any.
@@ -140,7 +140,10 @@ pub struct Page {
     html: Option<Bytes>,
     #[cfg(feature = "headers")]
     /// The headers of the page request response.
-    pub headers: Option<HeaderMap>,
+    pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "cookies")]
+    /// The cookies of the page request response.
+    pub cookies: Option<reqwest::header::HeaderMap>,
     /// The status code of the page request.
     pub status_code: StatusCode,
     /// The error of the request if any.
@@ -259,6 +262,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         },
         #[cfg(feature = "headers")]
         headers: res.headers,
+        #[cfg(feature = "cookies")]
+        cookies: res.cookies,
         base: match Url::parse(url) {
             Ok(u) => Some(u),
             _ => None,
@@ -298,6 +303,8 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         },
         #[cfg(feature = "headers")]
         headers: res.headers,
+        #[cfg(feature = "cookies")]
+        cookies: res.cookies,
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         error_status: match res.error_for_status {
@@ -1407,7 +1414,7 @@ pub fn get_html_encoded(html: &Option<Bytes>, label: &str) -> String {
 }
 
 #[cfg(test)]
-#[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+#[cfg(all(not(feature = "decentralized")))]
 pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[cfg(all(
