@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.0.6"
+version = "2.0.8"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -28,7 +28,7 @@ quote = "1"
 failure_derive = "0.1.8"
 
 [dependencies.spider]
-version = "2.0.6"
+version = "2.0.8"
 path = "../spider"
 
 [[bin]]
@@ -44,3 +44,4 @@ full_resources = ["spider/full_resources"]
 chrome_intercept = ["spider/chrome_intercept"]
 chrome = ["spider/chrome"]
 smart = ["spider/smart"]
+tokio_io_std = ["spider/tokio_io_std"]

@@ -38,7 +38,7 @@ The following can also be ran via command line to run the crawler.
 If you need loging pass in the `-v` flag.
 
 ```sh
-spider -v --url https://choosealicense.com crawl
+spider --url https://choosealicense.com crawl --output-links
 ```
 
 Crawl and output all links visited to a file.

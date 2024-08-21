@@ -5,3 +5,4 @@ target
 _temp_spider_downloads
 storage
 http-cacache
+release.sh

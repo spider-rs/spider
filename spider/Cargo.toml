@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.0.6"
+version = "2.0.8"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -17,13 +17,6 @@ edition = "2018"
 maintenance = { status = "as-is" }
 
 [dependencies]
-reqwest = { version = "0.12", features = [
-    "brotli",
-    "gzip",
-    "deflate",
-    "zstd",
-    "stream",
-] }
 url = "2"
 tokio-stream = "0.1"
 hashbrown = { version = "0.14", default-features = true }
@@ -85,6 +78,13 @@ tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread"
 ] }
 fastrand = { version = "2", optional = true }
+reqwest = { version = "0.12", features = [
+    "brotli",
+    "gzip",
+    "deflate",
+    "zstd",
+    "stream",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = [
@@ -93,6 +93,12 @@ tokio = { version = "1", default-features = false, features = [
     "rt"
 ] }
 fastrand = { version = "2", optional = true, features = ["js"] }
+reqwest = { version = "0.12", features = [
+    "brotli",
+    "gzip",
+    "deflate",
+    "stream",
+] }
 
 [features]
 default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator"]
@@ -104,7 +110,7 @@ decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
 adblock = ["dep:adblock"]
-sync = ["tokio/sync", "tokio/io-std"]
+sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde"]
 fs = ["tokio/fs"]
@@ -144,6 +150,7 @@ reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_history_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 cowboy = []
+tokio_io_std = ["tokio/io-std"]
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
