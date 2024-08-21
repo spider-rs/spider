@@ -1141,6 +1141,7 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
         Ok(res) => PageResponse {
             #[cfg(feature = "headers")]
             headers: Some(res.headers().clone()),
+            #[cfg(feature = "cookies")]
             cookies: get_cookies(&res),
             status_code: res.status(),
             ..Default::default()
