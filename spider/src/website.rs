@@ -483,9 +483,7 @@ pub struct Website {
     /// The domain url parsed.
     domain_parsed: Option<Box<Url>>,
     /// The callback when a link is found.
-    pub on_link_find_callback: Option<
-        fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-    >,
+    pub on_link_find_callback: Option<fn(CaseInsensitiveString, CaseInsensitiveString)>,
     /// Subscribe and broadcast changes.
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
     /// Guard counter for channel handling. This prevents things like the browser from closing after the crawl so that subscriptions can finalize events.
@@ -1522,19 +1520,22 @@ impl Website {
             };
 
             let links = if !page.is_empty() {
-                self.links_visited.insert(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.url.clone(), None);
-                        c.0
-                    }
-                    _ => *self.url.clone(),
-                });
 
+                self.links_visited.insert(*self.url.clone());
                 page.links(base).await
             } else {
                 self.status = CrawlStatus::Empty;
                 Default::default()
             };
+            
+            match self.on_link_find_callback {
+                Some(call) => {
+                    for link in links.iter() {
+                        call(*self.url.clone(), link.to_owned());
+                    }
+                },
+                None => {}
+            }
 
             if scrape {
                 match self.pages.as_mut() {
@@ -1546,6 +1547,8 @@ impl Website {
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             }
+
+            // println!("{:?}", links); 
 
             channel_send_page(&self.channel, page, &self.channel_guard);
 
@@ -2181,7 +2184,7 @@ impl Website {
 
                     let shared = Arc::new((
                         client.to_owned(),
-                        selector,
+                        selector.clone(),
                         self.channel.clone(),
                         self.configuration.external_domains_caseless.clone(),
                         self.channel_guard.clone(),
@@ -2189,7 +2192,7 @@ impl Website {
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                     let chandle = Handle::current();
-
+                    
                     while !links.is_empty() {
                         loop {
                             let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2226,12 +2229,8 @@ impl Website {
 
                                         set.spawn_on(
                                             run_task(semaphore, move || async move {
-                                                let link_result = match on_link_find_callback {
-                                                    Some(cb) => cb(link, None),
-                                                    _ => (link, None),
-                                                };
                                                 let mut page = Page::new_page(
-                                                    link_result.0.as_ref(),
+                                                    link.as_ref(),
                                                     &shared.0,
                                                 )
                                                 .await;
@@ -2245,6 +2244,16 @@ impl Website {
 
                                                 channel_send_page(&shared.2, page, &shared.4);
 
+                                                match on_link_find_callback {
+                                                    // this will be (link, ...)
+                                                    Some(cb) => {
+                                                        for page in page_links.iter() {
+                                                            // cb(link.clone(), String::new())
+                                                            cb(link.clone(), page.to_owned());
+                                                        }                                                        
+                                                    },
+                                                    None => {},
+                                                };
                                                 page_links
                                             }),
                                             &chandle,
@@ -3813,9 +3822,7 @@ impl Website {
     /// Perform a callback to run on each link find.
     pub fn with_on_link_find_callback(
         &mut self,
-        on_link_find_callback: Option<
-            fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-        >,
+        on_link_find_callback: Option<fn(CaseInsensitiveString, CaseInsensitiveString)>,
     ) -> &mut Self {
         match on_link_find_callback {
             Some(callback) => self.on_link_find_callback = Some(callback),
