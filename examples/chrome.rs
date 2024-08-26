@@ -13,6 +13,8 @@ async fn main() {
         .with_chrome_intercept(true, true)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_caching(cfg!(feature = "cache"))
+        // // you can use the project [https://github.com/spider-rs/chrome-server] to spin a chrome server locally to connect to.
+        // .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
