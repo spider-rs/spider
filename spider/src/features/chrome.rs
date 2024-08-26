@@ -187,16 +187,33 @@ pub async fn setup_browser_configuration(
 pub async fn launch_browser(
     config: &Configuration,
 ) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
+    use chromiumoxide::error::CdpError;
+
     let browser_configuration = setup_browser_configuration(&config).await;
 
     match browser_configuration {
         Some(c) => {
             let (browser, mut handler) = c;
             // spawn a new task that continuously polls the handler
-            let handle = task::spawn(async move {
+            let handle = tokio::task::spawn(async move {
                 while let Some(h) = handler.next().await {
-                    if h.is_err() {
-                        break;
+                    if let Err(e) = h {
+                        match e {
+                            CdpError::Ws(_)
+                            | CdpError::Io(_)
+                            | CdpError::Chrome(_)
+                            | CdpError::NoResponse
+                            | CdpError::UnexpectedWsMessage(_)
+                            | CdpError::ChannelSendError(_)
+                            | CdpError::LaunchExit(_, _)
+                            | CdpError::LaunchTimeout(_)
+                            | CdpError::LaunchIo(_, _) => {
+                                break;
+                            }
+                            _ => {
+                                continue;
+                            }
+                        }
                     }
                 }
             });
