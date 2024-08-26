@@ -2288,9 +2288,7 @@ impl Website {
                             }
                         }
 
-                        if self.channel.is_some() {
-                            self.subscription_guard().await;
-                        }
+                        self.subscription_guard();
                     }
                 }
             }
@@ -2331,9 +2329,7 @@ impl Website {
                             self.status = CrawlStatus::Active;
                             self.crawl_establish(&client, &mut selectors, false, &new_page, false)
                                 .await;
-                            if self.channel.is_some() {
-                                self.subscription_guard().await;
-                            }
+                            self.subscription_guard();
                         } else {
                             let mut links: HashSet<CaseInsensitiveString> =
                                 self.drain_extra_links().collect();
@@ -2531,9 +2527,7 @@ impl Website {
                                     }
                                 }
 
-                                if self.channel.is_some() {
-                                    self.subscription_guard().await;
-                                }
+                                self.subscription_guard();
                             }
                         }
 
@@ -2571,9 +2565,7 @@ impl Website {
                             self.status = CrawlStatus::Active;
                             self.crawl_establish(&client, &mut selectors, false, &new_page, false)
                                 .await;
-                            if self.channel.is_some() {
-                                self.subscription_guard().await;
-                            }
+                            self.subscription_guard();
                         } else {
                             let semaphore = if self.configuration.shared_queue {
                                 SEM_SHARED.clone()
@@ -2770,9 +2762,7 @@ impl Website {
                                         break;
                                     }
                                 }
-                                if self.channel.is_some() {
-                                    self.subscription_guard().await;
-                                }
+                                self.subscription_guard();
                             }
                         }
 
@@ -2950,9 +2940,7 @@ impl Website {
                         self.status = CrawlStatus::Active;
                         self.crawl_establish_smart(&client, &mut selectors, false, &browser, false)
                             .await;
-                        if self.channel.is_some() {
-                            self.subscription_guard().await;
-                        }
+                        self.subscription_guard();
                     } else {
                         let mut q = match &self.channel_queue {
                             Some(q) => Some(q.0.subscribe()),
@@ -3104,9 +3092,7 @@ impl Website {
                                 }
                             }
 
-                            if self.channel.is_some() {
-                                self.subscription_guard().await;
-                            }
+                            self.subscription_guard();
                         }
                     }
 
@@ -3648,7 +3634,7 @@ impl Website {
     }
 
     /// Guard the channel from closing until all subscription events complete.
-    async fn subscription_guard(&self) {
+    fn subscription_guard(&self) {
         match &self.channel {
             Some(channel) => {
                 if !channel.1.is_empty() {

@@ -823,10 +823,19 @@ pub async fn fetch_page_html_chrome_base(
         if !page_set {
             // used for smart mode re-rendering direct assigning html
             if content {
-                page.set_content(source).await?
+                match page.set_content(source).await {
+                    Ok(p) => p,
+                    _ => page,
+                }
             } else {
-                chrome_http_req_res = perform_chrome_http_request(&page, source).await?;
-
+                match perform_chrome_http_request(&page, source).await {
+                    Ok(chqr) => {
+                        chrome_http_req_res = chqr;
+                    }
+                    Err(e) => {
+                        log("HTTP Error: ", e.to_string());
+                    }
+                };
                 page
             }
         } else {

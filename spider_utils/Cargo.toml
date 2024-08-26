@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.0.6"
+version = "2.0.14"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -17,7 +17,7 @@ edition = "2018"
 indexmap = { version = "1", optional = true }
 
 [dependencies.spider]
-version = "2.0.9"
+version = "2.0.12"
 path = "../spider"
 
 [features]
