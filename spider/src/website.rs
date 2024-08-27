@@ -1499,7 +1499,7 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             let url = self.url.inner();
-            let page = Page::new_page(url, client).await;
+            let mut page = Page::new_page(url, client).await;
             log("fetch", &url);
 
             // allow initial page mutation
@@ -1545,6 +1545,14 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
+            }
+
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
             }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -1604,7 +1612,7 @@ impl Website {
 
             let _ = self.setup_chrome_interception(&chrome_page).await;
 
-            let page = Page::new(
+            let mut page = Page::new(
                 &self.url.inner(),
                 &client,
                 &chrome_page,
@@ -1666,6 +1674,14 @@ impl Website {
                 };
             }
 
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
@@ -1692,7 +1708,7 @@ impl Website {
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            let page = Page::new_page(&self.url.inner(), &client).await;
+            let mut page = Page::new_page(&self.url.inner(), &client).await;
 
             let page_links: HashSet<CaseInsensitiveString> =
                 page.smart_links(&base, &browser, &self.configuration).await;
@@ -1744,6 +1760,14 @@ impl Website {
                 };
             }
 
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
@@ -1770,7 +1794,7 @@ impl Website {
         {
             let link = self.url.inner();
 
-            let page = Page::new(
+            let mut page = Page::new(
                 &if http_worker && link.starts_with("https") {
                     link.replacen("https", "http", 1)
                 } else {
@@ -1793,7 +1817,7 @@ impl Website {
                 self.status = CrawlStatus::Blocked;
             }
 
-            let page_links = HashSet::from(page.links.clone());
+            let links = HashSet::from(page.links.clone());
 
             if scrape {
                 match self.pages.as_mut() {
@@ -1802,9 +1826,17 @@ impl Website {
                 };
             }
 
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
-            page_links
+            links
         } else {
             HashSet::new()
         };
@@ -1862,6 +1894,14 @@ impl Website {
                 };
             }
 
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
+            }
+
             channel_send_page(&self.channel, page.clone(), &self.channel_guard);
 
             let page_links = HashSet::from(page.links);
@@ -1896,7 +1936,7 @@ impl Website {
                 continue;
             }
 
-            let page = Page::new(
+            let mut page = Page::new(
                 &link.inner().as_str(),
                 &client,
                 &page,
@@ -1920,11 +1960,25 @@ impl Website {
                 };
             }
 
-            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+            if self.configuration.return_page_links {
+                let links = HashSet::from(page.links(&base).await);
 
-            let page_links = HashSet::from(page.links(&base).await);
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
+                };
 
-            links.extend(page_links);
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+                links.extend(links);
+            } else {
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+                let links = HashSet::from(page.links(&base).await);
+
+                links.extend(links);
+            }
         }
 
         links
@@ -1960,7 +2014,7 @@ impl Website {
                 continue;
             }
 
-            let page = Page::new(&link.inner(), &client).await;
+            let mut page = Page::new(&link.inner(), &client).await;
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -2001,6 +2055,14 @@ impl Website {
                 match self.pages.as_mut() {
                     Some(p) => p.push(page.clone()),
                     _ => (),
+                };
+            }
+
+            if self.configuration.return_page_links {
+                page.page_links = if links.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(links.clone()))
                 };
             }
 
@@ -2234,6 +2296,7 @@ impl Website {
                     self.configuration.configure_allowlist();
                     let on_link_find_callback = self.on_link_find_callback;
                     let full_resources = self.configuration.full_resources;
+                    let return_page_links = self.configuration.return_page_links;
                     let mut q = match &self.channel_queue {
                         Some(q) => Some(q.0.subscribe()),
                         _ => None,
@@ -2297,15 +2360,23 @@ impl Website {
                                                 .await;
                                                 page.set_external(shared.3.to_owned());
 
-                                                let page_links = if full_resources {
+                                                let links = if full_resources {
                                                     page.links_full(&shared.1).await
                                                 } else {
                                                     page.links(&shared.1).await
                                                 };
 
+                                                if return_page_links {
+                                                    page.page_links = if links.is_empty() {
+                                                        None
+                                                    } else {
+                                                        Some(Box::new(links.clone()))
+                                                    };
+                                                }
+
                                                 channel_send_page(&shared.2, page, &shared.4);
 
-                                                page_links
+                                                links
                                             }),
                                             &chandle,
                                         );
@@ -2432,6 +2503,7 @@ impl Website {
                             self.configuration.configure_allowlist();
                             let on_link_find_callback = self.on_link_find_callback;
                             let full_resources = self.configuration.full_resources;
+                            let return_page_links = self.configuration.return_page_links;
 
                             while !links.is_empty() {
                                 loop {
@@ -2534,17 +2606,25 @@ impl Website {
                                                                         );
                                                                     }
 
-                                                                    let page_links = if full_resources {
+                                                                    let links = if full_resources {
                                                                         page.links_full(&shared.1).await
                                                                     } else {
                                                                         page.links(&shared.1).await
                                                                     };
 
+                                                                    if return_page_links {
+                                                                        page.page_links = if links.is_empty() {
+                                                                            None
+                                                                        } else {
+                                                                            Some(Box::new(links.clone()))
+                                                                        };
+                                                                    }
+
                                                                     channel_send_page(
                                                                         &shared.2, page, &shared.3,
                                                                     );
 
-                                                                    page_links
+                                                                    links
                                                                 }
                                                                 _ => Default::default(),
                                                             };
@@ -2700,6 +2780,7 @@ impl Website {
                             self.configuration.configure_allowlist();
                             let on_link_find_callback = self.on_link_find_callback;
                             let full_resources = self.configuration.full_resources;
+                            let return_page_links = self.configuration.return_page_links;
 
                             while !links.is_empty() {
                                 loop {
@@ -2794,17 +2875,25 @@ impl Website {
                                                                     page.set_external(shared.3.clone());
                                                                 }
 
-                                                                let page_links = if full_resources {
+                                                                let links = if full_resources {
                                                                     page.links_full(&shared.1).await
                                                                 } else {
                                                                     page.links(&shared.1).await
                                                                 };
 
+                                                                if return_page_links {
+                                                                    page.page_links = if links.is_empty() {
+                                                                        None
+                                                                    } else {
+                                                                        Some(Box::new(links.clone()))
+                                                                    };
+                                                                }
+
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
                                                                 );
 
-                                                                page_links
+                                                                links
                                                             }
                                                             _ => Default::default(),
                                                         }
@@ -3047,6 +3136,7 @@ impl Website {
                         let (mut interval, throttle) = self.setup_crawl();
                         self.configuration.configure_allowlist();
                         let on_link_find_callback = self.on_link_find_callback;
+                        let return_page_links = self.configuration.return_page_links;
 
                         let semaphore = if self.configuration.shared_queue {
                             SEM_SHARED.clone()
@@ -3135,15 +3225,23 @@ impl Website {
                                                         );
                                                     }
 
-                                                    let page_links = page
+                                                    let links = page
                                                         .smart_links(
                                                             &shared.1, &shared.4, &shared.5,
                                                         )
                                                         .await;
 
+                                                    if return_page_links {
+                                                        page.page_links = if links.is_empty() {
+                                                            None
+                                                        } else {
+                                                            Some(Box::new(links.clone()))
+                                                        };
+                                                    }
+
                                                     channel_send_page(&shared.2, page, &shared.3);
 
-                                                    page_links
+                                                    links
                                                 }),
                                                 &chandle,
                                             );
@@ -3268,7 +3366,6 @@ impl Website {
                 self.configuration.configure_allowlist();
 
                 let shared = Arc::new((self.channel.clone(), self.channel_guard.clone()));
-
                 let mut sitemaps = match self.configuration.sitemap_url {
                     Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
                     _ => Default::default(),
@@ -3290,11 +3387,12 @@ impl Website {
                         let handles = tokio::spawn(async move {
                             let mut pages = Vec::new();
 
-                            while let Some(page) = rx.recv().await {
+                            while let Some(mut page) = rx.recv().await {
                                 if shared.0.is_some() {
                                     if scrape {
                                         pages.push(page.clone());
                                     };
+
                                     channel_send_page(&shared.0.clone(), page, &shared.1);
                                 } else {
                                     pages.push(page);
@@ -4084,6 +4182,12 @@ impl Website {
         self
     }
 
+    /// Return the links found on the page in the channel subscriptions. This method does nothing if the `decentralized` is enabled.
+    pub fn with_return_page_links(&mut self, return_page_links: bool) -> &mut Self {
+        self.configuration.with_return_page_links(return_page_links);
+        self
+    }
+
     /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
     pub fn with_chrome_connection(&mut self, chrome_connection_url: Option<String>) -> &mut Self {
         self.configuration
@@ -4091,16 +4195,6 @@ impl Website {
         self
     }
 
-    #[cfg(not(feature = "chrome"))]
-    /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_execution_scripts(
-        &mut self,
-        _execution_scripts: Option<ExecutionScriptsMap>,
-    ) -> &mut Self {
-        self
-    }
-
-    #[cfg(feature = "chrome")]
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
         &mut self,
@@ -4110,16 +4204,6 @@ impl Website {
         self
     }
 
-    #[cfg(not(feature = "chrome"))]
-    /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
-    pub fn with_automation_scripts(
-        &mut self,
-        _automation_scripts: Option<AutomationScriptsMap>,
-    ) -> &mut Self {
-        self
-    }
-
-    #[cfg(feature = "chrome")]
     /// Run web automated actions on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_automation_scripts(
         &mut self,

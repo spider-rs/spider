@@ -132,6 +132,8 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
+    /// The links found on the page.
+    pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -165,6 +167,8 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
+    /// The links found on the page. Unused until we can structure the buffers to match.
+    pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
 }
 
 /// get the clean domain name
@@ -291,6 +295,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         openai_credits_used: res.openai_credits_used,
         #[cfg(feature = "openai")]
         extra_ai_data: res.extra_ai_data,
+        page_links: None,
     }
 }
 

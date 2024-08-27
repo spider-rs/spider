@@ -150,6 +150,8 @@ pub struct Configuration {
     pub automation_scripts: Option<AutomationScripts>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
+    /// Return the page links in the subscription channels. This does nothing without the flag `sync` enabled.
+    pub return_page_links: bool,
     /// The blacklist urls.
     blacklist: AllowList,
     /// The whitelist urls.
@@ -429,6 +431,12 @@ impl Configuration {
             Some(p) => self.whitelist_url = Some(Box::new(p.into())),
             _ => self.whitelist_url = None,
         };
+        self
+    }
+
+    /// Return the links found on the page in the channel subscriptions. This method does nothing if the `decentralized` is enabled.
+    pub fn with_return_page_links(&mut self, return_page_links: bool) -> &mut Self {
+        self.return_page_links = return_page_links;
         self
     }
 
