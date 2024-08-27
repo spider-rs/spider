@@ -210,9 +210,7 @@ pub async fn launch_browser(
                     if let Err(e) = h {
                         match e {
                             CdpError::Ws(_)
-                            | CdpError::Io(_)
                             | CdpError::NoResponse
-                            | CdpError::UnexpectedWsMessage(_)
                             | CdpError::ChannelSendError(_)
                             | CdpError::LaunchExit(_, _)
                             | CdpError::LaunchTimeout(_)
