@@ -1,8 +1,10 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
+use chromiumoxide::error::CdpError;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
-use tokio::task::{self, JoinHandle};
+use tokio::task::JoinHandle;
 
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
@@ -186,14 +188,22 @@ pub async fn setup_browser_configuration(
 /// Launch a chromium browser with configurations and wait until the instance is up.
 pub async fn launch_browser(
     config: &Configuration,
-) -> Option<(Browser, tokio::task::JoinHandle<()>)> {
+) -> Option<(
+    Browser,
+    tokio::task::JoinHandle<()>,
+    Option<BrowserContextId>,
+)> {
     use chromiumoxide::error::CdpError;
+    let mut content_id = None;
 
     let browser_configuration = setup_browser_configuration(&config).await;
 
     match browser_configuration {
         Some(c) => {
             let (browser, mut handler) = c;
+
+            content_id.clone_from(&handler.default_browser_context().id().cloned());
+
             // spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
                 while let Some(h) = handler.next().await {
@@ -201,7 +211,6 @@ pub async fn launch_browser(
                         match e {
                             CdpError::Ws(_)
                             | CdpError::Io(_)
-                            | CdpError::Chrome(_)
                             | CdpError::NoResponse
                             | CdpError::UnexpectedWsMessage(_)
                             | CdpError::ChannelSendError(_)
@@ -218,7 +227,7 @@ pub async fn launch_browser(
                 }
             });
 
-            Some((browser, handle))
+            Some((browser, handle, content_id))
         }
         _ => None,
     }
@@ -262,8 +271,40 @@ pub async fn configure_browser(new_page: Page, configuration: &Configuration) ->
     new_page
 }
 
+/// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
+pub async fn attempt_navigation(
+    url: &str,
+    browser: &Browser,
+    request_timeout: &Option<Box<core::time::Duration>>,
+) -> Result<Page, CdpError> {
+    let page_result = tokio::time::timeout(
+        match request_timeout {
+            Some(timeout) => **timeout,
+            _ => tokio::time::Duration::from_secs(60),
+        },
+        browser.new_page(url),
+    )
+    .await;
+    match page_result {
+        Ok(page) => page,
+        Err(_) => Err(CdpError::Timeout),
+    }
+}
+
 /// close the browser and open handles
-pub async fn close_browser(browser_handle: JoinHandle<()>) {
+pub async fn close_browser(
+    browser_handle: JoinHandle<()>,
+    browser: &Browser,
+    context_id: &mut Option<BrowserContextId>,
+) {
+    match context_id.take() {
+        Some(id) => {
+            if let Err(er) = browser.dispose_browser_context(id).await {
+                log("CDP Error: ", er.to_string())
+            }
+        }
+        _ => (),
+    }
     if !browser_handle.is_finished() {
         browser_handle.abort();
     }
