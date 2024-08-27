@@ -1,6 +1,8 @@
 use crate::compact_str::CompactString;
-#[cfg(feature = "chrome")]
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
+
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
 
@@ -540,10 +542,16 @@ impl Page {
         .await
     }
 
-    #[cfg(feature = "chrome")]
+    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     /// Get the chrome page used. The feature flag `chrome` is required.
     pub fn get_chrome_page(&self) -> Option<&chromiumoxide::Page> {
         self.chrome_page.as_ref()
+    }
+
+    #[cfg(all(feature = "chrome", feature = "decentralized"))]
+    /// Get the chrome page used. The feature flag `chrome` is required.
+    pub fn get_chrome_page(&self) -> Option<&chromiumoxide::Page> {
+        None
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
@@ -609,6 +617,12 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_parsed(&self) -> &Option<Url> {
         &self.base
+    }
+
+    /// Parsed URL getter for page.
+    #[cfg(feature = "decentralized")]
+    pub fn get_url_parsed(&self) -> &Option<Url> {
+        &None
     }
 
     /// Take the parsed url.
@@ -959,7 +973,7 @@ impl Page {
 
                                                 tokio::task::spawn(async move {
                                                     // we need to use about:blank here since we set the HTML content directly
-                                                    match browser.new_page("about:blank").await {
+                                                    match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout).await {
                                                         Ok(new_page) => {
                                                             match configuration
                                                                 .evaluate_on_new_document

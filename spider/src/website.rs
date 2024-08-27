@@ -2054,6 +2054,24 @@ impl Website {
         self.client.replace(client);
     }
 
+    #[cfg(all(feature = "decentralized", feature = "smart"))]
+    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
+    pub async fn crawl_smart(&mut self) {
+        self.start();
+        let (client, handle) = self.setup().await;
+        let (handle, join_handle) = match handle {
+            Some(h) => (Some(h.0), Some(h.1)),
+            _ => (None, None),
+        };
+        self.crawl_concurrent(&client, &handle).await;
+        self.sitemap_crawl_chain(&client, &handle, false).await;
+        self.set_crawl_status();
+        if let Some(h) = join_handle {
+            h.abort()
+        }
+        self.client.replace(client);
+    }
+
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
@@ -2351,10 +2369,18 @@ impl Website {
         feature = "chrome",
     ))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        use crate::features::chrome::attempt_navigation;
+
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
-                Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
+                Some((browser, browser_handle, mut context_id)) => match attempt_navigation(
+                    "about:blank",
+                    &browser,
+                    &self.configuration.request_timeout,
+                )
+                .await
+                {
                     Ok(new_page) => {
                         let new_page = configure_browser(new_page, &self.configuration).await;
                         let semaphore = if self.configuration.shared_queue {
@@ -2458,11 +2484,10 @@ impl Website {
                                                                 Some(cb) => cb(link, None),
                                                                 _ => (link, None),
                                                             };
-
                                                             let target_url = link_result.0.as_ref();
-
-                                                            match shared.4.new_page(target_url).await {
+                                                            let next = match attempt_navigation(target_url, &shared.4, &shared.5.request_timeout).await {
                                                                 Ok(new_page) => {
+
                                                                     match shared.5.evaluate_on_new_document
                                                                     {
                                                                         Some(ref script) => {
@@ -2528,7 +2553,9 @@ impl Website {
                                                                     page_links
                                                                 }
                                                                 _ => Default::default(),
-                                                            }
+                                                            };
+
+                                                            next
                                                         },
                                                     ),
                                                     &chandle,
@@ -2566,7 +2593,16 @@ impl Website {
                                     while let Some(res) = set.join_next().await {
                                         match res {
                                             Ok(msg) => links.extend(&msg - &self.links_visited),
-                                            _ => (),
+                                            Err(e) => {
+                                                if set.is_empty() {
+                                                    break;
+                                                } else {
+                                                    if e.is_panic() {
+                                                        set.shutdown().await;
+                                                    }
+                                                    continue;
+                                                }
+                                            }
                                         };
                                     }
 
@@ -2579,7 +2615,12 @@ impl Website {
                             }
                         }
 
-                        crate::features::chrome::close_browser(browser_handle).await;
+                        crate::features::chrome::close_browser(
+                            browser_handle,
+                            &browser,
+                            &mut context_id,
+                        )
+                        .await;
                     }
                     _ => log("", "Chrome failed to open page."),
                 },
@@ -2596,10 +2637,18 @@ impl Website {
         feature = "chrome_intercept"
     ))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        use crate::features::chrome::attempt_navigation;
+
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
-                Some((browser, browser_handle)) => match browser.new_page("about:blank").await {
+                Some((browser, browser_handle, mut context_id)) => match attempt_navigation(
+                    "about:blank",
+                    &browser,
+                    &self.configuration.request_timeout,
+                )
+                .await
+                {
                     Ok(new_page) => {
                         let _ = self.setup_chrome_interception(&new_page).await;
 
@@ -2698,7 +2747,7 @@ impl Website {
 
                                                 set.spawn_on(
                                                     run_task(semaphore.clone(), move || async move {
-                                                        match shared.5.new_page("about:blank").await {
+                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout).await {
                                                             Ok(new_page) => {
                                                                 let _ = setup_chrome_interception_base(
                                                                     &new_page,
@@ -2814,7 +2863,12 @@ impl Website {
                             }
                         }
 
-                        crate::features::chrome::close_browser(browser_handle).await;
+                        crate::features::chrome::close_browser(
+                            browser_handle,
+                            &browser,
+                            &mut context_id,
+                        )
+                        .await;
                     }
                     _ => log("", "Chrome failed to open page."),
                 },
@@ -2977,7 +3031,7 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
-                Some((browser, browser_handle)) => {
+                Some((browser, browser_handle, mut context_id)) => {
                     if match self.configuration.budget {
                         Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                             Some(b) => b.eq(&1),
@@ -3025,7 +3079,7 @@ impl Website {
                             selectors,
                             self.channel.clone(),
                             self.channel_guard.clone(),
-                            browser,
+                            browser.clone(),
                             self.configuration.clone(),
                         ));
 
@@ -3144,7 +3198,12 @@ impl Website {
                         }
                     }
 
-                    crate::features::chrome::close_browser(browser_handle).await;
+                    crate::features::chrome::close_browser(
+                        browser_handle,
+                        &browser,
+                        &mut context_id,
+                    )
+                    .await;
                 }
                 _ => log("", "Chrome failed to start."),
             },
@@ -3396,10 +3455,12 @@ impl Website {
         use sitemap::reader::{SiteMapEntity, SiteMapReader};
         use sitemap::structs::Location;
 
+        use crate::features::chrome::attempt_navigation;
+
         match self.setup_selectors() {
             Some(selectors) => {
                 match self.setup_browser().await {
-                    Some((browser, browser_handle)) => {
+                    Some((browser, browser_handle, mut context_id)) => {
                         let domain = self.url.inner().as_str();
                         let mut interval = tokio::time::interval(Duration::from_millis(15));
                         let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
@@ -3526,13 +3587,14 @@ impl Website {
                                                                     let shared = shared.clone();
 
                                                                     tokio::spawn(async move {
-                                                                        match shared
-                                                                            .2
-                                                                            .new_page(
-                                                                                link.inner()
-                                                                                    .as_str(),
-                                                                            )
-                                                                            .await
+                                                                        match attempt_navigation(
+                                                                            link.inner().as_str(),
+                                                                            &shared.2,
+                                                                            &shared
+                                                                                .3
+                                                                                .request_timeout,
+                                                                        )
+                                                                        .await
                                                                         {
                                                                             Ok(new_page) => {
                                                                                 let new_page = configure_browser(new_page, &shared.3).await;
@@ -3616,7 +3678,12 @@ impl Website {
                             }
                         }
 
-                        crate::features::chrome::close_browser(browser_handle).await;
+                        crate::features::chrome::close_browser(
+                            browser_handle,
+                            &browser,
+                            &mut context_id,
+                        )
+                        .await;
                     }
                     _ => (),
                 }
@@ -3682,6 +3749,7 @@ impl Website {
     }
 
     /// Guard the channel from closing until all subscription events complete.
+    #[cfg(feature = "chrome_store_page")]
     fn subscription_guard(&self) {
         match &self.channel {
             Some(channel) => {
@@ -3696,16 +3764,24 @@ impl Website {
         }
     }
 
+    /// Guard the channel from closing until all subscription events complete.
+    #[cfg(not(feature = "chrome_store_page"))]
+    fn subscription_guard(&self) {}
+
     /// Launch or connect to browser with setup
     #[cfg(feature = "chrome")]
     pub async fn setup_browser(
         &self,
-    ) -> Option<(Arc<chromiumoxide::Browser>, tokio::task::JoinHandle<()>)> {
+    ) -> Option<(
+        Arc<chromiumoxide::Browser>,
+        tokio::task::JoinHandle<()>,
+        Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+    )> {
         match launch_browser(&self.configuration).await {
-            Some((browser, browser_handle)) => {
+            Some((browser, browser_handle, context_id)) => {
                 let browser = Arc::new(browser);
 
-                Some((browser, browser_handle))
+                Some((browser, browser_handle, context_id))
             }
             _ => None,
         }
@@ -4343,7 +4419,8 @@ impl ChannelGuard {
     pub(crate) fn new() -> ChannelGuard {
         ChannelGuard(Arc::new((AtomicBool::new(true), AtomicUsize::new(0))))
     }
-    /// Lock the channel until complete.
+    /// Lock the channel until complete. This is only used for when storing the chrome page outside.
+    #[cfg(feature = "chrome_store_page")]
     pub(crate) fn lock(&self) {
         if self.0 .0.load(Ordering::Relaxed) {
             while self

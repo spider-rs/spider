@@ -138,7 +138,7 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
             path.as_str()
         )
     };
-    let data = utils::fetch_page_html(&url_path, &CLIENT).await;
+    let data = utils::fetch_page_html_raw(&url_path, &CLIENT).await;
 
     #[cfg(feature = "headers")]
     fn pack(data: spider::utils::PageResponse) -> Result<impl warp::Reply, Infallible> {

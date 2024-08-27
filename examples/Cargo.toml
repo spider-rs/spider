@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "1.99.1"
+version = "2.0.17"
 authors = [
     "j-mendez <jeff@a11ywatch.com>",
 ]
@@ -24,7 +24,7 @@ htr = "0.5.27"
 flexbuffers = "2.0.0"
 
 [dependencies.spider]
-version = "2.0.0"
+version = "2"
 path = "../spider"
 features = ["serde"]
 
