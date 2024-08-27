@@ -2057,19 +2057,13 @@ impl Website {
     #[cfg(all(feature = "decentralized", feature = "smart"))]
     /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent(&client, &handle).await;
-        self.sitemap_crawl_chain(&client, &handle, false).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
-        }
-        self.client.replace(client);
+        self.crawl().await;
+    }
+
+    #[cfg(all(feature = "decentralized", not(feature = "smart")))]
+    /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
+    pub async fn crawl_smart(&mut self) {
+        self.crawl().await;
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
