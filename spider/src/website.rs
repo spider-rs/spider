@@ -2429,7 +2429,7 @@ impl Website {
                                 selectors,
                                 self.channel.clone(),
                                 self.channel_guard.clone(),
-                                browser.clone(),
+                                browser,
                                 self.configuration.clone(), // we may just want to share explicit config instead.
                             ));
 
@@ -2613,14 +2613,13 @@ impl Website {
 
                                 self.subscription_guard();
                             }
+                            crate::features::chrome::close_browser(
+                                browser_handle,
+                                &shared.4,
+                                &mut context_id,
+                            )
+                            .await;
                         }
-
-                        crate::features::chrome::close_browser(
-                            browser_handle,
-                            &browser,
-                            &mut context_id,
-                        )
-                        .await;
                     }
                     _ => log("", "Chrome failed to open page."),
                 },
@@ -2861,14 +2860,14 @@ impl Website {
                                 }
                                 self.subscription_guard();
                             }
-                        }
 
-                        crate::features::chrome::close_browser(
-                            browser_handle,
-                            &browser,
-                            &mut context_id,
-                        )
-                        .await;
+                            crate::features::chrome::close_browser(
+                                browser_handle,
+                                &shared.5,
+                                &mut context_id,
+                            )
+                            .await;
+                        }
                     }
                     _ => log("", "Chrome failed to open page."),
                 },
@@ -3079,7 +3078,7 @@ impl Website {
                             selectors,
                             self.channel.clone(),
                             self.channel_guard.clone(),
-                            browser.clone(),
+                            browser,
                             self.configuration.clone(),
                         ));
 
@@ -3196,14 +3195,13 @@ impl Website {
 
                             self.subscription_guard();
                         }
+                        crate::features::chrome::close_browser(
+                            browser_handle,
+                            &shared.4,
+                            &mut context_id,
+                        )
+                        .await;
                     }
-
-                    crate::features::chrome::close_browser(
-                        browser_handle,
-                        &browser,
-                        &mut context_id,
-                    )
-                    .await;
                 }
                 _ => log("", "Chrome failed to start."),
             },
@@ -3452,10 +3450,9 @@ impl Website {
         handle: &Option<Arc<AtomicI8>>,
         scrape: bool,
     ) {
+        use crate::features::chrome::attempt_navigation;
         use sitemap::reader::{SiteMapEntity, SiteMapReader};
         use sitemap::structs::Location;
-
-        use crate::features::chrome::attempt_navigation;
 
         match self.setup_selectors() {
             Some(selectors) => {
@@ -3680,7 +3677,7 @@ impl Website {
 
                         crate::features::chrome::close_browser(
                             browser_handle,
-                            &browser,
+                            &shared.2,
                             &mut context_id,
                         )
                         .await;
