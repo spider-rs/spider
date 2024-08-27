@@ -2142,6 +2142,54 @@ impl Website {
         };
     }
 
+    /// Start to scrape website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
+    pub async fn scrape_smart(&mut self) {
+        let mut w = self.clone();
+        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+
+        if self.pages.is_none() {
+            self.pages = Some(Box::new(Vec::new()));
+        }
+
+        tokio::spawn(async move {
+            w.crawl_smart().await;
+        });
+
+        match self.pages.as_mut() {
+            Some(p) => {
+                while let Ok(res) = rx2.recv().await {
+                    self.links_visited.insert(res.get_url().into());
+                    p.push(res);
+                }
+            }
+            _ => (),
+        };
+    }
+
+    /// Start to scrape website sitemap with async concurrency. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `sitemap` flag enabled.
+    pub async fn scrape_sitemap(&mut self) {
+        let mut w = self.clone();
+        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+
+        if self.pages.is_none() {
+            self.pages = Some(Box::new(Vec::new()));
+        }
+
+        tokio::spawn(async move {
+            w.crawl_sitemap().await;
+        });
+
+        match self.pages.as_mut() {
+            Some(p) => {
+                while let Ok(res) = rx2.recv().await {
+                    self.links_visited.insert(res.get_url().into());
+                    p.push(res);
+                }
+            }
+            _ => (),
+        };
+    }
+
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
