@@ -535,16 +535,24 @@ impl Page {
         output_path: Option<impl AsRef<std::path::Path>>,
         clip: Option<crate::configuration::ClipViewport>,
     ) -> Vec<u8> {
-        Page::take_screenshot(
-            &self,
-            full_page,
-            omit_background,
-            format,
-            quality,
-            output_path,
-            clip,
+        // prevent screenshot hangs
+        let screenshot_result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(30),
+            Page::take_screenshot(
+                &self,
+                full_page,
+                omit_background,
+                format,
+                quality,
+                output_path,
+                clip,
+            ),
         )
-        .await
+        .await;
+        match screenshot_result {
+            Ok(sb) => sb,
+            _ => Default::default(),
+        }
     }
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]

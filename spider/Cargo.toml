@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.1.4"
+version = "2.1.6"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -101,7 +101,7 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator"]
+default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator", "chrome"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]

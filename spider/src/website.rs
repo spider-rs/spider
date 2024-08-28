@@ -697,12 +697,12 @@ impl Website {
 
     /// Validate if url exceeds crawl budget and should not be handled.
     pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        if self.configuration.budget.is_some() || self.configuration.depth_distance > 0 {
+        if self.configuration.inner_budget.is_some() || self.configuration.depth_distance > 0 {
             match Url::parse(link.inner()) {
                 Ok(r) => {
                     let has_depth_control = self.configuration.depth_distance > 0;
 
-                    if self.configuration.budget.is_none() {
+                    if self.configuration.inner_budget.is_none() {
                         match r.path_segments() {
                             Some(segments) => {
                                 let mut over = false;
@@ -723,7 +723,7 @@ impl Website {
                             _ => false,
                         }
                     } else {
-                        match self.configuration.budget.as_mut() {
+                        match self.configuration.inner_budget.as_mut() {
                             Some(budget) => {
                                 let exceeded_wild_budget = if self.configuration.wild_card_budgeting
                                 {
@@ -2269,7 +2269,7 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selector) => {
-                if match self.configuration.budget {
+                if match self.configuration.inner_budget {
                     Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                         Some(b) => b.eq(&1),
                         _ => false,
@@ -2458,7 +2458,7 @@ impl Website {
                             _ => None,
                         };
 
-                        if match self.configuration.budget {
+                        if match self.configuration.inner_budget {
                             Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                                 Some(b) => b.eq(&1),
                                 _ => false,
@@ -2725,7 +2725,7 @@ impl Website {
                     Ok(new_page) => {
                         let _ = self.setup_chrome_interception(&new_page).await;
 
-                        if match self.configuration.budget {
+                        if match self.configuration.inner_budget {
                             Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                                 Some(b) => b.eq(&1),
                                 _ => false,
@@ -3114,7 +3114,7 @@ impl Website {
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
                 Some((browser, browser_handle, mut context_id)) => {
-                    if match self.configuration.budget {
+                    if match self.configuration.inner_budget {
                         Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                             Some(b) => b.eq(&1),
                             _ => false,
@@ -3991,7 +3991,7 @@ impl Website {
 
     /// Set the crawl budget directly. This does nothing without the `budget` flag enabled.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
-        self.configuration.budget = budget;
+        self.configuration.inner_budget = budget;
     }
 
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
@@ -4231,8 +4231,9 @@ impl Website {
 
     /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the `budget` flag enabled.
     fn determine_limits(&mut self) {
-        if self.configuration.budget.is_some() {
-            let wild_card_budget = match &self.configuration.budget {
+        self.configuration.configure_budget();
+        if self.configuration.inner_budget.is_some() {
+            let wild_card_budget = match &self.configuration.inner_budget {
                 Some(budget) => budget.contains_key(&*WILD_CARD_PATH),
                 _ => false,
             };

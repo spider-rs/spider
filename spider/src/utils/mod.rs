@@ -819,34 +819,50 @@ pub async fn fetch_page_html_chrome_base(
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let page = {
-        // the active page was already set prior. No need to re-navigate or set the content.
-        if !page_set {
-            // used for smart mode re-rendering direct assigning html
-            if content {
-                match page.set_content(source).await {
-                    Ok(p) => p,
-                    _ => page,
+        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(120), async {
+            {
+                // the active page was already set prior. No need to re-navigate or set the content.
+                if !page_set {
+                    // used for smart mode re-rendering direct assigning html
+                    if content {
+                        match page.set_content(source).await {
+                            Ok(p) => p,
+                            _ => page,
+                        }
+                    } else {
+                        match perform_chrome_http_request(&page, source).await {
+                            Ok(chqr) => {
+                                chrome_http_req_res = chqr;
+                            }
+                            Err(e) => {
+                                log("HTTP Error: ", e.to_string());
+                            }
+                        };
+                        page
+                    }
+                } else {
+                    page
                 }
-            } else {
-                match perform_chrome_http_request(&page, source).await {
-                    Ok(chqr) => {
-                        chrome_http_req_res = chqr;
-                    }
-                    Err(e) => {
-                        log("HTTP Error: ", e.to_string());
-                    }
-                };
-                page
             }
-        } else {
-            page
+        })
+        .await;
+        match page_result {
+            Ok(r) => r,
+            _ => page,
         }
     };
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !content {
-        match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&source, &u),
+        let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
+            match page.wait_for_navigation_response().await {
+                Ok(u) => get_last_redirect(&source, &u),
+                _ => None,
+            }
+        })
+        .await;
+        match last_redirect {
+            Ok(last) => last,
             _ => None,
         }
     } else {
@@ -881,7 +897,16 @@ pub async fn fetch_page_html_chrome_base(
         );
     }
 
-    let mut res: bytes::Bytes = page.content_bytes().await?;
+    let res =
+        tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content_bytes()).await;
+
+    let mut res: bytes::Bytes = match res {
+        Ok(b) => match b {
+            Ok(b) => b,
+            _ => Default::default(),
+        },
+        _ => Default::default(),
+    };
 
     if cfg!(feature = "real_browser") {
         let _ = cf_handle(&mut res, &page).await;
