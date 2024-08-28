@@ -3991,7 +3991,7 @@ impl Website {
 
     /// Set the crawl budget directly. This does nothing without the `budget` flag enabled.
     pub fn set_crawl_budget(&mut self, budget: Option<HashMap<CaseInsensitiveString, u32>>) {
-        self.configuration.inner_budget = budget;
+        self.configuration.budget = budget;
     }
 
     /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
