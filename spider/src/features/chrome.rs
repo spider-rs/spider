@@ -291,16 +291,8 @@ pub async fn attempt_navigation(
 pub async fn close_browser(
     browser_handle: JoinHandle<()>,
     browser: &Browser,
-    context_id: &mut Option<BrowserContextId>,
+    _context_id: &mut Option<BrowserContextId>,
 ) {
-    match context_id.take() {
-        Some(id) => {
-            if let Err(er) = browser.dispose_browser_context(id).await {
-                log("CDP Error: ", er.to_string())
-            }
-        }
-        _ => (),
-    }
     if !browser_handle.is_finished() {
         browser_handle.abort();
     }
