@@ -209,8 +209,7 @@ pub async fn launch_browser(
                 while let Some(h) = handler.next().await {
                     if let Err(e) = h {
                         match e {
-                            CdpError::NoResponse
-                            | CdpError::LaunchExit(_, _)
+                            CdpError::LaunchExit(_, _)
                             | CdpError::LaunchTimeout(_)
                             | CdpError::LaunchIo(_, _) => {
                                 break;
@@ -290,7 +289,7 @@ pub async fn attempt_navigation(
 /// close the browser and open handles
 pub async fn close_browser(
     browser_handle: JoinHandle<()>,
-    browser: &Browser,
+    _browser: &Browser,
     _context_id: &mut Option<BrowserContextId>,
 ) {
     if !browser_handle.is_finished() {

@@ -156,6 +156,9 @@ pub struct Configuration {
     blacklist: AllowList,
     /// The whitelist urls.
     whitelist: AllowList,
+    /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
+    pub(crate) inner_budget:
+        Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -245,6 +248,11 @@ impl Configuration {
     /// Get the blacklist compiled.
     pub(crate) fn get_blacklist_compiled(&self) -> &AllowList {
         &self.blacklist
+    }
+
+    /// Setup the budget for crawling.
+    pub(crate) fn configure_budget(&mut self) {
+        self.inner_budget.clone_from(&self.budget);
     }
 
     /// Get the whitelist compiled.
