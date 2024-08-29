@@ -908,6 +908,9 @@ impl Page {
         &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
+        if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+            return Default::default();
+        }
         self.detect_language();
         self.links_stream_base(selectors, &self.get_html()).await
     }
@@ -1300,6 +1303,9 @@ impl Page {
         &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
+        if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+            return Default::default();
+        }
         self.detect_language();
         self.links_stream_full_resource(selectors).await
     }
@@ -1339,6 +1345,9 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => {
+                if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+                    return Default::default();
+                }
                 self.detect_language();
                 self.links_stream_full_resource::<CaseInsensitiveString>(&(
                     &selectors.0,
@@ -1361,7 +1370,9 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                self.detect_language();
+                if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+                    return Default::default();
+                }
                 self.links_stream_smart::<CaseInsensitiveString>(
                     &(&selectors.0, &selectors.1),
                     page,

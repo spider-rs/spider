@@ -3387,7 +3387,7 @@ impl Website {
                         let handles = tokio::spawn(async move {
                             let mut pages = Vec::new();
 
-                            while let Some(mut page) = rx.recv().await {
+                            while let Some(page) = rx.recv().await {
                                 if shared.0.is_some() {
                                     if scrape {
                                         pages.push(page.clone());
@@ -3489,9 +3489,10 @@ impl Website {
 
                         drop(tx);
 
-                        if let Ok(handle) = handles.await {
-                            for page in handle.iter() {
-                                self.extra_links.extend(page.links(&selectors).await)
+                        if let Ok(mut handle) = handles.await {
+                            for page in handle.iter_mut() {
+                                let links = page.links(&selectors).await;
+                                self.extra_links.extend(links)
                             }
                             if scrape {
                                 match self.pages.as_mut() {
@@ -3749,8 +3750,8 @@ impl Website {
 
                                 drop(tx);
 
-                                if let Ok(handle) = handles.await {
-                                    for page in handle.iter() {
+                                if let Ok(mut handle) = handles.await {
+                                    for page in handle.iter_mut() {
                                         self.extra_links.extend(page.links(&selectors).await)
                                     }
                                     if scrape {

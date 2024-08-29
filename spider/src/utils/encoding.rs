@@ -147,7 +147,6 @@ pub(crate) fn encoding_for_locale(locale: &str) -> Option<&'static encoding_rs::
 }
 
 /// Checks if the file is a known binary format using its initial bytes.
-#[cfg(feature = "encoding")]
 pub(crate) fn is_binary_file(content: &[u8]) -> bool {
     if let Some(&keys) = FIRST_BYTE_MAP.get(&content[0]) {
         for &key in keys {
@@ -162,11 +161,7 @@ pub(crate) fn is_binary_file(content: &[u8]) -> bool {
 }
 
 /// Detect the language of a HTML resource. This does nothing without the "encoding" flag enabled.
-#[cfg(feature = "encoding")]
 pub fn detect_language(html_content: &[u8]) -> Option<String> {
-    if is_binary_file(html_content) {
-        return None;
-    }
     let search_area_limit = html_content.len().min(1024);
     let search_area = &html_content[..search_area_limit];
 
@@ -190,12 +185,6 @@ pub fn detect_language(html_content: &[u8]) -> Option<String> {
         }
     }
 
-    None
-}
-
-/// Detect the language of a HTML resource. This does nothing without the "encoding" flag enabled.
-#[cfg(not(feature = "encoding"))]
-pub fn detect_language(_html_content: &[u8]) -> Option<String> {
     None
 }
 
