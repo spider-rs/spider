@@ -134,6 +134,8 @@ pub struct Page {
     pub extra_ai_data: Option<Vec<AIResults>>,
     /// The links found on the page.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
+    /// The language for the page.
+    pub lang: Option<String>,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -169,6 +171,8 @@ pub struct Page {
     pub extra_ai_data: Option<Vec<AIResults>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
+    /// The language for the page.
+    pub lang: Option<String>,
 }
 
 /// get the clean domain name
@@ -296,6 +300,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         #[cfg(feature = "openai")]
         extra_ai_data: res.extra_ai_data,
         page_links: None,
+        lang: None,
     }
 }
 
@@ -664,10 +669,39 @@ impl Page {
         }
     }
 
+    /// Set the language for the page.
+    pub fn detect_language(&mut self) {
+        if self.lang.is_none() {
+            match self.html.as_ref() {
+                Some(html) => {
+                    if !html.is_empty() {
+                        match crate::utils::encoding::detect_language(html) {
+                            Some(lang) => {
+                                self.lang.replace(lang);
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+
     /// Html getter for bytes on the page as string.
     pub fn get_html(&self) -> String {
         match self.html.as_ref() {
-            Some(html) => String::from_utf8_lossy(html).to_string(),
+            Some(html) => {
+                if html.is_empty() {
+                    Default::default()
+                } else {
+                    let language = self.lang.as_ref();
+                    match language {
+                        Some(l) => encode_bytes_from_language(html, &l),
+                        _ => encode_bytes_from_language(html, &""),
+                    }
+                }
+            }
             _ => Default::default(),
         }
     }
@@ -827,7 +861,7 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_base<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &self,
+        &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         html: &str,
     ) -> HashSet<A> {
@@ -871,9 +905,10 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources"),))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &self,
+        &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
+        self.detect_language();
         self.links_stream_base(selectors, &self.get_html()).await
     }
 
@@ -887,7 +922,7 @@ impl Page {
     pub async fn links_stream_smart<
         A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1177,7 +1212,7 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     pub async fn links_stream_full_resource<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &self,
+        &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
         let mut map = HashSet::new();
@@ -1262,9 +1297,10 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &self,
+        &mut self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
+        self.detect_language();
         self.links_stream_full_resource(selectors).await
     }
 
@@ -1282,7 +1318,7 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
     pub async fn links(
-        &self,
+        &mut self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
@@ -1297,12 +1333,13 @@ impl Page {
     /// Find all href links and return them using CSS selectors gathering all resources.
     #[inline(always)]
     pub async fn links_full(
-        &self,
+        &mut self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
             true => {
+                self.detect_language();
                 self.links_stream_full_resource::<CaseInsensitiveString>(&(
                     &selectors.0,
                     &selectors.1,
@@ -1316,7 +1353,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[inline(always)]
     pub async fn smart_links(
-        &self,
+        &mut self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1324,6 +1361,7 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => {
+                self.detect_language();
                 self.links_stream_smart::<CaseInsensitiveString>(
                     &(&selectors.0, &selectors.1),
                     page,
@@ -1365,77 +1403,173 @@ impl Page {
     }
 }
 
-/// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
+/// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 #[cfg(feature = "encoding")]
-pub fn get_html_encoded(html: &Option<Bytes>, label: &str) -> String {
+fn encode_bytes(html: &Bytes, label: &str) -> String {
     use encoding_rs::CoderResult;
+    match encoding_rs::Encoding::for_label(label.as_bytes()) {
+        Some(enc) => {
+            let process = |buffer: &mut str| {
+                let mut bytes_in_buffer: usize = 0usize;
+                let mut output = String::new();
+                let mut decoder = enc.new_decoder();
+                let mut total_read_from_current_input = 0usize;
 
-    match html.as_ref() {
-        Some(html) => match encoding_rs::Encoding::for_label(label.as_bytes()) {
-            Some(enc) => {
-                let process = |buffer: &mut str| {
-                    let mut bytes_in_buffer: usize = 0usize;
-                    let mut output = String::new();
-                    let mut decoder = enc.new_decoder();
-                    let mut total_read_from_current_input = 0usize;
-
-                    loop {
-                        let (result, read, written, _had_errors) = decoder.decode_to_str(
-                            &html[total_read_from_current_input..],
-                            &mut buffer[bytes_in_buffer..],
-                            false,
-                        );
-                        total_read_from_current_input += read;
-                        bytes_in_buffer += written;
-                        match result {
-                            CoderResult::InputEmpty => {
-                                break;
-                            }
-                            CoderResult::OutputFull => {
-                                output.push_str(&buffer[..bytes_in_buffer]);
-                                bytes_in_buffer = 0usize;
-                                continue;
-                            }
+                loop {
+                    let (result, read, written, _had_errors) = decoder.decode_to_str(
+                        &html[total_read_from_current_input..],
+                        &mut buffer[bytes_in_buffer..],
+                        false,
+                    );
+                    total_read_from_current_input += read;
+                    bytes_in_buffer += written;
+                    match result {
+                        CoderResult::InputEmpty => {
+                            break;
                         }
-                    }
-
-                    loop {
-                        let (result, _, written, _had_errors) =
-                            decoder.decode_to_str(b"", &mut buffer[bytes_in_buffer..], true);
-                        bytes_in_buffer += written;
-                        output.push_str(&buffer[..bytes_in_buffer]);
-                        bytes_in_buffer = 0usize;
-                        match result {
-                            CoderResult::InputEmpty => {
-                                break;
-                            }
-                            CoderResult::OutputFull => {
-                                continue;
-                            }
+                        CoderResult::OutputFull => {
+                            output.push_str(&buffer[..bytes_in_buffer]);
+                            bytes_in_buffer = 0usize;
+                            continue;
                         }
-                    }
-
-                    output
-                };
-
-                match html.len() {
-                    15001..=usize::MAX => {
-                        let mut buffer_bytes = [0u8; 2048];
-                        process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-                    }
-                    1000..=15000 => {
-                        let mut buffer_bytes = [0u8; 1024];
-                        process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-                    }
-                    _ => {
-                        let mut buffer_bytes = [0u8; 512];
-                        process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
                     }
                 }
-                .into()
+
+                loop {
+                    let (result, _, written, _had_errors) =
+                        decoder.decode_to_str(b"", &mut buffer[bytes_in_buffer..], true);
+                    bytes_in_buffer += written;
+                    output.push_str(&buffer[..bytes_in_buffer]);
+                    bytes_in_buffer = 0usize;
+                    match result {
+                        CoderResult::InputEmpty => {
+                            break;
+                        }
+                        CoderResult::OutputFull => {
+                            continue;
+                        }
+                    }
+                }
+
+                output
+            };
+
+            match html.len() {
+                15001..=usize::MAX => {
+                    let mut buffer_bytes = [0u8; 2048];
+                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+                }
+                1000..=15000 => {
+                    let mut buffer_bytes = [0u8; 1024];
+                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+                }
+                _ => {
+                    let mut buffer_bytes = [0u8; 512];
+                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+                }
             }
-            _ => Default::default(),
-        },
+            .into()
+        }
+        _ => Default::default(),
+    }
+}
+
+#[cfg(feature = "encoding")]
+/// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
+fn encode_bytes_from_language(html: &Bytes, language: &str) -> String {
+    use encoding_rs::{CoderResult, Encoding};
+
+    let encoding = crate::utils::encoding::encoding_for_locale(language)
+        .or_else(|| Encoding::for_bom(&html).map(|(enc, _)| enc))
+        .unwrap_or_else(|| {
+            use chardetng::EncodingDetector;
+            let mut detector = EncodingDetector::new();
+            detector.feed(&html, true);
+            detector.guess(None, true)
+        });
+
+    let process = |buffer: &mut str| {
+        let mut bytes_in_buffer: usize = 0usize;
+        let mut output = String::new();
+        let mut decoder = encoding.new_decoder();
+        let mut total_read_from_current_input = 0usize;
+
+        loop {
+            let (result, read, written, _had_errors) = decoder.decode_to_str(
+                &html[total_read_from_current_input..],
+                &mut buffer[bytes_in_buffer..],
+                false,
+            );
+            total_read_from_current_input += read;
+            bytes_in_buffer += written;
+            match result {
+                CoderResult::InputEmpty => {
+                    break;
+                }
+                CoderResult::OutputFull => {
+                    output.push_str(&buffer[..bytes_in_buffer]);
+                    bytes_in_buffer = 0usize;
+                    continue;
+                }
+            }
+        }
+
+        loop {
+            let (result, _, written, _had_errors) =
+                decoder.decode_to_str(b"", &mut buffer[bytes_in_buffer..], true);
+            bytes_in_buffer += written;
+            output.push_str(&buffer[..bytes_in_buffer]);
+            bytes_in_buffer = 0usize;
+            match result {
+                CoderResult::InputEmpty => {
+                    break;
+                }
+                CoderResult::OutputFull => {
+                    continue;
+                }
+            }
+        }
+
+        output
+    };
+
+    match html.len() {
+        15001..=usize::MAX => {
+            let mut buffer_bytes = [0u8; 2048];
+            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+        }
+        1000..=15000 => {
+            let mut buffer_bytes = [0u8; 1024];
+            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+        }
+        _ => {
+            let mut buffer_bytes = [0u8; 512];
+            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
+        }
+    }
+    .into()
+}
+
+/// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
+#[cfg(not(feature = "encoding"))]
+fn encode_bytes_from_language(html: &Bytes, _language: &str) -> String {
+    String::from_utf8_lossy(html).to_string()
+}
+
+/// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
+#[cfg(feature = "encoding")]
+pub fn get_html_encoded(html: &Option<Bytes>, label: &str) -> String {
+    match html.as_ref() {
+        Some(html) => encode_bytes(html, label),
+        _ => Default::default(),
+    }
+}
+
+#[cfg(not(feature = "encoding"))]
+/// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
+pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
+    match html {
+        Some(b) => String::from_utf8_lossy(b).to_string(),
         _ => Default::default(),
     }
 }
@@ -1491,9 +1625,8 @@ async fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(link_result, &client).await;
+    let mut page = Page::new(link_result, &client).await;
     let selector = get_page_selectors(link_result, false, false);
-
     let links = page.links(&selector.unwrap()).await;
 
     assert!(

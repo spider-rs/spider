@@ -509,6 +509,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "chardetng"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14b8f0b65b7b08ae3c8187e8d77174de20cb6777864c6b832d8ad365999cf1ea"
+dependencies = [
+ "cfg-if",
+ "encoding_rs",
+ "memchr",
+]
+
+[[package]]
 name = "chromiumoxide"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3156,18 +3167,18 @@ checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
 name = "rustc_version"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
 ]
 
 [[package]]
 name = "rustix"
-version = "0.38.34"
+version = "0.38.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70dc5ec042f7a43c4a73241207cecc9873a06d45debb38b329f8541d85c2730f"
+checksum = "a85d50532239da68e9addb745ba38ff4612a242c1c7ceea689c4bc7c2f43c36f"
 dependencies = [
  "bitflags 2.6.0",
  "errno",
@@ -3207,9 +3218,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04182dffc9091a404e0fc069ea5cd60e5b866c3adf881eff99a32d048242dffa"
+checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
 dependencies = [
  "openssl-probe",
  "rustls-pemfile",
@@ -3236,9 +3247,9 @@ checksum = "fc0a2ce646f8655401bb81e7927b812614bd5d91dbc968696be50603510fcaf0"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.102.6"
+version = "0.102.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e6b52d4fda176fd835fdc55a835d4a89b8499cad995885a21149d5ad62f852e"
+checksum = "84678086bd54edf2b415183ed7a94d0efb049f1b646a33e22a36f3794be6ae56"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -3527,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.1.9"
+version = "2.2.1"
 dependencies = [
  "adblock",
  "ahash",
@@ -3536,6 +3547,7 @@ dependencies = [
  "async_job",
  "bytes",
  "case_insensitive_string",
+ "chardetng",
  "chromiumoxide",
  "chrono",
  "const_format",
@@ -3582,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.1.9"
+version = "2.2.1"
 dependencies = [
  "clap",
  "env_logger",
@@ -3594,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "2.1.9"
+version = "2.2.1"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3605,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.1.9"
+version = "2.2.1"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3613,7 +3625,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.1.9"
+version = "2.2.1"
 dependencies = [
  "env_logger",
  "lazy_static",
