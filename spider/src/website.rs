@@ -1529,7 +1529,7 @@ impl Website {
                     }
                     _ => *self.url.clone(),
                 });
-
+                page.detect_language();
                 page.links(base).await
             } else {
                 self.status = CrawlStatus::Empty;
@@ -1654,6 +1654,7 @@ impl Website {
                     }
                     _ => *self.url.clone(),
                 });
+                page.detect_language();
 
                 let links = HashSet::from(page.links(&base).await);
 
@@ -1960,6 +1961,8 @@ impl Website {
                 };
             }
 
+            page.detect_language();
+
             if self.configuration.return_page_links {
                 let links = HashSet::from(page.links(&base).await);
 
@@ -2037,6 +2040,8 @@ impl Website {
             }
 
             if !page.is_empty() {
+                page.detect_language();
+
                 let u = page.get_url().into();
                 let link_result = match self.on_link_find_callback {
                     Some(cb) => cb(u, None),
@@ -2359,6 +2364,7 @@ impl Website {
                                                 )
                                                 .await;
                                                 page.set_external(shared.3.to_owned());
+                                                page.detect_language();
 
                                                 let links = if full_resources {
                                                     page.links_full(&shared.1).await
@@ -2605,6 +2611,7 @@ impl Website {
                                                                                 .clone(),
                                                                         );
                                                                     }
+                                                                    page.detect_language();
 
                                                                     let links = if full_resources {
                                                                         page.links_full(&shared.1).await
@@ -2874,6 +2881,7 @@ impl Website {
                                                                 if add_external {
                                                                     page.set_external(shared.3.clone());
                                                                 }
+                                                                page.detect_language();
 
                                                                 let links = if full_resources {
                                                                     page.links_full(&shared.1).await
@@ -3491,6 +3499,7 @@ impl Website {
 
                         if let Ok(mut handle) = handles.await {
                             for page in handle.iter_mut() {
+                                page.detect_language();
                                 let links = page.links(&selectors).await;
                                 self.extra_links.extend(links)
                             }
@@ -3752,6 +3761,7 @@ impl Website {
 
                                 if let Ok(mut handle) = handles.await {
                                     for page in handle.iter_mut() {
+                                        page.detect_language();
                                         self.extra_links.extend(page.links(&selectors).await)
                                     }
                                     if scrape {

@@ -52,6 +52,8 @@ async fn forward(
 
         match spider::page::get_page_selectors(&url_path, subdomains, tld) {
             Some(selectors) => {
+                page.detect_language();
+
                 let links = page
                     .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
                     .await;

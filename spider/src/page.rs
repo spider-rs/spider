@@ -861,7 +861,7 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_base<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &mut self,
+        &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         html: &str,
     ) -> HashSet<A> {
@@ -905,13 +905,12 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources"),))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &mut self,
+        &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
         if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
         }
-        self.detect_language();
         self.links_stream_base(selectors, &self.get_html()).await
     }
 
@@ -925,7 +924,7 @@ impl Page {
     pub async fn links_stream_smart<
         A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
     >(
-        &mut self,
+        &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1215,7 +1214,7 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     pub async fn links_stream_full_resource<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &mut self,
+        &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
         let mut map = HashSet::new();
@@ -1300,13 +1299,12 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &mut self,
+        &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
         if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
         }
-        self.detect_language();
         self.links_stream_full_resource(selectors).await
     }
 
@@ -1324,7 +1322,7 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
     pub async fn links(
-        &mut self,
+        &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
@@ -1339,7 +1337,7 @@ impl Page {
     /// Find all href links and return them using CSS selectors gathering all resources.
     #[inline(always)]
     pub async fn links_full(
-        &mut self,
+        &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
@@ -1348,7 +1346,6 @@ impl Page {
                 if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.detect_language();
                 self.links_stream_full_resource::<CaseInsensitiveString>(&(
                     &selectors.0,
                     &selectors.1,
@@ -1362,7 +1359,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[inline(always)]
     pub async fn smart_links(
-        &mut self,
+        &self,
         selectors: &(CompactString, SmallVec<[CompactString; 2]>),
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1636,7 +1633,7 @@ async fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let mut page = Page::new(link_result, &client).await;
+    let page = Page::new(link_result, &client).await;
     let selector = get_page_selectors(link_result, false, false);
     let links = page.links(&selector.unwrap()).await;
 
