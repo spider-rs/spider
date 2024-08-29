@@ -282,9 +282,9 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auto_encoder"
-version = "0.1.0"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cc330568fc3b127eade6fb0505d4f840b620f6e87a4f6a5f472db77eb4cdf83"
+checksum = "8cfd944c56af79853532412fe19a63faa0cca5e0872ce3de7970dd28fd63dcc1"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -1013,18 +1013,18 @@ dependencies = [
 
 [[package]]
 name = "derive_builder"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
+checksum = "cd33f37ee6a119146a1781d3356a7c26028f83d779b2e04ecd45fdc75c76877b"
 dependencies = [
  "derive_builder_macro",
 ]
 
 [[package]]
 name = "derive_builder_core"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d48cda787f839151732d396ac69e3473923d54312c070ee21e9effcaa8ca0b1d"
+checksum = "7431fa049613920234f22c47fdc33e6cf3ee83067091ea4277a3f8c4587aae38"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1034,9 +1034,9 @@ dependencies = [
 
 [[package]]
 name = "derive_builder_macro"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
+checksum = "4abae7035bf79b9877b779505d8cf3749285b80c43941eda66604841889451dc"
 dependencies = [
  "derive_builder_core",
  "syn 2.0.76",
@@ -3551,7 +3551,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.2.5"
+version = "2.2.6"
 dependencies = [
  "adblock",
  "ahash",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.2.5"
+version = "2.2.6"
 dependencies = [
  "clap",
  "env_logger",
@@ -3618,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "2.2.5"
+version = "2.2.6"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3629,7 +3629,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.2.5"
+version = "2.2.6"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3637,7 +3637,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.2.5"
+version = "2.2.6"
 dependencies = [
  "env_logger",
  "lazy_static",
