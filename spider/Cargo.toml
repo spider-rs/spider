@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.1.9"
+version = "2.2.0"
 authors = [
     "j-mendez <jeff@a11ywatch.com>"
 ]
@@ -66,6 +66,7 @@ http = { version = "1", optional = true }
 adblock = { version = "0.8", optional = true, default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 phf = "0.11"
 phf_codegen = "0.11"
+chardetng = { version = "0.1", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -101,7 +102,7 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator"]
+default = ["sync", "reqwest_native_tls_alpn", "cookies", "ua_generator", "encoding"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
@@ -133,7 +134,7 @@ chrome_headless_new = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:regex"]
-encoding = ["dep:encoding_rs"]
+encoding = ["dep:encoding_rs", "dep:chardetng"]
 headers = []
 real_browser = []
 openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
