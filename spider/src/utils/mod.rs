@@ -1,8 +1,9 @@
+/// HTML Encoding.
+pub mod encoding;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// A trie struct.
 pub mod trie;
-
 use std::str::FromStr;
 
 #[cfg(feature = "chrome")]
