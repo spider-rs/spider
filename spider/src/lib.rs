@@ -136,7 +136,7 @@ pub extern crate async_job;
 #[cfg(feature = "openai")]
 pub extern crate async_openai;
 #[cfg(feature = "encoding")]
-pub extern crate encoding_rs;
+pub extern crate auto_encoder;
 #[cfg(feature = "flexbuffers")]
 pub extern crate flexbuffers;
 #[cfg(feature = "cache")]

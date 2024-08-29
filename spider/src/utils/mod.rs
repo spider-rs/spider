@@ -1,5 +1,3 @@
-/// HTML Encoding.
-pub mod encoding;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// A trie struct.

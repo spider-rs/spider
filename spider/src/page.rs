@@ -675,7 +675,7 @@ impl Page {
             match self.html.as_ref() {
                 Some(html) => {
                     if !html.is_empty() {
-                        match crate::utils::encoding::detect_language(html) {
+                        match auto_encoder::detect_language(html) {
                             Some(lang) => {
                                 self.lang.replace(lang);
                             }
@@ -908,7 +908,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
         }
         self.links_stream_base(selectors, &self.get_html()).await
@@ -1302,7 +1302,7 @@ impl Page {
         &self,
         selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
     ) -> HashSet<A> {
-        if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
         }
         self.links_stream_full_resource(selectors).await
@@ -1343,7 +1343,7 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+                if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
                 self.links_stream_full_resource::<CaseInsensitiveString>(&(
@@ -1367,7 +1367,7 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                if crate::utils::encoding::is_binary_file(self.get_html_bytes_u8()) {
+                if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
                 self.links_stream_smart::<CaseInsensitiveString>(
@@ -1414,148 +1414,13 @@ impl Page {
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 #[cfg(feature = "encoding")]
 fn encode_bytes(html: &Bytes, label: &str) -> String {
-    use encoding_rs::CoderResult;
-    match encoding_rs::Encoding::for_label(label.as_bytes()) {
-        Some(enc) => {
-            let process = |buffer: &mut str| {
-                let mut bytes_in_buffer: usize = 0usize;
-                let mut output = String::new();
-                let mut decoder = enc.new_decoder();
-                let mut total_read_from_current_input = 0usize;
-
-                loop {
-                    let (result, read, written, _had_errors) = decoder.decode_to_str(
-                        &html[total_read_from_current_input..],
-                        &mut buffer[bytes_in_buffer..],
-                        false,
-                    );
-                    total_read_from_current_input += read;
-                    bytes_in_buffer += written;
-                    match result {
-                        CoderResult::InputEmpty => {
-                            break;
-                        }
-                        CoderResult::OutputFull => {
-                            output.push_str(&buffer[..bytes_in_buffer]);
-                            bytes_in_buffer = 0usize;
-                            continue;
-                        }
-                    }
-                }
-
-                loop {
-                    let (result, _, written, _had_errors) =
-                        decoder.decode_to_str(b"", &mut buffer[bytes_in_buffer..], true);
-                    bytes_in_buffer += written;
-                    output.push_str(&buffer[..bytes_in_buffer]);
-                    bytes_in_buffer = 0usize;
-                    match result {
-                        CoderResult::InputEmpty => {
-                            break;
-                        }
-                        CoderResult::OutputFull => {
-                            continue;
-                        }
-                    }
-                }
-
-                output
-            };
-
-            match html.len() {
-                15001..=usize::MAX => {
-                    let mut buffer_bytes = [0u8; 2048];
-                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-                }
-                1000..=15000 => {
-                    let mut buffer_bytes = [0u8; 1024];
-                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-                }
-                _ => {
-                    let mut buffer_bytes = [0u8; 512];
-                    process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-                }
-            }
-            .into()
-        }
-        _ => Default::default(),
-    }
+    auto_encoder::encode_bytes(html, label)
 }
 
 #[cfg(feature = "encoding")]
 /// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
 fn encode_bytes_from_language(html: &Bytes, language: &str) -> String {
-    use encoding_rs::{CoderResult, Encoding};
-
-    let encoding = crate::utils::encoding::encoding_for_locale(language)
-        .or_else(|| Encoding::for_bom(&html).map(|(enc, _)| enc))
-        .unwrap_or_else(|| {
-            use chardetng::EncodingDetector;
-            let mut detector = EncodingDetector::new();
-            detector.feed(&html, true);
-            detector.guess(None, true)
-        });
-
-    let process = |buffer: &mut str| {
-        let mut bytes_in_buffer: usize = 0usize;
-        let mut output = String::new();
-        let mut decoder = encoding.new_decoder();
-        let mut total_read_from_current_input = 0usize;
-
-        loop {
-            let (result, read, written, _had_errors) = decoder.decode_to_str(
-                &html[total_read_from_current_input..],
-                &mut buffer[bytes_in_buffer..],
-                false,
-            );
-            total_read_from_current_input += read;
-            bytes_in_buffer += written;
-            match result {
-                CoderResult::InputEmpty => {
-                    break;
-                }
-                CoderResult::OutputFull => {
-                    output.push_str(&buffer[..bytes_in_buffer]);
-                    bytes_in_buffer = 0usize;
-                    continue;
-                }
-            }
-        }
-
-        loop {
-            let (result, _, written, _had_errors) =
-                decoder.decode_to_str(b"", &mut buffer[bytes_in_buffer..], true);
-            bytes_in_buffer += written;
-            output.push_str(&buffer[..bytes_in_buffer]);
-            bytes_in_buffer = 0usize;
-            match result {
-                CoderResult::InputEmpty => {
-                    break;
-                }
-                CoderResult::OutputFull => {
-                    continue;
-                }
-            }
-        }
-
-        output
-    };
-
-    match html.len() {
-        15001..=usize::MAX => {
-            let mut buffer_bytes = [0u8; 2048];
-            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-        }
-        1000..=15000 => {
-            let mut buffer_bytes = [0u8; 1024];
-            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-        }
-        _ => {
-            let mut buffer_bytes = [0u8; 512];
-            process(std::str::from_utf8_mut(&mut buffer_bytes[..]).unwrap_or_default())
-        }
-    }
-    .into()
+    auto_encoder::encode_bytes_from_language(html, language)
 }
 
 /// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
