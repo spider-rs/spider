@@ -3489,9 +3489,10 @@ impl Website {
 
                         drop(tx);
 
-                        if let Ok(handle) = handles.await {
-                            for page in handle.iter() {
-                                self.extra_links.extend(page.links(&selectors).await)
+                        if let Ok(mut handle) = handles.await {
+                            for page in handle.iter_mut() {
+                                let links = page.links(&selectors).await;
+                                self.extra_links.extend(links)
                             }
                             if scrape {
                                 match self.pages.as_mut() {
