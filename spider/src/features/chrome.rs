@@ -150,13 +150,16 @@ pub async fn setup_browser_configuration(
     config: &Configuration,
 ) -> Option<(Browser, chromiumoxide::Handler)> {
     let proxies = &config.proxies;
-    let chrome_base = std::env::var("CHROME_URL").ok();
-
-    match if config.chrome_connection_url.is_some() {
+    let chrome_connection = if config.chrome_connection_url.is_some() {
         config.chrome_connection_url.as_ref()
     } else {
-        chrome_base.as_ref()
-    } {
+        lazy_static! {
+            static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
+        }
+        CHROM_BASE.as_ref()
+    };
+
+    match chrome_connection {
         Some(v) => match Browser::connect_with_config(&*v, create_handler_config(&config)).await {
             Ok(browser) => Some(browser),
             Err(err) => {
