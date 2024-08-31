@@ -66,6 +66,8 @@ adblock = { version = "0.8", optional = true, default-features = false, features
 phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
+hyper = { version = "*", features = ["full"], optional = true}
+hyper-rustls = { version = "*", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -78,12 +80,14 @@ tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread"
 ] }
 fastrand = { version = "2", optional = true }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.12", default-features = false, features = [
     "brotli",
     "gzip",
     "deflate",
     "zstd",
     "stream",
+    "http2",
+    "rustls-tls",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -93,11 +97,13 @@ tokio = { version = "1", default-features = false, features = [
     "rt"
 ] }
 fastrand = { version = "2", optional = true, features = ["js"] }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.12", default-features = false, features = [
     "brotli",
     "gzip",
     "deflate",
     "stream",
+    "http2",
+    "rustls-tls",
 ] }
 
 [features]
@@ -140,7 +146,7 @@ openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktok
 openai_slim_fit = []
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]
-reqwest_rustls_tls = ["reqwest/rustls-tls"]
+reqwest_rustls_tls = ["reqwest/rustls-tls", "hyper-rustls", "hyper"]
 reqwest_native_tls = ["reqwest/native-tls"]
 reqwest_native_tls_alpn = ["reqwest/native-tls-alpn"]
 reqwest_native_tls_vendored = ["reqwest/native-tls-vendored"]
@@ -154,4 +160,3 @@ tokio_io_std = ["tokio/io-std"]
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
-
