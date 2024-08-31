@@ -85,36 +85,51 @@ async fn cf_handle(
     let cnf = CF_MOCK_FRAME.as_ref();
 
     if b.ends_with(cf) || b.ends_with(cf2) || b.starts_with(cn) && b.ends_with(cnf) {
-        let mut wait_for = WaitFor::default();
-        wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
-        wait_for.idle_network =
-            WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
-        page_wait(&page, &Some(wait_for.clone())).await;
+        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+            let mut wait_for = WaitFor::default();
+            wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
+            wait_for.idle_network =
+                WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
+            page_wait(&page, &Some(wait_for.clone())).await;
 
-        let _ = page
-            .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
-            .await;
+            let _ = page
+                .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
+                .await;
 
-        wait_for.page_navigations = true;
-        page_wait(&page, &Some(wait_for.clone())).await;
+            wait_for.page_navigations = true;
+            page_wait(&page, &Some(wait_for.clone())).await;
 
-        let next_content = page.content_bytes().await?;
+            match page.content_bytes().await {
+                Ok(next_content) => {
+                    let next_content = if next_content.ends_with(cf)
+                        || next_content.ends_with(cf2)
+                        || next_content.starts_with(cn) && next_content.ends_with(cnf)
+                    {
+                        wait_for.delay =
+                            WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+                        page_wait(&page, &Some(wait_for)).await;
+                        match page.content_bytes().await {
+                            Ok(nc) => nc,
+                            _ => next_content,
+                        }
+                    } else {
+                        next_content
+                    };
 
-        let next_content = if next_content.ends_with(cf)
-            || next_content.ends_with(cf2)
-            || next_content.starts_with(cn) && next_content.ends_with(cnf)
-        {
-            wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-            page_wait(&page, &Some(wait_for)).await;
-            page.content_bytes().await?
-        } else {
-            next_content
-        };
+                    *b = next_content;
+                }
+                _ => (),
+            }
+        })
+        .await;
 
-        *b = next_content;
+        match page_result {
+            Ok(_) => Ok(()),
+            _ => Err(chromiumoxide::error::CdpError::Timeout),
+        }
+    } else {
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
@@ -818,7 +833,7 @@ pub async fn fetch_page_html_chrome_base(
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let page = {
-        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(120), async {
+        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
             {
                 // the active page was already set prior. No need to re-navigate or set the content.
                 if !page_set {
@@ -924,21 +939,27 @@ pub async fn fetch_page_html_chrome_base(
         ..Default::default()
     };
 
-    run_openai_request(
-        match url_target {
-            Some(ref ut) => ut,
-            _ => source,
-        },
-        page,
-        wait_for,
-        openai_config,
-        &mut page_response,
-        ok,
-    )
-    .await;
+    if openai_config.is_some() {
+        run_openai_request(
+            match url_target {
+                Some(ref ut) => ut,
+                _ => source,
+            },
+            page,
+            wait_for,
+            openai_config,
+            &mut page_response,
+            ok,
+        )
+        .await;
+    }
 
     if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
-        perform_screenshot(source, page, screenshot, &mut page_response).await;
+        let _ = tokio::time::timeout(
+            tokio::time::Duration::from_secs(30),
+            perform_screenshot(source, page, screenshot, &mut page_response),
+        )
+        .await;
     }
 
     if !page_set && cfg!(feature = "cache_chrome_hybrid") {
