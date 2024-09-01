@@ -831,6 +831,7 @@ pub async fn fetch_page_html_chrome_base(
     automation_scripts: &Option<AutomationScripts>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
+    let mut valid = false;
 
     let page = {
         let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
@@ -840,12 +841,16 @@ pub async fn fetch_page_html_chrome_base(
                     // used for smart mode re-rendering direct assigning html
                     if content {
                         match page.set_content(source).await {
-                            Ok(p) => p,
+                            Ok(p) => {
+                                valid = true;
+                                p
+                            }
                             _ => page,
                         }
                     } else {
                         match perform_chrome_http_request(&page, source).await {
                             Ok(chqr) => {
+                                valid = true;
                                 chrome_http_req_res = chqr;
                             }
                             Err(e) => {
@@ -865,6 +870,14 @@ pub async fn fetch_page_html_chrome_base(
             _ => page,
         }
     };
+
+    if !valid {
+        if cfg!(not(feature = "chrome_store_page")) {
+            page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+                .await?;
+        }
+        return Err(chromiumoxide::error::CdpError::NoResponse);
+    }
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !content {
