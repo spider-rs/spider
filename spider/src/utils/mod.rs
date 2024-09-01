@@ -468,7 +468,7 @@ pub async fn perform_chrome_http_request(
                 _ => (),
             };
         }
-        _ => (),
+        Err(e) => return Err(e),
     }
 
     Ok(ChromeHTTPReqRes {
@@ -835,33 +835,31 @@ pub async fn fetch_page_html_chrome_base(
 
     let page = {
         let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
-            {
-                // the active page was already set prior. No need to re-navigate or set the content.
-                if !page_set {
-                    // used for smart mode re-rendering direct assigning html
-                    if content {
-                        match page.set_content(source).await {
-                            Ok(p) => {
-                                valid = true;
-                                p
-                            }
-                            _ => page,
+            // the active page was already set prior. No need to re-navigate or set the content.
+            if !page_set {
+                // used for smart mode re-rendering direct assigning html
+                if content {
+                    match page.set_content(source).await {
+                        Ok(p) => {
+                            valid = true;
+                            p
                         }
-                    } else {
-                        match perform_chrome_http_request(&page, source).await {
-                            Ok(chqr) => {
-                                valid = true;
-                                chrome_http_req_res = chqr;
-                            }
-                            Err(e) => {
-                                log("HTTP Error: ", e.to_string());
-                            }
-                        };
-                        page
+                        _ => page,
                     }
                 } else {
+                    match perform_chrome_http_request(&page, source).await {
+                        Ok(chqr) => {
+                            valid = true;
+                            chrome_http_req_res = chqr;
+                        }
+                        Err(e) => {
+                            log("HTTP Error: ", e.to_string());
+                        }
+                    };
                     page
                 }
+            } else {
+                page
             }
         })
         .await;

@@ -209,24 +209,30 @@ pub async fn launch_browser(
 
             // spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
-                while let Some(h) = handler.next().await {
-                    if let Err(e) = h {
-                        match e {
-                            CdpError::LaunchExit(_, _)
-                            | CdpError::LaunchTimeout(_)
-                            | CdpError::LaunchIo(_, _) => {
-                                break;
-                            }
-                            _ => {
-                                continue;
+                loop {
+                    match handler.next().await {
+                        Some(k) => {
+                            if let Err(e) = k {
+                                match e {
+                                    CdpError::LaunchExit(_, _)
+                                    | CdpError::LaunchTimeout(_)
+                                    | CdpError::LaunchIo(_, _) => {
+                                        break;
+                                    }
+                                    _ => {
+                                        continue;
+                                    }
+                                }
                             }
                         }
+                        _ => break,
                     }
                 }
             });
 
             Some((browser, handle, content_id))
         }
+
         _ => None,
     }
 }
