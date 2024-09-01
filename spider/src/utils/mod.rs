@@ -1190,7 +1190,10 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
 
                         data.put(text)
                     }
-                    _ => (),
+                    Err(_) => {
+                        log("- stream error in {}", target_url);
+                        return Default::default();
+                    }
                 }
             }
 
