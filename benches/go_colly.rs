@@ -36,7 +36,7 @@ pub fn crawl_stub() -> String {
 }
 
 pub fn gen_crawl() -> String {
-    let crawl_script = String::from("./go-crolly.go");
+    let crawl_script = String::from("./go-colly.go");
     let file = File::create(&crawl_script).expect("create go crawl script");
     let mut file = BufWriter::new(file);
     let stub = crawl_stub();

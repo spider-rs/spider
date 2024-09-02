@@ -401,7 +401,9 @@ pub async fn perform_chrome_http_request(
     let page_base =
         page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
-            transition_type: None,
+            transition_type: Some(
+                chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
+            ),
             frame_id: None,
             referrer: None,
             referrer_policy: None,

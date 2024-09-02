@@ -27,7 +27,7 @@ Test url: `https://rsseau.fr/`
 |                                          | `libraries` |
 | :--------------------------------------- | :---------- |
 | **`Rust[spider]: crawl 10 samples`**     | `73ms`      |
-| **`Go[crolly]: crawl 10 samples`**       | `32s`       |
+| **`Go[colly]: crawl 10 samples`**       | `32s`       |
 | **`Node.js[crawler]: crawl 10 samples`** | `15s`       |
 | **`C[wget]: crawl 10 samples`**          | `70s`       |
 
@@ -49,7 +49,7 @@ Test url: `https://rsseau.fr/`
 |                                          | `libraries` |
 | :--------------------------------------- | :---------- |
 | **`Rust[spider]: crawl 10 samples`**     | `50ms`      |
-| **`Go[crolly]: crawl 10 samples`**       | `30s`       |
+| **`Go[colly]: crawl 10 samples`**       | `30s`       |
 | **`Node.js[crawler]: crawl 10 samples`** | `3.4s`      |
 | **`C[wget]: crawl 10 samples`**          | `60s`       |
 

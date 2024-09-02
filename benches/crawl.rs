@@ -1,4 +1,4 @@
-pub mod go_crolly;
+pub mod go_colly;
 pub mod node_crawler;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -44,8 +44,8 @@ pub fn bench_speed(c: &mut Criterion) {
     drop(worker);
 
     // [deprecated] - lib does not update and over 60x slower.
-    if env::var("BENCH_GO_CROLLY").unwrap_or_default() == "true" {
-        group.bench_function(format!("Go[crolly]: {}", sample_title), |b| {
+    if env::var("BENCH_GO_COLLY").unwrap_or_default() == "true" {
+        group.bench_function(format!("Go[colly]: {}", sample_title), |b| {
             b.iter(|| {
                 black_box(
                     Command::new("./gospider")

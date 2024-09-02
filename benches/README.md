@@ -15,7 +15,7 @@ How fast can we crawl all pages on a medium sized website. Tests are ordered bet
 10 samples between each run on `https://spider.cloud`:
 
 1. [Node.js](./node_crawler.rs) - node-crawler
-1. [Go](./go_crolly.rs) - Crolly
+1. [Go](./go_colly.rs) - Colly
 1. [Rust](./crawl.rs) - Spider
 1. C - wget
 

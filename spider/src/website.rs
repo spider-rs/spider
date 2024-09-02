@@ -1610,7 +1610,7 @@ impl Website {
                 }
             }
 
-            let _ = self.setup_chrome_interception(&chrome_page).await;
+            let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
             let mut page = Page::new(
                 &self.url.inner(),
@@ -1624,6 +1624,13 @@ impl Website {
                 &self.configuration.automation_scripts,
             )
             .await;
+
+            match intercept_handle {
+                Some(h) => {
+                    h.abort();
+                }
+                _ => (),
+            }
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -2565,7 +2572,6 @@ impl Website {
                                                             let target_url = link_result.0.as_ref();
                                                             let next = match attempt_navigation(target_url, &shared.4, &shared.5.request_timeout).await {
                                                                 Ok(new_page) => {
-
                                                                     match shared.5.evaluate_on_new_document
                                                                     {
                                                                         Some(ref script) => {
@@ -2840,7 +2846,7 @@ impl Website {
                                                     run_task(semaphore.clone(), move || async move {
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout).await {
                                                             Ok(new_page) => {
-                                                                let _ = setup_chrome_interception_base(
+                                                                let intercept_handle = setup_chrome_interception_base(
                                                                     &new_page,
                                                                     shared.6.chrome_intercept,
                                                                     &shared.6.auth_challenge_response,
@@ -2887,6 +2893,14 @@ impl Website {
                                                                     &shared.6.automation_scripts,
                                                                 )
                                                                 .await;
+
+
+                                                                match intercept_handle {
+                                                                    Some(h) => {
+                                                                        h.abort();
+                                                                    }
+                                                                    _ => ()
+                                                                }
 
                                                                 if add_external {
                                                                     page.set_external(shared.3.clone());
@@ -3611,6 +3625,7 @@ impl Website {
                             self.channel_guard.clone(),
                             browser,
                             self.configuration.clone(),
+                            self.url.inner().to_string(),
                         ));
 
                         let mut sitemaps = match self.configuration.sitemap_url {
@@ -3712,6 +3727,14 @@ impl Website {
                                                                         .await
                                                                         {
                                                                             Ok(new_page) => {
+                                                                                let intercept_handle = setup_chrome_interception_base(
+                                                                                    &new_page,
+                                                                                    shared.3.chrome_intercept,
+                                                                                    &shared.3.auth_challenge_response,
+                                                                                    shared.3.chrome_intercept_block_visuals,
+                                                                                    &shared.4
+                                                                                )
+                                                                                .await;
                                                                                 let new_page = configure_browser(new_page, &shared.3).await;
                                                                                 let page = Page::new(
                                                                                     &link.inner(),
@@ -3725,6 +3748,13 @@ impl Website {
                                                                                     &shared.3.automation_scripts,
                                                                                 )
                                                                                 .await;
+
+                                                                                match intercept_handle {
+                                                                                    Some(h) => {
+                                                                                        h.abort();
+                                                                                    }
+                                                                                    _ => ()
+                                                                                }
 
                                                                                 match tx
                                                                                     .reserve()

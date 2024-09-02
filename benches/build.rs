@@ -1,12 +1,12 @@
 use std::process::Command;
 
-pub mod go_crolly;
+pub mod go_colly;
 pub mod node_crawler;
 
 /// build executables for benchmarks
 pub fn main() {
     node_crawler::gen_crawl();
-    go_crolly::gen_crawl();
+    go_colly::gen_crawl();
 
     // install spider_worker
     Command::new("cargo")
