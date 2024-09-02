@@ -2475,6 +2475,12 @@ impl Website {
                             self.crawl_establish(&client, &mut selectors, false, &new_page, false)
                                 .await;
                             self.subscription_guard();
+                            crate::features::chrome::close_browser(
+                                browser_handle,
+                                &browser,
+                                &mut context_id,
+                            )
+                            .await;
                         } else {
                             let mut links: HashSet<CaseInsensitiveString> =
                                 self.drain_extra_links().collect();
@@ -2730,8 +2736,6 @@ impl Website {
                 .await
                 {
                     Ok(new_page) => {
-                        let _ = self.setup_chrome_interception(&new_page).await;
-
                         if match self.configuration.inner_budget {
                             Some(ref b) => match b.get(&*WILD_CARD_PATH) {
                                 Some(b) => b.eq(&1),
@@ -2743,6 +2747,12 @@ impl Website {
                             self.crawl_establish(&client, &mut selectors, false, &new_page, false)
                                 .await;
                             self.subscription_guard();
+                            crate::features::chrome::close_browser(
+                                browser_handle,
+                                &browser,
+                                &mut context_id,
+                            )
+                            .await;
                         } else {
                             let semaphore = if self.configuration.shared_queue {
                                 SEM_SHARED.clone()
@@ -3133,6 +3143,12 @@ impl Website {
                         self.crawl_establish_smart(&client, &mut selectors, false, &browser, false)
                             .await;
                         self.subscription_guard();
+                        crate::features::chrome::close_browser(
+                            browser_handle,
+                            &browser,
+                            &mut context_id,
+                        )
+                        .await;
                     } else {
                         let mut q = match &self.channel_queue {
                             Some(q) => Some(q.0.subscribe()),
