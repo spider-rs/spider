@@ -1188,7 +1188,10 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
 
                         data.put(text)
                     }
-                    _ => (),
+                    Err(e) => {
+                        log::error!("{e} in {}", target_url);
+                        break;
+                    }
                 }
             }
 
@@ -1345,7 +1348,10 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                             }
                         }
                     }
-                    _ => (),
+                    Err(e) => {
+                        log::error!("{e} in {}", target_url);
+                        break;
+                    }
                 }
             }
 
@@ -1493,7 +1499,10 @@ pub async fn fetch_page_html(
                                             }
                                         }
                                     }
-                                    _ => (),
+                                    Err(e) => {
+                                        log::error!("{e} in {}", target_url);
+                                        break;
+                                    }
                                 }
                             }
 
@@ -1639,7 +1648,10 @@ pub async fn fetch_page_html_chrome(
                                         }
                                         data.put(text)
                                     }
-                                    _ => (),
+                                    Err(e) => {
+                                        log::error!("{e} in {}", target_url);
+                                        break;
+                                    }
                                 }
                             }
 
