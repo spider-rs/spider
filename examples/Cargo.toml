@@ -1,8 +1,8 @@
 [package]
 name = "spider_examples"
-version = "2.2.14"
+version = "2.2.15"
 authors = [
-    "j-mendez <jeff@a11ywatch.com>",
+    "j-mendez <jeff@spider.cloud>",
 ]
 description = "Multithreaded web crawler written in Rust."
 repository = "https://github.com/spider-rs/spider"

@@ -1,8 +1,8 @@
 [package]
 name = "spider_cli"
-version = "2.2.14"
+version = "2.2.15"
 authors = [
-    "j-mendez <jeff@a11ywatch.com>"
+    "j-mendez <jeff@spider.cloud>"
 ]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"

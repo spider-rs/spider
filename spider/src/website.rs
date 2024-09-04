@@ -120,7 +120,7 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
-/// Setup interception for chrome request.
+/// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
 #[cfg(all(
     feature = "chrome",
     feature = "chrome_intercept",
@@ -233,7 +233,7 @@ async fn setup_chrome_interception_base(
     }
 }
 
-/// Setup interception for chrome request with advertisement blocking.
+/// Setup interception for chrome request with advertisement blocking. This does nothing without the 'chrome_intercept' flag.
 #[cfg(all(feature = "chrome", feature = "chrome_intercept", feature = "adblock"))]
 async fn setup_chrome_interception_base(
     page: &chromiumoxide::Page,
@@ -374,6 +374,20 @@ async fn setup_chrome_interception_base(
         None
     }
 }
+
+
+/// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
+#[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
+async fn setup_chrome_interception_base(
+    _page: &chromiumoxide::Page,
+    _chrome_intercept: bool,
+    _auth_challenge_response: &Option<configuration::AuthChallengeResponse>,
+    _ignore_visuals: bool,
+    _host_name: &str,
+) -> Option<tokio::task::JoinHandle<()>> {
+   None
+}
+
 
 /// Semaphore low priority tasks to run
 #[cfg(not(feature = "cowboy"))]
