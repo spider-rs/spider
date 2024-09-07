@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "2.2.15"
+version = "2.2.16"
 authors = [
     "j-mendez <jeff@spider.cloud>",
 ]
@@ -166,6 +166,11 @@ required-features = ["spider/sync", "spider/openai", "spider/cache_openai"]
 [[example]]
 name = "encoding"
 path = "encoding.rs"
+required-features = ["spider/sync", "spider/encoding"]
+
+[[example]]
+name = "auto_encoding"
+path = "auto_encoding.rs"
 required-features = ["spider/sync", "spider/encoding"]
 
 [[example]]

@@ -104,8 +104,10 @@ impl Html {
             create_missing_parent: false,
         };
         let mut buf = Vec::new();
-        serialize(&mut buf, self, opts).unwrap();
-        String::from_utf8(buf).unwrap()
+        match serialize(&mut buf, self, opts) {
+            _ => ()
+        };
+        crate::page::encode_bytes_from_language(&buf, "")
     }
 }
 

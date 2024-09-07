@@ -1419,13 +1419,13 @@ fn encode_bytes(html: &Bytes, label: &str) -> String {
 
 #[cfg(feature = "encoding")]
 /// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
-fn encode_bytes_from_language(html: &Bytes, language: &str) -> String {
+pub fn encode_bytes_from_language(html: &[u8], language: &str) -> String {
     auto_encoder::encode_bytes_from_language(html, language)
 }
 
 /// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
 #[cfg(not(feature = "encoding"))]
-fn encode_bytes_from_language(html: &Bytes, _language: &str) -> String {
+pub fn encode_bytes_from_language(html: &[u8], _language: &str) -> String {
     String::from_utf8_lossy(html).to_string()
 }
 
