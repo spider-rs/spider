@@ -375,7 +375,6 @@ async fn setup_chrome_interception_base(
     }
 }
 
-
 /// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
 #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
 async fn setup_chrome_interception_base(
@@ -385,9 +384,8 @@ async fn setup_chrome_interception_base(
     _ignore_visuals: bool,
     _host_name: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
-   None
+    None
 }
-
 
 /// Semaphore low priority tasks to run
 #[cfg(not(feature = "cowboy"))]

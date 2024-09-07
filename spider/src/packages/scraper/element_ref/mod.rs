@@ -58,7 +58,7 @@ impl<'a> ElementRef<'a> {
         };
         let mut buf = Vec::new();
         match serialize(&mut buf, self, opts) {
-            _ => ()
+            _ => (),
         };
         crate::page::encode_bytes_from_language(&buf, "")
     }
