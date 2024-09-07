@@ -841,24 +841,40 @@ pub async fn fetch_page_html_chrome_base(
             if !page_set {
                 // used for smart mode re-rendering direct assigning html
                 if content {
-                    match page.set_content(source).await {
+                    match page.mainframe().await {
+                        Ok(frame) => {
+                            match page.execute(chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                                frame_id: frame.unwrap_or_default(),
+                                html: source.to_string()
+                            }).await {
+                                Ok(_p) => {
+                                    valid = true;
+                                    page
+                                }
+                                _ => page,
+                            }
+                        }
+                        _ => {
+                            match page.set_content(source).await {
+                                Ok(p) => {
+                                    valid = true;
+                                    p
+                                }
+                                _ => page,
+                            }
+                        }
+                    }
+                } else {
+                    match page.goto(source).await {
                         Ok(p) => {
                             valid = true;
                             p
                         }
-                        _ => page,
-                    }
-                } else {
-                    match perform_chrome_http_request(&page, source).await {
-                        Ok(chqr) => {
-                            valid = true;
-                            chrome_http_req_res = chqr;
-                        }
                         Err(e) => {
                             log("HTTP Error: ", e.to_string());
+                            page
                         }
-                    };
-                    page
+                    }
                 }
             } else {
                 page
@@ -975,7 +991,10 @@ pub async fn fetch_page_html_chrome_base(
         .await;
     }
 
-    if !page_set && cfg!(feature = "cache_chrome_hybrid") {
+    if !page_set
+        && cfg!(feature = "cache_chrome_hybrid")
+        && chrome_http_req_res.status_code.is_success()
+    {
         match url::Url::parse(source) {
             Ok(u) => {
                 let http_response = HttpResponse {
