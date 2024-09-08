@@ -2582,7 +2582,7 @@ impl Website {
                                                                 _ => (link, None),
                                                             };
                                                             let target_url = link_result.0.as_ref();
-                                                            let next = match attempt_navigation(target_url, &shared.4, &shared.5.request_timeout).await {
+                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout).await {
                                                                 Ok(new_page) => {
                                                                     match shared.5.evaluate_on_new_document
                                                                     {
@@ -2620,7 +2620,7 @@ impl Website {
                                                                         &new_page,
                                                                         &shared.5.wait_for,
                                                                         &shared.5.screenshot,
-                                                                        true,
+                                                                        false,
                                                                         &shared.5.openai_config,
                                                                         &shared.5.execution_scripts,
                                                                         &shared.5.automation_scripts,
@@ -3730,7 +3730,7 @@ impl Website {
 
                                                                     tokio::spawn(async move {
                                                                         match attempt_navigation(
-                                                                            link.inner().as_str(),
+                                                                            "about:blank",
                                                                             &shared.2,
                                                                             &shared
                                                                                 .3
