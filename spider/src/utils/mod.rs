@@ -372,17 +372,17 @@ pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
 /// The chrome HTTP response.
 pub struct ChromeHTTPReqRes {
     /// Is the request blocked by a firewall?
-    waf_check: bool,
+    pub waf_check: bool,
     /// The HTTP status code.
-    status_code: StatusCode,
+    pub status_code: StatusCode,
     /// The HTTP method of the request.
-    method: String,
+    pub method: String,
     /// The HTTP response headers for the request.
-    response_headers: std::collections::HashMap<String, String>,
+    pub response_headers: std::collections::HashMap<String, String>,
     /// The HTTP request headers for the request.
-    request_headers: std::collections::HashMap<String, String>,
+    pub request_headers: std::collections::HashMap<String, String>,
     /// The HTTP protocol of the request.
-    protocol: String,
+    pub protocol: String,
 }
 
 #[cfg(feature = "chrome")]
@@ -729,15 +729,17 @@ impl ResponseLike for HttpResponseLike {
 }
 
 /// Convert headers to header map
-#[cfg(feature = "cache_chrome_hybrid")]
-pub fn convert_headers(headers: &std::collections::HashMap<String, String>) -> http::HeaderMap {
-    let mut header_map = http::HeaderMap::new();
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "headers"))]
+pub fn convert_headers(
+    headers: &std::collections::HashMap<String, String>,
+) -> reqwest::header::HeaderMap {
+    let mut header_map = reqwest::header::HeaderMap::new();
 
     for (index, items) in headers.iter().enumerate() {
-        match http::HeaderValue::from_str(&items.1) {
+        match reqwest::header::HeaderValue::from_str(&items.1) {
             Ok(head) => {
                 use std::str::FromStr;
-                match http::HeaderName::from_str(&items.0) {
+                match reqwest::header::HeaderName::from_str(&items.0) {
                     Ok(key) => {
                         header_map.insert(key, head);
                     }
@@ -817,6 +819,157 @@ pub async fn put_hybrid_cache(
 ) {
 }
 
+/// Get the initial page headers of the page with navigation.
+#[cfg(all(feature = "chrome"))]
+async fn navigate(
+    page: &chromiumoxide::Page,
+    url: &str,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    use chromiumoxide::cdp::browser_protocol::network::{
+        EventRequestWillBeSent, EventResponseReceived,
+    };
+    use tokio::sync::oneshot;
+    let (req_tx, req_rx) = oneshot::channel();
+    let (resp_tx, resp_rx) = oneshot::channel();
+
+    let rq = tokio::join!(
+        page.event_listener::<EventRequestWillBeSent>(),
+        page.event_listener::<EventResponseReceived>()
+    );
+
+    let mut req_sent = rq.0?.fuse();
+    let mut req_rec = rq.1?.fuse();
+
+    let request_url = url.to_string();
+
+    tokio::spawn(async move {
+        let f1 = async {
+            match req_sent.next().await {
+                Some(event) => {
+                    if event.request.url.starts_with(&request_url) {
+                        let headers = match event.request.headers.inner().as_object() {
+                            Some(h) => {
+                                let hash_map: std::collections::HashMap<String, String> = h
+                                    .iter()
+                                    .map(|(k, v)| {
+                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
+                                    })
+                                    .collect();
+                                hash_map
+                            }
+                            _ => Default::default(),
+                        };
+
+                        let _ = req_tx.send(headers);
+                    }
+                }
+                _ => (),
+            }
+        };
+
+        let f2 = async {
+            match req_rec.next().await {
+                Some(event) => {
+                    if event.response.url.starts_with(&request_url) {
+                        let headers = match event.response.headers.inner().as_object() {
+                            Some(h) => {
+                                let hash_map: std::collections::HashMap<String, String> = h
+                                    .iter()
+                                    .map(|(k, v)| {
+                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
+                                    })
+                                    .collect();
+                                hash_map
+                            }
+                            _ => Default::default(),
+                        };
+
+                        let _ = resp_tx.send((
+                            headers,
+                            event.response.status,
+                            event.response.protocol.clone(),
+                            false,
+                        ));
+                    } else {
+                        let headers = match event.response.headers.inner().as_object() {
+                            Some(h) => {
+                                let hash_map: std::collections::HashMap<String, String> = h
+                                    .iter()
+                                    .map(|(k, v)| {
+                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
+                                    })
+                                    .collect();
+                                hash_map
+                            }
+                            _ => Default::default(),
+                        };
+
+                        let mut waf_check = match event.response.security_details {
+                            Some(ref security_details) => {
+                                if security_details.subject_name == "challenges.cloudflare.com" {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => event.response.url.contains("/cdn-cgi/challenge-platform"),
+                        };
+                        if !waf_check {
+                            waf_check = match event.response.protocol {
+                                Some(ref protocol) => protocol == "blob",
+                                _ => false,
+                            };
+                        }
+
+                        let _ = resp_tx.send((
+                            headers,
+                            event.response.status,
+                            event.response.protocol.clone(),
+                            waf_check,
+                        ));
+                    }
+                }
+                _ => (),
+            }
+        };
+
+        tokio::join! {
+              f1,
+              f2,
+        }
+    });
+
+    // perform the navigation here.
+    match page.goto(url).await {
+        Ok(_p) => {}
+        Err(e) => {
+            log("HTTP Error: ", e.to_string());
+        }
+    };
+
+    let rq_out = tokio::join!(req_rx, resp_rx);
+
+    match rq_out.0.ok() {
+        Some(r) => {
+            chrome_http_req_res.request_headers = r;
+        }
+        _ => (),
+    }
+
+    match rq_out.1.ok() {
+        Some(r) => {
+            chrome_http_req_res.response_headers = r.0;
+            chrome_http_req_res.status_code = StatusCode::from_u16(r.1 as u16).unwrap_or_default();
+            chrome_http_req_res.protocol = r.2.unwrap_or_default();
+            chrome_http_req_res.waf_check = r.3;
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -835,57 +988,45 @@ pub async fn fetch_page_html_chrome_base(
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
     let mut valid = false;
 
-    let page = {
-        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
-            // the active page was already set prior. No need to re-navigate or set the content.
-            if !page_set {
-                // used for smart mode re-rendering direct assigning html
-                if content {
-                    match page.mainframe().await {
-                        Ok(frame) => {
-                            match page.execute(chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                                frame_id: frame.unwrap_or_default(),
-                                html: source.to_string()
-                            }).await {
-                                Ok(_p) => {
-                                    valid = true;
-                                    page
-                                }
-                                _ => page,
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+        // the active page was already set prior. No need to re-navigate or set the content.
+        if !page_set {
+            // used for smart mode re-rendering direct assigning html
+            if content {
+                match page.mainframe().await {
+                    Ok(frame) => {
+                        match page.execute(chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                            frame_id: frame.unwrap_or_default(),
+                            html: source.to_string()
+                        }).await {
+                            Ok(_p) => {
+                                valid = true;
                             }
-                        }
-                        _ => {
-                            match page.set_content(source).await {
-                                Ok(p) => {
-                                    valid = true;
-                                    p
-                                }
-                                _ => page,
-                            }
+                            _ => (),
                         }
                     }
-                } else {
-                    match page.goto(source).await {
-                        Ok(p) => {
-                            valid = true;
-                            p
-                        }
-                        Err(e) => {
-                            log("HTTP Error: ", e.to_string());
-                            page
-                        }
+                    _ => {
+                        match page.set_content(source).await {
+                            Ok(_) => {
+                                valid = true;
+                            }
+                            _ => (),
+                        };
                     }
                 }
             } else {
-                page
+                match navigate(page, source, &mut chrome_http_req_res).await {
+                    Ok(_) => {
+                        valid = true;
+                    }
+                    Err(e) => {
+                        log("HTTP Error: ", e.to_string());
+                    }
+                }
             }
-        })
-        .await;
-        match page_result {
-            Ok(r) => r,
-            _ => page,
         }
-    };
+    })
+    .await;
 
     if !valid {
         if cfg!(not(feature = "chrome_store_page")) {
@@ -961,12 +1102,7 @@ pub async fn fetch_page_html_chrome_base(
         chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
     }
 
-    let mut page_response = PageResponse {
-        content: if ok { Some(res) } else { None },
-        status_code: chrome_http_req_res.status_code,
-        final_url,
-        ..Default::default()
-    };
+    let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
     if openai_config.is_some() {
         run_openai_request(
@@ -1015,9 +1151,9 @@ pub async fn fetch_page_html_chrome_base(
                     headers: chrome_http_req_res.response_headers,
                 };
                 put_hybrid_cache(
-                    &string_concat!(chrome_http_req_res.method, ":", source),
+                    &string_concat!("GET", ":", source),
                     http_response,
-                    &chrome_http_req_res.method,
+                    &"GET",
                     chrome_http_req_res.request_headers,
                 )
                 .await;
@@ -1032,6 +1168,47 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     Ok(page_response)
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", not(feature = "headers")))]
+fn set_page_response(
+    ok: bool,
+    res: bytes::Bytes,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    final_url: Option<String>,
+) -> PageResponse {
+    let page_response = PageResponse {
+        content: if ok { Some(res) } else { None },
+        status_code: chrome_http_req_res.status_code,
+        final_url,
+        ..Default::default()
+    };
+    page_response
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", feature = "headers"))]
+fn set_page_response(
+    ok: bool,
+    res: bytes::Bytes,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    final_url: Option<String>,
+) -> PageResponse {
+    let response_headers = convert_headers(&chrome_http_req_res.request_headers);
+
+    let page_response = PageResponse {
+        content: if ok { Some(res) } else { None },
+        status_code: chrome_http_req_res.status_code,
+        final_url,
+        headers: if response_headers.is_empty() {
+            None
+        } else {
+            Some(response_headers)
+        },
+        ..Default::default()
+    };
+    page_response
 }
 
 /// Perform a screenshot shortcut.
