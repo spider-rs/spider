@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.3.3"
+version = "2.3.4"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -128,7 +128,7 @@ chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]
 chrome_screenshot = ["chrome"]
 chrome_store_page = ["chrome", "serde"]
-chrome_intercept = ["chrome"]
+chrome_intercept = ["chrome", "dep:serde_json"]
 chrome_headless_new = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
