@@ -3624,6 +3624,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "spider",
+ "spider_utils",
 ]
 
 [[package]]

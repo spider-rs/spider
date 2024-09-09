@@ -28,6 +28,10 @@ version = "2"
 path = "../spider"
 features = ["serde"]
 
+[dependencies.spider_utils]
+version = "2"
+path = "../spider_utils"
+
 [[example]]
 name = "example"
 path = "example.rs"
@@ -196,4 +200,9 @@ required-features = ["spider/sync"]
 [[example]]
 name = "queue"
 path = "queue.rs"
+required-features = ["spider/sync"]
+
+[[example]]
+name = "css_scrape"
+path = "css_scrape.rs"
 required-features = ["spider/sync"]
