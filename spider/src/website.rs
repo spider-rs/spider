@@ -120,6 +120,146 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
+/// Perform a page intercept for chrome
+#[cfg(all(
+    feature = "chrome",
+    feature = "chrome_intercept",
+    not(feature = "adblock")
+))]
+async fn perform_intercept(
+    event: Arc<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>,
+    intercept_page: &chromiumoxide::Page,
+    host_name: &str,
+    ignore_visuals: bool,
+) {
+    use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+
+    if ignore_visuals
+        && (ResourceType::Image == event.resource_type
+            || ResourceType::Media == event.resource_type
+            || ResourceType::Stylesheet == event.resource_type)
+        || ResourceType::Prefetch == event.resource_type
+        || ResourceType::Ping == event.resource_type
+        || ResourceType::Script == event.resource_type
+            && !(event.request.url.starts_with('/')
+                || event.request.url.starts_with(&host_name)
+                || crate::page::JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str()))
+    // add one off stripe framework check for now...
+    {
+        match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+            .request_id(event.request_id.clone())
+            .response_code(200)
+            .build()
+        {
+            Ok(c) => {
+                if let Err(e) = intercept_page.execute(c).await {
+                    log("Failed to fullfill request: ", e.to_string());
+                }
+            }
+            _ => {
+                log("Failed to get request handle ", &host_name);
+            }
+        }
+    } else if let Err(e) = intercept_page
+        .execute(
+            chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(
+                event.request_id.clone(),
+            ),
+        )
+        .await
+    {
+        log("Failed to continue request: ", e.to_string());
+    }
+}
+
+/// Perform a page intercept for chrome
+#[cfg(all(feature = "chrome", feature = "chrome_intercept", feature = "adblock"))]
+async fn perform_intercept(
+    event: Arc<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>,
+    intercept_page: &chromiumoxide::Page,
+    host_name: &str,
+    ignore_visuals: bool,
+) {
+    use adblock::{
+        lists::{FilterSet, ParseOptions},
+        Engine,
+    };
+    use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+    let u = &event.request.url;
+
+    lazy_static! {
+        static ref AD_ENGINE: Engine = {
+            let mut filter_set = FilterSet::new(false);
+            filter_set.add_filters(
+                &vec![
+                    String::from("-advertisement."),
+                    String::from("-ads."),
+                    String::from("-ad."),
+                    String::from("-advertisement-icon."),
+                    String::from("-advertisement-management/"),
+                    String::from("-advertisement/script."),
+                    String::from("-ads/script."),
+                ],
+                ParseOptions::default(),
+            );
+            Engine::from_filter_set(filter_set, true)
+        };
+    }
+
+    let asset = ResourceType::Image == event.resource_type
+        || ResourceType::Media == event.resource_type
+        || ResourceType::Stylesheet == event.resource_type;
+
+    if ignore_visuals && asset
+        || ResourceType::Prefetch == event.resource_type
+        || ResourceType::Ping == event.resource_type
+        || ResourceType::Script == event.resource_type
+            && !(u.starts_with('/')
+                || u.starts_with(&host_name)
+                || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str()))
+        || !ignore_visuals
+            && (asset
+                || event.resource_type == ResourceType::Fetch
+                || event.resource_type == ResourceType::Xhr)
+            && match adblock::request::Request::new(
+                &u,
+                &intercept_page
+                    .url()
+                    .await
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                &event.resource_type.as_ref(),
+            ) {
+                Ok(adblock_request) => AD_ENGINE.check_network_request(&adblock_request).matched,
+                _ => false,
+            }
+    {
+        match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
+            .request_id(event.request_id.clone())
+            .response_code(200)
+            .build()
+        {
+            Ok(c) => {
+                if let Err(e) = intercept_page.execute(c).await {
+                    log("Failed to fullfill request: ", e.to_string());
+                }
+            }
+            _ => {
+                log("Failed to get request handle ", &host_name);
+            }
+        }
+    } else if let Err(e) = intercept_page
+        .execute(
+            chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(
+                event.request_id.clone(),
+            ),
+        )
+        .await
+    {
+        log("Failed to continue request: ", e.to_string());
+    }
+}
+
 /// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
 #[cfg(all(
     feature = "chrome",
@@ -180,47 +320,37 @@ async fn setup_chrome_interception_base(
             .await
         {
             Ok(mut rp) => {
-                let mut host_name = host_name.to_string();
+                let mut host_name: String = host_name.to_string();
                 let intercept_page = page.clone();
 
                 let ih = tokio::task::spawn(async move {
                     let mut first_rq = true;
                     while let Some(event) = rp.next().await {
-                        let u = &event.request.url;
+                        let spawn_task = !first_rq;
 
                         if first_rq {
                             if ResourceType::Document == event.resource_type {
-                                host_name = u.into();
+                                host_name = event.request.url.clone();
                             }
                             first_rq = false;
                         }
 
-                        if
-                                    ignore_visuals && (ResourceType::Image == event.resource_type || ResourceType::Media == event.resource_type || ResourceType::Stylesheet == event.resource_type) ||
-                                    ResourceType::Prefetch == event.resource_type ||
-                                    ResourceType::Ping == event.resource_type ||
-                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str())) // add one off stripe framework check for now...
-                                {
-                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
-                                    .request_id(event.request_id.clone())
-                                    .response_code(200)
-                                    .build() {
-                                        Ok(c) => {
-                                            if let Err(e) = intercept_page.execute(c).await
-                                            {
-                                                log("Failed to fullfill request: ", e.to_string());
-                                            }
-                                        }
-                                        _ => {
-                                            log("Failed to get request handle ", &host_name);
-                                        }
-                                    }
-                            } else if let Err(e) = intercept_page
-                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                        if spawn_task {
+                            let host_name = host_name.clone();
+                            let intercept_page = intercept_page.clone();
+                            tokio::task::spawn(async move {
+                                perform_intercept(
+                                    event,
+                                    &intercept_page,
+                                    &host_name,
+                                    ignore_visuals,
+                                )
                                 .await
-                                {
-                                    log("Failed to continue request: ", e.to_string());
-                                }
+                            });
+                        } else {
+                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
+                                .await;
+                        }
                     }
                 });
 
@@ -243,30 +373,7 @@ async fn setup_chrome_interception_base(
     host_name: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if chrome_intercept {
-        use adblock::{
-            lists::{FilterSet, ParseOptions},
-            Engine,
-        };
         use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-
-        lazy_static! {
-            static ref AD_ENGINE: Engine = {
-                let mut filter_set = FilterSet::new(false);
-                filter_set.add_filters(
-                    &vec![
-                        String::from("-advertisement."),
-                        String::from("-ads."),
-                        String::from("-ad."),
-                        String::from("-advertisement-icon."),
-                        String::from("-advertisement-management/"),
-                        String::from("-advertisement/script."),
-                        String::from("-ads/script."),
-                    ],
-                    ParseOptions::default(),
-                );
-                Engine::from_filter_set(filter_set, true)
-            };
-        }
 
         match auth_challenge_response {
             Some(ref auth_challenge_response) => {
@@ -318,51 +425,31 @@ async fn setup_chrome_interception_base(
                 let ih = tokio::task::spawn(async move {
                     let mut first_rq = true;
                     while let Some(event) = rp.next().await {
-                        let u = &event.request.url;
+                        let spawn_task = !first_rq;
 
                         if first_rq {
                             if ResourceType::Document == event.resource_type {
-                                host_name = u.into();
+                                host_name = event.request.url.clone();
                             }
                             first_rq = false;
                         }
 
-                        let asset = ResourceType::Image == event.resource_type
-                            || ResourceType::Media == event.resource_type
-                            || ResourceType::Stylesheet == event.resource_type;
-
-                        if
-                                    ignore_visuals && asset ||
-                                    ResourceType::Prefetch == event.resource_type ||
-                                    ResourceType::Ping == event.resource_type ||
-                                    ResourceType::Script == event.resource_type && !(u.starts_with('/') || u.starts_with(&host_name) || crate::page::JS_FRAMEWORK_ALLOW.contains(&u.as_str())) ||
-                                    !ignore_visuals && (asset || event.resource_type == ResourceType::Fetch || event.resource_type == ResourceType::Xhr) && match adblock::request::Request::new(&u, &intercept_page.url().await.unwrap_or_default().unwrap_or_default(),  &event.resource_type.as_ref()) {
-                                        Ok(adblock_request) => {
-                                            AD_ENGINE.check_network_request(&adblock_request).matched
-                                        }
-                                        _ => false
-                                    }
-                                {
-                                    match chromiumoxide::cdp::browser_protocol::fetch::FulfillRequestParams::builder()
-                                    .request_id(event.request_id.clone())
-                                    .response_code(200)
-                                    .build() {
-                                        Ok(c) => {
-                                            if let Err(e) = intercept_page.execute(c).await
-                                            {
-                                                log("Failed to fullfill request: ", e.to_string());
-                                            }
-                                        }
-                                        _ => {
-                                            log("Failed to get request handle ", &host_name);
-                                        }
-                                    }
-                            } else if let Err(e) = intercept_page
-                                .execute(chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(event.request_id.clone()))
+                        if spawn_task {
+                            let host_name = host_name.clone();
+                            let intercept_page = intercept_page.clone();
+                            tokio::task::spawn(async move {
+                                perform_intercept(
+                                    event,
+                                    &intercept_page,
+                                    &host_name,
+                                    ignore_visuals,
+                                )
                                 .await
-                                {
-                                    log("Failed to continue request: ", e.to_string());
-                                }
+                            });
+                        } else {
+                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
+                                .await;
+                        }
                     }
                 });
 
