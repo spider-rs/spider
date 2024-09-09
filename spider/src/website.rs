@@ -260,22 +260,18 @@ async fn perform_intercept(
     }
 }
 
-/// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
+/// Setup interception for auth challenges. This does nothing without the 'chrome_intercept' flag.
 #[cfg(all(
     feature = "chrome",
     feature = "chrome_intercept",
     not(feature = "adblock")
 ))]
-async fn setup_chrome_interception_base(
+async fn setup_auth_challenge_response(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
     auth_challenge_response: &Option<configuration::AuthChallengeResponse>,
-    ignore_visuals: bool,
-    host_name: &str,
-) -> Option<tokio::task::JoinHandle<()>> {
+) {
     if chrome_intercept {
-        use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-
         match auth_challenge_response {
             Some(ref auth_challenge_response) => {
                 match page
@@ -314,7 +310,19 @@ async fn setup_chrome_interception_base(
             }
             _ => (),
         }
+    }
+}
 
+/// Setup interception for chrome network request. This does nothing without the 'chrome_intercept' flag.
+#[cfg(all(feature = "chrome", feature = "chrome_intercept",))]
+async fn setup_chrome_network_interception(
+    page: &chromiumoxide::Page,
+    chrome_intercept: bool,
+    ignore_visuals: bool,
+    host_name: &str,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if chrome_intercept {
+        use chromiumoxide::cdp::browser_protocol::network::ResourceType;
         match page
             .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
             .await
@@ -325,32 +333,25 @@ async fn setup_chrome_interception_base(
 
                 let ih = tokio::task::spawn(async move {
                     let mut first_rq = true;
-                    while let Some(event) = rp.next().await {
-                        let spawn_task = !first_rq;
 
+                    while let Some(event) = rp.next().await {
                         if first_rq {
                             if ResourceType::Document == event.resource_type {
                                 host_name = event.request.url.clone();
                             }
                             first_rq = false;
-                        }
-
-                        if spawn_task {
-                            let host_name = host_name.clone();
-                            let intercept_page = intercept_page.clone();
-                            tokio::task::spawn(async move {
-                                perform_intercept(
-                                    event,
-                                    &intercept_page,
-                                    &host_name,
-                                    ignore_visuals,
-                                )
-                                .await
-                            });
-                        } else {
                             perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
                                 .await;
+                            continue;
                         }
+
+                        let host_name = host_name.clone();
+                        let intercept_page = intercept_page.clone();
+
+                        tokio::task::spawn(async move {
+                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
+                                .await;
+                        });
                     }
                 });
 
@@ -363,8 +364,8 @@ async fn setup_chrome_interception_base(
     }
 }
 
-/// Setup interception for chrome request with advertisement blocking. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(feature = "chrome", feature = "chrome_intercept", feature = "adblock"))]
+/// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
+#[cfg(all(feature = "chrome", feature = "chrome_intercept",))]
 async fn setup_chrome_interception_base(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
@@ -373,90 +374,11 @@ async fn setup_chrome_interception_base(
     host_name: &str,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if chrome_intercept {
-        use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-
-        match auth_challenge_response {
-            Some(ref auth_challenge_response) => {
-                match page
-                        .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
-                        .await
-                        {
-                            Ok(mut rp) => {
-                                let intercept_page = page.clone();
-                                let auth_challenge_response = auth_challenge_response.clone();
-
-                                // we may need return for polling
-                                tokio::task::spawn(async move {
-                                    while let Some(event) = rp.next().await {
-                                        let u = &event.request.url;
-                                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
-
-                                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
-                                        .request_id(event.request_id.clone())
-                                        .auth_challenge_response(acr)
-                                        .build() {
-                                            Ok(c) => {
-                                                if let Err(e) = intercept_page.execute(c).await
-                                                {
-                                                    log("Failed to fullfill auth challege request: ", e.to_string());
-                                                }
-                                            }
-                                            _ => {
-                                                log("Failed to get auth challege request handle ", &u);
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                            _ => (),
-                        }
-            }
-            _ => (),
-        }
-
-        match page
-            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
-            .await
-        {
-            Ok(mut rp) => {
-                let mut host_name = host_name.to_string();
-                let intercept_page = page.clone();
-
-                let ih = tokio::task::spawn(async move {
-                    let mut first_rq = true;
-                    while let Some(event) = rp.next().await {
-                        let spawn_task = !first_rq;
-
-                        if first_rq {
-                            if ResourceType::Document == event.resource_type {
-                                host_name = event.request.url.clone();
-                            }
-                            first_rq = false;
-                        }
-
-                        if spawn_task {
-                            let host_name = host_name.clone();
-                            let intercept_page = intercept_page.clone();
-                            tokio::task::spawn(async move {
-                                perform_intercept(
-                                    event,
-                                    &intercept_page,
-                                    &host_name,
-                                    ignore_visuals,
-                                )
-                                .await
-                            });
-                        } else {
-                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
-                                .await;
-                        }
-                    }
-                });
-
-                Some(ih)
-            }
-            _ => None,
-        }
+        let interceptions = tokio::join!(
+            setup_auth_challenge_response(page, chrome_intercept, auth_challenge_response),
+            setup_chrome_network_interception(page, chrome_intercept, ignore_visuals, host_name)
+        );
+        interceptions.1
     } else {
         None
     }
