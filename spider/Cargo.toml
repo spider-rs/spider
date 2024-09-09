@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.3.5"
+version = "2.4.0"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -66,6 +66,7 @@ adblock = { version = "0.8", optional = true, default-features = false, features
 phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
+base64 = { version = "0.22", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -122,7 +123,7 @@ cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]
 cache_chrome_hybrid = ["cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
-chrome = ["dep:chromiumoxide"]
+chrome = ["dep:chromiumoxide", "dep:base64"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]

@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.3.5"
+version = "2.4.0"
 dependencies = [
  "adblock",
  "ahash",
@@ -3557,6 +3557,7 @@ dependencies = [
  "async-trait",
  "async_job",
  "auto_encoder",
+ "base64 0.22.1",
  "bytes",
  "case_insensitive_string",
  "chromiumoxide",
@@ -3604,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.3.5"
+version = "2.4.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -3616,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "2.3.5"
+version = "2.4.0"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3627,7 +3628,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.3.5"
+version = "2.4.0"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3635,7 +3636,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.3.5"
+version = "2.4.0"
 dependencies = [
  "env_logger",
  "lazy_static",

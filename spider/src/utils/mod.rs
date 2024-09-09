@@ -1219,6 +1219,9 @@ pub async fn perform_screenshot(
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_response: &mut PageResponse,
 ) {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+
     match screenshot {
         Some(ref ss) => {
             let output_format = string_concat!(
@@ -1232,37 +1235,54 @@ pub async fn perform_screenshot(
             );
             let ss_params = chromiumoxide::page::ScreenshotParams::from(ss.params.clone());
 
-            if ss.save {
-                let output_path = create_output_path(
-                    &ss.output_dir.clone().unwrap_or_else(|| "./storage/".into()),
-                    &target_url,
-                    &output_format,
-                )
-                .await;
+            let full_page = ss_params.full_page.unwrap_or_default();
+            let omit_background = ss_params.omit_background.unwrap_or_default();
+            let mut cdp_params = ss_params.cdp_params;
 
-                match page.save_screenshot(ss_params, &output_path).await {
+            cdp_params.optimize_for_speed = Some(true);
+
+            if full_page {
+                cdp_params.capture_beyond_viewport = Some(true);
+            }
+
+            if omit_background {
+                let _ = page.execute(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams {
+                    color: Some(chromiumoxide::cdp::browser_protocol::dom::Rgba {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: Some(0.),
+                    }),
+                })
+                .await;
+            }
+
+            match page.execute(cdp_params).await {
+                Ok(b) => match STANDARD.decode(&b.data) {
                     Ok(b) => {
-                        log::debug!("saved screenshot: {:?}", output_path);
+                        if ss.save {
+                            let output_path = create_output_path(
+                                &ss.output_dir.clone().unwrap_or_else(|| "./storage/".into()),
+                                &target_url,
+                                &output_format,
+                            )
+                            .await;
+                            let _ = tokio::fs::write(output_path, &b).await;
+                        }
                         if ss.bytes {
                             page_response.screenshot_bytes = Some(b);
                         }
                     }
-                    Err(e) => {
-                        log::error!("failed to save screenshot: {:?} - {:?}", e, output_path)
-                    }
-                };
-            } else {
-                match page.screenshot(ss_params).await {
-                    Ok(b) => {
-                        log::debug!("took screenshot: {:?}", target_url);
-                        if ss.bytes {
-                            page_response.screenshot_bytes = Some(b);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("failed to take screenshot: {:?} - {:?}", e, target_url)
-                    }
-                };
+                    _ => (),
+                },
+                Err(e) => {
+                    log::error!("failed to take screenshot: {:?} - {:?}", e, target_url)
+                }
+            };
+
+            if omit_background {
+                let _ = page.execute(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams { color: None })
+                        .await;
             }
         }
         _ => {
