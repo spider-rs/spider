@@ -10,6 +10,17 @@ use super::ElementRef;
 impl<'a> Element for ElementRef<'a> {
     type Impl = Simple;
 
+    fn add_element_unique_hashes(&self, _filter: &mut selectors::bloom::BloomFilter) -> bool {
+        false
+    }
+
+    fn has_custom_state(
+        &self,
+        _name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
+    ) -> bool {
+        false
+    }
+
     fn opaque(&self) -> OpaqueElement {
         OpaqueElement::new(self.node.value())
     }

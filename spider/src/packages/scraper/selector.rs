@@ -4,8 +4,10 @@ use crate::packages::scraper::element_ref::ElementRef;
 use crate::packages::scraper::error::SelectorErrorKind;
 use cssparser::ToCss;
 use fast_html5ever::{LocalName, Namespace};
+use precomputed_hash::PrecomputedHash;
+use selectors::context::SelectorCaches;
 use selectors::parser::SelectorParseErrorKind;
-use selectors::{matching, parser, NthIndexCache};
+use selectors::{matching, parser};
 use smallvec::SmallVec;
 use std::convert::TryFrom;
 use std::fmt;
@@ -27,7 +29,9 @@ impl Selector {
         let mut parser = cssparser::Parser::new(&mut parser_input);
 
         parser::SelectorList::parse(&Parser, &mut parser, parser::ParseRelative::No)
-            .map(|list| Selector { selectors: list.0 })
+            .map(|list| Selector {
+                selectors: list.slice().into(),
+            })
             .map_err(SelectorErrorKind::from)
     }
 
@@ -40,14 +44,14 @@ impl Selector {
     /// The optional `scope` argument is used to specify which element has `:scope` pseudo-class.
     /// When it is `None`, `:scope` will match the root element.
     pub fn matches_with_scope(&self, element: &ElementRef, scope: Option<ElementRef>) -> bool {
-        let mut binding = NthIndexCache::default();
+        let mut binding = SelectorCaches::default();
         let mut context = matching::MatchingContext::new(
             matching::MatchingMode::Normal,
             None,
             &mut binding,
             matching::QuirksMode::NoQuirks,
             matching::NeedsSelectorFlags::No,
-            matching::IgnoreNthChildForInvalidation::No,
+            matching::MatchingForInvalidation::No,
         );
         context.scope_element = scope.map(|x| selectors::Element::opaque(&x));
         self.selectors
@@ -124,6 +128,12 @@ impl ToCss for CssLocalName {
         W: fmt::Write,
     {
         dest.write_str(&self.0)
+    }
+}
+
+impl PrecomputedHash for CssLocalName {
+    fn precomputed_hash(&self) -> u32 {
+        self.0.as_ptr() as u32
     }
 }
 
