@@ -11,7 +11,7 @@
 [API Docs](https://docs.rs/spider/latest/spider) |
 [Chat](https://discord.spider.cloud)
 
-The fastest web crawler and indexer. Foundational building blocks for data curation workloads.
+A web crawler and scraper, building blocks for data curation workloads.
 
 - Concurrent
 - Streaming
