@@ -27,6 +27,8 @@ impl<V: std::fmt::Debug> TrieNode<V> {
 pub struct Trie<V: Debug> {
     /// A new trie node.
     pub root: TrieNode<V>,
+    /// Contains a match all segment to default to.
+    pub match_all: bool,
 }
 
 impl<V: Debug> Trie<V> {
@@ -34,6 +36,7 @@ impl<V: Debug> Trie<V> {
     pub fn new() -> Self {
         Self {
             root: TrieNode::new(),
+            match_all: false,
         }
     }
 
@@ -83,18 +86,27 @@ impl<V: Debug> Trie<V> {
                 .or_insert_with(TrieNode::new);
         }
 
+        if path == "/" {
+            self.match_all = true;
+        }
+
         node.value = Some(value);
     }
 
     /// Search for a path in the trie.
     pub fn search(&self, input: &str) -> Option<&V> {
-        let normalized_path = Self::normalize_path(input);
         let mut node = &self.root;
+
+        if node.children.is_empty() {
+            return None;
+        }
+
+        let normalized_path = Self::normalize_path(input);
 
         for segment in normalized_path.split('/').filter(|s| !s.is_empty()) {
             if let Some(child) = node.children.get(segment) {
                 node = child;
-            } else {
+            } else if !self.match_all {
                 return None;
             }
         }
@@ -125,13 +137,17 @@ mod tests {
     fn test_insert_and_search() {
         let mut trie: Trie<usize> = Trie::new();
         trie.insert("/path/to/node", 42);
-        trie.insert("https://mywebsite/path/to/node", 42);
+        trie.insert("https://mywebsite/path/to/node", 22);
 
-        assert_eq!(trie.search("https://mywebsite/path/to/node"), Some(&42));
-        assert_eq!(trie.search("/path/to/node"), Some(&42));
+        assert_eq!(trie.search("https://mywebsite/path/to/node"), Some(&22));
+        assert_eq!(trie.search("/path/to/node"), Some(&22));
         assert_eq!(trie.search("/path"), None);
         assert_eq!(trie.search("/path/to"), None);
         assert_eq!(trie.search("/path/to/node/extra"), None);
+
+        // insert match all context
+        trie.insert("/", 11);
+        assert_eq!(trie.search("/random"), Some(&11));
     }
 
     #[test]

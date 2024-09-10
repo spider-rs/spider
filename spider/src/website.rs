@@ -261,11 +261,7 @@ async fn perform_intercept(
 }
 
 /// Setup interception for auth challenges. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(
-    feature = "chrome",
-    feature = "chrome_intercept",
-    not(feature = "adblock")
-))]
+#[cfg(all(feature = "chrome", feature = "chrome_intercept",))]
 async fn setup_auth_challenge_response(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
