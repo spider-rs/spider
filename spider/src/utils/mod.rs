@@ -993,27 +993,12 @@ pub async fn fetch_page_html_chrome_base(
         if !page_set {
             // used for smart mode re-rendering direct assigning html
             if content {
-                match page.mainframe().await {
-                    Ok(frame) => {
-                        match page.execute(chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                            frame_id: frame.unwrap_or_default(),
-                            html: source.to_string()
-                        }).await {
-                            Ok(_p) => {
-                                valid = true;
-                            }
-                            _ => (),
-                        }
+                match page.set_content(source).await {
+                    Ok(_) => {
+                        valid = true;
                     }
-                    _ => {
-                        match page.set_content(source).await {
-                            Ok(_) => {
-                                valid = true;
-                            }
-                            _ => (),
-                        };
-                    }
-                }
+                    _ => (),
+                };
             } else {
                 match navigate(page, source, &mut chrome_http_req_res).await {
                     Ok(_) => {
