@@ -4,6 +4,7 @@ use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// get chrome configuration

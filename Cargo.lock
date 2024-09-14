@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.4.2"
+version = "2.5.0"
 dependencies = [
  "adblock",
  "ahash",
@@ -3592,6 +3592,7 @@ dependencies = [
  "serde_json",
  "sitemap",
  "smallvec",
+ "string-interner",
  "string_concat",
  "strum",
  "tendril",
@@ -3605,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.4.2"
+version = "2.5.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -3617,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "2.4.2"
+version = "2.5.0"
 dependencies = [
  "convert_case 0.6.0",
  "env_logger",
@@ -3629,7 +3630,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.4.2"
+version = "2.5.0"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3637,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.4.2"
+version = "2.5.0"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -3679,6 +3680,17 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "string-interner"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c6a0d765f5807e98a091107bae0a56ea3799f66a5de47b2c84c94a39c09974e"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.14.5",
+ "serde",
+]
 
 [[package]]
 name = "string_cache"

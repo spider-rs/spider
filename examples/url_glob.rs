@@ -22,7 +22,7 @@ async fn main() {
 
     let links = website.get_links();
 
-    for link in links {
+    for link in links.iter() {
         println!("- {:?}", link.as_ref());
     }
 

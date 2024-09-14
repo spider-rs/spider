@@ -5,7 +5,7 @@ use crate::configuration::{
 };
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{get_page_selectors, Page};
-use crate::utils::log;
+use crate::utils::{interner::ListBucket, log};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use hashbrown::{HashMap, HashSet};
@@ -14,6 +14,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use string_interner::symbol::SymbolU32;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, Semaphore},
@@ -216,7 +217,7 @@ pub struct Website {
     /// Configuration properties for website.
     pub configuration: Box<Configuration>,
     /// All URLs visited.
-    links_visited: Box<HashSet<CaseInsensitiveString>>,
+    links_visited: Box<ListBucket>,
     /// Extra links to crawl.
     extra_links: Box<HashSet<CaseInsensitiveString>>,
     /// Pages visited.
@@ -263,7 +264,7 @@ impl Website {
         };
         Self {
             configuration: Configuration::new().into(),
-            links_visited: Box::new(HashSet::new()),
+            links_visited: Box::new(ListBucket::new()),
             pages: None,
             robot_file_parser: None,
             on_link_find_callback: None,
@@ -557,7 +558,7 @@ impl Website {
     }
 
     /// Drain the links visited.
-    pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
+    pub(crate) fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolU32> {
         self.links_visited.drain()
     }
 
@@ -593,8 +594,8 @@ impl Website {
     }
 
     /// Links visited getter.
-    pub fn get_links(&self) -> &HashSet<CaseInsensitiveString> {
-        &self.links_visited
+    pub fn get_links(&self) -> HashSet<CaseInsensitiveString> {
+        self.links_visited.get_links()
     }
 
     /// Domain parsed url getter.
@@ -2153,9 +2154,8 @@ impl Website {
                                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                         continue;
                                                     }
-                                                    links.extend(
-                                                        &HashSet::from([s]) - &self.links_visited,
-                                                    );
+                                                    self.links_visited
+                                                        .extend_with_new_links(&mut links, s);
                                                 }
                                             }
                                             _ => (),
@@ -2167,7 +2167,7 @@ impl Website {
 
                             while let Some(res) = set.join_next().await {
                                 match res {
-                                    Ok(msg) => links.extend(&msg - &self.links_visited),
+                                    Ok(msg) => self.links_visited.extend_links(&mut links, msg),
                                     _ => (),
                                 };
                             }
@@ -2415,10 +2415,11 @@ impl Website {
                                                             {
                                                                 continue;
                                                             }
-                                                            links.extend(
-                                                                &HashSet::from([s])
-                                                                    - &self.links_visited,
-                                                            );
+
+                                                            self.links_visited
+                                                                .extend_with_new_links(
+                                                                    &mut links, s,
+                                                                );
                                                         }
                                                     }
                                                     _ => (),
@@ -2430,7 +2431,9 @@ impl Website {
 
                                     while let Some(res) = set.join_next().await {
                                         match res {
-                                            Ok(msg) => links.extend(&msg - &self.links_visited),
+                                            Ok(msg) => {
+                                                self.links_visited.extend_links(&mut links, msg)
+                                            }
                                             Err(e) => {
                                                 if set.is_empty() {
                                                     break;
@@ -2694,10 +2697,11 @@ impl Website {
                                                             {
                                                                 continue;
                                                             }
-                                                            links.extend(
-                                                                &HashSet::from([s])
-                                                                    - &self.links_visited,
-                                                            );
+
+                                                            self.links_visited
+                                                                .extend_with_new_links(
+                                                                    &mut links, s,
+                                                                );
                                                         }
                                                     }
                                                     _ => (),
@@ -2709,7 +2713,9 @@ impl Website {
 
                                     while let Some(res) = set.join_next().await {
                                         match res {
-                                            Ok(msg) => links.extend(&msg - &self.links_visited),
+                                            Ok(msg) => {
+                                                self.links_visited.extend_links(&mut links, msg)
+                                            }
                                             _ => (),
                                         };
                                     }
@@ -2851,9 +2857,9 @@ impl Website {
                                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                         continue;
                                                     }
-                                                    links.extend(
-                                                        &HashSet::from([s]) - &self.links_visited,
-                                                    );
+
+                                                    self.links_visited
+                                                        .extend_with_new_links(&mut links, s);
                                                 }
                                             }
                                             _ => (),
@@ -2868,9 +2874,7 @@ impl Website {
 
                     while let Some(res) = set.join_next().await {
                         match res {
-                            Ok(msg) => {
-                                links.extend(&msg - &self.links_visited);
-                            }
+                            Ok(msg) => self.links_visited.extend_links(&mut links, msg),
                             _ => (),
                         };
                     }
@@ -3043,10 +3047,9 @@ impl Website {
                                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                             continue;
                                                         }
-                                                        links.extend(
-                                                            &HashSet::from([s])
-                                                                - &self.links_visited,
-                                                        );
+
+                                                        self.links_visited
+                                                            .extend_with_new_links(&mut links, s);
                                                     }
                                                 }
                                                 _ => (),
@@ -3058,7 +3061,7 @@ impl Website {
 
                                 while let Some(res) = set.join_next().await {
                                     match res {
-                                        Ok(msg) => links.extend(&msg - &self.links_visited),
+                                        Ok(msg) => self.links_visited.extend_links(&mut links, msg),
                                         _ => (),
                                     };
                                 }
@@ -3297,8 +3300,9 @@ impl Website {
                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
                                         }
-                                        self.extra_links
-                                            .extend(&HashSet::from([s]) - &self.links_visited);
+
+                                        self.links_visited
+                                            .extend_with_new_links(&mut self.extra_links, s);
                                     }
                                 }
                                 _ => (),
@@ -4385,7 +4389,7 @@ async fn crawl() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4409,8 +4413,9 @@ async fn crawl_cron() {
             links_visited.insert(CaseInsensitiveString::new(url));
         }
         assert!(
-            links_visited
-                .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            links_visited.contains(&CaseInsensitiveString::from(
+                "https://choosealicense.com/licenses/"
+            )),
             "{:?}",
             links_visited
         );
@@ -4442,8 +4447,9 @@ async fn crawl_cron_own() {
             links_visited.insert(CaseInsensitiveString::new(url));
         }
         assert!(
-            links_visited
-                .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            links_visited.contains(&CaseInsensitiveString::from(
+                "https://choosealicense.com/licenses/"
+            )),
             "{:?}",
             links_visited
         );
@@ -4463,7 +4469,7 @@ async fn scrape() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4488,7 +4494,7 @@ async fn crawl_invalid() {
     let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
     uniq.insert(format!("{}/", domain.to_string()).into()); // TODO: remove trailing slash mutate
 
-    assert_eq!(website.links_visited, uniq); // only the target url should exist
+    assert_eq!(website.links_visited.get_links(), *uniq); // only the target url should exist
 }
 
 #[tokio::test]
@@ -4502,7 +4508,7 @@ async fn not_crawl_blacklist() {
     assert!(
         !website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4572,7 +4578,7 @@ async fn test_crawl_subdomains() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4625,10 +4631,10 @@ async fn test_crawl_glob() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into())
+            .contains(&"https://choosealicense.com/licenses/".into())
             || website
                 .links_visited
-                .contains::<CaseInsensitiveString>(&"http://choosealicense.com/licenses/".into()),
+                .contains(&"http://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4644,7 +4650,7 @@ async fn test_crawl_tld() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
@@ -4712,7 +4718,7 @@ async fn test_link_duplicates() {
     let mut website: Website = Website::new("http://0.0.0.0:8000");
     website.crawl().await;
 
-    assert!(has_unique_elements(&*website.links_visited));
+    assert!(has_unique_elements(website.links_visited.get_links()));
 }
 
 #[tokio::test]
@@ -4751,7 +4757,7 @@ async fn test_crawl_pause_resume() {
     assert!(
         website
             .links_visited
-            .contains::<CaseInsensitiveString>(&"https://choosealicense.com/licenses/".into()),
+            .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
     );
