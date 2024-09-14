@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.4.2"
+version = "2.5.1"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -67,6 +67,7 @@ phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
 base64 = { version = "0.22", optional = true }
+string-interner = {version = "0.17",default-features = false,  features = ["std", "inline-more", "backends"]}
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -113,7 +114,7 @@ time = []
 adblock = ["dep:adblock"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
-serde = ["dep:serde", "hashbrown/serde"]
+serde = ["dep:serde", "hashbrown/serde", "string-interner/serde-1"]
 fs = ["tokio/fs"]
 full_resources = []
 socks = ["reqwest/socks"]

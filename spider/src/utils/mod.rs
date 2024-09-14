@@ -1,7 +1,10 @@
 /// Utils to modify the HTTP header.
 pub mod header_utils;
+/// String interner.
+pub mod interner;
 /// A trie struct.
 pub mod trie;
+
 use std::str::FromStr;
 
 #[cfg(feature = "chrome")]

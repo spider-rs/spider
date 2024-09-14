@@ -30,7 +30,6 @@ async fn main() {
     let mut website: Website = Website::new("https://rsseau.fr/en/blog")
         .with_chrome_intercept(true, true)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
-        .with_caching(cfg!(feature = "cache"))
         .with_limit(1)
         .with_automation_scripts(Some(automation_scripts))
         .build()
@@ -50,7 +49,7 @@ async fn main() {
 
     let links = website.get_links();
 
-    for link in links {
+    for link in links.iter() {
         println!("- {:?}", link.as_ref());
     }
 

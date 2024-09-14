@@ -70,6 +70,7 @@ impl<V: Debug> Trie<V> {
     }
 
     /// Insert a path and its associated value into the trie.
+    #[inline(always)]
     pub fn insert(&mut self, path: &str, value: V) {
         let normalized_path = Self::normalize_path(path);
         let mut node = &mut self.root;
@@ -94,6 +95,7 @@ impl<V: Debug> Trie<V> {
     }
 
     /// Search for a path in the trie.
+    #[inline(always)]
     pub fn search(&self, input: &str) -> Option<&V> {
         let mut node = &self.root;
 
