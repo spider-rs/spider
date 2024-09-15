@@ -2,9 +2,9 @@ use crate::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use string_interner::backend::StringBackend;
-use string_interner::symbol::SymbolU32;
-use string_interner::{DefaultSymbol, StringInterner};
+use string_interner::backend::BufferBackend;
+use string_interner::symbol::SymbolUsize;
+use string_interner::StringInterner;
 
 /// The links visited bucket store.
 #[derive(Debug, Clone)]
@@ -13,9 +13,9 @@ where
     K: Eq + Hash + AsRef<str>,
 {
     /// The links visited.
-    pub(crate) links_visited: HashSet<DefaultSymbol>,
+    pub(crate) links_visited: HashSet<SymbolUsize>,
     /// The string interner.
-    pub(crate) interner: StringInterner<StringBackend<DefaultSymbol>>,
+    pub(crate) interner: StringInterner<BufferBackend<SymbolUsize>>,
     /// Phantom data to link the generic type.
     _marker: PhantomData<K>,
 }
@@ -27,7 +27,7 @@ where
     fn default() -> Self {
         Self {
             links_visited: HashSet::new(),
-            interner: StringInterner::default(),
+            interner: StringInterner::new(),
             _marker: PhantomData,
         }
     }
@@ -65,7 +65,7 @@ where
     }
 
     /// Drain the bucket.
-    pub fn drain(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolU32> {
+    pub fn drain(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolUsize> {
         self.links_visited.drain()
     }
 

@@ -14,7 +14,6 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use string_interner::symbol::SymbolU32;
 use tokio::{
     runtime::Handle,
     sync::{broadcast, Semaphore},
@@ -555,11 +554,6 @@ impl Website {
     /// Amount of pages crawled.
     pub fn size(&self) -> usize {
         self.links_visited.len()
-    }
-
-    /// Drain the links visited.
-    pub(crate) fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolU32> {
-        self.links_visited.drain()
     }
 
     /// Drain the extra links used for things like the sitemap.

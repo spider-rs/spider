@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.5.1"
+version = "2.5.2"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -151,8 +151,15 @@ reqwest_native_tls_webpki_roots = ["reqwest/rustls-tls-webpki-roots"]
 reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_history_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
-cowboy = []
 tokio_io_std = ["tokio/io-std"]
+
+# Allows full concurrency
+cowboy = []
+
+# Enables usage of `#[inline]` on far more functions than by default in this
+# crate. This may lead to a performance increase but often comes at a compile
+# time cost.
+inline-more = []
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
