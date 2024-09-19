@@ -2,7 +2,7 @@ use crate::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use string_interner::backend::BufferBackend;
+use string_interner::backend::BucketBackend;
 use string_interner::symbol::SymbolUsize;
 use string_interner::StringInterner;
 
@@ -15,7 +15,7 @@ where
     /// The links visited.
     pub(crate) links_visited: HashSet<SymbolUsize>,
     /// The string interner.
-    pub(crate) interner: StringInterner<BufferBackend<SymbolUsize>>,
+    pub(crate) interner: StringInterner<BucketBackend<SymbolUsize>>,
     /// Phantom data to link the generic type.
     _marker: PhantomData<K>,
 }
