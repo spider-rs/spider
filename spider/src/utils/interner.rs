@@ -2,9 +2,36 @@ use crate::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use string_interner::backend::BufferBackend;
 use string_interner::symbol::SymbolUsize;
 use string_interner::StringInterner;
+
+#[cfg(all(
+    feature = "string_interner_bucket_backend",
+    not(feature = "string_interner_string_backend"),
+    not(feature = "string_interner_buffer_backend"),
+))]
+type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
+
+#[cfg(all(
+    feature = "string_interner_string_backend",
+    not(feature = "string_interner_bucket_backend"),
+    not(feature = "string_interner_buffer_backend"),
+))]
+type Backend = string_interner::backend::StringBackend<SymbolUsize>;
+
+#[cfg(all(
+    feature = "string_interner_buffer_backend",
+    not(feature = "string_interner_bucket_backend"),
+    not(feature = "string_interner_string_backend"),
+))]
+type Backend = string_interner::backend::BufferBackend<SymbolUsize>;
+
+#[cfg(all(
+    not(feature = "string_interner_bucket_backend"),
+    not(feature = "string_interner_string_backend"),
+    not(feature = "string_interner_buffer_backend")
+))]
+type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
 
 /// The links visited bucket store.
 #[derive(Debug, Clone)]
@@ -15,7 +42,7 @@ where
     /// The links visited.
     pub(crate) links_visited: HashSet<SymbolUsize>,
     /// The string interner.
-    pub(crate) interner: StringInterner<BufferBackend<SymbolUsize>>,
+    pub(crate) interner: StringInterner<Backend>,
     /// Phantom data to link the generic type.
     _marker: PhantomData<K>,
 }

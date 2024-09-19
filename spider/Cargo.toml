@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.5.2"
+version = "2.5.5"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -152,8 +152,11 @@ reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_history_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 tokio_io_std = ["tokio/io-std"]
+string_interner_buffer_backend = []
+string_interner_string_backend = []
+string_interner_bucket_backend = []
 
-# Allows full concurrency
+# Allows full concurrency.
 cowboy = []
 
 # Enables usage of `#[inline]` on far more functions than by default in this
