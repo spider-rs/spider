@@ -1,5 +1,5 @@
 use crate::configuration::Configuration;
-use reqwest::header::REFERER;
+use reqwest::header::{HOST, REFERER};
 use reqwest::{
     header::{HeaderMap, HeaderValue},
     ClientBuilder,
@@ -10,6 +10,7 @@ pub fn setup_default_headers(
     client_builder: ClientBuilder,
     configuration: &Configuration,
     header_map: HeaderMap,
+    url: &Option<Box<url::Url>>,
 ) -> ClientBuilder {
     let mut headers = match configuration.headers.clone() {
         Some(h) => *h,
@@ -23,6 +24,21 @@ pub fn setup_default_headers(
             if !ref_value.is_empty() {
                 headers.insert(REFERER, ref_value);
             }
+        }
+    }
+
+    if !headers.contains_key(HOST) {
+        match url {
+            Some(u) => {
+                if let Some(host) = u.host_str() {
+                    if let Ok(ref_value) = HeaderValue::from_str(&host) {
+                        if !ref_value.is_empty() {
+                            headers.insert(HOST, ref_value);
+                        }
+                    }
+                }
+            }
+            _ => (),
         }
     }
 

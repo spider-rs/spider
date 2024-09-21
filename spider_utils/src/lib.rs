@@ -8,6 +8,9 @@ use spider::{
 };
 use std::{fmt::Debug, hash::Hash};
 
+#[cfg(feature = "transformations")]
+pub use spider_transformations;
+
 /// Extracted content from CSS query selectors.
 type CSSQueryMap = HashMap<String, Vec<String>>;
 

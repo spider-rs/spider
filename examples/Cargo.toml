@@ -1,6 +1,6 @@
 [package]
 name = "spider_examples"
-version = "2.5.5"
+version = "2.6.2"
 authors = [
     "j-mendez <jeff@spider.cloud>",
 ]
@@ -206,3 +206,8 @@ required-features = ["spider/sync"]
 name = "css_scrape"
 path = "css_scrape.rs"
 required-features = ["spider/sync"]
+
+[[example]]
+name = "transform_markdown"
+path = "transform_markdown.rs"
+required-features = ["spider/sync", "spider_utils/transformations"]
