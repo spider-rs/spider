@@ -4,6 +4,7 @@ members = [
     "spider_worker",
     "spider_cli",
     "spider_utils",
+    "spider_transformations",
     # internal
     "examples",
     "benches"]

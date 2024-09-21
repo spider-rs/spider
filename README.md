@@ -24,6 +24,8 @@ A web crawler and scraper, building blocks for data curation workloads.
 - Blacklisting, Whitelisting, and Budgeting Depth
 - Dynamic AI Prompt Scripting Headless with Step Caching
 - CSS Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
+- HTML transformations with [spider_transformations](./spider_transformations/README.md)
+
 - [Changelog](CHANGELOG.md)
 
 ## Getting Started
