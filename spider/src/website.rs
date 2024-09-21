@@ -786,8 +786,12 @@ impl Website {
             client
         };
 
-        let client =
-            crate::utils::header_utils::setup_default_headers(client, &self.configuration, headers);
+        let client = crate::utils::header_utils::setup_default_headers(
+            client,
+            &self.configuration,
+            headers,
+            self.get_url_parsed(),
+        );
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -841,8 +845,12 @@ impl Website {
             client
         };
 
-        let client =
-            crate::utils::header_utils::setup_default_headers(client, &self.configuration, headers);
+        let client = crate::utils::header_utils::setup_default_headers(
+            client,
+            &self.configuration,
+            headers,
+            self.get_url_parsed(),
+        );
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
