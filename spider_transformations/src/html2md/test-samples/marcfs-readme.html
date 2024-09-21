@@ -1,0 +1,124 @@
+﻿<p><a href="https://gitter.im/MARC-FS/Lobby?utm_source=badge&amp;utm_medium=badge&amp;utm_campaign=pr-badge&amp;utm_content=badge"><img src="https://img.shields.io/gitter/room/MARC-FS/MARC-FS.svg" alt="Gitter"></a><br>
+<a href="https://gitlab.com/Kanedias/MARC-FS/commits/master"><img src="https://gitlab.com/Kanedias/MARC-FS/badges/master/build.svg" alt="build status"></a><br>
+<a href="https://www.gnu.org/licenses/gpl-3.0.html"><img src="https://img.shields.io/aur/license/marcfs-git.svg" alt="License"></a><br>
+<h1 id="marc-fs">MARC-FS</h1>
+<p><a href="http://Mail.ru">Mail.ru</a> Cloud filesystem written for FUSE</p>
+<h2 id="synopsis">Synopsis</h2>
+<p>This is an implementation of a simple filesystem with all calls and hooks needed for normal file operations. After mounting it you’ll be provided access to all your cloud files remotely stored on <a href="http://Mail.ru">Mail.ru</a> Cloud as if they were local ones. You should keep in mind that this is a network-driven FS and so it will never be as fast as any local one, but having a folder connected as remote drive in 9P/GNU Hurd fashion can be convenient at a times.</p>
+<p><strong>Bear in mind that this project is still in its infancy, sudden errors/crashes/memory leaks may occur.</strong></p>
+<h2 id="features">Features</h2>
+<ul>
+<li>cloud storage is represented as local folder</li>
+<li><code>rm</code>, <code>cp</code>, <code>ls</code>, <code>rmdir</code>, <code>touch</code>, <code>grep</code> and so on are working</li>
+<li>filesystem stats are working, can check with <code>df</code></li>
+<li>multithreaded, you can work with multiple files at once</li>
+<li>support for files &gt; 2GB by seamless splitting/joining uploaded/downloaded files</li>
+</ul>
+<h2 id="installation--usage">Installation &amp; Usage</h2>
+<p>You should have cmake and g++ with C++14 support at hand.<br>
+MARC-FS also requires <code>libfuse</code> (obviously), <code>libcurl</code> (min 7.34) and <code>pthread</code> libraries. Once you have all this, do as usual:</p>
+<pre><code>$ git clone --recursive https://gitlab.com/Kanedias/MARC-FS.git
+$ cd MARC-FS
+$ mkdir build
+$ cd build &amp;&amp; cmake ..
+$ make
+$ # here goes the step where you actually go and register on mail.ru website to obtain cloud storage and auth info
+$ ./marcfs /path/to/mount/folder -o username=your.email@mail.ru,password=your.password,cachedir=/path/to/cache
+</code></pre>
+<p>If you want your files on <a href="http://Mail.ru">Mail.ru</a> Cloud to be encrypted, you may use nested EncFS filesystem to achieve this:</p>
+<pre><code>$ ./marcfs /path/to/mount/folder -o username=your.email@mail.ru,password=your.password
+$ mkdir /path/to/mount/folder/encrypted # needed only once when you init your EncFS
+$ encfs --no-default-flags /path/to/mount/folder/encrypted /path/to/decrypted/dir
+$ cp whatever /path/to/decrypted/dir
+$ # at this point encrypted data will appear in Cloud Mail.ru storage
+</code></pre>
+<p>If you want to use rsync to synchronize local and remote sides, use <code>--sizes-only</code> option.<br>
+Rsync compares mtime and size of file by default, but <a href="http://Mail.ru">Mail.ru</a> Cloud saves only seconds in mtime,<br>
+which causes false-positives and reuploads of identical files:</p>
+<pre><code>$ rsync -av --delete --size-only /path/to/local/folder/ ~/path/to/mount/folder
+</code></pre>
+<p>To unmount previously mounted share, make sure no one uses it and execute:</p>
+<pre><code>$ # if you mounted encfs previously, first unmount it
+$ # fusermount -u /path/to/mount/folder/encrypted
+$ fusermount -u /path/to/mount/folder
+</code></pre>
+<p>If you want to get a shared link to the file, you should create a file with special name, <code>*.marcfs-link</code></p>
+<pre><code>$ # suppose we want to get a public link to file 'picture.png'
+$ touch picture.png.marcfs-link
+$ cat picture.png.marcfs-link
+/path/to/file/pictire.png: https://cloud.mail.ru/public/LINK/ADDRESS
+</code></pre>
+<p>Files with size &gt; 2G will show up as series of shared links for each part.<br>
+After getting the link special file can be safely removed.</p>
+<h2 id="notes">Notes</h2>
+<h4 id="external-configuration">External configuration</h4>
+<p>If you don’t want to type credentials on the command line you can use config file for that.<br>
+The file is <code>~/.config/marcfs/config.json</code> (default <a href="https://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG basedir spec</a>).<br>
+You can override its’ location via <code>-o conffile=/path/to/config</code> option. Example config:</p>
+<pre class=" language-json"><code class="prism  language-json"><span class="token punctuation">{</span>
+    <span class="token string">"username"</span><span class="token punctuation">:</span> <span class="token string">"user@mail.ru"</span><span class="token punctuation">,</span>
+    <span class="token string">"password"</span><span class="token punctuation">:</span> <span class="token string">"password"</span><span class="token punctuation">,</span>
+    <span class="token string">"cachedir"</span><span class="token punctuation">:</span> <span class="token string">"/absolute/path"</span>
+    <span class="token string">"proxyurl"</span><span class="token punctuation">:</span> <span class="token string">"http://localhost:3128"</span>
+<span class="token punctuation">}</span>
+</code></pre>
+<h4 id="cache-dir">Cache dir</h4>
+<p>MARC-FS has two modes of operation. If no cachedir option is given, it stores all intermediate download/upload<br>
+data directly in memory. If you copy large files as HD movies or ISO files, it may eat up your RAM pretty quickly,<br>
+so be careful. This one is useful if you want to copy your photo library to/from the cloud - this will actually take<br>
+a lot less time than with second option.</p>
+<p>If cachedir option is given, MARC-FS stores all intermediate data there. It means, all files that are currently open<br>
+in some process, copied/read or being edited - will have their data stored in this dir. This may sound like plenty<br>
+of space, but most software execute file operations sequentally, so in case of copying large media library on/from<br>
+the cloud you won’t need more free space than largest one of the files occupies.</p>
+<h2 id="api-references">API references</h2>
+<ul>
+<li>There is no official <a href="http://Mail.ru">Mail.ru</a> Cloud API reference, everything is reverse-engineered. You may refer to <a href="https://gitlab.com/Kanedias/MARC-FS/blob/master/marc_api.h">Doxygen API comments</a> to grasp concept of what’s going on.</li>
+<li>FUSE: <a href="https://www.cs.hmc.edu/~geoff/classes/hmc.cs135.201109/homework/fuse/fuse_doc.html">API overview</a> - used to implement FS calls</li>
+<li>cURL: <a href="https://curl.haxx.se/docs/">API overview</a> - used to interact with <a href="http://Mail.ru">Mail.ru</a> Cloud REST API</li>
+</ul>
+<h2 id="motivation">Motivation</h2>
+<p><a href="http://Mail.ru">Mail.ru</a> is one of largest Russian social networks. It provides mail services, hosting, gaming platforms and, incidentally, cloud services, similar to Dropbox, NextCloud etc.</p>
+<p>Once upon a time <a href="http://Mail.ru">Mail.ru</a> did a discount for this cloud solution and provided beta testers (and your humble servant among them) with free 1 TiB storage.</p>
+<p>And so… A holy place is never empty.</p>
+<h2 id="bugs--known-issues">Bugs &amp; Known issues</h2>
+<ol>
+<li>Temporary</li>
+</ol>
+<ul>
+<li>SOme issues may arise if you delete/move file that is currently copied or read. Please report such bugs here.</li>
+<li>big memory footprint due to
+<ul>
+<li>SSL engine sessions - tend to become bigger with time (WIP)</li>
+<li>heap fragmentation (WIP)</li>
+<li>MADV_FREE - lazy memory reclaiming in Linux &gt; 4.5 (not a bug actually)</li>
+</ul>
+</li>
+<li>On RHEL-based distros (CentOS/Fedora) you may need <code>NSS_STRICT_NOFORK=DISABLED</code> environment variable (see <a href="https://gitlab.com/Kanedias/MARC-FS/issues/6">this</a> and <a href="https://bugzilla.redhat.com/show_bug.cgi?id=1317691">this</a>)</li>
+</ul>
+<ol start="2">
+<li>Principal (<a href="http://Mail.ru">Mail.ru</a> Cloud API limitations)</li>
+</ol>
+<ul>
+<li>No extended attr/chmod support, all files on storage are owned by you</li>
+<li>No atime/ctime support, only mtime is stored</li>
+<li>No mtime support for directories, expect all of them to have <code>Jan 1 1970</code> date in <code>ls</code></li>
+<li>No <code>Transfer-Encoding: chunked</code> support for POST <strong>requests</strong> in cloud nginx (<code>chunkin on</code>/<code>proxy_request_buffering</code> options in <code>nginx</code>/<code>tengine</code> config), so files are read fully into memory before uploading</li>
+</ul>
+<h2 id="contributions">Contributions</h2>
+<p>You may create merge request or bug/enhancement issue right here on GitLab, or send formatted patch via e-mail. For details see <a href="http://CONTRIBUTING.md">CONTRIBUTING.md</a> file in this repo.<br>
+Audits from code style and security standpoint are also much appreciated.</p>
+<h2 id="license">License</h2>
+<pre><code>Copyright (C) 2016-2017  Oleg `Kanedias` Chernovskiy
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+</code></pre>
+

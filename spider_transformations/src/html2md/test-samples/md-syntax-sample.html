@@ -1,0 +1,130 @@
+<h1 id="an-h1-header">An h1 header</h1>
+<p>Paragraphs are separated by a blank line.</p>
+<p>2nd paragraph. <em>Italic</em>, <strong>bold</strong>, and <code>monospace</code>. Itemized lists<br>
+look like:</p>
+<ul>
+<li>this one</li>
+<li>that one</li>
+<li>the other one</li>
+</ul>
+<p>Note that — not considering the asterisk — the actual text<br>
+content starts at 4-columns in.</p>
+<blockquote>
+<p>Block quotes are<br>
+written like so.</p>
+<p>They can span multiple paragraphs,<br>
+if you like.</p>
+</blockquote>
+<p>Use 3 dashes for an em-dash. Use 2 dashes for ranges (ex., “it’s all<br>
+in chapters 12–14”). Three dots … will be converted to an ellipsis.<br>
+Unicode is supported. ☺</p>
+<h2 id="an-h2-header">An h2 header</h2>
+<p>Here’s a numbered list:</p>
+<ol>
+<li>first item</li>
+<li>second item</li>
+<li>third item</li>
+</ol>
+<p>Note again how the actual text starts at 4 columns in (4 characters<br>
+from the left side). Here’s a code sample:</p>
+<pre><code># Let me re-iterate ...
+for i in 1 .. 10 { do-something(i) }
+</code></pre>
+<p>As you probably guessed, indented 4 spaces. By the way, instead of<br>
+indenting the block, you can use delimited blocks, if you like:</p>
+<pre><code>define foobar() {
+    print "Welcome to flavor country!";
+}
+</code></pre>
+<p>(which makes copying &amp; pasting easier). You can optionally mark the<br>
+delimited block for Pandoc to syntax highlight it:</p>
+<pre class=" language-python"><code class="prism  language-python"><span class="token keyword">import</span> time
+<span class="token comment"># Quick, count to ten!</span>
+<span class="token keyword">for</span> i <span class="token keyword">in</span> <span class="token builtin">range</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">:</span>
+    <span class="token comment"># (but not *too* quick)</span>
+    time<span class="token punctuation">.</span>sleep<span class="token punctuation">(</span><span class="token number">0.5</span><span class="token punctuation">)</span>
+    <span class="token keyword">print</span> i
+</code></pre>
+<h3 id="an-h3-header">An h3 header</h3>
+<p>Now a nested list:</p>
+<ol>
+<li>
+<p>First, get these ingredients:</p>
+<ul>
+<li>carrots</li>
+<li>celery</li>
+<li>lentils</li>
+</ul>
+</li>
+<li>
+<p>Boil some water.</p>
+</li>
+<li>
+<p>Dump everything in the pot and follow<br>
+this algorithm:</p>
+<pre><code>find wooden spoon
+uncover pot
+stir
+cover pot
+balance wooden spoon precariously on pot handle
+wait 10 minutes
+goto first step (or shut off burner when done)
+</code></pre>
+<p>Do not bump wooden spoon or it will fall.</p>
+</li>
+</ol>
+<p>Notice again how text always lines up on 4-space indents (including<br>
+that last line which continues item 3 above).</p>
+<p>Here’s a link to <a href="http://foo.bar">a website</a>, to a <a href="local-doc.html">local<br>
+doc</a>, and to a <a href="#an-h2-header">section heading in the current<br>
+doc</a>. Here’s a footnote <sup class="footnote-ref"><a href="#fn1" id="fnref1">1</a></sup>.</p>
+<p>Tables can look like this:</p>
+<p>size  material      color</p>
+<hr>
+<p>9     leather       brown<br>
+10    hemp canvas   natural<br>
+11    glass         transparent</p>
+<p>Table: Shoes, their sizes, and what they’re made of</p>
+<p>(The above is the caption for the table.) Pandoc also supports<br>
+multi-line tables:</p>
+<hr>
+<p>keyword   text</p>
+<hr>
+<p>red       Sunsets, apples, and<br>
+other red or reddish<br>
+things.</p>
+<p>green     Leaves, grass, frogs<br>
+and other things it’s<br>
+not easy being.</p>
+<hr>
+<p>A horizontal rule follows.</p>
+<hr>
+<p>Here’s a definition list:</p>
+<dl>
+<dt>apples</dt>
+<dd>Good for making applesauce.<br>
+oranges</dd>
+<dd>Citrus!<br>
+tomatoes</dd>
+<dd>There’s no “e” in tomatoe.</dd>
+</dl>
+<p>Again, text is indented 4 spaces. (Put a blank line between each<br>
+term/definition pair to spread things out more.)</p>
+<p>Here’s a “line block”:</p>
+<p>| Line one<br>
+|   Line too<br>
+| Line tree</p>
+<p>and images can be specified like so:</p>
+<p><img src="example-image.jpg" alt="example image" title="An exemplary image"></p>
+<p>Inline math equations go in like so: <span class="katex--inline"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>ω</mi><mo>=</mo><mi>d</mi><mi>ϕ</mi><mi mathvariant="normal">/</mi><mi>d</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">\omega = d\phi / dt</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="strut" style="height: 0.75em;"></span><span class="strut bottom" style="height: 1em; vertical-align: -0.25em;"></span><span class="base"><span style="margin-right: 0.03588em;" class="mord mathit">ω</span><span class="mrel">=</span><span class="mord mathit">d</span><span class="mord mathit">ϕ</span><span class="mord mathrm">/</span><span class="mord mathit">d</span><span class="mord mathit">t</span></span></span></span></span>. Display<br>
+math should get its own line and be put in in double-dollarsigns:</p>
+<p><span class="katex--display"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>I</mi><mo>=</mo><mo>∫</mo><mi>ρ</mi><msup><mi>R</mi><mn>2</mn></msup><mi>d</mi><mi>V</mi></mrow><annotation encoding="application/x-tex">I = \int \rho R^{2} dV</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="strut" style="height: 1.36em;"></span><span class="strut bottom" style="height: 2.22225em; vertical-align: -0.86225em;"></span><span class="base"><span style="margin-right: 0.07847em;" class="mord mathit">I</span><span class="mrel">=</span><span style="margin-right: 0.44445em; position: relative; top: -0.001125em;" class="mop op-symbol large-op">∫</span><span class="mord mathit">ρ</span><span class="mord"><span style="margin-right: 0.00773em;" class="mord mathit">R</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height: 0.864108em;"><span class="" style="top: -3.113em; margin-right: 0.05em;"><span class="pstrut" style="height: 2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathrm mtight">2</span></span></span></span></span></span></span></span></span><span class="mord mathit">d</span><span style="margin-right: 0.22222em;" class="mord mathit">V</span></span></span></span></span></span></p>
+<p>And note that you can backslash-escape any punctuation characters<br>
+which you wish to be displayed literally, ex.: `foo`, *bar*, etc.</p>
+<hr class="footnotes-sep">
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn1" class="footnote-item"><p>Footnote text goes here. <a href="#fnref1" class="footnote-backref">↩︎</a></p>
+</li>
+</ol>
+</section>
