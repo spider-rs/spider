@@ -1527,7 +1527,6 @@ impl Website {
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         // base_domain name passed here is for primary url determination and not subdomain.tld placement
         let links: HashSet<CaseInsensitiveString> = if self
@@ -1586,7 +1585,6 @@ impl Website {
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let expanded = self.get_expanded_links(&self.url.inner().as_str());
@@ -1622,13 +1620,6 @@ impl Website {
 
             self.links_visited.insert(link_result.0);
 
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
-            }
-
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
                     None
@@ -1655,7 +1646,6 @@ impl Website {
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
         page: &chromiumoxide::Page,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let expanded = self.get_expanded_links(&self.url.inner().as_str());
@@ -1687,13 +1677,6 @@ impl Website {
             };
 
             self.links_visited.insert(link_result.0);
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
-            }
 
             page.detect_language();
 
@@ -1732,7 +1715,6 @@ impl Website {
         client: &Client,
         base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
         _: bool,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.url.inner();
@@ -1789,13 +1771,6 @@ impl Website {
             } else {
                 self.status = CrawlStatus::Empty;
             };
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
-            }
 
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
