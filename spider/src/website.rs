@@ -3697,6 +3697,12 @@ impl Website {
         self
     }
 
+    /// Preserve the HOST header.
+    pub fn with_preserve_host_header(&mut self, disable: bool) -> &mut Self {
+        self.configuration.with_preserve_host_header(disable);
+        self
+    }
+
     #[cfg(feature = "sitemap")]
     /// Add user agent to request. This does nothing without the `sitemap` flag enabled.
     pub fn with_sitemap(&mut self, sitemap_url: Option<&str>) -> &mut Self {

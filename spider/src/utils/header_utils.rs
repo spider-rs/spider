@@ -12,8 +12,8 @@ pub fn setup_default_headers(
     header_map: HeaderMap,
     url: &Option<Box<url::Url>>,
 ) -> ClientBuilder {
-    let mut headers = match configuration.headers.clone() {
-        Some(h) => *h,
+    let mut headers = match configuration.headers {
+        Some(ref h) => *h.clone(),
         None => HeaderMap::new(),
     };
 
@@ -27,7 +27,7 @@ pub fn setup_default_headers(
         }
     }
 
-    if !headers.contains_key(HOST) {
+    if !headers.contains_key(HOST) && !configuration.preserve_host_header {
         match url {
             Some(u) => {
                 if let Some(host) = u.host_str() {

@@ -52,6 +52,8 @@ pub struct Configuration {
     pub subdomains: bool,
     /// Allow all tlds for domain.
     pub tld: bool,
+    /// Preserve the HTTP host header from being included.
+    pub preserve_host_header: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
     pub blacklist_url: Option<Box<Vec<CompactString>>>,
     /// List of pages to only crawl. [optional: regex pattern matching]
@@ -358,6 +360,12 @@ impl Configuration {
             Some(agent) => self.user_agent = Some(CompactString::new(agent).into()),
             _ => self.user_agent = None,
         };
+        self
+    }
+
+    /// Preserve the HOST header.
+    pub fn with_preserve_host_header(&mut self, disable: bool) -> &mut Self {
+        self.preserve_host_header = disable;
         self
     }
 
