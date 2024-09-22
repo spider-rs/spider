@@ -1,5 +1,5 @@
-use html2md;
 use aho_corasick::AhoCorasick;
+use html2md;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use spider::lazy_static::lazy_static;

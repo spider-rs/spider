@@ -208,7 +208,7 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     }
 }
 
-/// validation to match a domain to parent host
+/// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host'.
 pub fn parent_host_match(
     host_name: Option<&str>,
     base_domain: &str,
@@ -219,7 +219,7 @@ pub fn parent_host_match(
             if base_domain.is_empty() {
                 parent_host.eq(&host)
             } else {
-                host.ends_with(parent_host.as_str())
+                host.ends_with(base_domain) || host.ends_with(parent_host.as_str())
             }
         }
         _ => false,
