@@ -27,7 +27,7 @@ pub fn setup_default_headers(
         }
     }
 
-    if !headers.contains_key(HOST) && !configuration.preserve_host_header {
+    if !headers.contains_key(HOST) && configuration.preserve_host_header {
         match url {
             Some(u) => {
                 if let Some(host) = u.host_str() {

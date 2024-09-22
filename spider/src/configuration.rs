@@ -364,8 +364,8 @@ impl Configuration {
     }
 
     /// Preserve the HOST header.
-    pub fn with_preserve_host_header(&mut self, disable: bool) -> &mut Self {
-        self.preserve_host_header = disable;
+    pub fn with_preserve_host_header(&mut self, preserve: bool) -> &mut Self {
+        self.preserve_host_header = preserve;
         self
     }
 
