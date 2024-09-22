@@ -54,9 +54,7 @@ async fn forward(
             Some(selectors) => {
                 page.detect_language();
 
-                let links = page
-                    .links_stream::<spider::bytes::Bytes>(&(&selectors.0, &selectors.1))
-                    .await;
+                let links = page.links_stream::<spider::bytes::Bytes>(&selectors).await;
 
                 let mut s = flexbuffers::FlexbufferSerializer::new();
 

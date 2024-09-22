@@ -8,6 +8,7 @@ use crate::page::{get_page_selectors, Page};
 use crate::utils::{interner::ListBucket, log};
 use crate::CaseInsensitiveString;
 use crate::Client;
+use crate::RelativeSelectors;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
 use std::future::Future;
@@ -684,7 +685,6 @@ impl Website {
 
         match self.domain_parsed.as_deref().cloned() {
             Some(host_s) => {
-                let initial_redirect = Arc::new(AtomicU8::new(0));
                 let initial_redirect_limit = if self.configuration.respect_robots_txt {
                     2
                 } else {
@@ -700,6 +700,8 @@ impl Website {
                 let redirect_limit = *self.configuration.redirect_limit;
 
                 let custom_policy = {
+                    let initial_redirect = Arc::new(AtomicU8::new(0));
+
                     move |attempt: Attempt| {
                         if tld && domain_name(attempt.url()) == host_domain_name
                             || subdomains
@@ -1238,9 +1240,8 @@ impl Website {
     async fn _crawl_establish(
         &mut self,
         client: &Client,
-        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut RelativeSelectors,
         _: bool,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         if self
             .is_allowed_default(self.get_base_link())
@@ -1284,13 +1285,6 @@ impl Website {
                 Default::default()
             };
 
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
-            }
-
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             }
@@ -1316,10 +1310,9 @@ impl Website {
     async fn crawl_establish(
         &mut self,
         client: &Client,
-        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut RelativeSelectors,
         _: bool,
         chrome_page: &chromiumoxide::Page,
-        scrape: bool,
     ) -> HashSet<CaseInsensitiveString> {
         if self
             .is_allowed_default(&self.get_base_link())
@@ -1421,13 +1414,6 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
-            }
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
             }
 
             if self.configuration.return_page_links {
@@ -1574,13 +1560,6 @@ impl Website {
             }
 
             let links = HashSet::from(page.links.clone());
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
-            }
 
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
@@ -2037,8 +2016,7 @@ impl Website {
                     _ => false,
                 } {
                     self.status = CrawlStatus::Active;
-                    self._crawl_establish(client, &mut selector, false, false)
-                        .await;
+                    self._crawl_establish(client, &mut selector, false).await;
                 } else {
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
@@ -2049,10 +2027,7 @@ impl Website {
                         Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
                     };
 
-                    links.extend(
-                        self._crawl_establish(client, &mut selector, false, false)
-                            .await,
-                    );
+                    links.extend(self._crawl_establish(client, &mut selector, false).await);
                     self.configuration.configure_allowlist();
                     let on_link_find_callback = self.on_link_find_callback;
                     let full_resources = self.configuration.full_resources;
@@ -2226,7 +2201,7 @@ impl Website {
                             _ => false,
                         } {
                             self.status = CrawlStatus::Active;
-                            self.crawl_establish(&client, &mut selectors, false, &new_page, false)
+                            self.crawl_establish(&client, &mut selectors, false, &new_page)
                                 .await;
                             self.subscription_guard();
                             crate::features::chrome::close_browser(
@@ -2242,14 +2217,8 @@ impl Website {
                             let (mut interval, throttle) = self.setup_crawl();
 
                             links.extend(
-                                self.crawl_establish(
-                                    &client,
-                                    &mut selectors,
-                                    false,
-                                    &new_page,
-                                    false,
-                                )
-                                .await,
+                                self.crawl_establish(&client, &mut selectors, false, &new_page)
+                                    .await,
                             );
 
                             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -2500,7 +2469,7 @@ impl Website {
                             _ => false,
                         } {
                             self.status = CrawlStatus::Active;
-                            self.crawl_establish(&client, &mut selectors, false, &new_page, false)
+                            self.crawl_establish(&client, &mut selectors, false, &new_page)
                                 .await;
                             self.subscription_guard();
                             crate::features::chrome::close_browser(
@@ -2526,14 +2495,8 @@ impl Website {
                             let (mut interval, throttle) = self.setup_crawl();
 
                             links.extend(
-                                self.crawl_establish(
-                                    &client,
-                                    &mut selectors,
-                                    false,
-                                    &new_page,
-                                    false,
-                                )
-                                .await,
+                                self.crawl_establish(&client, &mut selectors, false, &new_page)
+                                    .await,
                             );
                             let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                             let chandle = Handle::current();
@@ -2775,7 +2738,6 @@ impl Website {
                         &client,
                         &mut (domain.into(), Default::default()),
                         http_worker,
-                        false,
                     )
                     .await;
 

@@ -209,3 +209,9 @@ pub type Client = reqwest_middleware::ClientWithMiddleware;
 #[cfg(feature = "cache")]
 /// The asynchronous Client Builder.
 pub type ClientBuilder = reqwest_middleware::ClientBuilder;
+
+/// The selectors type. The values are held to make sure the relative domain can be crawled upon base redirects.
+pub(crate) type RelativeSelectors = (
+    compact_str::CompactString,
+    smallvec::SmallVec<[compact_str::CompactString; 2]>,
+);

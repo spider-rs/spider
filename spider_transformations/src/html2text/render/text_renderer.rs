@@ -1614,7 +1614,6 @@ pub struct PlainDecorator {
 
 impl PlainDecorator {
     /// Create a new `PlainDecorator`.
-    #[cfg_attr(feature = "clippy", allow(new_without_default_derive))]
     pub fn new() -> PlainDecorator {
         PlainDecorator {
             nlinks: Rc::new(Cell::new(0)),
@@ -1826,7 +1825,6 @@ pub enum RichAnnotation {
 
 impl RichDecorator {
     /// Create a new `RichDecorator`.
-    #[cfg_attr(feature = "clippy", allow(new_without_default_derive))]
     pub fn new() -> RichDecorator {
         RichDecorator {}
     }

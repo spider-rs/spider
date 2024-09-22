@@ -10,6 +10,7 @@ use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
 use crate::Client;
+use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
 use reqwest::StatusCode;
@@ -791,7 +792,7 @@ impl Page {
         A: PartialEq + Eq + std::hash::Hash + From<String>,
     >(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
         xml: &str,
         map: &mut HashSet<A>,
     ) {
@@ -862,7 +863,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_base<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
         html: &str,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
@@ -906,7 +907,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources"),))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
@@ -925,7 +926,7 @@ impl Page {
         A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
     >(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
     ) -> HashSet<A> {
@@ -1215,7 +1216,7 @@ impl Page {
     #[inline(always)]
     pub async fn links_stream_full_resource<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
         let html = self.get_html();
@@ -1300,7 +1301,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        selectors: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             return Default::default();
@@ -1313,7 +1314,7 @@ impl Page {
     /// Find the links as a stream using string resource validation
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
-        _: &(&CompactString, &SmallVec<[CompactString; 2]>),
+        _: &RelativeSelectors,
     ) -> HashSet<A> {
         Default::default()
     }
@@ -1321,16 +1322,10 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
-    pub async fn links(
-        &self,
-        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
-    ) -> HashSet<CaseInsensitiveString> {
+    pub async fn links(&self, selectors: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
-            true => {
-                self.links_stream::<CaseInsensitiveString>(&(&selectors.0, &selectors.1))
-                    .await
-            }
+            true => self.links_stream::<CaseInsensitiveString>(selectors).await,
         }
     }
 
@@ -1338,7 +1333,7 @@ impl Page {
     #[inline(always)]
     pub async fn links_full(
         &self,
-        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -1346,11 +1341,8 @@ impl Page {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.links_stream_full_resource::<CaseInsensitiveString>(&(
-                    &selectors.0,
-                    &selectors.1,
-                ))
-                .await
+                self.links_stream_full_resource::<CaseInsensitiveString>(&selectors)
+                    .await
             }
         }
     }
@@ -1360,7 +1352,7 @@ impl Page {
     #[inline(always)]
     pub async fn smart_links(
         &self,
-        selectors: &(CompactString, SmallVec<[CompactString; 2]>),
+        selectors: &RelativeSelectors,
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
     ) -> HashSet<CaseInsensitiveString> {
@@ -1370,12 +1362,8 @@ impl Page {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.links_stream_smart::<CaseInsensitiveString>(
-                    &(&selectors.0, &selectors.1),
-                    page,
-                    configuration,
-                )
-                .await
+                self.links_stream_smart::<CaseInsensitiveString>(&selectors, page, configuration)
+                    .await
             }
         }
     }
@@ -1383,10 +1371,7 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     #[cfg(feature = "decentralized")]
     #[inline(always)]
-    pub async fn links(
-        &self,
-        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
-    ) -> HashSet<CaseInsensitiveString> {
+    pub async fn links(&self, _: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
         self.links.to_owned()
     }
 
