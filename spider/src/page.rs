@@ -219,7 +219,7 @@ pub fn parent_host_match(
             if base_domain.is_empty() {
                 parent_host.eq(&host)
             } else {
-                host.ends_with(base_domain) || host.ends_with(parent_host.as_str())
+                host.ends_with(parent_host.as_str())
             }
         }
         _ => false,
