@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v2
+
+1. feat(transform): HTML transformation crate with spider_transformations
+1. feat(css_scraping): CSS scraping with the spider_utils
+1. chore(chrome): stabilize concurrent screenshot handling
+
 ## v1.98.0
 
 1. feat(whitelist): whitelist routes to only crawl.

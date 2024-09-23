@@ -211,7 +211,10 @@ pub type Client = reqwest_middleware::ClientWithMiddleware;
 pub type ClientBuilder = reqwest_middleware::ClientBuilder;
 
 /// The selectors type. The values are held to make sure the relative domain can be crawled upon base redirects.
-pub(crate) type RelativeSelectors = (
+pub type RelativeSelectors = (
+    // base domain
     compact_str::CompactString,
     smallvec::SmallVec<[compact_str::CompactString; 2]>,
+    // redirected domain
+    compact_str::CompactString,
 );

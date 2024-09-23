@@ -14,7 +14,6 @@ use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
 use reqwest::StatusCode;
-use smallvec::SmallVec;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use std::time::Duration;
@@ -209,18 +208,19 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     }
 }
 
-/// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host'.
+/// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host' and 'base_host' being the input start domain.
 pub fn parent_host_match(
     host_name: Option<&str>,
     base_domain: &str,
     parent_host: &CompactString,
+    base_host: &CompactString,
 ) -> bool {
     match host_name {
         Some(host) => {
             if base_domain.is_empty() {
-                parent_host.eq(&host)
+                parent_host.eq(&host) || base_host.eq(&host)
             } else {
-                host.ends_with(parent_host.as_str())
+                host.ends_with(parent_host.as_str()) || host.ends_with(base_host.as_str())
             }
         }
         _ => false,
@@ -228,36 +228,35 @@ pub fn parent_host_match(
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors(
-    url: &str,
-    subdomains: bool,
-    tld: bool,
-) -> Option<(CompactString, SmallVec<[CompactString; 2]>)> {
+pub fn get_page_selectors_base(u: &Url, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
+    let host_name =
+        CompactString::from(match convert_abs_path(&u, Default::default()).host_str() {
+            Some(host) => host.to_ascii_lowercase(),
+            _ => Default::default(),
+        });
+    let scheme = u.scheme();
+
+    Some(if tld || subdomains {
+        let dname = domain_name(&u);
+
+        (
+            dname.into(),
+            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+            CompactString::default(),
+        )
+    } else {
+        (
+            CompactString::default(),
+            smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
+            CompactString::default(),
+        )
+    })
+}
+
+/// html selector for valid web pages for domain.
+pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
     match Url::parse(url) {
-        Ok(host) => {
-            let host_name = CompactString::from(
-                match convert_abs_path(&host, Default::default()).host_str() {
-                    Some(host) => host.to_ascii_lowercase(),
-                    _ => Default::default(),
-                },
-            );
-            let scheme = host.scheme();
-
-            Some(if tld || subdomains {
-                let dname = domain_name(&host);
-                let scheme = host.scheme();
-
-                (
-                    dname.into(),
-                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-                )
-            } else {
-                (
-                    CompactString::default(),
-                    smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
-                )
-            })
-        }
+        Ok(host) => get_page_selectors_base(&host, subdomains, tld),
         _ => None,
     }
 }
@@ -741,11 +740,13 @@ impl Page {
         base_domain: &CompactString,
         parent_host: &CompactString,
         parent_host_scheme: &CompactString,
+        base_input_domain: &CompactString,
     ) {
         match self.abs_path(href) {
             Some(mut abs) => {
                 let host_name = abs.host_str();
-                let mut can_process = parent_host_match(host_name, base_domain, parent_host);
+                let mut can_process =
+                    parent_host_match(host_name, base_domain, parent_host, base_input_domain);
                 let mut external_domain = false;
 
                 if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
@@ -807,6 +808,7 @@ impl Page {
 
         let parent_host = &selectors.1[0];
         let parent_host_scheme = &selectors.1[1];
+        let base_input_domain = &selectors.2;
 
         let mut is_link_tag = false;
 
@@ -832,6 +834,7 @@ impl Page {
                                         &selectors.0,
                                         parent_host,
                                         parent_host_scheme,
+                                        base_input_domain,
                                     );
                                 }
                                 _ => (),
@@ -877,6 +880,7 @@ impl Page {
 
             let parent_host = &selectors.1[0];
             let parent_host_scheme = &selectors.1[1];
+            let base_input_domain = &selectors.2;
 
             while let Some(node) = stream.next().await {
                 if let Some(element) = node.as_element() {
@@ -891,6 +895,7 @@ impl Page {
                                     &selectors.0,
                                     parent_host,
                                     parent_host_scheme,
+                                    base_input_domain,
                                 );
                             }
                             _ => (),
@@ -939,6 +944,8 @@ impl Page {
         } else {
             let base_domain = &selectors.0;
             let parent_frags = &selectors.1; // todo: allow mix match tpt
+            let base_input_domain = &selectors.2;
+
             let parent_host = &parent_frags[0];
             let parent_host_scheme = &parent_frags[1];
 
@@ -1152,8 +1159,12 @@ impl Page {
                             Some(href) => match self.abs_path(href) {
                                 Some(mut abs) => {
                                     let host_name = abs.host_str();
-                                    let mut can_process =
-                                        parent_host_match(host_name, &base_domain, parent_host);
+                                    let mut can_process = parent_host_match(
+                                        host_name,
+                                        &base_domain,
+                                        parent_host,
+                                        base_input_domain,
+                                    );
 
                                     if can_process {
                                         if abs.scheme() != parent_host_scheme.as_str() {
@@ -1229,6 +1240,7 @@ impl Page {
             let mut stream = tokio_stream::iter(html.tree);
 
             let base_domain = &selectors.0;
+            let base_input_domain = &selectors.2;
             let parent_frags = &selectors.1; // todo: allow mix match tpt
             let parent_host = &parent_frags[0];
             let parent_host_scheme = &parent_frags[1];
@@ -1249,8 +1261,12 @@ impl Page {
                         Some(href) => match self.abs_path(href) {
                             Some(mut abs) => {
                                 let host_name = abs.host_str();
-                                let mut can_process =
-                                    parent_host_match(host_name, base_domain, parent_host);
+                                let mut can_process = parent_host_match(
+                                    host_name,
+                                    base_domain,
+                                    parent_host,
+                                    base_input_domain,
+                                );
 
                                 let mut external_domain = false;
 

@@ -4,7 +4,7 @@ use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
 };
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{get_page_selectors, Page};
+use crate::page::{get_page_selectors, get_page_selectors_base, Page};
 use crate::utils::{interner::ListBucket, log};
 use crate::CaseInsensitiveString;
 use crate::Client;
@@ -1160,12 +1160,17 @@ impl Website {
     }
 
     /// Setup selectors for handling link targets.
-    fn setup_selectors(&self) -> Option<(CompactString, smallvec::SmallVec<[CompactString; 2]>)> {
-        get_page_selectors(
-            self.url.inner(),
-            self.configuration.subdomains,
-            self.configuration.tld,
-        )
+    fn setup_selectors(&self) -> Option<RelativeSelectors> {
+        match self.get_url_parsed() {
+            Some(u) => {
+                get_page_selectors_base(u, self.configuration.subdomains, self.configuration.tld)
+            }
+            _ => get_page_selectors(
+                self.get_url().inner(),
+                self.configuration.subdomains,
+                self.configuration.tld,
+            ),
+        }
     }
 
     /// Setup config for crawl.
@@ -1254,6 +1259,7 @@ impl Website {
             // allow initial page mutation
             match page.final_redirect_destination.as_deref() {
                 Some(domain) => {
+                    let prior_domain = self.domain_parsed.take();
                     self.domain_parsed = match url::Url::parse(domain) {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
@@ -1263,6 +1269,15 @@ impl Website {
                         Some(s) => {
                             base.0 = s.0;
                             base.1 = s.1;
+                            match prior_domain {
+                                Some(prior_domain) => match prior_domain.host_str() {
+                                    Some(dname) => {
+                                        base.2 = dname.into();
+                                    }
+                                    _ => (),
+                                },
+                                _ => (),
+                            }
                         }
                         _ => (),
                     }
@@ -1377,6 +1392,9 @@ impl Website {
                 Some(ref domain) => {
                     let domain: Box<CaseInsensitiveString> =
                         CaseInsensitiveString::new(&domain).into();
+
+                    let prior_domain = self.domain_parsed.take();
+
                     self.domain_parsed = match url::Url::parse(&domain.inner()) {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
@@ -1386,6 +1404,15 @@ impl Website {
                         Some(s) => {
                             base.0 = s.0;
                             base.1 = s.1;
+                            match prior_domain {
+                                Some(prior_domain) => match prior_domain.host_str() {
+                                    Some(dname) => {
+                                        base.2 = dname.into();
+                                    }
+                                    _ => (),
+                                },
+                                _ => (),
+                            }
                         }
                         _ => (),
                     }
@@ -1441,7 +1468,7 @@ impl Website {
     async fn crawl_establish_smart(
         &mut self,
         client: &Client,
-        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        base: &mut RelativeSelectors,
         _: bool,
         browser: &Arc<chromiumoxide::Browser>,
         scrape: bool,
@@ -1459,6 +1486,8 @@ impl Website {
                 Some(ref domain) => {
                     let domain: Box<CaseInsensitiveString> =
                         CaseInsensitiveString::new(&domain).into();
+                    let prior_domain = self.domain_parsed.take();
+
                     self.domain_parsed = match url::Url::parse(&domain.inner()) {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
@@ -1468,6 +1497,15 @@ impl Website {
                         Some(s) => {
                             base.0 = s.0;
                             base.1 = s.1;
+                            match prior_domain {
+                                Some(prior_domain) => match prior_domain.host_str() {
+                                    Some(dname) => {
+                                        base.2 = dname.into();
+                                    }
+                                    _ => (),
+                                },
+                                _ => (),
+                            }
                         }
                         _ => (),
                     }
@@ -1739,6 +1777,7 @@ impl Website {
                 Some(ref domain) => {
                     let domain: Box<CaseInsensitiveString> =
                         CaseInsensitiveString::new(&domain).into();
+                    let prior_domain = self.domain_parsed.take();
                     self.domain_parsed = match url::Url::parse(&domain.inner()) {
                         Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
                         _ => None,
@@ -1748,6 +1787,15 @@ impl Website {
                         Some(s) => {
                             base.0 = s.0;
                             base.1 = s.1;
+                            match prior_domain {
+                                Some(prior_domain) => match prior_domain.host_str() {
+                                    Some(dname) => {
+                                        base.2 = dname.into();
+                                    }
+                                    _ => (),
+                                },
+                                _ => (),
+                            }
                         }
                         _ => (),
                     }

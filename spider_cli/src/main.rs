@@ -199,7 +199,7 @@ async fn main() {
                 }) => {
                     let mut stdout = tokio::io::stdout();
 
-                    let selectors: Option<(spider::compact_str::CompactString, spider::smallvec::SmallVec<[spider::compact_str::CompactString; 2]>)> = if output_links {
+                    let selectors: Option<spider::RelativeSelectors> = if output_links {
                         get_page_selectors(&url, cli.subdomains, cli.tld)
                     } else {
                         None
