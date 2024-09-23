@@ -33,6 +33,13 @@ type Backend = string_interner::backend::BufferBackend<SymbolUsize>;
 ))]
 type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
 
+#[cfg(all(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend"
+))]
+type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
+
 /// The links visited bucket store.
 #[derive(Debug, Clone)]
 pub struct ListBucket<K = CaseInsensitiveString>
