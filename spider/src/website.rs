@@ -562,6 +562,11 @@ impl Website {
         self.extra_links.drain()
     }
 
+    /// Drain the links visited.
+    pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, string_interner::symbol::SymbolUsize> {
+        self.links_visited.drain()
+    }
+
     /// Set extra links to crawl. This could be used in conjuntion with 'website.persist_links' to extend the crawl on the next run.
     pub fn set_extra_links(
         &mut self,
