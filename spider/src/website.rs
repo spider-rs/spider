@@ -63,8 +63,10 @@ lazy_static! {
     static ref DEFAULT_PERMITS: usize = calc_limits(1);
     static ref SEM_SHARED: Arc<Semaphore> = {
         let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
-            Ok(multiplier) => match multiplier.parse::<usize>() {
-                Ok(parsed_value) => DEFAULT_PERMITS.wrapping_mul(parsed_value.max(1)),
+            Ok(multiplier) => match multiplier.parse::<isize>() {
+                Ok(parsed_value) => (*DEFAULT_PERMITS as isize)
+                    .wrapping_mul(parsed_value)
+                    .max(1) as usize,
                 Err(_) => *DEFAULT_PERMITS,
             },
             _ => *DEFAULT_PERMITS,
@@ -79,8 +81,8 @@ lazy_static! {
         let base_limit = calc_limits(1);
 
         let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
-            Ok(multiplier) => match multiplier.parse::<usize>() {
-                Ok(parsed_value) => base_limit * parsed_value.max(1),
+            Ok(multiplier) => match multiplier.parse::<isize>() {
+                Ok(parsed_value) => (base_limit as isize * parsed_value).max(1) as usize,
                 Err(_) => base_limit,
             },
             _ => base_limit,
@@ -563,7 +565,9 @@ impl Website {
     }
 
     /// Drain the links visited.
-    pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, string_interner::symbol::SymbolUsize> {
+    pub fn drain_links(
+        &mut self,
+    ) -> hashbrown::hash_set::Drain<'_, string_interner::symbol::SymbolUsize> {
         self.links_visited.drain()
     }
 
