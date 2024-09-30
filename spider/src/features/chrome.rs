@@ -1,10 +1,10 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
+use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
-use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// get chrome configuration
@@ -281,13 +281,18 @@ pub async fn attempt_navigation(
     url: &str,
     browser: &Browser,
     request_timeout: &Option<Box<core::time::Duration>>,
+    browser_context_id: &Option<BrowserContextId>,
 ) -> Result<Page, CdpError> {
+    let mut cdp_params = CreateTargetParams::new(url);
+    cdp_params.browser_context_id.clone_from(browser_context_id);
+    cdp_params.background = Some(true);
+    cdp_params.url = url.into();
     let page_result = tokio::time::timeout(
         match request_timeout {
             Some(timeout) => **timeout,
             _ => tokio::time::Duration::from_secs(60),
         },
-        browser.new_page(url),
+        browser.new_page(cdp_params),
     )
     .await;
     match page_result {
@@ -299,9 +304,17 @@ pub async fn attempt_navigation(
 /// close the browser and open handles
 pub async fn close_browser(
     browser_handle: JoinHandle<()>,
-    _browser: &Browser,
-    _context_id: &mut Option<BrowserContextId>,
+    browser: &Browser,
+    context_id: &mut Option<BrowserContextId>,
 ) {
+    match context_id.take() {
+        Some(id) => {
+            if let Err(er) = browser.dispose_browser_context(id).await {
+                log("CDP Error: ", er.to_string())
+            }
+        }
+        _ => (),
+    }
     if !browser_handle.is_finished() {
         browser_handle.abort();
     }
