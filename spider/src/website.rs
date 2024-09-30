@@ -1480,7 +1480,7 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
         browser: &Arc<chromiumoxide::Browser>,
-        scrape: bool,
+        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<CaseInsensitiveString> {
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link())
@@ -1488,8 +1488,9 @@ impl Website {
         {
             let mut page = Page::new_page(&self.url.inner(), &client).await;
 
-            let page_links: HashSet<CaseInsensitiveString> =
-                page.smart_links(&base, &browser, &self.configuration).await;
+            let page_links: HashSet<CaseInsensitiveString> = page
+                .smart_links(&base, &browser, &self.configuration, &context_id)
+                .await;
 
             match page.final_redirect_destination {
                 Some(ref domain) => {
@@ -1540,13 +1541,6 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
-            }
-
-            if scrape {
-                match self.pages.as_mut() {
-                    Some(p) => p.push(page.clone()),
-                    _ => (),
-                };
             }
 
             if self.configuration.return_page_links {
@@ -2210,6 +2204,7 @@ impl Website {
                     "about:blank",
                     &browser,
                     &self.configuration.request_timeout,
+                    &context_id,
                 )
                 .await
                 {
@@ -2263,6 +2258,7 @@ impl Website {
                                 self.channel_guard.clone(),
                                 browser,
                                 self.configuration.clone(), // we may just want to share explicit config instead.
+                                context_id.clone(),
                             ));
 
                             let add_external =
@@ -2318,7 +2314,8 @@ impl Website {
                                                                 _ => (link, None),
                                                             };
                                                             let target_url = link_result.0.as_ref();
-                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout).await {
+                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout,                     &shared.6
+                                                        ).await {
                                                                 Ok(new_page) => {
                                                                     match shared.5.evaluate_on_new_document
                                                                     {
@@ -2489,6 +2486,7 @@ impl Website {
                     "about:blank",
                     &browser,
                     &self.configuration.request_timeout,
+                    &context_id,
                 )
                 .await
                 {
@@ -2542,6 +2540,7 @@ impl Website {
                                 browser,
                                 self.configuration.clone(),
                                 self.url.inner().to_string(),
+                                context_id.clone(),
                             ));
 
                             let add_external = shared.3.len() > 0;
@@ -2589,7 +2588,8 @@ impl Website {
 
                                                 set.spawn_on(
                                                     run_task(semaphore.clone(), move || async move {
-                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout).await {
+                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
+                                                    ).await {
                                                             Ok(new_page) => {
                                                                 let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
                                                                     &new_page,
@@ -2899,8 +2899,14 @@ impl Website {
                         _ => false,
                     } {
                         self.status = CrawlStatus::Active;
-                        self.crawl_establish_smart(&client, &mut selectors, false, &browser, false)
-                            .await;
+                        self.crawl_establish_smart(
+                            &client,
+                            &mut selectors,
+                            false,
+                            &browser,
+                            &context_id,
+                        )
+                        .await;
                         self.subscription_guard();
                         crate::features::chrome::close_browser(
                             browser_handle,
@@ -2932,7 +2938,7 @@ impl Website {
                                 &mut selectors,
                                 false,
                                 &browser,
-                                false,
+                                &context_id,
                             )
                             .await,
                         );
@@ -2947,6 +2953,7 @@ impl Website {
                             self.channel_guard.clone(),
                             browser,
                             self.configuration.clone(),
+                            context_id.clone(),
                         ));
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
@@ -3011,6 +3018,7 @@ impl Website {
                                                     let links = page
                                                         .smart_links(
                                                             &shared.1, &shared.4, &shared.5,
+                                                            &shared.6,
                                                         )
                                                         .await;
 
@@ -3371,6 +3379,7 @@ impl Website {
                             browser,
                             self.configuration.clone(),
                             self.url.inner().to_string(),
+                            context_id.clone(),
                         ));
 
                         let mut sitemaps = match self.configuration.sitemap_url {
@@ -3468,6 +3477,7 @@ impl Website {
                                                                             &shared
                                                                                 .3
                                                                                 .request_timeout,
+                                                                            &shared.5,
                                                                         )
                                                                         .await
                                                                         {
@@ -3668,11 +3678,34 @@ impl Website {
         tokio::task::JoinHandle<()>,
         Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     )> {
+        use chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams;
         match launch_browser(&self.configuration).await {
             Some((browser, browser_handle, context_id)) => {
-                let browser = Arc::new(browser);
+                let b = if context_id.is_some() {
+                    context_id
+                } else {
+                    let mut create_content = CreateBrowserContextParams::default();
+                    create_content.dispose_on_detach = Some(true);
 
-                Some((browser, browser_handle, context_id))
+                    match self.configuration.proxies {
+                        Some(ref p) => match p.get(0) {
+                            Some(p) => {
+                                create_content.proxy_server = Some(p.into());
+                            }
+                            _ => (),
+                        },
+                        _ => (),
+                    };
+
+                    match browser.create_browser_context(create_content).await {
+                        Ok(c) => Some(c),
+                        _ => None,
+                    }
+                };
+
+                let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
+
+                Some((browser, browser_handle, b))
             }
             _ => None,
         }
