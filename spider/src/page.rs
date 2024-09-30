@@ -934,6 +934,7 @@ impl Page {
         selectors: &RelativeSelectors,
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
+        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
         let html = self.get_html();
@@ -1028,10 +1029,11 @@ impl Page {
                                                 let browser = browser.to_owned();
                                                 let configuration = configuration.clone();
                                                 let target_url = self.url.clone();
+                                                let context_id = context_id.clone();
 
                                                 tokio::task::spawn(async move {
                                                     // we need to use about:blank here since we set the HTML content directly
-                                                    match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout).await {
+                                                    match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout, &context_id).await {
                                                         Ok(new_page) => {
                                                             match configuration
                                                                 .evaluate_on_new_document
@@ -1371,6 +1373,7 @@ impl Page {
         selectors: &RelativeSelectors,
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
+        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -1378,8 +1381,13 @@ impl Page {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.links_stream_smart::<CaseInsensitiveString>(&selectors, page, configuration)
-                    .await
+                self.links_stream_smart::<CaseInsensitiveString>(
+                    &selectors,
+                    page,
+                    configuration,
+                    context_id,
+                )
+                .await
             }
         }
     }

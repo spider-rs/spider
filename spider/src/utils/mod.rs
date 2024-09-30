@@ -823,7 +823,7 @@ pub async fn put_hybrid_cache(
 }
 
 /// Get the initial page headers of the page with navigation.
-#[cfg(all(feature = "chrome"))]
+#[cfg(feature = "chrome")]
 async fn navigate(
     page: &chromiumoxide::Page,
     url: &str,
@@ -833,142 +833,174 @@ async fn navigate(
         EventRequestWillBeSent, EventResponseReceived,
     };
     use tokio::sync::oneshot;
+    use tokio::time;
+
     let (req_tx, req_rx) = oneshot::channel();
     let (resp_tx, resp_rx) = oneshot::channel();
 
-    let rq = tokio::join!(
+    let (req_sent_result, req_rec_result) = tokio::join!(
         page.event_listener::<EventRequestWillBeSent>(),
         page.event_listener::<EventResponseReceived>()
     );
 
-    let mut req_sent = rq.0?.fuse();
-    let mut req_rec = rq.1?.fuse();
+    match (req_sent_result, req_rec_result) {
+        (Ok(req_sent), Ok(req_rec)) => {
+            let mut req_sent = req_sent.fuse();
+            let mut req_rec = req_rec.fuse();
 
-    let request_url = url.to_string();
+            let request_url = url.to_string();
 
-    tokio::spawn(async move {
-        let f1 = async {
-            match req_sent.next().await {
-                Some(event) => {
-                    if event.request.url.starts_with(&request_url) {
-                        let headers = match event.request.headers.inner().as_object() {
-                            Some(h) => {
-                                let hash_map: std::collections::HashMap<String, String> = h
-                                    .iter()
-                                    .map(|(k, v)| {
-                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
-                                    })
-                                    .collect();
-                                hash_map
+            tokio::spawn(async move {
+                let f1 = async {
+                    match req_sent.next().await {
+                        Some(event) => {
+                            if event.request.url.starts_with(&request_url) {
+                                let headers = match event.request.headers.inner().as_object() {
+                                    Some(h) => {
+                                        let hash_map: std::collections::HashMap<String, String> = h
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    v.as_str().unwrap_or_else(|| "").to_string(),
+                                                )
+                                            })
+                                            .collect();
+                                        hash_map
+                                    }
+                                    _ => Default::default(),
+                                };
+
+                                let _ = req_tx.send(headers);
                             }
-                            _ => Default::default(),
-                        };
-
-                        let _ = req_tx.send(headers);
-                    }
-                }
-                _ => (),
-            }
-        };
-
-        let f2 = async {
-            match req_rec.next().await {
-                Some(event) => {
-                    if event.response.url.starts_with(&request_url) {
-                        let headers = match event.response.headers.inner().as_object() {
-                            Some(h) => {
-                                let hash_map: std::collections::HashMap<String, String> = h
-                                    .iter()
-                                    .map(|(k, v)| {
-                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
-                                    })
-                                    .collect();
-                                hash_map
-                            }
-                            _ => Default::default(),
-                        };
-
-                        let _ = resp_tx.send((
-                            headers,
-                            event.response.status,
-                            event.response.protocol.clone(),
-                            false,
-                        ));
-                    } else {
-                        let headers = match event.response.headers.inner().as_object() {
-                            Some(h) => {
-                                let hash_map: std::collections::HashMap<String, String> = h
-                                    .iter()
-                                    .map(|(k, v)| {
-                                        (k.clone(), v.as_str().unwrap_or_else(|| "").to_string())
-                                    })
-                                    .collect();
-                                hash_map
-                            }
-                            _ => Default::default(),
-                        };
-
-                        let mut waf_check = match event.response.security_details {
-                            Some(ref security_details) => {
-                                if security_details.subject_name == "challenges.cloudflare.com" {
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                            _ => event.response.url.contains("/cdn-cgi/challenge-platform"),
-                        };
-                        if !waf_check {
-                            waf_check = match event.response.protocol {
-                                Some(ref protocol) => protocol == "blob",
-                                _ => false,
-                            };
                         }
+                        _ => (),
+                    }
+                };
 
-                        let _ = resp_tx.send((
-                            headers,
-                            event.response.status,
-                            event.response.protocol.clone(),
-                            waf_check,
-                        ));
+                let f2 = async {
+                    match req_rec.next().await {
+                        Some(event) => {
+                            if event.response.url.starts_with(&request_url) {
+                                let headers = match event.response.headers.inner().as_object() {
+                                    Some(h) => {
+                                        let hash_map: std::collections::HashMap<String, String> = h
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    v.as_str().unwrap_or_else(|| "").to_string(),
+                                                )
+                                            })
+                                            .collect();
+                                        hash_map
+                                    }
+                                    _ => Default::default(),
+                                };
+
+                                let _ = resp_tx.send((
+                                    headers,
+                                    event.response.status,
+                                    event.response.protocol.clone(),
+                                    false,
+                                ));
+                            } else {
+                                let headers = match event.response.headers.inner().as_object() {
+                                    Some(h) => {
+                                        let hash_map: std::collections::HashMap<String, String> = h
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    v.as_str().unwrap_or_else(|| "").to_string(),
+                                                )
+                                            })
+                                            .collect();
+                                        hash_map
+                                    }
+                                    _ => Default::default(),
+                                };
+
+                                let mut waf_check = match event.response.security_details {
+                                    Some(ref security_details) => {
+                                        if security_details.subject_name
+                                            == "challenges.cloudflare.com"
+                                        {
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    _ => event.response.url.contains("/cdn-cgi/challenge-platform"),
+                                };
+                                if !waf_check {
+                                    waf_check = match event.response.protocol {
+                                        Some(ref protocol) => protocol == "blob",
+                                        _ => false,
+                                    };
+                                }
+
+                                let _ = resp_tx.send((
+                                    headers,
+                                    event.response.status,
+                                    event.response.protocol.clone(),
+                                    waf_check,
+                                ));
+                            }
+                        }
+                        _ => (),
+                    }
+                };
+
+                tokio::join! {
+                      f1,
+                      f2,
+                }
+            });
+
+            match page.goto(url).await {
+                Ok(_p) => {
+                    let timeout_duration = tokio::time::Duration::from_secs(25);
+
+                    let rq_out = tokio::join!(
+                        time::timeout(timeout_duration, req_rx),
+                        time::timeout(timeout_duration, resp_rx)
+                    );
+
+                    match rq_out.0 {
+                        Ok(Ok(r)) => {
+                            chrome_http_req_res.request_headers = r;
+                        }
+                        Ok(Err(_)) | Err(_) => {
+                            log("", "Timeout or error waiting for request headers");
+                        }
+                    }
+
+                    match rq_out.1 {
+                        Ok(Ok(r)) => {
+                            chrome_http_req_res.response_headers = r.0;
+                            chrome_http_req_res.status_code =
+                                StatusCode::from_u16(r.1 as u16).unwrap_or_default();
+                            chrome_http_req_res.protocol = r.2.unwrap_or_default();
+                            chrome_http_req_res.waf_check = r.3;
+                        }
+                        Ok(Err(_)) | Err(_) => {
+                            log("", "Timeout or error waiting for response headers");
+                        }
                     }
                 }
-                _ => (),
-            }
-        };
-
-        tokio::join! {
-              f1,
-              f2,
+                Err(e) => {
+                    log("HTTP Error: ", e.to_string());
+                }
+            };
         }
-    });
-
-    // perform the navigation here.
-    match page.goto(url).await {
-        Ok(_p) => {}
-        Err(e) => {
-            log("HTTP Error: ", e.to_string());
+        (Err(_e), _) => {
+            let _ = page.goto(url).await;
+        }
+        (_, Err(_e)) => {
+            let _ = page.goto(url).await;
         }
     };
-
-    let rq_out = tokio::join!(req_rx, resp_rx);
-
-    match rq_out.0.ok() {
-        Some(r) => {
-            chrome_http_req_res.request_headers = r;
-        }
-        _ => (),
-    }
-
-    match rq_out.1.ok() {
-        Some(r) => {
-            chrome_http_req_res.response_headers = r.0;
-            chrome_http_req_res.status_code = StatusCode::from_u16(r.1 as u16).unwrap_or_default();
-            chrome_http_req_res.protocol = r.2.unwrap_or_default();
-            chrome_http_req_res.waf_check = r.3;
-        }
-        _ => (),
-    }
 
     Ok(())
 }
@@ -991,7 +1023,7 @@ pub async fn fetch_page_html_chrome_base(
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
     let mut valid = false;
 
-    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
         // the active page was already set prior. No need to re-navigate or set the content.
         if !page_set {
             // used for smart mode re-rendering direct assigning html
