@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.6.27"
+version = "2.6.32"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -37,7 +37,7 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = []
+default = ["tokio_io_std"]
 jemalloc = ["spider/jemalloc"]
 regex = ["spider/regex"]
 full_resources = ["spider/full_resources"]

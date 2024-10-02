@@ -1035,68 +1035,7 @@ impl Page {
                                                     // we need to use about:blank here since we set the HTML content directly
                                                     match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout, &context_id).await {
                                                         Ok(new_page) => {
-                                                            match configuration
-                                                                .evaluate_on_new_document
-                                                            {
-                                                                Some(ref script) => {
-                                                                    if configuration.fingerprint {
-                                                                        let _ = new_page
-                                                                            .evaluate_on_new_document(string_concat!(
-                                                                                crate::features::chrome::FP_JS,
-                                                                                script.as_str()
-                                                                            ))
-                                                                            .await;
-                                                                    } else {
-                                                                        let _ =
-                                                                            new_page.evaluate_on_new_document(script.as_str()).await;
-                                                                    }
-                                                                }
-                                                                _ => {
-                                                                    if configuration.fingerprint {
-                                                                        let _ = new_page
-                                                                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                                                                            .await;
-                                                                    }
-                                                                }
-                                                            }
-
-                                                            let new_page =
-                                                            crate::features::chrome::configure_browser(
-                                                                new_page,
-                                                                &configuration,
-                                                            )
-                                                            .await;
-
-                                                            if cfg!(feature = "chrome_stealth")
-                                                                || configuration.stealth_mode
-                                                            {
-                                                                let _ = new_page
-                                                                    .enable_stealth_mode_with_agent(
-                                                                        &if configuration
-                                                                            .user_agent
-                                                                            .is_some()
-                                                                        {
-                                                                            match configuration
-                                                                            .user_agent
-                                                                            .as_ref() {
-                                                                                Some(agent) => {
-                                                                                    if !agent.contains("Chrome")  {
-                                                                                        if cfg!(feature = "ua_generator") {
-                                                                                            crate::configuration::get_ua(true)
-                                                                                        } else {
-                                                                                           ""
-                                                                                        }
-                                                                                    } else {
-                                                                                        agent
-                                                                                    }
-                                                                                }
-                                                                                _ => ""
-                                                                            }
-                                                                        } else {
-                                                                            ""
-                                                                        },
-                                                                    );
-                                                            }
+                                                            crate::website::Website::setup_chrome_events(&new_page, &configuration).await;
 
                                                             let page_resource =
                                                             crate::utils::fetch_page_html_chrome_base(

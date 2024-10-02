@@ -1329,6 +1329,48 @@ impl Website {
         }
     }
 
+    /// establish all the page events.
+    #[cfg(feature = "chrome")]
+    pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+        let stealth = async {
+            if cfg!(feature = "chrome_stealth") || config.stealth_mode {
+                match config.user_agent.as_ref() {
+                    Some(agent) => {
+                        let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                    }
+                    _ => {
+                        let _ = chrome_page.enable_stealth_mode().await;
+                    }
+                }
+            }
+        };
+        let eval_docs = async {
+            match config.evaluate_on_new_document {
+                Some(ref script) => {
+                    if config.fingerprint {
+                        let _ = chrome_page
+                            .evaluate_on_new_document(string_concat!(
+                                crate::features::chrome::FP_JS,
+                                script.as_str()
+                            ))
+                            .await;
+                    } else {
+                        let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
+                    }
+                }
+                _ => {
+                    if config.fingerprint {
+                        let _ = chrome_page
+                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                            .await;
+                    }
+                }
+            }
+        };
+
+        tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config));
+    }
+
     /// Expand links for crawl.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_establish(
@@ -1342,38 +1384,7 @@ impl Website {
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            if cfg!(feature = "chrome_stealth") || self.configuration.stealth_mode {
-                match self.configuration.user_agent.as_ref() {
-                    Some(agent) => {
-                        let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
-                    }
-                    _ => {
-                        let _ = chrome_page.enable_stealth_mode().await;
-                    }
-                }
-            }
-
-            match self.configuration.evaluate_on_new_document {
-                Some(ref script) => {
-                    if self.configuration.fingerprint {
-                        let _ = chrome_page
-                            .evaluate_on_new_document(string_concat!(
-                                crate::features::chrome::FP_JS,
-                                script.as_str()
-                            ))
-                            .await;
-                    } else {
-                        let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
-                    }
-                }
-                _ => {
-                    if self.configuration.fingerprint {
-                        let _ = chrome_page
-                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                            .await;
-                    }
-                }
-            }
+            Website::setup_chrome_events(chrome_page, &self.configuration).await;
 
             let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
@@ -1392,7 +1403,7 @@ impl Website {
 
             match intercept_handle {
                 Some(h) => {
-                    h.abort();
+                    let _ = h.await;
                 }
                 _ => (),
             }
@@ -2209,7 +2220,8 @@ impl Website {
                 .await
                 {
                     Ok(new_page) => {
-                        let new_page = configure_browser(new_page, &self.configuration).await;
+                        Website::setup_chrome_events(&new_page, &self.configuration).await;
+
                         let semaphore = if self.configuration.shared_queue {
                             SEM_SHARED.clone()
                         } else {
@@ -2317,36 +2329,7 @@ impl Website {
                                                             let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout,                     &shared.6
                                                         ).await {
                                                                 Ok(new_page) => {
-                                                                    match shared.5.evaluate_on_new_document
-                                                                    {
-                                                                        Some(ref script) => {
-                                                                            let _ = new_page
-                                                                                .evaluate_on_new_document(
-                                                                                    script.as_str(),
-                                                                                )
-                                                                                .await;
-                                                                        }
-                                                                        _ => (),
-                                                                    }
-
-                                                                    let new_page = configure_browser(
-                                                                        new_page, &shared.5,
-                                                                    )
-                                                                    .await;
-
-                                                                    if cfg!(feature = "chrome_stealth")
-                                                                        || shared.5.stealth_mode
-                                                                    {
-                                                                        match shared.5.user_agent.as_ref() {
-                                                                            Some(agent) => {
-                                                                                let _ = new_page.enable_stealth_mode_with_agent(agent).await;
-                                                                            },
-                                                                            _ => {
-                                                                                let _ = new_page.enable_stealth_mode().await;
-                                                                            },
-                                                                        }
-                                                                    }
-
+                                                                    Website::setup_chrome_events(&new_page, &shared.5).await;
                                                                     let mut page = Page::new(
                                                                         &target_url,
                                                                         &shared.0,
@@ -2482,111 +2465,115 @@ impl Website {
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
-                Some((browser, browser_handle, mut context_id)) => match attempt_navigation(
-                    "about:blank",
-                    &browser,
-                    &self.configuration.request_timeout,
-                    &context_id,
-                )
-                .await
-                {
-                    Ok(new_page) => {
-                        if match self.configuration.inner_budget {
-                            Some(ref b) => match b.get(&*WILD_CARD_PATH) {
-                                Some(b) => b.eq(&1),
+                Some((browser, browser_handle, mut context_id)) => {
+                    match attempt_navigation(
+                        "about:blank",
+                        &browser,
+                        &self.configuration.request_timeout,
+                        &context_id,
+                    )
+                    .await
+                    {
+                        Ok(new_page) => {
+                            if match self.configuration.inner_budget {
+                                Some(ref b) => match b.get(&*WILD_CARD_PATH) {
+                                    Some(b) => b.eq(&1),
+                                    _ => false,
+                                },
                                 _ => false,
-                            },
-                            _ => false,
-                        } {
-                            self.status = CrawlStatus::Active;
-                            self.crawl_establish(&client, &mut selectors, false, &new_page)
-                                .await;
-                            self.subscription_guard();
-                            crate::features::chrome::close_browser(
-                                browser_handle,
-                                &browser,
-                                &mut context_id,
-                            )
-                            .await;
-                        } else {
-                            let semaphore = if self.configuration.shared_queue {
-                                SEM_SHARED.clone()
-                            } else {
-                                Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                            };
-                            let new_page = configure_browser(new_page, &self.configuration).await;
-                            let mut q = match &self.channel_queue {
-                                Some(q) => Some(q.0.subscribe()),
-                                _ => None,
-                            };
-                            let mut links: HashSet<CaseInsensitiveString> =
-                                self.drain_extra_links().collect();
-
-                            let (mut interval, throttle) = self.setup_crawl();
-
-                            links.extend(
+                            } {
+                                self.status = CrawlStatus::Active;
                                 self.crawl_establish(&client, &mut selectors, false, &new_page)
-                                    .await,
-                            );
-                            let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                            let chandle = Handle::current();
+                                    .await;
+                                self.subscription_guard();
+                                crate::features::chrome::close_browser(
+                                    browser_handle,
+                                    &browser,
+                                    &mut context_id,
+                                )
+                                .await;
+                            } else {
+                                let semaphore = if self.configuration.shared_queue {
+                                    SEM_SHARED.clone()
+                                } else {
+                                    Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                                };
+                                Website::setup_chrome_events(&new_page, &self.configuration).await;
+                                let mut q = match &self.channel_queue {
+                                    Some(q) => Some(q.0.subscribe()),
+                                    _ => None,
+                                };
+                                let mut links: HashSet<CaseInsensitiveString> =
+                                    self.drain_extra_links().collect();
 
-                            let shared = Arc::new((
-                                client.to_owned(),
-                                selectors,
-                                self.channel.clone(),
-                                self.configuration.external_domains_caseless.clone(),
-                                self.channel_guard.clone(),
-                                browser,
-                                self.configuration.clone(),
-                                self.url.inner().to_string(),
-                                context_id.clone(),
-                            ));
+                                let (mut interval, throttle) = self.setup_crawl();
 
-                            let add_external = shared.3.len() > 0;
-                            self.configuration.configure_allowlist();
-                            let on_link_find_callback = self.on_link_find_callback;
-                            let full_resources = self.configuration.full_resources;
-                            let return_page_links = self.configuration.return_page_links;
+                                links.extend(
+                                    self.crawl_establish(&client, &mut selectors, false, &new_page)
+                                        .await,
+                                );
+                                let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
+                                    JoinSet::new();
+                                let chandle = Handle::current();
 
-                            while !links.is_empty() {
-                                loop {
-                                    let stream =
-                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                            links.drain().collect(),
-                                        )
-                                        .throttle(*throttle);
-                                    tokio::pin!(stream);
+                                let shared = Arc::new((
+                                    client.to_owned(),
+                                    selectors,
+                                    self.channel.clone(),
+                                    self.configuration.external_domains_caseless.clone(),
+                                    self.channel_guard.clone(),
+                                    browser,
+                                    self.configuration.clone(),
+                                    self.url.inner().to_string(),
+                                    context_id.clone(),
+                                ));
 
+                                let add_external = shared.3.len() > 0;
+                                self.configuration.configure_allowlist();
+                                let on_link_find_callback = self.on_link_find_callback;
+                                let full_resources = self.configuration.full_resources;
+                                let return_page_links = self.configuration.return_page_links;
+
+                                while !links.is_empty() {
                                     loop {
-                                        match stream.next().await {
-                                            Some(link) => {
-                                                if !self
-                                                    .handle_process(
-                                                        handle,
-                                                        &mut interval,
-                                                        set.shutdown(),
-                                                    )
-                                                    .await
-                                                {
-                                                    break;
-                                                }
+                                        let stream =
+                                            tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                                links.drain().collect(),
+                                            )
+                                            .throttle(*throttle);
+                                        tokio::pin!(stream);
 
-                                                let allowed = self.is_allowed(&link);
+                                        loop {
+                                            match stream.next().await {
+                                                Some(link) => {
+                                                    if !self
+                                                        .handle_process(
+                                                            handle,
+                                                            &mut interval,
+                                                            set.shutdown(),
+                                                        )
+                                                        .await
+                                                    {
+                                                        break;
+                                                    }
 
-                                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                    break;
-                                                }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                    continue;
-                                                }
+                                                    let allowed = self.is_allowed(&link);
 
-                                                log("fetch", &link);
-                                                self.links_visited.insert(link.clone());
+                                                    if allowed
+                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                    {
+                                                        break;
+                                                    }
+                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                        continue;
+                                                    }
 
-                                                let shared = shared.clone();
+                                                    log("fetch", &link);
+                                                    self.links_visited.insert(link.clone());
 
-                                                set.spawn_on(
+                                                    let shared = shared.clone();
+
+                                                    set.spawn_on(
                                                     run_task(semaphore.clone(), move || async move {
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
                                                     ).await {
@@ -2608,23 +2595,7 @@ impl Website {
 
                                                                 let target_url = link_result.0.as_ref();
 
-                                                                let new_page = configure_browser(
-                                                                    new_page, &shared.6,
-                                                                )
-                                                                .await;
-
-                                                                if cfg!(feature = "chrome_stealth")
-                                                                    || shared.6.stealth_mode
-                                                                {
-                                                                    match shared.6.user_agent.as_ref() {
-                                                                        Some(agent) => {
-                                                                            let _ = new_page.enable_stealth_mode_with_agent(agent).await;
-                                                                        },
-                                                                        _ => {
-                                                                            let _ = new_page.enable_stealth_mode().await;
-                                                                        },
-                                                                    }
-                                                                }
+                                                                Website::setup_chrome_events(&new_page, &shared.6).await;
 
                                                                 let mut page = Page::new(
                                                                     &target_url,
@@ -2639,10 +2610,9 @@ impl Website {
                                                                 )
                                                                 .await;
 
-
                                                                 match intercept_handle {
                                                                     Some(h) => {
-                                                                        h.abort();
+                                                                        let _ = h.await;
                                                                     }
                                                                     _ => ()
                                                                 }
@@ -2678,62 +2648,63 @@ impl Website {
                                                     &chandle,
                                                 );
 
-                                                match q.as_mut() {
-                                                    Some(q) => {
-                                                        while let Ok(link) = q.try_recv() {
-                                                            let s = link.into();
-                                                            let allowed = self.is_allowed(&s);
+                                                    match q.as_mut() {
+                                                        Some(q) => {
+                                                            while let Ok(link) = q.try_recv() {
+                                                                let s = link.into();
+                                                                let allowed = self.is_allowed(&s);
 
-                                                            if allowed.eq(
+                                                                if allowed.eq(
                                                                 &ProcessLinkStatus::BudgetExceeded,
                                                             ) {
                                                                 break;
                                                             }
-                                                            if allowed
-                                                                .eq(&ProcessLinkStatus::Blocked)
-                                                            {
-                                                                continue;
-                                                            }
+                                                                if allowed
+                                                                    .eq(&ProcessLinkStatus::Blocked)
+                                                                {
+                                                                    continue;
+                                                                }
 
-                                                            self.links_visited
-                                                                .extend_with_new_links(
-                                                                    &mut links, s,
-                                                                );
+                                                                self.links_visited
+                                                                    .extend_with_new_links(
+                                                                        &mut links, s,
+                                                                    );
+                                                            }
                                                         }
+                                                        _ => (),
                                                     }
-                                                    _ => (),
                                                 }
+                                                _ => break,
                                             }
-                                            _ => break,
+                                        }
+
+                                        while let Some(res) = set.join_next().await {
+                                            match res {
+                                                Ok(msg) => {
+                                                    self.links_visited.extend_links(&mut links, msg)
+                                                }
+                                                _ => (),
+                                            };
+                                        }
+
+                                        if links.is_empty() {
+                                            break;
                                         }
                                     }
-
-                                    while let Some(res) = set.join_next().await {
-                                        match res {
-                                            Ok(msg) => {
-                                                self.links_visited.extend_links(&mut links, msg)
-                                            }
-                                            _ => (),
-                                        };
-                                    }
-
-                                    if links.is_empty() {
-                                        break;
-                                    }
+                                    self.subscription_guard();
                                 }
-                                self.subscription_guard();
-                            }
 
-                            crate::features::chrome::close_browser(
-                                browser_handle,
-                                &shared.5,
-                                &mut context_id,
-                            )
-                            .await;
+                                crate::features::chrome::close_browser(
+                                    browser_handle,
+                                    &shared.5,
+                                    &mut context_id,
+                                )
+                                .await;
+                            }
                         }
+                        _ => log("", "Chrome failed to open page."),
                     }
-                    _ => log("", "Chrome failed to open page."),
-                },
+                }
                 _ => log("", "Chrome failed to start."),
             },
             _ => log("", INVALID_URL),
@@ -3490,7 +3461,9 @@ impl Website {
                                                                                     &shared.4
                                                                                 )
                                                                                 .await;
-                                                                                let new_page = configure_browser(new_page, &shared.3).await;
+
+                                                                                Website::setup_chrome_events(&new_page, &shared.3).await;
+
                                                                                 let page = Page::new(
                                                                                     &link.inner(),
                                                                                     &client,
@@ -3506,7 +3479,7 @@ impl Website {
 
                                                                                 match intercept_handle {
                                                                                     Some(h) => {
-                                                                                        h.abort();
+                                                                                        let _ = h.await;
                                                                                     }
                                                                                     _ => ()
                                                                                 }
@@ -3672,40 +3645,20 @@ impl Website {
     /// Launch or connect to browser with setup
     #[cfg(feature = "chrome")]
     pub async fn setup_browser(
-        &self,
+        &mut self,
     ) -> Option<(
         Arc<chromiumoxide::Browser>,
         tokio::task::JoinHandle<()>,
         Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     )> {
-        use chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams;
         match launch_browser(&self.configuration).await {
             Some((browser, browser_handle, context_id)) => {
-                let b = if context_id.is_some() {
-                    context_id
-                } else {
-                    let mut create_content = CreateBrowserContextParams::default();
-                    create_content.dispose_on_detach = Some(true);
-
-                    match self.configuration.proxies {
-                        Some(ref p) => match p.get(0) {
-                            Some(p) => {
-                                create_content.proxy_server = Some(p.into());
-                            }
-                            _ => (),
-                        },
-                        _ => (),
-                    };
-
-                    match browser.create_browser_context(create_content).await {
-                        Ok(c) => Some(c),
-                        _ => None,
-                    }
-                };
-
+                if !browser.has_child() {
+                    self.configuration.chrome_intercept = false;
+                }
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
 
-                Some((browser, browser_handle, b))
+                Some((browser, browser_handle, context_id))
             }
             _ => None,
         }
