@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.6.27"
+version = "2.6.28"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -39,10 +39,6 @@ serde = { version = "1", optional = true, features = ["derive"] }
 flexbuffers = { version = "2", optional = true }
 itertools = { version = "0.12", optional = true }
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
-chromiumoxide = { version = "0.7", optional = true, features = [
-    "tokio-runtime",
-    "bytes",
-], default-features = false }
 sitemap = { version = "0.4", optional = true }
 chrono = { version = "0.4", optional = true }
 cron = { version = "0.12", optional = true }
@@ -68,6 +64,7 @@ phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
 base64 = { version = "0.22", optional = true }
 string-interner = {version = "0.17",default-features = false,  features = ["std", "inline-more", "backends"]}
+rand = "0.8.5"
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -102,8 +99,17 @@ reqwest = { version = "0.12", features = [
     "stream",
 ] }
 
+[dependencies.spider_chrome]
+version = "0.7"
+path = "../spider_chrome"
+optional = true
+features = [
+    "tokio-runtime",
+    "bytes",
+]
+
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding"]
+default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "chrome", "chrome_intercept"]
 regex = ["dep:regex"]
 glob = ["dep:regex", "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
@@ -124,7 +130,7 @@ cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]
 cache_chrome_hybrid = ["cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
-chrome = ["dep:chromiumoxide", "dep:base64"]
+chrome = ["dep:spider_chrome", "dep:base64"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]

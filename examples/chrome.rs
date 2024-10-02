@@ -1,20 +1,16 @@
 //! `cargo run --example chrome --features chrome`
 extern crate spider;
-
-use std::time::Duration;
-
-use spider::configuration::WaitForIdleNetwork;
 use spider::tokio;
 use spider::website::Website;
 
-#[tokio::main]
-async fn main() {
-    let mut website: Website = Website::new("https://choosealicense.com")
-        .with_chrome_intercept(true, true)
+async fn crawl_website(url: &str) {
+    let mut website: Website = Website::new(url)
+        // .with_chrome_intercept(true, true)
         .with_limit(5)
-        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
+        .with_stealth(true)
+        // .with_wait_for_idle_network(Some(spider::configuration::WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         // // you can use the project [https://github.com/spider-rs/chrome-server] to spin a chrome server locally to connect to.
-        // .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
+        .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(16).unwrap();
@@ -37,4 +33,12 @@ async fn main() {
         duration,
         links.len()
     )
+}
+
+#[tokio::main]
+async fn main() {
+    tokio::join!(
+        crawl_website("https://choosealicense.com"),
+        crawl_website("https://jeffmendez.com"),
+    );
 }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
@@ -134,7 +136,8 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             Some(timeout) => **timeout,
             _ => Default::default(),
         },
-        request_intercept: cfg!(feature = "chrome_intercept") && config.chrome_intercept,
+        // temp disabled until we figure out concurrent interception handling.
+        request_intercept: false,
         cache_enabled: config.cache,
         viewport: match config.viewport {
             Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
@@ -146,17 +149,19 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
     }
 }
 
+lazy_static! {
+    static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
+}
+
 /// Setup the browser configuration.
 pub async fn setup_browser_configuration(
     config: &Configuration,
 ) -> Option<(Browser, chromiumoxide::Handler)> {
     let proxies = &config.proxies;
+
     let chrome_connection = if config.chrome_connection_url.is_some() {
         config.chrome_connection_url.as_ref()
     } else {
-        lazy_static! {
-            static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
-        }
         CHROM_BASE.as_ref()
     };
 
@@ -197,19 +202,20 @@ pub async fn launch_browser(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
 )> {
+    use chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams;
     use chromiumoxide::error::CdpError;
-    let mut content_id = None;
-
     let browser_configuration = setup_browser_configuration(&config).await;
+    let mut context_id = None;
 
     match browser_configuration {
         Some(c) => {
-            let (browser, mut handler) = c;
+            let (mut browser, mut handler) = c;
 
-            content_id.clone_from(&handler.default_browser_context().id().cloned());
+            context_id.clone_from(&handler.default_browser_context().id().cloned());
 
-            // spawn a new task that continuously polls the handler
+            // Spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
+                tokio::pin!(handler);
                 loop {
                     match handler.next().await {
                         Some(k) => {
@@ -231,7 +237,30 @@ pub async fn launch_browser(
                 }
             });
 
-            Some((browser, handle, content_id))
+            if !context_id.is_some() {
+                let mut create_content = CreateBrowserContextParams::default();
+                create_content.dispose_on_detach = Some(true);
+
+                match config.proxies {
+                    Some(ref p) => match p.get(0) {
+                        Some(p) => {
+                            create_content.proxy_server = Some(p.into());
+                        }
+                        _ => (),
+                    },
+                    _ => (),
+                };
+
+                match browser.create_browser_context(create_content).await {
+                    Ok(c) => {
+                        let _ = browser.send_new_context(c.clone()).await;
+                        let _ = context_id.insert(c);
+                    }
+                    _ => (),
+                }
+            }
+
+            Some((browser, handle, context_id))
         }
 
         _ => None,
@@ -239,41 +268,43 @@ pub async fn launch_browser(
 }
 
 /// configure the browser
-pub async fn configure_browser(new_page: Page, configuration: &Configuration) -> Page {
-    let new_page = match configuration.timezone_id.as_deref() {
-        Some(timezone_id) => {
-            match new_page
-                .emulate_timezone(
-                    chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
-                        timezone_id,
-                    ),
-                )
-                .await
-            {
-                Ok(np) => np.to_owned(),
-                _ => new_page,
+pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
+    let timezone_id = async {
+        match configuration.timezone_id.as_deref() {
+            Some(timezone_id) => {
+                match new_page
+                    .emulate_timezone(
+                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                            timezone_id,
+                        ),
+                    )
+                    .await
+                {
+                    _ => (),
+                }
             }
+            _ => (),
         }
-        _ => new_page,
     };
-    let new_page = match configuration.locale.as_deref() {
-        Some(locale) => {
-            match new_page
-                .emulate_locale(
-                    chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
-                        locale: Some(locale.into()),
-                    },
-                )
-                .await
-            {
-                Ok(np) => np.to_owned(),
-                _ => new_page,
+    let locale = async {
+        match configuration.locale.as_deref() {
+            Some(locale) => {
+                match new_page
+                    .emulate_locale(
+                        chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                            locale: Some(locale.into()),
+                        },
+                    )
+                    .await
+                {
+                    _ => (),
+                }
             }
+            _ => (),
         }
-        _ => new_page,
     };
 
-    new_page
+    tokio::join!(timezone_id, locale);
 }
 
 /// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
@@ -286,6 +317,9 @@ pub async fn attempt_navigation(
     let mut cdp_params = CreateTargetParams::new(url);
     cdp_params.browser_context_id.clone_from(browser_context_id);
     cdp_params.url = url.into();
+    cdp_params.for_tab = Some(false);
+    // cdp_params.new_window = Some(true);
+
     let page_result = tokio::time::timeout(
         match request_timeout {
             Some(timeout) => **timeout,
@@ -359,15 +393,17 @@ async fn perform_intercept(
                 log("Failed to get request handle ", &host_name);
             }
         }
-    } else if let Err(e) = intercept_page
-        .execute(
-            chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(
-                event.request_id.clone(),
-            ),
-        )
-        .await
-    {
-        log("Failed to continue request: ", e.to_string());
+    } else {
+        if let Err(e) = intercept_page
+            .execute(
+                chromiumoxide::cdp::browser_protocol::fetch::ContinueRequestParams::new(
+                    event.request_id.clone(),
+                ),
+            )
+            .await
+        {
+            log("Failed to continue request ", &e.to_string());
+        }
     }
 }
 
@@ -518,42 +554,54 @@ pub async fn setup_chrome_network_interception(
 ) -> Option<tokio::task::JoinHandle<()>> {
     if chrome_intercept {
         use chromiumoxide::cdp::browser_protocol::network::ResourceType;
-        match page
-            .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
-            .await
-        {
-            Ok(mut rp) => {
-                let mut host_name: String = host_name.to_string();
-                let intercept_page = page.clone();
+        let page = page.clone();
+        let host_name = host_name.to_string();
 
-                let ih = tokio::task::spawn(async move {
+        let ih = tokio::task::spawn(async move {
+            match page
+                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused>()
+                .await
+            {
+                Ok(mut rp) => {
+                    let mut host_name: String = host_name.to_string();
                     let mut first_rq = true;
 
-                    while let Some(event) = rp.next().await {
-                        if first_rq {
-                            if ResourceType::Document == event.resource_type {
-                                host_name = event.request.url.clone();
+                    loop {
+                        match rp.next().await {
+                            Some(event) => {
+                                if first_rq {
+                                    if ResourceType::Document == event.resource_type {
+                                        host_name = event.request.url.clone();
+                                    }
+                                    first_rq = false;
+                                    perform_intercept(event, &page, &host_name, ignore_visuals)
+                                        .await;
+                                    continue;
+                                }
+
+                                let host_name = host_name.clone();
+                                let intercept_page = page.clone();
+
+                                tokio::task::spawn(async move {
+                                    perform_intercept(
+                                        event,
+                                        &intercept_page,
+                                        &host_name,
+                                        ignore_visuals,
+                                    )
+                                    .await;
+                                });
                             }
-                            first_rq = false;
-                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
-                                .await;
-                            continue;
+                            _ => {
+                                break;
+                            }
                         }
-
-                        let host_name = host_name.clone();
-                        let intercept_page = intercept_page.clone();
-
-                        tokio::task::spawn(async move {
-                            perform_intercept(event, &intercept_page, &host_name, ignore_visuals)
-                                .await;
-                        });
                     }
-                });
-
-                Some(ih)
-            }
-            _ => None,
-        }
+                }
+                _ => {}
+            };
+        });
+        Some(ih)
     } else {
         None
     }
