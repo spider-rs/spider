@@ -1062,7 +1062,7 @@ impl Page {
 
                                                             let new_page =
                                                             crate::features::chrome::configure_browser(
-                                                                new_page,
+                                                                &new_page,
                                                                 &configuration,
                                                             )
                                                             .await;
