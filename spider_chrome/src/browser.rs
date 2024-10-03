@@ -116,16 +116,30 @@ impl Browser {
                 .await
             {
                 Ok(req) => {
-                    let socketaddr = req.remote_addr().unwrap();
+                    let forwarded_ip = req
+                        .headers()
+                        .get("X-Forwarded-For")
+                        .and_then(|header| header.to_str().ok())
+                        .and_then(|ips| ips.split(',').next())
+                        .map(|ip| ip.trim().to_string());
+
+                    let remote_ip = match forwarded_ip {
+                        Some(forward) => forward,
+                        _ => match req.remote_addr() {
+                            Some(socketaddr) => socketaddr.ip().to_string(),
+                            _ => Default::default(),
+                        },
+                    };
+
                     let connection: BrowserConnection =
                         serde_json::from_slice(&req.bytes().await.unwrap_or_default())
                             .unwrap_or_default();
 
                     if !connection.web_socket_debugger_url.is_empty() {
-                        // prevent proxy interfaces from returning local ips to connect to the exact machine
+                        // Prevent proxy interfaces from returning local IPs by replacing 127.0.0.1
                         debug_ws_url = connection
                             .web_socket_debugger_url
-                            .replace("127.0.0.1", &socketaddr.ip().to_string());
+                            .replace("127.0.0.1", &remote_ip);
                     }
                 }
                 Err(_) => return Err(CdpError::NoResponse),
@@ -519,7 +533,15 @@ impl Browser {
             }
         }
 
-        self.execute(SetCookiesParams::new(cookies)).await?;
+        let mut cookies_param = SetCookiesParams::new(cookies);
+
+        if let Some(id) = self.browser_context.id() {
+            if cookies_param.browser_context_id.is_none() {
+                cookies_param.browser_context_id = Some(id.clone());
+            }
+        }
+
+        self.execute(cookies_param).await?;
         Ok(self)
     }
 }

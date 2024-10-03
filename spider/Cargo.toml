@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.6.32"
+version = "2.6.33"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -99,7 +99,7 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [dependencies.spider_chrome]
-version = "0.7"
+version = "2"
 path = "../spider_chrome"
 optional = true
 features = [
