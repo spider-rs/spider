@@ -1,11 +1,69 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
+use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
+use reqwest::cookie::CookieStore;
+use reqwest::cookie::Jar;
 use tokio::task::JoinHandle;
+use url::Url;
+
+/// parse a cookie into a jar
+pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieParam>, String> {
+    let jar = Jar::default();
+
+    jar.add_cookie_str(cookie_str, url);
+
+    // Retrieve cookies stored in the jar
+    if let Some(header_value) = jar.cookies(url) {
+        let cookie_header_str = header_value.to_str().map_err(|e| e.to_string())?;
+        let cookie_pairs: Vec<&str> = cookie_header_str.split(';').collect();
+
+        let mut cookies = Vec::new();
+
+        for pair in cookie_pairs {
+            let parts: Vec<&str> = pair.trim().splitn(2, '=').collect();
+
+            if parts.len() == 2 {
+                let name = parts[0].trim();
+                let value = parts[1].trim();
+
+                let mut builder = CookieParam::builder()
+                    .name(name)
+                    .value(value)
+                    .url(url.as_str());
+
+                if let Some(domain) = url.domain() {
+                    builder = builder.domain(domain.to_string());
+                }
+
+                let path = url.path();
+                builder = builder.path(if path.is_empty() { "/" } else { path });
+
+                if cookie_str.contains("Secure") {
+                    builder = builder.secure(true);
+                }
+
+                if cookie_str.contains("HttpOnly") {
+                    builder = builder.http_only(true);
+                }
+                match builder.build() {
+                    Ok(cookie_param) => cookies.push(cookie_param),
+                    Err(e) => return Err(e),
+                }
+            } else {
+                return Err(format!("Invalid cookie pair: {}", pair));
+            }
+        }
+
+        Ok(cookies)
+    } else {
+        Err("No cookies found".to_string())
+    }
+}
 
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
@@ -195,6 +253,7 @@ pub async fn setup_browser_configuration(
 /// Launch a chromium browser with configurations and wait until the instance is up.
 pub async fn launch_browser(
     config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
 ) -> Option<(
     Browser,
     tokio::task::JoinHandle<()>,
@@ -253,6 +312,14 @@ pub async fn launch_browser(
                     Ok(c) => {
                         let _ = browser.send_new_context(c.clone()).await;
                         let _ = context_id.insert(c);
+                        if !config.cookie_str.is_empty() {
+                            if let Some(parsed) = url_parsed {
+                                let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
+                                if let Ok(co) = cookies {
+                                    let _ = browser.set_cookies(co).await;
+                                };
+                            };
+                        }
                     }
                     _ => (),
                 }

@@ -3651,7 +3651,7 @@ impl Website {
         tokio::task::JoinHandle<()>,
         Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     )> {
-        match launch_browser(&self.configuration).await {
+        match launch_browser(&self.configuration, self.get_url_parsed()).await {
             Some((browser, browser_handle, context_id)) => {
                 if !browser.has_child() {
                     self.configuration.chrome_intercept = false;
