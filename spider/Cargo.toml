@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.6.35"
+version = "2.7.1"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -64,6 +64,7 @@ phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
 base64 = { version = "0.22", optional = true }
 string-interner = {version = "0.17", default-features = false,  features = ["std", "inline-more", "backends"]}
+httpdate = { version = "1", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -141,7 +142,7 @@ cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:regex"]
 encoding = ["dep:auto_encoder"]
-headers = []
+headers = ["dep:httpdate"]
 real_browser = []
 openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
 openai_slim_fit = []

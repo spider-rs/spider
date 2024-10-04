@@ -498,6 +498,7 @@ async fn main() -> Result<(), Error> {
         .with_subdomains(false)
         .with_tld(false)
         .with_redirect_limit(3)
+        .with_retry(1)
         .with_respect_robots_txt(true)
         .with_external_domains(Some(
             Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter(),

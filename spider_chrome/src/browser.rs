@@ -140,7 +140,7 @@ impl Browser {
 
         let conn = Connection::<CdpEventMessage>::connect(&debug_ws_url).await?;
 
-        let (tx, rx) = channel(1);
+        let (tx, rx) = channel(1000);
 
         let fut = Handler::new(conn, rx, config);
         let browser_context = fut.default_browser_context().clone();

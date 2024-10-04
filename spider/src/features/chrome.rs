@@ -266,7 +266,7 @@ pub async fn launch_browser(
 
     match browser_configuration {
         Some(c) => {
-            let (mut browser, mut handler) = c;
+            let (mut browser, handler) = c;
 
             context_id.clone_from(&handler.default_browser_context().id().cloned());
 

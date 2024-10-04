@@ -5,7 +5,6 @@ use crate::configuration::{AutomationScripts, ExecutionScripts};
 
 #[cfg(not(feature = "decentralized"))]
 use crate::packages::scraper::Html;
-
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
@@ -14,9 +13,8 @@ use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
 use reqwest::StatusCode;
+use tokio::time::Duration;
 
-#[cfg(all(feature = "time", not(feature = "decentralized")))]
-use std::time::Duration;
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
@@ -136,6 +134,8 @@ pub struct Page {
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The language for the page.
     pub lang: Option<String>,
+    /// The request should retry
+    pub should_retry: bool,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -173,6 +173,8 @@ pub struct Page {
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The language for the page.
     pub lang: Option<String>,
+    /// The request should retry
+    pub should_retry: bool,
 }
 
 /// get the clean domain name
@@ -264,12 +266,13 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<Rela
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {
+    let resource_found = res.content.is_some();
+    let mut should_retry = resource_found && res.status_code.is_success()
+        || res.status_code.is_server_error()
+        || res.status_code == StatusCode::TOO_MANY_REQUESTS;
+
     Page {
-        html: if res.content.is_some() {
-            res.content
-        } else {
-            None
-        },
+        html: if resource_found { res.content } else { None },
         #[cfg(feature = "headers")]
         headers: res.headers,
         #[cfg(feature = "cookies")]
@@ -287,7 +290,12 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         error_status: match res.error_for_status {
             Some(e) => match e {
                 Ok(_) => None,
-                Err(er) => Some(er.to_string()),
+                Err(er) => {
+                    if er.is_status() || er.is_connect() || er.is_timeout() {
+                        should_retry = true;
+                    }
+                    Some(er.to_string())
+                }
             },
             _ => None,
         },
@@ -301,6 +309,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         extra_ai_data: res.extra_ai_data,
         page_links: None,
         lang: None,
+        should_retry,
     }
 }
 
@@ -598,6 +607,36 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {
         &self.url
+    }
+
+    #[cfg(not(feature = "headers"))]
+    /// Get the timeout required for rate limiting. The max duration is 30 seconds for delay respecting. Requires the feature flag `headers`.
+    pub fn get_timeout(&self) -> Option<Duration> {
+        None
+    }
+
+    #[cfg(feature = "headers")]
+    /// Get the timeout required for rate limiting. The max duration is 30 seconds for delay respecting. Requires the feature flag `headers`.
+    pub fn get_timeout(&self) -> Option<Duration> {
+        if self.status_code == 429 {
+            const MAX_TIMEOUT: Duration = Duration::from_secs(30);
+            if let Some(ref headers) = self.headers {
+                if let Some(retry_after) = headers.get(reqwest::header::RETRY_AFTER) {
+                    if let Ok(retry_after_str) = retry_after.to_str() {
+                        if let Ok(seconds) = retry_after_str.parse::<u64>() {
+                            return Some(Duration::from_secs(seconds).min(MAX_TIMEOUT));
+                        }
+                        if let Ok(date) = httpdate::parse_http_date(retry_after_str) {
+                            if let Ok(duration) = date.duration_since(std::time::SystemTime::now())
+                            {
+                                return Some(duration.min(MAX_TIMEOUT));
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        None
     }
 
     /// Url getter for page after redirects.

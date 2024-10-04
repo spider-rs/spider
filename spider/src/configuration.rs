@@ -154,6 +154,8 @@ pub struct Configuration {
     pub shared_queue: bool,
     /// Return the page links in the subscription channels. This does nothing without the flag `sync` enabled.
     pub return_page_links: bool,
+    /// Retry count to attempt to swap proxies etc.
+    pub retry: u8,
     /// The blacklist urls.
     blacklist: AllowList,
     /// The whitelist urls.
@@ -566,6 +568,12 @@ impl Configuration {
         &mut self,
         _viewport: Option<crate::configuration::Viewport>,
     ) -> &mut Self {
+        self
+    }
+
+    /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
+    pub fn with_retry(&mut self, retry: u8) -> &mut Self {
+        self.retry = retry;
         self
     }
 

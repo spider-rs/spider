@@ -1262,7 +1262,18 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             let url = self.url.inner();
+
             let mut page = Page::new_page(url, client).await;
+            let mut retry_count = self.configuration.retry;
+
+            while page.should_retry && retry_count > 0 {
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
+                page.clone_from(&Page::new_page(url, client).await);
+                retry_count -= 1;
+            }
+
             log("fetch", &url);
 
             // allow initial page mutation
@@ -1498,6 +1509,16 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             let mut page = Page::new_page(&self.url.inner(), &client).await;
+
+            let mut retry_count = self.configuration.retry;
+
+            while page.should_retry && retry_count > 0 {
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
+                page.clone_from(&Page::new_page(self.url.inner(), &client).await);
+                retry_count -= 1;
+            }
 
             let page_links: HashSet<CaseInsensitiveString> = page
                 .smart_links(&base, &browser, &self.configuration, &context_id)
@@ -2080,6 +2101,7 @@ impl Website {
                         self.channel.clone(),
                         self.configuration.external_domains_caseless.clone(),
                         self.channel_guard.clone(),
+                        self.configuration.retry,
                     ));
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -2130,6 +2152,22 @@ impl Website {
                                                     &shared.0,
                                                 )
                                                 .await;
+                                                let mut retry_count = shared.5;
+
+                                                while page.should_retry && retry_count > 0 {
+                                                    if let Some(timeout) = page.get_timeout() {
+                                                        tokio::time::sleep(timeout).await;
+                                                    }
+                                                    page.clone_from(
+                                                        &Page::new_page(
+                                                            link_result.0.as_ref(),
+                                                            &shared.0,
+                                                        )
+                                                        .await,
+                                                    );
+                                                    retry_count -= 1;
+                                                }
+
                                                 page.set_external(shared.3.to_owned());
                                                 page.detect_language();
 
@@ -2326,7 +2364,7 @@ impl Website {
                                                                 _ => (link, None),
                                                             };
                                                             let target_url = link_result.0.as_ref();
-                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout,                     &shared.6
+                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
                                                         ).await {
                                                                 Ok(new_page) => {
                                                                     Website::setup_chrome_events(&new_page, &shared.5).await;
@@ -2977,6 +3015,22 @@ impl Website {
                                                     )
                                                     .await;
 
+                                                    let mut retry_count = shared.5.retry;
+
+                                                    while page.should_retry && retry_count > 0 {
+                                                        if let Some(timeout) = page.get_timeout() {
+                                                            tokio::time::sleep(timeout).await;
+                                                        }
+                                                        page.clone_from(
+                                                            &Page::new_page(
+                                                                link_result.0.as_ref(),
+                                                                &shared.0,
+                                                            )
+                                                            .await,
+                                                        );
+                                                        retry_count -= 1;
+                                                    }
+
                                                     if add_external {
                                                         page.set_external(
                                                             shared
@@ -3132,6 +3186,8 @@ impl Website {
                     _ => Default::default(),
                 };
 
+                let retry = self.configuration.retry;
+
                 loop {
                     let stream =
                         tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
@@ -3205,11 +3261,32 @@ impl Website {
                                                             let tx = tx.clone();
 
                                                             tokio::spawn(async move {
-                                                                let page = Page::new_page(
+                                                                let mut page = Page::new_page(
                                                                     &link.inner(),
                                                                     &client,
                                                                 )
                                                                 .await;
+
+                                                                let mut retry_count = retry;
+
+                                                                while page.should_retry
+                                                                    && retry_count > 0
+                                                                {
+                                                                    if let Some(timeout) =
+                                                                        page.get_timeout()
+                                                                    {
+                                                                        tokio::time::sleep(timeout)
+                                                                            .await;
+                                                                    }
+                                                                    page.clone_from(
+                                                                        &Page::new_page(
+                                                                            link.inner(),
+                                                                            &client,
+                                                                        )
+                                                                        .await,
+                                                                    );
+                                                                    retry_count -= 1;
+                                                                }
 
                                                                 match tx.reserve().await {
                                                                     Ok(permit) => {
@@ -3623,7 +3700,6 @@ impl Website {
     }
 
     /// Guard the channel from closing until all subscription events complete.
-    #[cfg(feature = "chrome_store_page")]
     fn subscription_guard(&self) {
         match &self.channel {
             Some(channel) => {
@@ -3637,10 +3713,6 @@ impl Website {
             _ => (),
         }
     }
-
-    /// Guard the channel from closing until all subscription events complete.
-    #[cfg(not(feature = "chrome_store_page"))]
-    fn subscription_guard(&self) {}
 
     /// Launch or connect to browser with setup
     #[cfg(feature = "chrome")]
@@ -3759,6 +3831,12 @@ impl Website {
         Vec<CompactString>: From<Vec<T>>,
     {
         self.configuration.with_blacklist_url(blacklist_url);
+        self
+    }
+
+    /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
+    pub fn with_retry(&mut self, retry: u8) -> &mut Self {
+        self.configuration.with_retry(retry);
         self
     }
 
@@ -4290,7 +4368,6 @@ impl ChannelGuard {
         ChannelGuard(Arc::new((AtomicBool::new(true), AtomicUsize::new(0))))
     }
     /// Lock the channel until complete. This is only used for when storing the chrome page outside.
-    #[cfg(feature = "chrome_store_page")]
     pub(crate) fn lock(&self) {
         if self.0 .0.load(Ordering::Relaxed) {
             while self
