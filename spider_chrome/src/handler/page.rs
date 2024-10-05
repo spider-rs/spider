@@ -47,7 +47,7 @@ pub struct PageHandle {
 
 impl PageHandle {
     pub fn new(target_id: TargetId, session_id: SessionId, opener_id: Option<TargetId>) -> Self {
-        let (commands, rx) = channel(1);
+        let (commands, rx) = channel(100);
         let page = PageInner {
             target_id,
             session_id,

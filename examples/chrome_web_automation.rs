@@ -4,6 +4,7 @@ extern crate spider;
 use std::time::Duration;
 
 use spider::configuration::{WaitForIdleNetwork, WebAutomation};
+use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::hashbrown::HashMap;
 use spider::tokio;
 use spider::website::Website;
@@ -28,7 +29,7 @@ async fn main() {
     );
 
     let mut website: Website = Website::new("https://rsseau.fr/en/blog")
-        .with_chrome_intercept(true, true)
+        .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_limit(1)
         .with_automation_scripts(Some(automation_scripts))

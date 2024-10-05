@@ -3747,9 +3747,8 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
- "adblock",
  "ahash",
  "async-openai",
  "async-trait",
@@ -3805,8 +3804,9 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
+ "adblock",
  "async-tungstenite",
  "base64 0.22.1",
  "bytes",
@@ -3819,6 +3819,8 @@ dependencies = [
  "fnv",
  "futures",
  "futures-timer",
+ "lazy_static",
+ "phf 0.11.2",
  "pin-project-lite",
  "proc-macro2",
  "quote",
@@ -3836,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
  "clap",
  "env_logger",
@@ -3860,7 +3862,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -3879,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
@@ -3888,7 +3890,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.7.1"
+version = "2.8.1"
 dependencies = [
  "env_logger",
  "lazy_static",

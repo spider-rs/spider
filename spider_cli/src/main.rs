@@ -8,6 +8,7 @@ use crate::spider::tokio::io::AsyncWriteExt;
 use clap::Parser;
 use options::{Cli, Commands};
 use serde_json::json;
+use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::hashbrown::HashMap;
 use spider::page::get_page_selectors;
 use spider::string_concat::string_concat;
@@ -41,7 +42,7 @@ async fn main() {
     website
         .with_respect_robots_txt(cli.respect_robots_txt)
         .with_subdomains(cli.subdomains)
-        .with_chrome_intercept(cli.block_images, true)
+        .with_chrome_intercept(RequestInterceptConfiguration::new(cli.block_images))
         .with_danger_accept_invalid_certs(cli.accept_invalid_certs)
         .with_tld(cli.tld)
         .with_blacklist_url(

@@ -227,6 +227,7 @@ impl Target {
 
     pub fn on_event(&mut self, event: CdpEventMessage) {
         let CdpEventMessage { params, method, .. } = event;
+
         match &params {
             // `FrameManager` events
             CdpEvent::PageFrameAttached(ev) => self
@@ -602,6 +603,7 @@ pub struct TargetConfig {
     pub viewport: Option<Viewport>,
     pub request_intercept: bool,
     pub cache_enabled: bool,
+    pub ignore_visuals: bool,
 }
 
 impl Default for TargetConfig {
@@ -612,6 +614,7 @@ impl Default for TargetConfig {
             viewport: Default::default(),
             request_intercept: false,
             cache_enabled: true,
+            ignore_visuals: false,
         }
     }
 }

@@ -3,6 +3,7 @@ use crate::compact_str::CompactString;
 use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
 };
+use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{get_page_selectors, get_page_selectors_base, Page};
 use crate::utils::{interner::ListBucket, log};
@@ -762,7 +763,7 @@ impl Website {
     fn only_chrome_agent(&self) -> bool {
         self.configuration.chrome_connection_url.is_some()
             || self.configuration.wait_for.is_some()
-            || self.configuration.chrome_intercept
+            || self.configuration.chrome_intercept.enabled
             || self.configuration.stealth_mode
             || self.configuration.fingerprint
     }
@@ -1151,7 +1152,7 @@ impl Website {
     ) -> Option<tokio::task::JoinHandle<()>> {
         crate::features::chrome::setup_chrome_interception_base(
             page,
-            self.configuration.chrome_intercept,
+            self.configuration.chrome_intercept.enabled,
             &self.configuration.auth_challenge_response,
             self.configuration.chrome_intercept_block_visuals,
             &self.url.inner().to_string(),
@@ -2618,10 +2619,10 @@ impl Website {
                                                             Ok(new_page) => {
                                                                 let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
                                                                     &new_page,
-                                                                    shared.6.chrome_intercept,
+                                                                    shared.6.chrome_intercept.enabled,
                                                                     &shared.6.auth_challenge_response,
                                                                     shared.6.chrome_intercept_block_visuals,
-                                                                    &shared.7
+                                                                    &shared.7,
                                                                 )
                                                                 .await;
 
@@ -2740,7 +2741,7 @@ impl Website {
                                 .await;
                             }
                         }
-                        _ => log("", "Chrome failed to open page."),
+                        Err(err) => log("", err.to_string()),
                     }
                 }
                 _ => log("", "Chrome failed to start."),
@@ -3532,10 +3533,10 @@ impl Website {
                                                                             Ok(new_page) => {
                                                                                 let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
                                                                                     &new_page,
-                                                                                    shared.3.chrome_intercept,
+                                                                                    shared.3.chrome_intercept.enabled,
                                                                                     &shared.3.auth_challenge_response,
                                                                                     shared.3.chrome_intercept_block_visuals,
-                                                                                    &shared.4
+                                                                                    &shared.4,
                                                                                 )
                                                                                 .await;
 
@@ -3725,9 +3726,6 @@ impl Website {
     )> {
         match launch_browser(&self.configuration, self.get_url_parsed()).await {
             Some((browser, browser_handle, context_id)) => {
-                if !browser.has_child() {
-                    self.configuration.chrome_intercept = false;
-                }
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
 
                 Some((browser, browser_handle, context_id))
@@ -3986,11 +3984,9 @@ impl Website {
     /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
-        chrome_intercept: bool,
-        block_images: bool,
+        chrome_intercept: RequestInterceptConfiguration,
     ) -> &mut Self {
-        self.configuration
-            .with_chrome_intercept(chrome_intercept, block_images);
+        self.configuration.with_chrome_intercept(chrome_intercept);
         self
     }
 

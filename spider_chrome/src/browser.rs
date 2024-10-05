@@ -116,23 +116,12 @@ impl Browser {
                 .await
             {
                 Ok(req) => {
-                    let remote_addr = req.remote_addr();
                     let connection: BrowserConnection =
                         serde_json::from_slice(&req.bytes().await.unwrap_or_default())
                             .unwrap_or_default();
-
-                    if let Some(socket) = remote_addr {
-                        if !connection.web_socket_debugger_url.is_empty() {
-                            // prevent proxy interfaces from returning local ips to connect to the exact machine
-                            debug_ws_url = connection
-                                .web_socket_debugger_url
-                                .replace("127.0.0.1", &socket.ip().to_string());
-                        }
-                    } else {
-                        if !connection.web_socket_debugger_url.is_empty() {
-                            debug_ws_url = connection.web_socket_debugger_url;
-                        }
-                    };
+                    if !connection.web_socket_debugger_url.is_empty() {
+                        debug_ws_url = connection.web_socket_debugger_url;
+                    }
                 }
                 Err(_) => return Err(CdpError::NoResponse),
             }
@@ -206,7 +195,7 @@ impl Browser {
         // Only infaillible calls are allowed after this point to avoid clean-up issues with the
         // child process.
 
-        let (tx, rx) = channel(1);
+        let (tx, rx) = channel(1000);
 
         let handler_config = HandlerConfig {
             ignore_https_errors: config.ignore_https_errors,
@@ -215,6 +204,10 @@ impl Browser {
             request_timeout: config.request_timeout,
             request_intercept: config.request_intercept,
             cache_enabled: config.cache_enabled,
+            ignore_visuals: config.ignore_visuals,
+            ignore_stylesheets: config.ignore_stylesheets,
+            ignore_javascript: config.ignore_javascript,
+            ignore_ads: config.ignore_ads,
         };
 
         let fut = Handler::new(conn, rx, handler_config);
@@ -680,8 +673,17 @@ pub struct BrowserConfig {
     /// Whether to enable request interception
     pub request_intercept: bool,
 
-    /// Whether to enable cache
+    /// Whether to enable cache.
     pub cache_enabled: bool,
+
+    /// Whether to ignore visuals when request interception is enabled.
+    pub ignore_visuals: bool,
+    /// Whether to ignore stylesheets when request interception is enabled.
+    pub ignore_stylesheets: bool,
+    /// Whether to ignore javascript when request interception is enabled.
+    pub ignore_javascript: bool,
+    /// Whether to ignore ads when request interception is enabled.
+    pub ignore_ads: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -704,6 +706,10 @@ pub struct BrowserConfigBuilder {
     disable_default_args: bool,
     request_intercept: bool,
     cache_enabled: bool,
+    ignore_visuals: bool,
+    ignore_ads: bool,
+    ignore_javascript: bool,
+    ignore_stylesheets: bool,
 }
 
 impl BrowserConfig {
@@ -737,6 +743,10 @@ impl Default for BrowserConfigBuilder {
             disable_default_args: false,
             request_intercept: false,
             cache_enabled: true,
+            ignore_visuals: false,
+            ignore_ads: false,
+            ignore_javascript: false,
+            ignore_stylesheets: false,
         }
     }
 }
@@ -918,6 +928,10 @@ impl BrowserConfigBuilder {
             disable_default_args: self.disable_default_args,
             request_intercept: self.request_intercept,
             cache_enabled: self.cache_enabled,
+            ignore_visuals: self.ignore_visuals,
+            ignore_ads: self.ignore_ads,
+            ignore_javascript: self.ignore_javascript,
+            ignore_stylesheets: self.ignore_stylesheets,
         })
     }
 }

@@ -458,6 +458,7 @@ impl Handler {
                 viewport: self.config.viewport.clone(),
                 request_intercept: self.config.request_intercept,
                 cache_enabled: self.config.cache_enabled,
+                ignore_visuals: self.config.ignore_visuals,
             },
             browser_ctx,
         );
@@ -686,6 +687,14 @@ pub struct HandlerConfig {
     pub request_intercept: bool,
     /// Whether to enable cache
     pub cache_enabled: bool,
+    /// Whether to ignore visuals.
+    pub ignore_visuals: bool,
+    /// Whether to ignore stylesheets.
+    pub ignore_stylesheets: bool,
+    /// Whether to ignore stylesheets.
+    pub ignore_javascript: bool,
+    /// Whether to ignore ads.
+    pub ignore_ads: bool,
 }
 
 impl Default for HandlerConfig {
@@ -697,6 +706,10 @@ impl Default for HandlerConfig {
             request_timeout: Duration::from_millis(REQUEST_TIMEOUT),
             request_intercept: false,
             cache_enabled: true,
+            ignore_visuals: false,
+            ignore_stylesheets: false,
+            ignore_ads: false,
+            ignore_javascript: false,
         }
     }
 }

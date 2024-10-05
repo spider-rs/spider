@@ -2,6 +2,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::fetch::{
     self, AuthChallengeResponse, AuthChallengeResponseResponse, ContinueRequestParams,
     ContinueWithAuthParams, DisableParams, EventAuthRequired, EventRequestPaused, RequestPattern,
 };
+use chromiumoxide_cdp::cdp::browser_protocol::network::ResourceType;
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
     EmulateNetworkConditionsParams, EventLoadingFailed, EventLoadingFinished,
     EventRequestServedFromCache, EventRequestWillBeSent, EventResponseReceived, Headers,
@@ -17,6 +18,25 @@ use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
+
+lazy_static::lazy_static! {
+    /// allowed js frameworks and libs excluding some and adding additional URLs
+    pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
+        phf::phf_set! {
+            // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
+            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js",
+            "react.development.js", "react-dom.development.js", "react.production.min.js",
+            "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
+            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
+            "d3.js",
+            // Verified 3rd parties for request
+            "https://m.stripe.network/inner.html",
+            "https://m.stripe.network/out-4.5.43.js",
+            "https://challenges.cloudflare.com/turnstile",
+            "https://js.stripe.com/v3/"
+        }
+    };
+}
 
 #[derive(Debug)]
 pub struct NetworkManager {
@@ -34,6 +54,12 @@ pub struct NetworkManager {
     protocol_request_interception_enabled: bool,
     offline: bool,
     request_timeout: Duration,
+    /// Ignore visuals (no pings, prefetching, and etc).
+    ignore_visuals: bool,
+    /// Block CSS stylesheets.
+    block_stylesheets: bool,
+    /// Block javascript.
+    block_javascript: bool,
 }
 
 impl NetworkManager {
@@ -52,6 +78,9 @@ impl NetworkManager {
             protocol_request_interception_enabled: false,
             offline: false,
             request_timeout,
+            ignore_visuals: true,
+            block_javascript: false,
+            block_stylesheets: false,
         }
     }
 
@@ -130,20 +159,121 @@ impl NetworkManager {
         }
     }
 
+    #[cfg(not(feature = "adblock"))]
     pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
         if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
             self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
-        }
-        if let Some(network_id) = event.network_id.as_ref() {
-            if let Some(request_will_be_sent) =
-                self.requests_will_be_sent.remove(network_id.as_ref())
-            {
-                self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
-            } else {
-                self.request_id_to_interception_id
-                    .insert(network_id.clone(), event.request_id.clone().into());
+        } else {
+            if let Some(network_id) = event.network_id.as_ref() {
+                if let Some(request_will_be_sent) =
+                    self.requests_will_be_sent.remove(network_id.as_ref())
+                {
+                    self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
+                } else {
+                    if self.ignore_visuals
+                        && (ResourceType::Image == event.resource_type
+                            || ResourceType::Media == event.resource_type
+                            || self.block_stylesheets
+                                && ResourceType::Stylesheet == event.resource_type)
+                        || ResourceType::Prefetch == event.resource_type
+                        || ResourceType::Ping == event.resource_type
+                        || self.block_javascript
+                            && ResourceType::Script == event.resource_type
+                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
+                    // add one off stripe framework check for now...
+                    {
+                        let fullfill_params =
+                            crate::handler::network::fetch::FulfillRequestParams::new(
+                                event.request_id.clone(),
+                                200,
+                            );
+                        self.push_cdp_request(fullfill_params);
+                    } else {
+                        self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
+                    }
+                }
             }
         }
+    }
+
+    #[cfg(feature = "adblock")]
+    pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
+        if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
+            self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
+        } else {
+            if let Some(network_id) = event.network_id.as_ref() {
+                if let Some(request_will_be_sent) =
+                    self.requests_will_be_sent.remove(network_id.as_ref())
+                {
+                    self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
+                } else {
+                    if self.detect_ad(event)
+                        || self.ignore_visuals
+                            && (ResourceType::Image == event.resource_type
+                                || ResourceType::Media == event.resource_type
+                                || self.block_stylesheets
+                                    && ResourceType::Stylesheet == event.resource_type)
+                        || ResourceType::Prefetch == event.resource_type
+                        || ResourceType::Ping == event.resource_type
+                        || self.block_javascript
+                            && ResourceType::Script == event.resource_type
+                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
+                    // add one off stripe framework check for now...
+                    {
+                        let fullfill_params =
+                            crate::handler::network::fetch::FulfillRequestParams::new(
+                                event.request_id.clone(),
+                                200,
+                            );
+                        self.push_cdp_request(fullfill_params);
+                    } else {
+                        self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Perform a page intercept for chrome
+    #[cfg(feature = "adblock")]
+    pub fn detect_ad(&self, event: &EventRequestPaused) -> bool {
+        use adblock::{
+            lists::{FilterSet, ParseOptions},
+            Engine,
+        };
+        lazy_static::lazy_static! {
+            static ref AD_ENGINE: Engine = {
+                let mut filter_set = FilterSet::new(false);
+                filter_set.add_filters(
+                    &vec![
+                        String::from("-advertisement."),
+                        String::from("-ads."),
+                        String::from("-ad."),
+                        String::from("-advertisement-icon."),
+                        String::from("-advertisement-management/"),
+                        String::from("-advertisement/script."),
+                        String::from("-ads/script."),
+                    ],
+                    ParseOptions::default(),
+                );
+                Engine::from_filter_set(filter_set, true)
+            };
+        };
+
+        let asset = ResourceType::Image == event.resource_type
+            || ResourceType::Media == event.resource_type
+            || ResourceType::Stylesheet == event.resource_type;
+        let u = &event.request.url;
+
+        !self.ignore_visuals
+            && (asset
+                || event.resource_type == ResourceType::Fetch
+                || event.resource_type == ResourceType::Xhr)
+                // set it to example.com for 3rd party handling is_same_site
+            &&   match adblock::request::Request::new(&u,  if event.request.is_same_site.unwrap_or_default() {&u } else { &"https://example.com" }, &event.resource_type.as_ref()) {
+                Ok(adblock_request) => AD_ENGINE.check_network_request(&adblock_request).matched,
+                _ => false,
+            }
     }
 
     pub fn on_fetch_auth_required(&mut self, event: &EventAuthRequired) {
