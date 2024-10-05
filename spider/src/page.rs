@@ -1069,11 +1069,22 @@ impl Page {
                                                 let configuration = configuration.clone();
                                                 let target_url = self.url.clone();
                                                 let context_id = context_id.clone();
+                                                let parent_host = parent_host.clone();
 
                                                 tokio::task::spawn(async move {
                                                     // we need to use about:blank here since we set the HTML content directly
                                                     match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout, &context_id).await {
                                                         Ok(new_page) => {
+
+                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                                                                &new_page,
+                                                                configuration.chrome_intercept.enabled,
+                                                                &configuration.auth_challenge_response,
+                                                                configuration.chrome_intercept_block_visuals,
+                                                                &parent_host,
+                                                            )
+                                                            .await;
+
                                                             crate::website::Website::setup_chrome_events(&new_page, &configuration).await;
 
                                                             let page_resource =
@@ -1103,6 +1114,13 @@ impl Page {
                                                                         .automation_scripts
                                                             )
                                                             .await;
+
+                                                            match intercept_handle {
+                                                                Some(h) => {
+                                                                    let _ = h.await;
+                                                                }
+                                                                _ => (),
+                                                            }
 
                                                             match page_resource {
                                                                 Ok(resource) => {
