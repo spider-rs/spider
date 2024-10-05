@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.7.1"
+version = "2.8.0"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -58,7 +58,6 @@ fastrand = { version = "2", optional = true }
 http-cache-semantics = { version = "2", optional = true }
 http-cache = { version = "0.19", optional = true, default-features = false }
 http = { version = "1", optional = true }
-adblock = { version = "0.8", optional = true, default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1", optional = true }
@@ -117,7 +116,7 @@ jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
-adblock = ["dep:adblock"]
+adblock = ["spider_chrome/adblock"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde", "string-interner/serde-1"]

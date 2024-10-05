@@ -264,6 +264,7 @@ impl Page {
     /// ```
     pub async fn event_listener<T: IntoEventKind>(&self) -> Result<EventStream<T>> {
         let (tx, rx) = unbounded();
+
         self.inner
             .sender()
             .clone()

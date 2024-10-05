@@ -593,6 +593,41 @@ pub fn convert_to_trie_execution_scripts(
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Chrome request interception configurations.
+pub struct RequestInterceptConfiguration {
+    /// Request interception enabled?
+    pub enabled: bool,
+    /// Block visuals. By default this is enabled. This will prevent Prefetch, Ping, and some javascript from rendering.
+    pub block_visuals: bool,
+    /// Block stylesheets.
+    pub block_stylesheets: bool,
+    /// Block javascript.
+    pub block_javascript: bool,
+    /// Block ads. Requires the [adblock] feature flag.
+    pub block_ads: bool,
+}
+
+impl RequestInterceptConfiguration {
+    /// Setup a new intercept config
+    pub fn new(enabled: bool) -> RequestInterceptConfiguration {
+        RequestInterceptConfiguration {
+            enabled,
+            block_visuals: true,
+            ..Default::default()
+        }
+    }
+    /// Block all request besides html and the important stuff.
+    pub fn block_all(&mut self) -> &Self {
+        self.block_javascript = true;
+        self.block_stylesheets = true;
+        self.block_visuals = true;
+        self.block_ads = true;
+        self
+    }
+}
+
 /// Convert AutomationScripts to Trie.
 pub fn convert_to_trie_automation_scripts(
     input: &Option<AutomationScriptsMap>,

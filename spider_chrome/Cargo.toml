@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.7.1"
+version = "2.8.0"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -45,6 +45,9 @@ pin-project-lite = "0.2"
 dunce = "1"
 bytes = { version = "1", features = ["serde"], optional = true }
 reqwest = { version = "0.12", default-features = false }
+lazy_static = "1.5.0"
+phf = { version = "0.11", features = ["macros"] }
+adblock = { version = "0.8", optional = true, default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
@@ -62,6 +65,7 @@ tokio-runtime = ["async-tungstenite/tokio-runtime"]
 fetcher = []
 bytes = ["dep:bytes"]
 serde0 = []
+adblock = ["dep:adblock"]
 
 # Temporary features until cargo weak dependencies bug is fixed
 # See https://github.com/rust-lang/cargo/issues/10801

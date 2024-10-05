@@ -351,7 +351,7 @@ use spider::website::Website;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://spider.cloud")
-        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
+        .with_chrome_intercept(spider::features::chrome_common::RequestInterceptConfiguration::new(true))
         .build()
         .unwrap();
 

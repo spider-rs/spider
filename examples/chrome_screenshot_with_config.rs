@@ -15,7 +15,6 @@ async fn main() {
 
     let mut website: Website = Website::new("https://choosealicense.com")
         .with_screenshot(Some(screenshot_config))
-        .with_chrome_intercept(cfg!(feature = "chrome_intercept"), true)
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(18).unwrap();

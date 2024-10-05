@@ -1,4 +1,5 @@
 use crate::compact_str::CompactString;
+use crate::features::chrome_common::RequestInterceptConfiguration;
 pub use crate::features::chrome_common::{
     AuthChallengeResponse, AuthChallengeResponseResponse, AutomationScripts, AutomationScriptsMap,
     CaptureScreenshotFormat, CaptureScreenshotParams, ClipViewport, ExecutionScripts,
@@ -14,8 +15,16 @@ use std::time::Duration;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RedirectPolicy {
     #[default]
+    #[cfg_attr(
+        feature = "serde",
+        serde(alias = "Loose", alias = "loose", alias = "LOOSE",)
+    )]
     /// A loose policy that allows all request up to the redirect limit.
     Loose,
+    #[cfg_attr(
+        feature = "serde",
+        serde(alias = "Strict", alias = "strict", alias = "STRICT",)
+    )]
     /// A strict policy only allowing request that match the domain set for crawling.
     Strict,
 }
@@ -99,15 +108,9 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept: bool,
     /// Configure the viewport for chrome. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub viewport: Option<Viewport>,
-    /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept_block_visuals: bool,
     /// Overrides default host system timezone with the specified one. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
     pub timezone_id: Option<Box<String>>,
@@ -156,6 +159,18 @@ pub struct Configuration {
     pub return_page_links: bool,
     /// Retry count to attempt to swap proxies etc.
     pub retry: u8,
+    /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
+    #[cfg(feature = "chrome")]
+    pub chrome_intercept: RequestInterceptConfiguration,
+    /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
+    #[cfg(feature = "chrome")]
+    pub chrome_intercept_block_visuals: bool,
+    /// Block all javascript from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
+    #[cfg(feature = "chrome")]
+    pub chrome_intercept_block_javascript: bool,
+    /// Block all stylesheets from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
+    #[cfg(feature = "chrome")]
+    pub chrome_intercept_block_stylesheets: bool,
     /// The blacklist urls.
     blacklist: AllowList,
     /// The whitelist urls.
@@ -207,7 +222,9 @@ impl Configuration {
             delay: 0,
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_secs(15))),
-            chrome_intercept: cfg!(feature = "chrome_intercept"),
+            chrome_intercept: RequestInterceptConfiguration::new(cfg!(
+                feature = "chrome_intercept"
+            )),
             ..Default::default()
         }
     }
@@ -676,11 +693,9 @@ impl Configuration {
     /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
-        chrome_intercept: bool,
-        block_images: bool,
+        chrome_intercept: RequestInterceptConfiguration,
     ) -> &mut Self {
         self.chrome_intercept = chrome_intercept;
-        self.chrome_intercept_block_visuals = block_images;
         self
     }
 
@@ -688,8 +703,7 @@ impl Configuration {
     /// Use request intercept for the request to only allow content required for the page that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
-        _chrome_intercept: bool,
-        _block_images: bool,
+        _chrome_intercept: RequestInterceptConfiguration,
     ) -> &mut Self {
         self
     }
