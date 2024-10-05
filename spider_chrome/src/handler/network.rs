@@ -116,7 +116,7 @@ impl NetworkManager {
 
     pub fn set_extra_headers(&mut self, headers: HashMap<String, String>) {
         self.extra_headers = headers;
-        let headers = serde_json::to_value(self.extra_headers.clone()).unwrap();
+        let headers = serde_json::to_value(self.extra_headers.clone()).unwrap_or_default();
         self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
     }
 

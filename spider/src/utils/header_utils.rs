@@ -90,3 +90,17 @@ pub fn get_mimic_headers(user_agent: &str) -> reqwest::header::HeaderMap {
 
     headers
 }
+
+/// convert the headermap to hashmap
+pub fn header_map_to_hash_map(header_map: &HeaderMap) -> std::collections::HashMap<String, String> {
+    let mut hash_map = std::collections::HashMap::new();
+
+    for (key, value) in header_map.iter() {
+        let key_string = key.as_str().to_string();
+        if let Ok(value_string) = value.to_str() {
+            hash_map.insert(key_string, value_string.to_string());
+        }
+    }
+
+    hash_map
+}

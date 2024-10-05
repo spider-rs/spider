@@ -208,6 +208,7 @@ impl Browser {
             ignore_stylesheets: config.ignore_stylesheets,
             ignore_javascript: config.ignore_javascript,
             ignore_ads: config.ignore_ads,
+            extra_headers: config.extra_headers.clone(),
         };
 
         let fut = Handler::new(conn, rx, handler_config);
@@ -684,6 +685,8 @@ pub struct BrowserConfig {
     pub ignore_javascript: bool,
     /// Whether to ignore ads when request interception is enabled.
     pub ignore_ads: bool,
+    /// Extra headers.
+    pub extra_headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -710,6 +713,7 @@ pub struct BrowserConfigBuilder {
     ignore_ads: bool,
     ignore_javascript: bool,
     ignore_stylesheets: bool,
+    extra_headers: Option<HashMap<String, String>>,
 }
 
 impl BrowserConfig {
@@ -747,6 +751,7 @@ impl Default for BrowserConfigBuilder {
             ignore_ads: false,
             ignore_javascript: false,
             ignore_stylesheets: false,
+            extra_headers: Default::default(),
         }
     }
 }
@@ -902,7 +907,10 @@ impl BrowserConfigBuilder {
         self.cache_enabled = false;
         self
     }
-
+    pub fn set_extra_headers(mut self, headers: Option<HashMap<String, String>>) -> Self {
+        self.extra_headers = headers;
+        self
+    }
     pub fn build(self) -> std::result::Result<BrowserConfig, String> {
         let executable = if let Some(e) = self.executable {
             e
@@ -932,6 +940,7 @@ impl BrowserConfigBuilder {
             ignore_ads: self.ignore_ads,
             ignore_javascript: self.ignore_javascript,
             ignore_stylesheets: self.ignore_stylesheets,
+            extra_headers: self.extra_headers,
         })
     }
 }

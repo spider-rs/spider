@@ -204,6 +204,17 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_ads: config.chrome_intercept.block_ads,
         ignore_javascript: config.chrome_intercept.block_javascript,
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
+        extra_headers: match config.headers {
+            Some(ref headers) => {
+                let hm = crate::utils::header_utils::header_map_to_hash_map(headers);
+                if hm.is_empty() {
+                    None
+                } else {
+                    Some(hm)
+                }
+            }
+            _ => None,
+        },
         ..HandlerConfig::default()
     }
 }
@@ -249,6 +260,18 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_javascript = config.chrome_intercept.block_javascript;
                 browser_config.ignore_ads = config.chrome_intercept.block_ads;
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
+                browser_config.extra_headers = match config.headers {
+                    Some(ref headers) => {
+                        let hm = crate::utils::header_utils::header_map_to_hash_map(headers);
+                        if hm.is_empty() {
+                            None
+                        } else {
+                            Some(hm)
+                        }
+                    }
+                    _ => None,
+                };
+
                 match Browser::launch(browser_config).await {
                     Ok(browser) => Some(browser),
                     _ => None,

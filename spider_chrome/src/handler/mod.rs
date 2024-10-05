@@ -459,6 +459,7 @@ impl Handler {
                 request_intercept: self.config.request_intercept,
                 cache_enabled: self.config.cache_enabled,
                 ignore_visuals: self.config.ignore_visuals,
+                extra_headers: self.config.extra_headers.clone(),
             },
             browser_ctx,
         );
@@ -695,6 +696,8 @@ pub struct HandlerConfig {
     pub ignore_javascript: bool,
     /// Whether to ignore ads.
     pub ignore_ads: bool,
+    /// Extra headers.
+    pub extra_headers: Option<HashMap<String, String>>,
 }
 
 impl Default for HandlerConfig {
@@ -710,6 +713,7 @@ impl Default for HandlerConfig {
             ignore_stylesheets: false,
             ignore_ads: false,
             ignore_javascript: false,
+            extra_headers: Default::default(),
         }
     }
 }

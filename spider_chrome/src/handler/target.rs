@@ -105,6 +105,10 @@ impl Target {
         network_manager.set_cache_enabled(config.cache_enabled);
         network_manager.set_request_interception(config.request_intercept);
 
+        if let Some(ref headers) = config.extra_headers {
+            network_manager.set_extra_headers(headers.clone());
+        }
+
         Self {
             info,
             r#type: ty,
@@ -604,6 +608,7 @@ pub struct TargetConfig {
     pub request_intercept: bool,
     pub cache_enabled: bool,
     pub ignore_visuals: bool,
+    pub extra_headers: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Default for TargetConfig {
@@ -615,6 +620,7 @@ impl Default for TargetConfig {
             request_intercept: false,
             cache_enabled: true,
             ignore_visuals: false,
+            extra_headers: Default::default(),
         }
     }
 }
