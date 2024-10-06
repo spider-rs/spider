@@ -12,6 +12,7 @@ use crate::Client;
 use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
+use phf::phf_set;
 use reqwest::StatusCode;
 use tokio::time::Duration;
 
@@ -194,18 +195,42 @@ pub fn domain_name(domain: &Url) -> &str {
     }
 }
 
-/// convert to absolute path
+static URL_JOIN_SYMBOLS: phf::Set<&'static str> = phf_set! {
+    "?", "#", "/"
+};
+
+/// Convert to absolute path
 #[inline]
 pub fn convert_abs_path(base: &Url, href: &str) -> Url {
-    match base.join(href) {
-        Ok(mut joined) => {
-            joined.set_fragment(None);
-            joined
+    let should_adjust = !base.path().ends_with('/') && !href.is_empty();
+    let needs_slash =
+        should_adjust && !URL_JOIN_SYMBOLS.contains(&href[..1]) && !href.starts_with("http");
+
+    if needs_slash {
+        let mut base = base.clone();
+        let mut path = base.path().to_string();
+        path.push('/');
+        base.set_path(&path);
+        match base.join(&href) {
+            Ok(mut joined) => {
+                joined.set_fragment(None);
+                joined
+            }
+            Err(e) => {
+                log("URL Parse Error: ", e.to_string());
+                base.clone()
+            }
         }
-        Err(e) => {
-            log("URL Parse Error: ", e.to_string());
-            // todo: we may want to repair the url being passed in.
-            base.clone()
+    } else {
+        match base.join(&href) {
+            Ok(mut joined) => {
+                joined.set_fragment(None);
+                joined
+            }
+            Err(e) => {
+                log("URL Parse Error: ", e.to_string());
+                base.clone()
+            }
         }
     }
 }
