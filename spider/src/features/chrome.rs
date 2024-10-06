@@ -451,7 +451,7 @@ pub async fn close_browser(
 }
 
 /// Setup interception for auth challenges. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(feature = "chrome", feature = "chrome_intercept",))]
+#[cfg(all(feature = "chrome"))]
 pub async fn setup_auth_challenge_response(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
@@ -500,7 +500,7 @@ pub async fn setup_auth_challenge_response(
 }
 
 /// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(feature = "chrome", feature = "chrome_intercept",))]
+#[cfg(all(feature = "chrome"))]
 pub async fn setup_chrome_interception_base(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,

@@ -1115,26 +1115,21 @@ impl Page {
                                                             )
                                                             .await;
 
-                                                            match intercept_handle {
-                                                                Some(h) => {
-                                                                    let _ = h.await;
-                                                                }
-                                                                _ => (),
+                                                        match intercept_handle {
+                                                            Some(h) => {
+                                                                let _ = h.await;
                                                             }
-
-                                                            match page_resource {
-                                                                Ok(resource) => {
-                                                                    if let Err(_) =
-                                                                        tx.send(resource)
-                                                                    {
-                                                                        crate::utils::log(
-                                                                            "the receiver dropped",
-                                                                            "",
-                                                                        );
-                                                                    }
+                                                            _ => (),
+                                                        }
+                                                        if let Ok(resource) = page_resource {
+                                                                if let Err(_) = tx.send(resource)
+                                                                {
+                                                                    crate::utils::log(
+                                                                        "the receiver dropped",
+                                                                        "",
+                                                                    );
                                                                 }
-                                                                _ => (),
-                                                            };
+                                                            }
                                                         }
                                                         _ => (),
                                                     }

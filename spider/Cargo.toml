@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.8.2"
+version = "2.8.3"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -139,7 +139,7 @@ chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
-smart = ["chrome", "dep:regex"]
+smart = ["chrome", "dep:regex", "chrome_intercept"]
 encoding = ["dep:auto_encoder"]
 headers = ["dep:httpdate"]
 real_browser = []

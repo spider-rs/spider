@@ -1491,6 +1491,62 @@ impl Website {
         }
     }
 
+    /// fetch the page with chrome
+    #[cfg(all(
+        not(feature = "glob"),
+        not(feature = "decentralized"),
+        feature = "smart"
+    ))]
+    async fn render_chrome_page(
+        config: &Configuration,
+        client: &Client,
+        browser: &Arc<chromiumoxide::Browser>,
+        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+        page: &mut Page,
+        url: &str,
+    ) {
+        if let Ok(chrome_page) = crate::features::chrome::attempt_navigation(
+            "about:blank",
+            &browser,
+            &config.request_timeout,
+            &context_id,
+        )
+        .await
+        {
+            Website::setup_chrome_events(&chrome_page, &config).await;
+            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                &chrome_page,
+                config.chrome_intercept.enabled,
+                &config.auth_challenge_response,
+                config.chrome_intercept_block_visuals,
+                &url,
+            )
+            .await;
+
+            let next_page = Page::new(
+                &url,
+                &client,
+                &chrome_page,
+                &config.wait_for,
+                &config.screenshot,
+                false, // we use the initial about:blank page.
+                &config.openai_config,
+                &config.execution_scripts,
+                &config.automation_scripts,
+            )
+            .await;
+
+            page.clone_from(&next_page);
+
+            match intercept_handle {
+                Some(h) => {
+                    let _ = h.await;
+                }
+                _ => (),
+            }
+        }
+    }
+
     /// Expand links for crawl.
     #[cfg(all(
         not(feature = "glob"),
@@ -1509,7 +1565,20 @@ impl Website {
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            let mut page = Page::new_page(&self.url.inner(), &client).await;
+            let url = self.url.inner();
+            let mut page = Page::new_page(&url, &client).await;
+
+            if page.should_retry {
+                Website::render_chrome_page(
+                    &self.configuration,
+                    client,
+                    browser,
+                    context_id,
+                    &mut page,
+                    url,
+                )
+                .await
+            }
 
             let mut retry_count = self.configuration.retry;
 
@@ -1517,7 +1586,19 @@ impl Website {
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
                 }
-                page.clone_from(&Page::new_page(self.url.inner(), &client).await);
+                if retry_count.is_power_of_two() {
+                    Website::render_chrome_page(
+                        &self.configuration,
+                        client,
+                        browser,
+                        context_id,
+                        &mut page,
+                        url,
+                    )
+                    .await
+                } else {
+                    page.clone_from(&Page::new_page(url, &client).await);
+                }
                 retry_count -= 1;
             }
 
@@ -3010,11 +3091,17 @@ impl Website {
                                                         _ => (link, None),
                                                     };
 
-                                                    let mut page = Page::new_page(
-                                                        &link_result.0.as_ref(),
-                                                        &shared.0,
-                                                    )
-                                                    .await;
+                                                    let url = link_result.0.as_ref();
+                                                    let mut page =
+                                                        Page::new_page(&url, &shared.0).await;
+
+                                                    if page.should_retry {
+                                                        Website::render_chrome_page(
+                                                            &shared.5, &shared.0, &shared.4,
+                                                            &shared.6, &mut page, url,
+                                                        )
+                                                        .await;
+                                                    }
 
                                                     let mut retry_count = shared.5.retry;
 
@@ -3022,13 +3109,18 @@ impl Website {
                                                         if let Some(timeout) = page.get_timeout() {
                                                             tokio::time::sleep(timeout).await;
                                                         }
-                                                        page.clone_from(
-                                                            &Page::new_page(
-                                                                link_result.0.as_ref(),
-                                                                &shared.0,
+                                                        if retry_count.is_power_of_two() {
+                                                            Website::render_chrome_page(
+                                                                &shared.5, &shared.0, &shared.4,
+                                                                &shared.6, &mut page, url,
                                                             )
-                                                            .await,
-                                                        );
+                                                            .await;
+                                                        } else {
+                                                            page.clone_from(
+                                                                &Page::new_page(url, &shared.0)
+                                                                    .await,
+                                                            );
+                                                        }
                                                         retry_count -= 1;
                                                     }
 
