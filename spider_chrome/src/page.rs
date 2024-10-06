@@ -156,10 +156,10 @@ impl Page {
         Ok(())
     }
 
-    /// Sets `window.chrome` on frame creation
+    /// Sets `window.chrome` on frame creation and console.log methods.
     async fn hide_chrome(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "window.chrome = { runtime: {} };".to_string(),
+            source: "window.chrome = { runtime: {} };['log', 'warn', 'error', 'info', 'debug', 'table'].forEach((method) => { console[method] = () => {}; });".to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,

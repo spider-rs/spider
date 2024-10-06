@@ -852,6 +852,13 @@ async fn perform_smart_mouse_movement(page: &chromiumoxide::Page) {
 #[cfg(all(not(feature = "real_browser"), feature = "smart"))]
 async fn perform_smart_mouse_movement(_page: &chromiumoxide::Page) {}
 
+#[cfg(all(
+    not(feature = "real_browser"),
+    not(feature = "smart"),
+    feature = "chrome"
+))]
+async fn perform_smart_mouse_movement(_page: &chromiumoxide::Page) {}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
