@@ -833,6 +833,25 @@ async fn navigate(
     Ok(())
 }
 
+#[cfg(all(feature = "real_browser", feature = "smart"))]
+/// generate random mouse movement.
+async fn perform_smart_mouse_movement(page: &chromiumoxide::Page) {
+    use chromiumoxide::layout::Point;
+    use rand::rngs::SmallRng;
+    use rand::{Rng, SeedableRng};
+
+    let mut rng = SmallRng::from_entropy();
+
+    // we can pass in the browser size once we allow re-adjusting it and real movements.
+    let random_x = rng.gen_range(0.0..1280.0);
+    let random_y = rng.gen_range(0.0..720.0);
+
+    let _ = page.move_mouse(Point::new(random_x, random_y)).await;
+}
+
+#[cfg(all(not(feature = "real_browser"), feature = "smart"))]
+async fn perform_smart_mouse_movement(_page: &chromiumoxide::Page) {}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -857,6 +876,10 @@ pub async fn fetch_page_html_chrome_base(
         } else {
             let _ = navigate(page, source, &mut chrome_http_req_res).await;
         }
+    }
+
+    if chrome_http_req_res.waf_check {
+        perform_smart_mouse_movement(&page).await;
     }
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
