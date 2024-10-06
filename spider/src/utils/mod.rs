@@ -879,11 +879,15 @@ pub async fn fetch_page_html_chrome_base(
     if !page_set {
         // used for smart mode re-rendering direct assigning html
         if content {
-            if let Ok(frame) = page.mainframe().await {             
-                let _ = page.execute(chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                    frame_id: frame.unwrap_or_default(),
-                    html: source.to_string()
-                }).await;
+            if let Ok(frame) = page.mainframe().await {
+                let _ = page
+                    .execute(
+                        chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                            frame_id: frame.unwrap_or_default(),
+                            html: source.to_string(),
+                        },
+                    )
+                    .await;
             }
         } else {
             let _ = navigate(page, source, &mut chrome_http_req_res).await;
@@ -962,6 +966,9 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
+    set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+    set_page_response_cookies(&mut page_response, &page).await;
+
     if openai_config.is_some() {
         run_openai_request(
             match url_target {
@@ -1029,7 +1036,7 @@ pub async fn fetch_page_html_chrome_base(
 }
 
 /// Set the page response.
-#[cfg(all(feature = "chrome", not(feature = "headers")))]
+#[cfg(feature = "chrome")]
 fn set_page_response(
     ok: bool,
     res: bytes::Bytes,
@@ -1047,26 +1054,47 @@ fn set_page_response(
 
 /// Set the page response.
 #[cfg(all(feature = "chrome", feature = "headers"))]
-fn set_page_response(
-    ok: bool,
-    res: bytes::Bytes,
+fn set_page_response_headers(
     chrome_http_req_res: &mut ChromeHTTPReqRes,
-    final_url: Option<String>,
-) -> PageResponse {
-    let response_headers = convert_headers(&chrome_http_req_res.request_headers);
+    page_response: &mut PageResponse,
+) {
+    let response_headers = convert_headers(&chrome_http_req_res.response_headers);
 
-    let page_response = PageResponse {
-        content: if ok { Some(res) } else { None },
-        status_code: chrome_http_req_res.status_code,
-        final_url,
-        headers: if response_headers.is_empty() {
-            None
-        } else {
-            Some(response_headers)
-        },
-        ..Default::default()
-    };
-    page_response
+    if !response_headers.is_empty() {
+        page_response.headers = Some(response_headers);
+    }
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", not(feature = "cookies")))]
+fn set_page_response_headers(
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    page_response: &mut PageResponse,
+) {
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", feature = "cookies"))]
+async fn set_page_response_cookies(page_response: &mut PageResponse, page: &chromiumoxide::Page) {
+    if let Ok(mut cookies) = page.get_cookies().await {
+        let mut cookies_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        for cookie in cookies.drain(..) {
+            cookies_map.insert(cookie.name, cookie.value);
+        }
+
+        let response_headers = convert_headers(&cookies_map);
+
+        if !response_headers.is_empty() {
+            page_response.cookies = Some(response_headers);
+        }
+    }
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", not(feature = "headers")))]
+async fn set_page_response_cookies(_page_response: &mut PageResponse, _page: &chromiumoxide::Page) {
 }
 
 /// Perform a screenshot shortcut.
