@@ -4,6 +4,9 @@ use std::sync::Arc;
 use futures::channel::mpsc::unbounded;
 use futures::channel::oneshot::channel as oneshot_channel;
 use futures::{stream, SinkExt, StreamExt};
+use rand::distributions::Alphanumeric;
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 
 use chromiumoxide_cdp::cdp::browser_protocol::dom::*;
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
@@ -38,10 +41,83 @@ use crate::js::{Evaluation, EvaluationResult};
 use crate::layout::Point;
 use crate::listeners::{EventListenerRequest, EventStream};
 use crate::{utils, ArcHttpRequest};
+use phf::phf_set;
 
 #[derive(Debug, Clone)]
 pub struct Page {
     inner: Arc<PageInner>,
+}
+
+/// List of chrome plugins.
+static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
+    "internal-pdf-viewer",
+    "internal-nacl-plugin",
+    "pepperflashplugin-nonfree",
+    "libunity-webplugin.so",
+    "Shockwave Flash",
+    "Chrome PDF Viewer",
+    "Widevine Content Decryption Module",
+    "Google Talk Plugin",
+    "Java(TM) Platform SE",
+    "Silverlight Plug-In",
+    "QuickTime Plug-in",
+    "Adobe Acrobat",
+    "RealPlayer Version Plugin",
+    "RealJukebox NS Plugin",
+    "iTunes Application Detector",
+    "VLC Web Plugin",
+    "DivX Plus Web Player",
+    "Unity Player",
+    "Facebook Video Calling Plugin",
+    "Windows Media Player Plug-in Dynamic Link Library",
+    "Microsoft Office Live Plug-in",
+    "Google Earth Plugin",
+    "Adobe Flash Player",
+    "Shockwave for Director",
+    "npapi",
+    "ActiveTouch General Plugin Container",
+    "Java Deployment Toolkit",
+    "Garmin Communicator Plug-In",
+    "npffmpeg",
+    "Silverlight",
+    "Citrix ICA Client Plugin (Win32)",
+    "MetaStream 3 Plugin",
+    "Google Update",
+    "Photo Gallery",
+    "plugin-pdf",
+    "Microsoft Office 2010",
+    "Mozilla Default Plug-in",
+    "Exif Image Viewer",
+    "DivX Browser Plug-In",
+};
+
+/// Obfuscates browser plugins on frame creation
+fn generate_random_plugin_filename() -> String {
+    let mut rng = thread_rng();
+    let random_string: String = (0..10)
+        .map(|_| rng.sample(Alphanumeric))
+        .map(char::from)
+        .collect();
+    format!("{}.plugin", random_string)
+}
+
+/// Returns a vector with a mix of real and random plugin filenames
+fn get_plugin_filenames() -> Vec<String> {
+    use rand::prelude::IteratorRandom;
+
+    let mut plugins: Vec<String> = PLUGINS_SET
+        .iter()
+        .choose_multiple(&mut thread_rng(), 2)
+        .into_iter()
+        .map(|f| f.to_string())
+        .collect();
+
+    for _ in 0..2 {
+        plugins.push(generate_random_plugin_filename().into());
+    }
+
+    plugins.shuffle(&mut thread_rng());
+    plugins
 }
 
 impl Page {
@@ -96,8 +172,7 @@ impl Page {
     async fn hide_webgl_vendor(&self) -> Result<(), CdpError> {
         self
             .execute(AddScriptToEvaluateOnNewDocumentParams {
-                source: "
-                    const getParameter = WebGLRenderingContext.getParameter;
+                source: "const getParameter = WebGLRenderingContext.getParameter;
                     WebGLRenderingContext.prototype.getParameter = function (parameter) {
                         if (parameter === 37445) {
                             return 'Google Inc. (NVIDIA)';
@@ -108,8 +183,7 @@ impl Page {
                         }
     
                         return getParameter(parameter);
-                    };
-                "
+                    };"
                 .to_string(),
                 world_name: None,
                 include_command_line_api: None,
@@ -119,42 +193,47 @@ impl Page {
         Ok(())
     }
 
-    /// Obfuscates browser plugins on frame creation
+    /// Obfuscates browser plugins and hides the navigator object on frame creation
     async fn hide_plugins(&self) -> Result<(), CdpError> {
+        let plugins = get_plugin_filenames();
+        let plugin_script = format!(
+            "Object.defineProperty(
+                navigator,
+                'plugins',
+                {{
+                    get: () => [
+                        {{ filename: '{}' }},
+                        {{ filename: '{}' }},
+                        {{ filename: '{}' }},
+                        {{ filename: '{}' }}
+                    ],
+                }}
+            );",
+            plugins[0], plugins[1], plugins[2], plugins[3]
+        );
+
+        let navigator_script = "Object.defineProperty(window, 'navigator', { value: {} });";
+
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "
-                    Object.defineProperty(
-                        navigator,
-                        'plugins',
-                        {
-                            get: () => [
-                                { filename: 'internal-pdf-viewer' },
-                                { filename: 'adsfkjlkjhalkh' },
-                                { filename: 'internal-nacl-plugin '}
-                            ],
-                        }
-                    );
-                "
-            .to_string(),
+            source: format!("{}{}", navigator_script, plugin_script).to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
         })
         .await?;
+
         Ok(())
     }
 
     /// Obfuscates browser permissions on frame creation
     async fn hide_permissions(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "
-                    const originalQuery = window.navigator.permissions.query;
+            source: "const originalQuery = window.navigator.permissions.query;
                     window.navigator.permissions.__proto__.query = parameters => {
                         return parameters.name === 'notifications'
                             ? Promise.resolve({ state: Notification.permission })
                             : originalQuery(parameters);
-                    }
-                "
+                    }"
             .to_string(),
             world_name: None,
             include_command_line_api: None,
@@ -167,13 +246,11 @@ impl Page {
     /// Removes the `navigator.webdriver` property on frame creation
     async fn hide_webdriver(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "
-                    Object.defineProperty(
+            source: "Object.defineProperty(
                         navigator,
                         'webdriver',
                         { get: () => undefined }
-                    );
-                "
+                    );"
             .to_string(),
             world_name: None,
             include_command_line_api: None,
