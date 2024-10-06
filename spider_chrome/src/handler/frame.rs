@@ -216,21 +216,25 @@ impl FrameManager {
         let enable = page::EnableParams::default();
         let get_tree = page::GetFrameTreeParams::default();
         let set_lifecycle = page::SetLifecycleEventsEnabledParams::new(true);
+
         let enable_runtime = runtime::EnableParams::default();
         CommandChain::new(
             vec![
-                (enable.identifier(), serde_json::to_value(enable).unwrap()),
+                (
+                    enable.identifier(),
+                    serde_json::to_value(enable).unwrap_or_default(),
+                ),
                 (
                     get_tree.identifier(),
-                    serde_json::to_value(get_tree).unwrap(),
+                    serde_json::to_value(get_tree).unwrap_or_default(),
                 ),
                 (
                     set_lifecycle.identifier(),
-                    serde_json::to_value(set_lifecycle).unwrap(),
+                    serde_json::to_value(set_lifecycle).unwrap_or_default(),
                 ),
                 (
                     enable_runtime.identifier(),
-                    serde_json::to_value(enable_runtime).unwrap(),
+                    serde_json::to_value(enable_runtime).unwrap_or_default(),
                 ),
             ],
             timeout,
@@ -545,15 +549,26 @@ impl FrameManager {
 
         cmds.push((cmd.identifier(), serde_json::to_value(cmd).unwrap()));
 
-        cmds.extend(self.frames.keys().map(|id| {
-            let cmd = CreateIsolatedWorldParams::builder()
+        let cm = self.frames.keys().filter_map(|id| {
+            if let Ok(cmd) = CreateIsolatedWorldParams::builder()
                 .frame_id(id.clone())
                 .grant_univeral_access(true)
                 .world_name(world_name)
                 .build()
-                .unwrap();
-            (cmd.identifier(), serde_json::to_value(cmd).unwrap())
-        }));
+            {
+                let cm = (
+                    cmd.identifier(),
+                    serde_json::to_value(cmd).unwrap_or_default(),
+                );
+
+                Some(cm)
+            } else {
+                None
+            }
+        });
+
+        cmds.extend(cm);
+
         Some(CommandChain::new(cmds, self.request_timeout))
     }
 }

@@ -732,7 +732,11 @@ impl ResponseLike for HttpResponseLike {
 }
 
 /// Convert headers to header map
-#[cfg(any(feature = "cache_chrome_hybrid", feature = "headers"))]
+#[cfg(any(
+    feature = "cache_chrome_hybrid",
+    feature = "headers",
+    feature = "cookies"
+))]
 pub fn convert_headers(
     headers: &std::collections::HashMap<String, String>,
 ) -> reqwest::header::HeaderMap {
@@ -899,7 +903,7 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !content {
+    let final_url = if wait_for_navigation {
         let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
             match page.wait_for_navigation_response().await {
                 Ok(u) => get_last_redirect(&source, &u),
@@ -1066,10 +1070,10 @@ fn set_page_response_headers(
 }
 
 /// Set the page response.
-#[cfg(all(feature = "chrome", not(feature = "cookies")))]
+#[cfg(all(feature = "chrome", not(feature = "headers")))]
 fn set_page_response_headers(
-    chrome_http_req_res: &mut ChromeHTTPReqRes,
-    page_response: &mut PageResponse,
+    _chrome_http_req_res: &mut ChromeHTTPReqRes,
+    _page_response: &mut PageResponse,
 ) {
 }
 
@@ -1093,7 +1097,7 @@ async fn set_page_response_cookies(page_response: &mut PageResponse, page: &chro
 }
 
 /// Set the page response.
-#[cfg(all(feature = "chrome", not(feature = "headers")))]
+#[cfg(all(feature = "chrome", not(feature = "cookies")))]
 async fn set_page_response_cookies(_page_response: &mut PageResponse, _page: &chromiumoxide::Page) {
 }
 
