@@ -2463,6 +2463,29 @@ impl Website {
                                                                     )
                                                                     .await;
 
+                                                                    let mut retry_count = shared.5.retry;
+
+                                                                    while page.should_retry && retry_count > 0 {
+                                                                        if let Some(timeout) = page.get_timeout() {
+                                                                            tokio::time::sleep(timeout).await;
+                                                                        }
+                                                                        page.clone_from(
+                                                                            &Page::new(
+                                                                                &target_url,
+                                                                                &shared.0,
+                                                                                &new_page,
+                                                                                &shared.5.wait_for,
+                                                                                &shared.5.screenshot,
+                                                                                false,
+                                                                                &shared.5.openai_config,
+                                                                                &shared.5.execution_scripts,
+                                                                                &shared.5.automation_scripts,
+                                                                            )
+                                                                            .await,
+                                                                        );
+                                                                        retry_count -= 1;
+                                                                    }
+
                                                                     if add_external {
                                                                         page.set_external(
                                                                             shared
@@ -2729,6 +2752,30 @@ impl Website {
                                                                     &shared.6.automation_scripts,
                                                                 )
                                                                 .await;
+
+                                                                let mut retry_count = shared.6.retry;
+
+                                                                while page.should_retry && retry_count > 0 {
+                                                                    if let Some(timeout) = page.get_timeout() {
+                                                                        tokio::time::sleep(timeout).await;
+                                                                    }
+                                                                    page.clone_from(
+                                                                        &Page::new(
+                                                                            &target_url,
+                                                                            &shared.0,
+                                                                            &new_page,
+                                                                            &shared.6.wait_for,
+                                                                            &shared.6.screenshot,
+                                                                            false,
+                                                                            &shared.6.openai_config,
+                                                                            &shared.6.execution_scripts,
+                                                                            &shared.6.automation_scripts,
+                                                                        )
+                                                                        .await,
+                                                                    );
+                                                                    retry_count -= 1;
+                                                                }
+
 
                                                                 match intercept_handle {
                                                                     Some(h) => {
