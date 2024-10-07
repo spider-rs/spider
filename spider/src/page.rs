@@ -203,8 +203,14 @@ static URL_JOIN_SYMBOLS: phf::Set<&'static str> = phf_set! {
 #[inline]
 pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     let should_adjust = !base.path().ends_with('/') && !href.is_empty();
-    let needs_slash =
-        should_adjust && !URL_JOIN_SYMBOLS.contains(&href[..1]) && !href.starts_with("http");
+    let needs_slash = if should_adjust {
+        match href.chars().next() {
+            Some(c) => !URL_JOIN_SYMBOLS.contains(&c.to_string()) && !href.starts_with("http"),
+            _ => false,
+        }
+    } else {
+        false
+    };
 
     if needs_slash {
         let mut base = base.clone();
