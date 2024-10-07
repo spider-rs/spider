@@ -170,6 +170,10 @@ pub enum CrawlStatus {
     Active,
     /// The crawl blocked from network ratelimit, firewall, etc.
     Blocked,
+    /// The crawl failed from a server error.
+    ServerError,
+    /// The crawl was rate limited.
+    RateLimited,
     /// The initial request ran without returning html.
     Empty,
     /// The URL of the website is invalid. Crawl cannot commence.
@@ -1323,8 +1327,11 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
+            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.status = CrawlStatus::RateLimited;
+            } else if page.status_code.is_server_error() {
+                self.status = CrawlStatus::ServerError;
             }
-
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
                     None
@@ -1473,8 +1480,11 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
+            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.status = CrawlStatus::RateLimited;
+            } else if page.status_code.is_server_error() {
+                self.status = CrawlStatus::ServerError;
             }
-
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
                     None
@@ -1655,8 +1665,11 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
+            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.status = CrawlStatus::RateLimited;
+            } else if page.status_code.is_server_error() {
+                self.status = CrawlStatus::ServerError;
             }
-
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
                     None
@@ -1709,10 +1722,13 @@ impl Website {
                 _ => *self.url.to_owned(),
             });
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN && page.links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
+            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.status = CrawlStatus::RateLimited;
+            } else if page.status_code.is_server_error() {
+                self.status = CrawlStatus::ServerError;
             }
-
             let links = HashSet::from(page.links.clone());
 
             if self.configuration.return_page_links {
