@@ -1120,7 +1120,7 @@ impl Page {
                                                                 &uu,
                                                                 &new_page,
                                                                 true,
-                                                                false,
+                                                                true,
                                                                 &Some(crate::configuration::WaitFor::new(
                                                                     Some(
                                                                         core::time::Duration::from_secs(
