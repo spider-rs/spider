@@ -303,7 +303,9 @@ pub fn build(url: &str, res: PageResponse) -> Page {
     };
     let mut should_retry = resource_found && !res.status_code.is_success()
         || res.status_code.is_server_error()
-        || res.status_code == StatusCode::TOO_MANY_REQUESTS;
+        || res.status_code == StatusCode::TOO_MANY_REQUESTS
+        || res.status_code == StatusCode::FORBIDDEN
+        || res.status_code == StatusCode::REQUEST_TIMEOUT;
 
     Page {
         html: if resource_found { res.content } else { None },
