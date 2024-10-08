@@ -1431,6 +1431,7 @@ impl Website {
                 &self.configuration.openai_config,
                 &self.configuration.execution_scripts,
                 &self.configuration.automation_scripts,
+                &self.configuration.viewport,
             )
             .await;
 
@@ -1557,6 +1558,7 @@ impl Website {
                 &config.openai_config,
                 &config.execution_scripts,
                 &config.automation_scripts,
+                &config.viewport,
             )
             .await;
 
@@ -2527,6 +2529,7 @@ impl Website {
                                                                         &shared.5.openai_config,
                                                                         &shared.5.execution_scripts,
                                                                         &shared.5.automation_scripts,
+                                                                        &shared.5.viewport,
                                                                     )
                                                                     .await;
 
@@ -2547,6 +2550,7 @@ impl Website {
                                                                                         &shared.5.openai_config,
                                                                                         &shared.5.execution_scripts,
                                                                                         &shared.5.automation_scripts,
+                                                                                        &shared.5.viewport,
                                                                                     )
                                                                                     .await;
                                                                                     Ok::<
@@ -2575,6 +2579,7 @@ impl Website {
                                                                                     &shared.5.openai_config,
                                                                                     &shared.5.execution_scripts,
                                                                                     &shared.5.automation_scripts,
+                                                                                    &shared.5.viewport,
                                                                                 )
                                                                                 .await,
                                                                             );
@@ -2846,6 +2851,7 @@ impl Website {
                                                                     &shared.6.openai_config,
                                                                     &shared.6.execution_scripts,
                                                                     &shared.6.automation_scripts,
+                                                                    &shared.6.viewport,
                                                                 )
                                                                 .await;
 
@@ -2866,6 +2872,7 @@ impl Website {
                                                                                     &shared.6.openai_config,
                                                                                     &shared.6.execution_scripts,
                                                                                     &shared.6.automation_scripts,
+                                                                                    &shared.6.viewport,
                                                                                 ).await;
                                                                                 Ok::<
                                                                                     Page,
@@ -2893,6 +2900,7 @@ impl Website {
                                                                                 &shared.6.openai_config,
                                                                                 &shared.6.execution_scripts,
                                                                                 &shared.6.automation_scripts,
+                                                                                &shared.6.viewport,
                                                                             )
                                                                             .await,
                                                                         );
@@ -3837,6 +3845,7 @@ impl Website {
                                                                                     &shared.3.openai_config,
                                                                                     &shared.3.execution_scripts,
                                                                                     &shared.3.automation_scripts,
+                                                                                    &shared.3.viewport,
                                                                                 )
                                                                                 .await;
 

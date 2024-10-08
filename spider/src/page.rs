@@ -343,7 +343,11 @@ pub fn build(url: &str, res: PageResponse) -> Page {
                 Ok(_) => None,
                 Err(er) => {
                     if er.is_status() || er.is_connect() || er.is_timeout() {
-                        should_retry = true;
+                        if er.to_string().contains("ENOTFOUND") {
+                            should_retry = false;
+                        } else {
+                            should_retry = true;
+                        }
                     }
                     Some(er.to_string())
                 }
@@ -416,6 +420,7 @@ impl Page {
         openai_config: &Option<crate::configuration::GPTConfigs>,
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
+        viewport: &Option<crate::configuration::Viewport>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -427,6 +432,7 @@ impl Page {
             openai_config,
             execution_scripts,
             automation_scripts,
+            viewport,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -1161,8 +1167,9 @@ impl Page {
                                                                 Some(&target_url),
                                                                 &configuration
                                                                         .execution_scripts,
-                                                                        &configuration
-                                                                        .automation_scripts
+                                                                &configuration
+                                                                        .automation_scripts,
+                                                                &configuration.viewport
                                                             )
                                                             .await;
 
