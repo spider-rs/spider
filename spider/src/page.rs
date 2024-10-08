@@ -299,9 +299,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<Rela
 pub fn validate_empty(content: &Option<Bytes>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
-            let empty_page = content != "<html><head></head><body></body></html>";
-
-            if empty_page || is_success &&
+            if content.is_empty() || content == "<html><head></head><body></body></html>" || is_success &&
             content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
             content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n") {
                 false
@@ -806,7 +804,7 @@ impl Page {
         }
     }
 
-    /// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS. This fallsback to get_html without the [encoding] flag enabled.
+    /// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS. This fallsback to get_html without the `encoding` flag enabled.
     #[cfg(feature = "encoding")]
     pub fn get_html_encoded(&self, label: &str) -> String {
         get_html_encoded(&self.html, label)
@@ -1624,13 +1622,9 @@ async fn test_abs_path() {
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_duration() {
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .unwrap();
-
+    let client = Client::default();
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(&link_result, &client).await;
+    let page: Page = Page::new_page(&link_result, &client).await;
     let duration_elasped = page.get_duration_elasped().as_millis();
 
     assert!(

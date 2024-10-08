@@ -605,7 +605,7 @@ pub struct RequestInterceptConfiguration {
     pub block_stylesheets: bool,
     /// Block javascript.
     pub block_javascript: bool,
-    /// Block ads. Requires the [adblock] feature flag.
+    /// Block ads. Requires the `adblock` feature flag.
     pub block_ads: bool,
 }
 

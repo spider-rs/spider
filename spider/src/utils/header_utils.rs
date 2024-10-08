@@ -14,7 +14,7 @@ pub fn setup_default_headers(
 ) -> ClientBuilder {
     let mut headers = match configuration.headers {
         Some(ref h) => *h.clone(),
-        None => HeaderMap::new(),
+        None => crate::configuration::SerializableHeaderMap::default(),
     };
 
     if !headers.contains_key(REFERER) {
@@ -44,7 +44,7 @@ pub fn setup_default_headers(
 
     headers.extend(header_map);
 
-    client_builder.default_headers(headers)
+    client_builder.default_headers(headers.0)
 }
 
 /// Build the headers to use to act like a browser

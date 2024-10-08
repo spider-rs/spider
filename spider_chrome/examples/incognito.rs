@@ -22,6 +22,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .new_page("https://en.wikipedia.org")
         .await?;
 
-    handle.await;
+    handle.await?;
     Ok(())
 }

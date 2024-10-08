@@ -20,6 +20,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // save the page as pdf
     page.save_pdf(PrintToPdfParams::default(), "hn.pdf").await?;
 
-    handle.await;
+    handle.await?;
     Ok(())
 }

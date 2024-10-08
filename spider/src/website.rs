@@ -989,7 +989,7 @@ impl Website {
         }
 
         match &self.configuration.headers {
-            Some(h) => headers.extend(*h.to_owned()),
+            Some(h) => headers.extend(h.inner().clone()),
             _ => (),
         };
 
@@ -1068,7 +1068,7 @@ impl Website {
         }
 
         match &self.configuration.headers {
-            Some(h) => headers.extend(*h.to_owned()),
+            Some(h) => headers.extend(h.inner().clone()),
             _ => (),
         };
 
@@ -5039,7 +5039,7 @@ async fn test_crawl_proxy() {
 
     let mut license_found = false;
 
-    for links_visited in website.links_visited.iter() {
+    for links_visited in website.get_links() {
         // Proxy may return http or https in socks5 per platform.
         // We may want to replace the protocol with the host of the platform regardless of proxy response.
         if links_visited.as_ref().contains("/licenses/") {
