@@ -837,31 +837,29 @@ async fn navigate(
     Ok(())
 }
 
-#[cfg(all(feature = "real_browser", feature = "smart"))]
+#[cfg(all(feature = "real_browser", feature = "chrome"))]
 /// generate random mouse movement.
-async fn perform_smart_mouse_movement(page: &chromiumoxide::Page) {
+async fn perform_smart_mouse_movement(
+    page: &chromiumoxide::Page,
+    viewport: &Option<crate::configuration::Viewport>,
+) {
+    use crate::features::chrome_mouse_movements::GaussianMouse;
     use chromiumoxide::layout::Point;
-    use rand::rngs::SmallRng;
-    use rand::{Rng, SeedableRng};
-
-    let mut rng = SmallRng::from_entropy();
-
-    // we can pass in the browser size once we allow re-adjusting it and real movements.
-    let random_x = rng.gen_range(0.0..1280.0);
-    let random_y = rng.gen_range(0.0..720.0);
-
-    let _ = page.move_mouse(Point::new(random_x, random_y)).await;
+    let (viewport_width, viewport_height) = match viewport {
+        Some(vp) => (vp.width as f64, vp.height as f64),
+        _ => (1280.0, 720.0),
+    };
+    for (x, y) in GaussianMouse::generate_random_coordinates(viewport_width, viewport_height) {
+        let _ = page.move_mouse(Point::new(x, y)).await;
+    }
 }
 
-#[cfg(all(not(feature = "real_browser"), feature = "smart"))]
-async fn perform_smart_mouse_movement(_page: &chromiumoxide::Page) {}
-
-#[cfg(all(
-    not(feature = "real_browser"),
-    not(feature = "smart"),
-    feature = "chrome"
-))]
-async fn perform_smart_mouse_movement(_page: &chromiumoxide::Page) {}
+#[cfg(all(not(feature = "real_browser"), feature = "chrome"))]
+async fn perform_smart_mouse_movement(
+    _page: &chromiumoxide::Page,
+    _viewport: &Option<crate::configuration::Viewport>,
+) {
+}
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -877,6 +875,7 @@ pub async fn fetch_page_html_chrome_base(
     url_target: Option<&str>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -899,7 +898,7 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     if chrome_http_req_res.waf_check {
-        perform_smart_mouse_movement(&page).await;
+        perform_smart_mouse_movement(&page, &viewport).await;
     }
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
@@ -1519,6 +1518,7 @@ pub async fn fetch_page_html(
     openai_config: &Option<crate::configuration::GPTConfigs>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
+    viewport: &crate::configuration::Viewport,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::utf8_percent_encode;
@@ -1539,6 +1539,7 @@ pub async fn fetch_page_html(
                 None,
                 execution_scripts,
                 automation_scripts,
+                viewport,
             )
             .await
             {
@@ -1673,6 +1674,7 @@ pub async fn fetch_page_html(
     openai_config: &Option<crate::configuration::GPTConfigs>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -1686,6 +1688,7 @@ pub async fn fetch_page_html(
         None,
         execution_scripts,
         automation_scripts,
+        viewport,
     )
     .await
     {
@@ -1709,6 +1712,7 @@ pub async fn fetch_page_html_chrome(
     openai_config: &Option<crate::configuration::GPTConfigs>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -1724,6 +1728,7 @@ pub async fn fetch_page_html_chrome(
                 None,
                 execution_scripts,
                 automation_scripts,
+                viewport,
             )
             .await
             {

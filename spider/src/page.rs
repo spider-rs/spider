@@ -416,6 +416,7 @@ impl Page {
         openai_config: &Option<crate::configuration::GPTConfigs>,
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
+        viewport: &Option<crate::configuration::Viewport>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -427,6 +428,7 @@ impl Page {
             openai_config,
             execution_scripts,
             automation_scripts,
+            viewport,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -1161,8 +1163,9 @@ impl Page {
                                                                 Some(&target_url),
                                                                 &configuration
                                                                         .execution_scripts,
-                                                                        &configuration
-                                                                        .automation_scripts
+                                                                &configuration
+                                                                        .automation_scripts,
+                                                                &configuration.viewport
                                                             )
                                                             .await;
 
