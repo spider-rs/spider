@@ -35,7 +35,7 @@
 //!
 //!     let html = page.wait_for_navigation().await?.content().await?;
 //!
-//!     handle.await;
+//!     let _ = handle.await;
 //!     Ok(())
 //! }
 //! ```
