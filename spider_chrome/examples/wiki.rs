@@ -27,6 +27,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _html = page.wait_for_navigation().await?.content().await?;
 
-    handle.await;
+    handle.await?;
     Ok(())
 }

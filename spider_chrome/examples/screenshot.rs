@@ -35,6 +35,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .save_screenshot(CaptureScreenshotFormat::Png, "top-post.png")
         .await?;
 
-    handle.await;
+    handle.await?;
     Ok(())
 }

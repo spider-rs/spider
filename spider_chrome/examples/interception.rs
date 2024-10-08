@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     browser.close().await?;
-    browser_handle.await;
-    intercept_handle.await;
+    browser_handle.await?;
+    intercept_handle.await?;
     Ok(())
 }

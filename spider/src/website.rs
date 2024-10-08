@@ -989,7 +989,7 @@ impl Website {
         }
 
         match &self.configuration.headers {
-            Some(h) => headers.extend(*h.to_owned()),
+            Some(h) => headers.extend(h.inner().clone()),
             _ => (),
         };
 
@@ -1068,7 +1068,7 @@ impl Website {
         }
 
         match &self.configuration.headers {
-            Some(h) => headers.extend(*h.to_owned()),
+            Some(h) => headers.extend(h.inner().clone()),
             _ => (),
         };
 

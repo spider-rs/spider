@@ -299,9 +299,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<Rela
 pub fn validate_empty(content: &Option<Bytes>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
-            let empty_page = content != "<html><head></head><body></body></html>";
-
-            if empty_page || is_success &&
+            if content.is_empty() || content == "<html><head></head><body></body></html>" || is_success &&
             content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
             content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n") {
                 false
