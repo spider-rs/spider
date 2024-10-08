@@ -840,17 +840,12 @@ async fn navigate(
 #[cfg(all(feature = "real_browser", feature = "smart"))]
 /// generate random mouse movement.
 async fn perform_smart_mouse_movement(page: &chromiumoxide::Page) {
+    use crate::features::chrome_mouse_movements::BezierMouse;
     use chromiumoxide::layout::Point;
-    use rand::rngs::SmallRng;
-    use rand::{Rng, SeedableRng};
 
-    let mut rng = SmallRng::from_entropy();
-
-    // we can pass in the browser size once we allow re-adjusting it and real movements.
-    let random_x = rng.gen_range(0.0..1280.0);
-    let random_y = rng.gen_range(0.0..720.0);
-
-    let _ = page.move_mouse(Point::new(random_x, random_y)).await;
+    for (x, y) in BezierMouse::generate_random_coordinates(720.0, 1280.0) {
+        let _ = page.move_mouse(Point::new(x, y)).await;
+    }
 }
 
 #[cfg(all(not(feature = "real_browser"), feature = "smart"))]

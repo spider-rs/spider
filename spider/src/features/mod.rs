@@ -3,6 +3,9 @@
 pub mod chrome;
 /// Common modules for Chrome
 pub mod chrome_common;
+#[cfg(all(feature = "real_browser", feature = "smart"))]
+/// Mouse movements
+pub mod chrome_mouse_movements;
 /// Decentralized header handling
 #[cfg(feature = "decentralized_headers")]
 pub mod decentralized_headers;
