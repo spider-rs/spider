@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
    let html = page.wait_for_navigation().await?.content().await?;
    
     browser.close().await?;
-    handle.await;
+    let _ = handle.await;
     Ok(())
 }
 ```

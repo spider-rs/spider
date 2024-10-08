@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(*value, "30");
 
     browser.close().await?;
-    handle.await;
+    handle.await?;
 
     Ok(())
 }

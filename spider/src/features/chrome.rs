@@ -206,7 +206,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
         extra_headers: match config.headers {
             Some(ref headers) => {
-                let hm = crate::utils::header_utils::header_map_to_hash_map(headers);
+                let hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
                 if hm.is_empty() {
                     None
                 } else {
@@ -262,7 +262,8 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
                 browser_config.extra_headers = match config.headers {
                     Some(ref headers) => {
-                        let hm = crate::utils::header_utils::header_map_to_hash_map(headers);
+                        let hm =
+                            crate::utils::header_utils::header_map_to_hash_map(headers.inner());
                         if hm.is_empty() {
                             None
                         } else {
