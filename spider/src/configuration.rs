@@ -8,6 +8,7 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::website::CronType;
+use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::time::Duration;
 
 /// Redirect policy configuration for request
@@ -53,7 +54,7 @@ type AllowList = Box<regex::RegexSet>;
     ),
     derive(PartialEq)
 )]
-
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files. This may slow down crawls if robots.txt file has a delay included.
     pub respect_robots_txt: bool,
@@ -78,7 +79,7 @@ pub struct Configuration {
     /// Use proxy list for performing network request.
     pub proxies: Option<Box<Vec<String>>>,
     /// Headers to include with request.
-    pub headers: Option<Box<reqwest::header::HeaderMap>>,
+    pub headers: Option<Box<SerializableHeaderMap>>,
     #[cfg(feature = "sitemap")]
     /// Include a sitemap in response of the crawl.
     pub sitemap_url: Option<Box<CompactString>>,
@@ -178,6 +179,82 @@ pub struct Configuration {
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub(crate) inner_budget:
         Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+/// Serializable HTTP headers.
+pub struct SerializableHeaderMap(pub HeaderMap);
+
+impl SerializableHeaderMap {
+    /// Innter HeaderMap.
+    pub fn inner(&self) -> &HeaderMap {
+        &self.0
+    }
+    /// Returns true if the map contains a value for the specified key.
+    pub fn contains_key<K>(&self, key: K) -> bool
+    where
+        K: AsHeaderName,
+    {
+        self.0.contains_key(key)
+    }
+    /// Inserts a key-value pair into the map.
+    pub fn insert<K>(
+        &mut self,
+        key: K,
+        val: reqwest::header::HeaderValue,
+    ) -> Option<reqwest::header::HeaderValue>
+    where
+        K: IntoHeaderName,
+    {
+        self.0.insert(key, val)
+    }
+    /// Extend a `HeaderMap` with the contents of another `HeaderMap`.
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (Option<HeaderName>, HeaderValue)>,
+    {
+        self.0.extend(iter);
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SerializableHeaderMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let map: std::collections::BTreeMap<String, String> = self
+            .0
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        map.serialize(serializer)
+    }
+}
+
+impl From<HeaderMap> for SerializableHeaderMap {
+    fn from(header_map: HeaderMap) -> Self {
+        SerializableHeaderMap(header_map)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SerializableHeaderMap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use reqwest::header::{HeaderName, HeaderValue};
+        use std::collections::BTreeMap;
+        let map: BTreeMap<String, String> = BTreeMap::deserialize(deserializer)?;
+        let mut headers = HeaderMap::new();
+        for (k, v) in map {
+            let key = HeaderName::from_bytes(k.as_bytes()).map_err(serde::de::Error::custom)?;
+            let value = HeaderValue::from_str(&v).map_err(serde::de::Error::custom)?;
+            headers.insert(key, value);
+        }
+        Ok(SerializableHeaderMap(headers))
+    }
 }
 
 /// Get the user agent from the top agent list randomly.
@@ -478,7 +555,7 @@ impl Configuration {
     /// Set HTTP headers for request using [reqwest::header::HeaderMap](https://docs.rs/reqwest/latest/reqwest/header/struct.HeaderMap.html).
     pub fn with_headers(&mut self, headers: Option<reqwest::header::HeaderMap>) -> &mut Self {
         match headers {
-            Some(m) => self.headers = Some(m.into()),
+            Some(m) => self.headers = Some(SerializableHeaderMap::from(m).into()),
             _ => self.headers = None,
         };
         self
