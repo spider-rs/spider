@@ -2731,6 +2731,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
+name = "peresil"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f658886ed52e196e850cfbbfddab9eaa7f6d90dd0929e264c31e5cec07e09e57"
+
+[[package]]
 name = "phf"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3875,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3936,7 +3942,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -3971,7 +3977,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -3995,7 +4001,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4014,16 +4020,18 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "indexmap 1.9.3",
  "spider",
  "spider_transformations",
+ "sxd-document",
+ "sxd-xpath",
 ]
 
 [[package]]
 name = "spider_worker"
-version = "2.8.29"
+version = "2.9.0"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4154,6 +4162,27 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "sxd-document"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94d82f37be9faf1b10a82c4bd492b74f698e40082f0f40de38ab275f31d42078"
+dependencies = [
+ "peresil",
+ "typed-arena",
+]
+
+[[package]]
+name = "sxd-xpath"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36e39da5d30887b5690e29de4c5ebb8ddff64ebd9933f98a01daaa4fd11b36ea"
+dependencies = [
+ "peresil",
+ "quick-error",
+ "sxd-document",
+]
 
 [[package]]
 name = "syn"
@@ -4614,6 +4643,12 @@ dependencies = [
  "thiserror",
  "utf-8",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9b2228007eba4120145f785df0f6c92ea538f5a3635a612ecf4e334c8c1446d"
 
 [[package]]
 name = "typenum"

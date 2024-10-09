@@ -20,8 +20,22 @@ pub struct Selector {
 }
 
 impl Selector {
-    /// Parses a CSS selector group.
+    /// Get the raw selector query.
+    pub fn raw_query(&self) -> String {
+        self.selectors
+            .iter()
+            .filter_map(|s| {
+                let mut ss = String::new();
+                if let Ok(_) = s.to_css(&mut ss) {
+                    Some(ss)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 
+    /// Parses a CSS selector group.
     pub fn parse(selectors: &'_ str) -> Result<Self, SelectorErrorKind> {
         let mut parser_input = cssparser::ParserInput::new(selectors);
         let mut parser = cssparser::Parser::new(&mut parser_input);
