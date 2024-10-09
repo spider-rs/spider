@@ -21,7 +21,6 @@ async fn main() {
     let join_handle = tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {
             let map = QueryCSSMap::from([("list", QueryCSSSelectSet::from(["ul", "ol"]))]);
-
             let data = css_query_select_map_streamed(&res.get_html(), &build_selectors(map)).await;
 
             let _ = stdout.write_all(format!("- {:?}\n", data).as_bytes()).await;
