@@ -4,6 +4,7 @@ extern crate spider;
 use std::time::Duration;
 
 use spider::configuration::{GPTConfigs, WaitForIdleNetwork};
+use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::hashbrown::{HashMap, HashSet};
 use spider::website::Website;
 use spider::{tokio, CaseInsensitiveString};
@@ -22,20 +23,20 @@ async fn main() {
     let prompt_url_map = HashMap::from([
         (
             CaseInsensitiveString::new(website_url),
-            GPTConfigs::new("gpt-4o", "Search for Movies", 500),
+            GPTConfigs::new("gpt-4o-2024-05-13", "Search for Movies", 500),
         ),
         (
             CaseInsensitiveString::new(
                 &((website_url.to_owned()) + "/search/howsearchworks/?fg=1"),
             ),
-            GPTConfigs::new("gpt-4o", "Change the background blue", 500),
+            GPTConfigs::new("gpt-4o-2024-05-13", "Change the background blue", 500),
         ),
     ]);
 
     gpt_config.prompt_url_map = Some(prompt_url_map);
 
     let mut website: Website = Website::new(website_url)
-        .with_chrome_intercept(true, true)
+        .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
         .with_limit(2)

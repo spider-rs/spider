@@ -13,7 +13,6 @@ use sxd_xpath::evaluate_xpath;
 
 /// The type of selectors that can be used to query.
 #[derive(Default, Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DocumentSelectors<K> {
     /// CSS Selectors.
     pub css: HashMap<K, Vec<Selector>>,

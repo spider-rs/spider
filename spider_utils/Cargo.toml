@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.9.2"
+version = "2.9.3"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -17,6 +17,7 @@ edition = "2018"
 indexmap = { version = "1", optional = true }
 sxd-document = "0.3"
 sxd-xpath = "0.4"
+serde = { version = "1", optional = true, features = ["derive"] }
 
 [dependencies.spider]
 version = "2"
@@ -30,5 +31,5 @@ optional = true
 [features]
 default = []
 indexset = ["indexmap"]
-serde = ["indexmap/serde", "spider/serde"]
+serde = ["dep:serde", "indexmap/serde", "spider/serde"]
 transformations = ["dep:spider_transformations"]

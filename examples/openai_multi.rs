@@ -17,7 +17,7 @@ async fn main() {
         spider::configuration::ScreenShotConfig::new(screenshot_params, true, true, None);
 
     let gpt_config: GPTConfigs = GPTConfigs::new_multi(
-        "gpt-4-1106-preview",
+        "gpt-4o",
         vec![
             "Search for Movies",
             "Click on the first result movie result",
@@ -26,7 +26,7 @@ async fn main() {
     );
 
     let mut website: Website = Website::new("https://www.google.com")
-        .with_chrome_intercept(true, true)
+        .with_chrome_intercept(RequestInterceptConfiguration::new(false))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
         .with_limit(1)

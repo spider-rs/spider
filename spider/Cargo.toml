@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.9.2"
+version = "2.9.3"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -123,7 +123,7 @@ time = []
 adblock = ["spider_chrome/adblock"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
-serde = ["dep:serde", "hashbrown/serde", "string-interner/serde-1", "dep:serde_regex"]
+serde = ["dep:serde", "hashbrown/serde", "string-interner/serde-1", "dep:serde_regex", "smallvec/serde"]
 fs = ["tokio/fs"]
 full_resources = []
 socks = ["reqwest/socks"]
