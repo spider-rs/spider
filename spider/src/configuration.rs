@@ -170,15 +170,6 @@ pub struct Configuration {
     /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
     #[cfg(feature = "chrome")]
     pub chrome_intercept: RequestInterceptConfiguration,
-    /// Block all images from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept_block_visuals: bool,
-    /// Block all javascript from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept_block_javascript: bool,
-    /// Block all stylesheets from rendering in Chrome. This does nothing without the flag `chrome_intercept` enabled
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept_block_stylesheets: bool,
     /// The blacklist urls.
     blacklist: AllowListSet,
     /// The whitelist urls.
