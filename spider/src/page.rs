@@ -1137,7 +1137,7 @@ impl Page {
                                                                 &new_page,
                                                                 configuration.chrome_intercept.enabled,
                                                                 &configuration.auth_challenge_response,
-                                                                configuration.chrome_intercept_block_visuals,
+                                                                configuration.chrome_intercept.block_visuals,
                                                                 &parent_host,
                                                             )
                                                             .await;

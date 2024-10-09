@@ -1160,7 +1160,7 @@ impl Website {
             page,
             self.configuration.chrome_intercept.enabled,
             &self.configuration.auth_challenge_response,
-            self.configuration.chrome_intercept_block_visuals,
+            self.configuration.chrome_intercept.block_visuals,
             &self.url.inner().to_string(),
         )
         .await
@@ -1543,7 +1543,7 @@ impl Website {
                 &chrome_page,
                 config.chrome_intercept.enabled,
                 &config.auth_challenge_response,
-                config.chrome_intercept_block_visuals,
+                configuration.chrome_intercept.block_visuals,
                 &url,
             )
             .await;
@@ -2828,7 +2828,7 @@ impl Website {
                                                                     &new_page,
                                                                     shared.6.chrome_intercept.enabled,
                                                                     &shared.6.auth_challenge_response,
-                                                                    shared.6.chrome_intercept_block_visuals,
+                                                                    shared.6.chrome_intercept.block_visuals,
                                                                     &shared.7,
                                                                 )
                                                                 .await;
@@ -3828,7 +3828,7 @@ impl Website {
                                                                                     &new_page,
                                                                                     shared.3.chrome_intercept.enabled,
                                                                                     &shared.3.auth_challenge_response,
-                                                                                    shared.3.chrome_intercept_block_visuals,
+                                                                                    shared.3.chrome_intercept.block_visuals,
                                                                                     &shared.4,
                                                                                 )
                                                                                 .await;

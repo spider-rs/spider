@@ -2,6 +2,7 @@
 extern crate spider;
 
 use spider::configuration::{GPTConfigs, WaitForIdleNetwork};
+use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::tokio;
 use spider::website::Website;
 use std::time::Duration;
@@ -25,7 +26,7 @@ async fn main() {
     gpt_config.set_extra(true);
 
     let mut website: Website = Website::new("https://www.bing.com")
-        .with_chrome_intercept(true, true)
+        .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
         .with_limit(1)
