@@ -1,3 +1,4 @@
+use crate::html2xml::convert_html_to_xml;
 use aho_corasick::AhoCorasick;
 use html2md;
 use regex::Regex;
@@ -48,6 +49,8 @@ pub enum ReturnFormat {
     Markdown,
     /// Commonmark
     CommonMark,
+    /// XML
+    XML,
 }
 
 impl ReturnFormat {
@@ -62,6 +65,7 @@ impl ReturnFormat {
             "raw" | "RAW" | "Raw" => ReturnFormat::Raw,
             "bytes" | "Bytes" | "BYTES" => ReturnFormat::Bytes,
             "commonmark" | "CommonMark" | "COMMONMARK" => ReturnFormat::CommonMark,
+            "xml" | "XML" | "XmL" | "Xml" => ReturnFormat::XML,
             _ => ReturnFormat::Raw,
         }
     }
@@ -83,6 +87,7 @@ impl<'de> Deserialize<'de> for ReturnFormat {
             "raw" | "RAW" | "Raw" => Ok(ReturnFormat::Raw),
             "bytes" | "Bytes" | "BYTES" => Ok(ReturnFormat::Bytes),
             "commonmark" | "CommonMark" | "COMMONMARK" => Ok(ReturnFormat::CommonMark),
+            "xml" | "XML" | "XmL" | "Xml" => Ok(ReturnFormat::XML),
             _ => Ok(ReturnFormat::Raw),
         }
     }
@@ -463,6 +468,50 @@ pub fn transform_content(
             };
 
             super::text_extract::extract_text(&d)
+        }
+        ReturnFormat::XML => {
+            let target_url = match url_parsed {
+                Some(u) => u.to_string(),
+                _ => EXAMPLE_URL.to_string(),
+            };
+
+            if c.readability {
+                match llm_readability::extractor::extract(
+                    &mut res.get_html_bytes_u8(),
+                    match url_parsed {
+                        Some(u) => u,
+                        _ => &EXAMPLE_URL,
+                    },
+                    &None,
+                ) {
+                    Ok(product) => {
+                        if let Ok(xml) =
+                            convert_html_to_xml(&product.content, &target_url, &encoding)
+                        {
+                            xml
+                        } else {
+                            Default::default()
+                        }
+                    }
+                    _ => {
+                        if let Ok(xml) =
+                            convert_html_to_xml(&get_html(res, &encoding), &target_url, &encoding)
+                        {
+                            xml
+                        } else {
+                            Default::default()
+                        }
+                    }
+                }
+            } else {
+                if let Ok(xml) =
+                    convert_html_to_xml(&get_html(res, &encoding), &target_url, &encoding)
+                {
+                    xml
+                } else {
+                    Default::default()
+                }
+            }
         }
     }
 }

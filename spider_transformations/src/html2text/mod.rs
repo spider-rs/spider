@@ -1,4 +1,10 @@
 pub mod render;
+
+use crate::markup5ever_rcdom::{
+    Handle,
+    NodeData::{Comment, Document, Element},
+};
+pub use crate::markup5ever_rcdom::{NodeData, RcDom};
 use html5ever::driver::ParseOpts;
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
@@ -9,12 +15,6 @@ use render::text_renderer::{
     TaggedLine, TextDecorator, TextRenderer,
 };
 use render::Renderer;
-mod markup5ever_rcdom;
-pub use markup5ever_rcdom::RcDom;
-use markup5ever_rcdom::{
-    Handle,
-    NodeData::{Comment, Document, Element},
-};
 use std::cell::Cell;
 use std::cmp::{max, min};
 use unicode_width::UnicodeWidthStr;
@@ -1255,7 +1255,7 @@ fn process_dom_node<'a, 'b, 'c, T: Write>(
 
             result
         }
-        markup5ever_rcdom::NodeData::Text { contents: ref tstr } => {
+        NodeData::Text { contents: ref tstr } => {
             Finished(RenderNode::new(Text((&*tstr.borrow()).into())))
         }
         _ => {

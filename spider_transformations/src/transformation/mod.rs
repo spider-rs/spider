@@ -11,7 +11,7 @@ mod tests {
     use spider::{bytes::Bytes, page::build, utils::PageResponse};
 
     #[test]
-    fn text_html_to_markdown() {
+    fn test_transformations() {
         use maud::{html, DOCTYPE};
 
         let page_title = "Transform Test";
@@ -66,6 +66,15 @@ mod tests {
             content
                 .contains(&"<html class=\"paper\"><head>\n<meta name=\"disabled-adaptations\" content=\"watch\">\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n<meta name=\"viewport\" content=\"initial-scale=1\">\n<base href=\"https://spider.cloud/\">\n<title>Transform Test</title>\n<script>window.isReaderPage = true;</script>\n</head><body>\n<h1>Fun is fun</h1><a href=\"https://spider.cloud\">Spider Cloud</a><pre>The content is ready</pre></body></html>"),
             "The tranform to bytes is invalid"
+        );
+
+        conf.return_format = ReturnFormat::XML;
+        let content = content::transform_content(&page, &conf, &None, &None);
+
+        assert!(
+            content
+                .contains(& "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root xmlns:custom=\"https://spider.cloud/\"><html custom:class=\"paper\"><head>\n<meta custom:name=\"disabled-adaptations\" custom:content=\"watch\" />\n<meta custom:http-equiv=\"Content-Type\" custom:content=\"text/html; charset=utf-8\" />\n<meta custom:name=\"viewport\" custom:content=\"initial-scale=1\" />\n<base custom:href=\"https://spider.cloud/\" />\n<title>Transform Test</title>\n<script>window.isReaderPage = true;</script>\n</head><body>\n<h1>Fun is fun</h1><a custom:href=\"https://spider.cloud\">Spider Cloud</a><pre>The content is ready</pre></body></html></root>"),
+            "The tranform to xml is invalid"
         );
     }
 }
