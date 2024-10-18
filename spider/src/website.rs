@@ -394,18 +394,13 @@ impl Website {
         let blacklist = self.configuration.get_blacklist_compiled();
         let whitelist = self.configuration.get_whitelist_compiled();
 
-        if !whitelist.is_empty() && !contains(&whitelist, link.inner()) {
+        let blocked_whitelist = !whitelist.is_empty() && !contains(&whitelist, link.inner());
+        let blocked_blacklist = !blacklist.is_empty() && contains(&blacklist, link.inner());
+
+        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(&link.as_ref()) {
             ProcessLinkStatus::Blocked
-        } else if !blacklist.is_empty() {
-            if !contains(&blacklist, link.inner()) {
-                ProcessLinkStatus::Allowed
-            } else {
-                ProcessLinkStatus::Blocked
-            }
-        } else if self.is_allowed_robots(&link.as_ref()) {
-            ProcessLinkStatus::Allowed
         } else {
-            ProcessLinkStatus::Blocked
+            ProcessLinkStatus::Allowed
         }
     }
 
@@ -418,15 +413,15 @@ impl Website {
     #[cfg(not(feature = "regex"))]
     pub fn is_allowed_default(&self, link: &CompactString) -> ProcessLinkStatus {
         let whitelist = self.configuration.get_whitelist_compiled();
+        let blacklist = self.configuration.get_blacklist_compiled();
 
-        if !whitelist.is_empty() && !contains(&whitelist, link) {
+        let blocked_whitelist = !whitelist.is_empty() && !contains(&whitelist, link);
+        let blocked_blacklist = !blacklist.is_empty() && contains(&blacklist, link);
+
+        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(link) {
             ProcessLinkStatus::Blocked
-        } else if contains(&self.configuration.get_blacklist_compiled(), link) {
-            ProcessLinkStatus::Blocked
-        } else if self.is_allowed_robots(link) {
-            ProcessLinkStatus::Allowed
         } else {
-            ProcessLinkStatus::Blocked
+            ProcessLinkStatus::Allowed
         }
     }
 

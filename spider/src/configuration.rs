@@ -268,7 +268,6 @@ impl serde::Serialize for AllowListSet {
 
         #[cfg(feature = "regex")]
         {
-            // Serialize each regex pattern as Vec<String>
             self.0
                 .patterns()
                 .into_iter()
