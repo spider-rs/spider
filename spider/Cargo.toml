@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.9.8"
+version = "2.9.9"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -60,7 +60,7 @@ http-cache = { version = "0.19", optional = true, default-features = false }
 http = { version = "1", optional = true }
 phf = "0.11"
 phf_codegen = "0.11"
-auto_encoder = { version = "0.1", optional = true }
+auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
 string-interner = {version = "0.17", default-features = false, features = ["std", "inline-more", "backends"] }
 httpdate = { version = "1", optional = true }
@@ -144,7 +144,7 @@ chrome_headless_new = ["chrome"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:regex", "dep:rand", "chrome_intercept"]
-encoding = ["dep:auto_encoder"]
+encoding = []
 headers = ["dep:httpdate"]
 real_browser = ["dep:statrs", "dep:rand"]
 openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
