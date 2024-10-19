@@ -102,6 +102,8 @@ pub struct TransformConfig {
     pub return_format: ReturnFormat,
     /// Filter Images.
     pub filter_images: bool,
+    /// Trim the content for LLMs.
+    pub clean_html: bool,
 }
 
 /// ignore tags for markdown transformation
@@ -332,8 +334,12 @@ pub fn transform_content(
             tag_factory.insert(String::from("noscript"), tag.clone());
 
             if filter_images {
+                tag_factory.insert(String::from("svg"), tag.clone());
                 tag_factory.insert(String::from("img"), tag.clone());
                 tag_factory.insert(String::from("picture"), tag.clone());
+            }
+
+            if c.clean_html {
                 html = clean_html(&html)
             }
 
@@ -341,6 +347,7 @@ pub fn transform_content(
 
             let html = html2md::parse_html_custom(&html, &tag_factory, false);
             let html = aho_clean_markdown(&html);
+
             html
         }
         ReturnFormat::Html2Text => match encoding {
