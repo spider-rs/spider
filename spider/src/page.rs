@@ -137,6 +137,8 @@ pub struct Page {
     pub lang: Option<String>,
     /// The request should retry
     pub should_retry: bool,
+    /// A WAF was found on the page.
+    pub waf_check: bool,
 }
 
 /// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
@@ -176,6 +178,8 @@ pub struct Page {
     pub lang: Option<String>,
     /// The request should retry
     pub should_retry: bool,
+    /// A WAF was found on the page.
+    pub waf_check: bool,
 }
 
 /// get the clean domain name
@@ -365,6 +369,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         page_links: None,
         lang: None,
         should_retry,
+        waf_check: res.waf_check,
     }
 }
 

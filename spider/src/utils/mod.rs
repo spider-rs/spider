@@ -170,6 +170,8 @@ pub struct PageResponse {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<crate::page::AIResults>>,
+    /// A WAF was found on the page.
+    pub waf_check: bool,
 }
 
 /// wait for event with timeout
@@ -1034,6 +1036,8 @@ pub async fn fetch_page_html_chrome_base(
         page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
             .await?;
     }
+
+    page_response.waf_check = chrome_http_req_res.waf_check;
 
     Ok(page_response)
 }
