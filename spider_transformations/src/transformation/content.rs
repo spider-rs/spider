@@ -1,6 +1,7 @@
 use crate::html2xml::convert_html_to_xml;
 use aho_corasick::AhoCorasick;
 use html2md;
+use phf::phf_set;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use spider::lazy_static::lazy_static;
@@ -125,38 +126,64 @@ impl html2md::TagHandler for IgnoreTagFactory {
 }
 
 /// is the content html and safe for formatting.
-pub fn is_html_content(bytes: &[u8], url: &spider::url::Url) -> bool {
-    // Check for common HTML tags in the byte content
-    const HTML_TAGS: [&[u8]; 4] = [b"<html", b"<!doctype html", b"<head", b"<body"];
+static HTML_TAGS: phf::Set<&'static [u8]> = phf_set! {
+    b"<!doctype html",
+    b"<html",
+    b"<head",
+    b"<body",
+    b"<title",
+    b"<div",
+    b"<span",
+    b"<meta",
+    b"<link",
+    b"<section",
+    b"<main",
+};
 
-    // Check the beginning of the byte content for HTML tags or doctype
-    if bytes.len() >= 1024 {
-        for tag in &HTML_TAGS {
-            if bytes[..1024]
-                .windows(tag.len())
-                .any(|window| window == *tag)
-            {
-                return true;
-            }
-        }
+/// valid file extensions that will render html from a program
+pub static VALID_EXTENSIONS: phf::Set<&'static str> = phf_set! {
+    ".html",
+    ".htm",
+    ".shtml",
+    ".asp",
+    ".aspx",
+    ".php",
+    ".jps",
+    ".jpsx",
+    ".jsp",
+    ".cfm",
+    ".xhtml",
+    ".rhtml",
+    ".phtml",
+    ".erb",
+};
+
+/// Check if the content is HTML.
+pub fn is_html_content(bytes: &[u8], url: &Url) -> bool {
+    let check_bytes = if bytes.len() > 1024 {
+        &bytes[..1024]
     } else {
-        for tag in &HTML_TAGS {
-            if bytes.windows(tag.len()).any(|window| window == *tag) {
-                return true;
-            }
-        }
-    }
+        bytes
+    };
 
-    // Perform some heuristic checks on the URL in case it's not apparent from content
-
-    if let Some(extension) = url.path_segments().and_then(|segments| segments.last()) {
-        if extension.ends_with(".html") || extension.ends_with(".htm") {
+    for tag in HTML_TAGS.iter() {
+        if check_bytes
+            .windows(tag.len())
+            .any(|window| window.eq_ignore_ascii_case(tag))
+        {
             return true;
         }
     }
 
-    // Check for MIME type if needed. This can be done via HTTP headers if available in a broader context.
-
+    // Heuristic check on URL extension
+    if let Some(extension) = url
+        .path_segments()
+        .and_then(|segments| segments.last().and_then(|s| s.split('.').last()))
+    {
+        if VALID_EXTENSIONS.contains(extension) {
+            return true;
+        }
+    }
     false
 }
 
@@ -235,15 +262,20 @@ fn get_html_with_selector(
     root_selector: Option<&String>,
 ) -> String {
     let html = get_html(&res, &encoding);
+
     if let Some(selector) = root_selector {
         if let Ok(parsed_selector) = Selector::parse(selector) {
             let fragment = Html::parse_fragment(&html);
             let root_element = fragment.select(&parsed_selector).next();
             if let Some(root_node) = root_element {
-                return root_node.html();
+                let content = root_node.html();
+                if !content.is_empty() {
+                    return content;
+                }
             }
         }
     };
+
     html
 }
 
@@ -259,47 +291,26 @@ pub fn transform_content(
     let url_parsed = res.get_url_parsed().as_ref();
     let base_html = get_html_with_selector(res, encoding, root_selector.as_ref());
 
-    match return_format {
-        ReturnFormat::Raw | ReturnFormat::Bytes => {
-            if c.readability {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match url_parsed {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => product.content,
-                    _ => base_html,
-                }
-            } else {
-                base_html
-            }
+    // process readability
+    let base_html = if c.readability {
+        match llm_readability::extractor::extract(
+            &mut base_html.as_bytes(),
+            match url_parsed {
+                Some(u) => u,
+                _ => &EXAMPLE_URL,
+            },
+            &None,
+        ) {
+            Ok(product) => product.content,
+            _ => base_html,
         }
-        ReturnFormat::CommonMark => {
-            let mut html = if c.readability && !res.is_empty() {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match url_parsed {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => {
-                        if product.content.is_empty() {
-                            base_html
-                        } else {
-                            product.content
-                        }
-                    }
-                    _ => base_html,
-                }
-            } else {
-                base_html
-            };
+    } else {
+        base_html
+    };
 
+    match return_format {
+        ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
+        ReturnFormat::CommonMark => {
             let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
                 HashMap::new();
             let tag = Box::new(IgnoreTagFactory {});
@@ -311,39 +322,22 @@ pub fn transform_content(
             if filter_images {
                 tag_factory.insert(String::from("img"), tag.clone());
                 tag_factory.insert(String::from("picture"), tag.clone());
-                html = clean_html(&html)
             }
+
+            let base_html = if c.clean_html {
+                clean_html(&base_html)
+            } else {
+                base_html
+            };
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&html, &tag_factory, true);
+            let html = html2md::parse_html_custom(&base_html, &tag_factory, true);
             let html = aho_clean_markdown(&html);
 
             html
         }
         ReturnFormat::Markdown => {
-            let mut html = if c.readability {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match url_parsed {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => {
-                        if product.content.is_empty() {
-                            base_html
-                        } else {
-                            product.content
-                        }
-                    }
-                    _ => base_html,
-                }
-            } else {
-                base_html
-            };
-
             let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
                 HashMap::new();
 
@@ -352,6 +346,7 @@ pub fn transform_content(
             tag_factory.insert(String::from("script"), tag.clone());
             tag_factory.insert(String::from("style"), tag.clone());
             tag_factory.insert(String::from("noscript"), tag.clone());
+            tag_factory.insert(String::from("br"), tag.clone());
 
             if filter_images {
                 tag_factory.insert(String::from("svg"), tag.clone());
@@ -359,71 +354,28 @@ pub fn transform_content(
                 tag_factory.insert(String::from("picture"), tag.clone());
             }
 
-            if c.clean_html {
-                html = clean_html(&html)
-            }
+            let base_html = if c.clean_html {
+                clean_html(&base_html)
+            } else {
+                base_html
+            };
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&html, &tag_factory, false);
+            let html = html2md::parse_html_custom(&base_html, &tag_factory, false);
             let html = aho_clean_markdown(&html);
 
             html
         }
         ReturnFormat::Html2Text => {
-            let b = if c.readability {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match res.get_url_parsed() {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => {
-                        if product.content.is_empty() {
-                            base_html
-                        } else {
-                            product.content
-                        }
-                    }
-                    _ => base_html,
-                }
+            if !base_html.is_empty() {
+                crate::html2text::from_read(&base_html.as_bytes()[..], base_html.len())
             } else {
                 base_html
-            };
-
-            if b.len() > 0 {
-                crate::html2text::from_read(&b.as_bytes()[..], b.len())
-            } else {
-                Default::default()
             }
         }
         ReturnFormat::Text => {
-            let b = if c.readability {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match url_parsed {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => {
-                        if product.content.is_empty() {
-                            base_html
-                        } else {
-                            product.content
-                        }
-                    }
-                    _ => base_html,
-                }
-            } else {
-                base_html
-            };
-
-            let fragment = Html::parse_document(&b);
-
+            let fragment = Html::parse_document(&base_html);
             let d = fragment
                 .select(SELECTOR.as_ref())
                 .filter_map(|c| ElementRef::wrap(*c))
@@ -437,40 +389,10 @@ pub fn transform_content(
                 _ => EXAMPLE_URL.to_string(),
             };
 
-            if c.readability {
-                match llm_readability::extractor::extract(
-                    &mut base_html.as_bytes(),
-                    match url_parsed {
-                        Some(u) => u,
-                        _ => &EXAMPLE_URL,
-                    },
-                    &None,
-                ) {
-                    Ok(product) => {
-                        if let Ok(xml) =
-                            convert_html_to_xml(&product.content, &target_url, &encoding)
-                        {
-                            xml
-                        } else {
-                            Default::default()
-                        }
-                    }
-                    _ => {
-                        if let Ok(xml) =
-                            convert_html_to_xml(&get_html(res, &encoding), &target_url, &encoding)
-                        {
-                            xml
-                        } else {
-                            Default::default()
-                        }
-                    }
-                }
+            if let Ok(xml) = convert_html_to_xml(&base_html, &target_url, &encoding) {
+                xml
             } else {
-                if let Ok(xml) = convert_html_to_xml(&base_html, &target_url, &encoding) {
-                    xml
-                } else {
-                    Default::default()
-                }
+                Default::default()
             }
         }
     }

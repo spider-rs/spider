@@ -64,12 +64,12 @@ lazy_static! {
 lazy_static! {
     /// include only list of resources
     static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(20);
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(28);
 
         m.extend([
-            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp", "cfm",
+            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp", "cfm", "xhtml", "rhtml", "phtml", "erb",
             // handle .. prefix for urls ending with an extra ending
-            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp", ".cfm"
+            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp", ".cfm", ".xhtml", ".rhtml", ".phtml", ".erb",
         ].map(|s| s.into()));
 
         m
