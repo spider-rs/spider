@@ -112,4 +112,25 @@ mod tests {
             "The tranform to xml is invalid"
         );
     }
+
+    #[test]
+    fn test_transformations_root_selector() {
+        let markup = template().into_string();
+        let url = "https://spider.cloud";
+
+        let mut conf = content::TransformConfig::default();
+        let mut page_response = PageResponse::default();
+
+        page_response.content = Some(Bytes::from(markup));
+        let page = build(url, page_response);
+
+        conf.return_format = ReturnFormat::Markdown;
+
+        let content = content::transform_content(&page, &conf, &None, &Some("pre".into()));
+
+        assert!(
+            content.contains(&"The content is ready"),
+            "The tranform to markdown is invalid"
+        );
+    }
 }

@@ -228,6 +228,25 @@ fn get_html(res: &Page, encoding: &Option<String>) -> String {
     }
 }
 
+/// get the html with the root selector
+fn get_html_with_selector(
+    res: &Page,
+    encoding: &Option<String>,
+    root_selector: Option<&String>,
+) -> String {
+    let html = get_html(&res, &encoding);
+    if let Some(selector) = root_selector {
+        if let Ok(parsed_selector) = Selector::parse(selector) {
+            let fragment = Html::parse_fragment(&html);
+            let root_element = fragment.select(&parsed_selector).next();
+            if let Some(root_node) = root_element {
+                return root_node.html();
+            }
+        }
+    };
+    html
+}
+
 /// Transform format the content.
 pub fn transform_content(
     res: &Page,
@@ -238,12 +257,13 @@ pub fn transform_content(
     let return_format = c.return_format;
     let filter_images = c.filter_images;
     let url_parsed = res.get_url_parsed().as_ref();
+    let base_html = get_html_with_selector(res, encoding, root_selector.as_ref());
 
     match return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => {
             if c.readability {
                 match llm_readability::extractor::extract(
-                    &mut res.get_html_bytes_u8(),
+                    &mut base_html.as_bytes(),
                     match url_parsed {
                         Some(u) => u,
                         _ => &EXAMPLE_URL,
@@ -251,16 +271,16 @@ pub fn transform_content(
                     &None,
                 ) {
                     Ok(product) => product.content,
-                    _ => get_html(res, &encoding),
+                    _ => base_html,
                 }
             } else {
-                get_html(res, &encoding)
+                base_html
             }
         }
         ReturnFormat::CommonMark => {
             let mut html = if c.readability && !res.is_empty() {
                 match llm_readability::extractor::extract(
-                    &mut res.get_html_bytes_u8(),
+                    &mut base_html.as_bytes(),
                     match url_parsed {
                         Some(u) => u,
                         _ => &EXAMPLE_URL,
@@ -269,15 +289,15 @@ pub fn transform_content(
                 ) {
                     Ok(product) => {
                         if product.content.is_empty() {
-                            get_html(res, &encoding)
+                            base_html
                         } else {
                             product.content
                         }
                     }
-                    _ => get_html(res, &encoding),
+                    _ => base_html,
                 }
             } else {
-                get_html(res, &encoding)
+                base_html
             };
 
             let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
@@ -304,7 +324,7 @@ pub fn transform_content(
         ReturnFormat::Markdown => {
             let mut html = if c.readability {
                 match llm_readability::extractor::extract(
-                    &mut res.get_html_bytes_u8(),
+                    &mut base_html.as_bytes(),
                     match url_parsed {
                         Some(u) => u,
                         _ => &EXAMPLE_URL,
@@ -313,15 +333,15 @@ pub fn transform_content(
                 ) {
                     Ok(product) => {
                         if product.content.is_empty() {
-                            get_html(res, encoding)
+                            base_html
                         } else {
                             product.content
                         }
                     }
-                    _ => get_html(res, encoding),
+                    _ => base_html,
                 }
             } else {
-                get_html(res, encoding)
+                base_html
             };
 
             let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
@@ -350,91 +370,39 @@ pub fn transform_content(
 
             html
         }
-        ReturnFormat::Html2Text => match encoding {
-            Some(ref e) => {
-                let b = res.get_html_encoded(e);
-                let b = if c.readability {
-                    match llm_readability::extractor::extract(
-                        &mut b.as_bytes(),
-                        match res.get_url_parsed() {
-                            Some(u) => u,
-                            _ => &EXAMPLE_URL,
-                        },
-                        &None,
-                    ) {
-                        Ok(product) => {
-                            if product.content.is_empty() {
-                                get_html(res, &encoding)
-                            } else {
-                                product.content
-                            }
+        ReturnFormat::Html2Text => {
+            let b = if c.readability {
+                match llm_readability::extractor::extract(
+                    &mut base_html.as_bytes(),
+                    match res.get_url_parsed() {
+                        Some(u) => u,
+                        _ => &EXAMPLE_URL,
+                    },
+                    &None,
+                ) {
+                    Ok(product) => {
+                        if product.content.is_empty() {
+                            base_html
+                        } else {
+                            product.content
                         }
-                        _ => b,
                     }
-                } else {
-                    b
-                };
-
-                if b.len() > 0 {
-                    crate::html2text::from_read(&b.as_bytes()[..], b.len())
-                } else {
-                    Default::default()
+                    _ => base_html,
                 }
-            }
-            _ => {
-                if c.readability {
-                    match llm_readability::extractor::extract(
-                        &mut res.get_html_bytes_u8(),
-                        match url_parsed {
-                            Some(u) => u,
-                            _ => &EXAMPLE_URL,
-                        },
-                        &None,
-                    ) {
-                        Ok(product) => {
-                            let b = {
-                                if product.content.is_empty() {
-                                    res.get_html_bytes_u8()
-                                } else {
-                                    product.content.as_bytes()
-                                }
-                            };
+            } else {
+                base_html
+            };
 
-                            if b.len() > 0 {
-                                crate::html2text::from_read(&b[..], b.len())
-                            } else {
-                                Default::default()
-                            }
-                        }
-                        _ => match res.get_bytes() {
-                            Some(b) => {
-                                if b.len() > 0 {
-                                    crate::html2text::from_read(&b[..], b.len())
-                                } else {
-                                    Default::default()
-                                }
-                            }
-                            _ => Default::default(),
-                        },
-                    }
-                } else {
-                    match res.get_bytes() {
-                        Some(b) => {
-                            if b.len() > 0 {
-                                crate::html2text::from_read(&b[..], b.len())
-                            } else {
-                                Default::default()
-                            }
-                        }
-                        _ => Default::default(),
-                    }
-                }
+            if b.len() > 0 {
+                crate::html2text::from_read(&b.as_bytes()[..], b.len())
+            } else {
+                Default::default()
             }
-        },
+        }
         ReturnFormat::Text => {
             let b = if c.readability {
                 match llm_readability::extractor::extract(
-                    &mut res.get_html_bytes_u8(),
+                    &mut base_html.as_bytes(),
                     match url_parsed {
                         Some(u) => u,
                         _ => &EXAMPLE_URL,
@@ -443,36 +411,23 @@ pub fn transform_content(
                 ) {
                     Ok(product) => {
                         if product.content.is_empty() {
-                            get_html(res, encoding)
+                            base_html
                         } else {
                             product.content
                         }
                     }
-                    _ => get_html(res, encoding),
+                    _ => base_html,
                 }
             } else {
-                get_html(res, encoding)
+                base_html
             };
+
             let fragment = Html::parse_document(&b);
 
-            let d = if root_selector.is_some() {
-                let selector = &match root_selector {
-                    Some(ref root_selector) => match Selector::parse(root_selector) {
-                        Ok(qs) => qs,
-                        _ => SELECTOR.as_ref().clone(),
-                    },
-                    _ => SELECTOR.as_ref().clone(),
-                };
-                fragment
-                    .select(&selector)
-                    .filter_map(|c| ElementRef::wrap(*c))
-                    .collect::<Vec<_>>()
-            } else {
-                fragment
-                    .select(SELECTOR.as_ref())
-                    .filter_map(|c| ElementRef::wrap(*c))
-                    .collect::<Vec<_>>()
-            };
+            let d = fragment
+                .select(SELECTOR.as_ref())
+                .filter_map(|c| ElementRef::wrap(*c))
+                .collect::<Vec<_>>();
 
             super::text_extract::extract_text(&d)
         }
@@ -484,7 +439,7 @@ pub fn transform_content(
 
             if c.readability {
                 match llm_readability::extractor::extract(
-                    &mut res.get_html_bytes_u8(),
+                    &mut base_html.as_bytes(),
                     match url_parsed {
                         Some(u) => u,
                         _ => &EXAMPLE_URL,
@@ -511,9 +466,7 @@ pub fn transform_content(
                     }
                 }
             } else {
-                if let Ok(xml) =
-                    convert_html_to_xml(&get_html(res, &encoding), &target_url, &encoding)
-                {
+                if let Ok(xml) = convert_html_to_xml(&base_html, &target_url, &encoding) {
                     xml
                 } else {
                     Default::default()
