@@ -317,16 +317,17 @@ pub fn transform_content(
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
 ) -> String {
+    let base_html = get_html_with_selector(res, encoding, selector_config);
+
     // prevent transforming binary files or re-encoding it
     if is_binary_file(res.get_html_bytes_u8()) {
-        return Default::default();
+        return base_html;
     }
 
     let return_format = c.return_format;
     let filter_images = c.filter_images;
 
     let url_parsed = res.get_url_parsed().as_ref();
-    let base_html = get_html_with_selector(res, encoding, selector_config);
 
     // process readability
     let base_html = if c.readability {
@@ -369,7 +370,7 @@ pub fn transform_content(
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&base_html, &tag_factory, true);
+            let html = html2md::parse_html_custom(&base_html.trim(), &tag_factory, true);
             let html = aho_clean_markdown(&html);
 
             html
@@ -399,7 +400,7 @@ pub fn transform_content(
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&base_html, &tag_factory, false);
+            let html = html2md::parse_html_custom(&base_html.trim(), &tag_factory, false);
             let html = aho_clean_markdown(&html);
 
             html
@@ -412,7 +413,7 @@ pub fn transform_content(
             }
         }
         ReturnFormat::Text => {
-            let fragment = Html::parse_document(&base_html);
+            let fragment = Html::parse_document(&base_html.trim());
             let d = fragment
                 .select(SELECTOR.as_ref())
                 .filter_map(|c| ElementRef::wrap(*c))
@@ -426,7 +427,7 @@ pub fn transform_content(
                 _ => EXAMPLE_URL.to_string(),
             };
 
-            if let Ok(xml) = convert_html_to_xml(&base_html, &target_url, &encoding) {
+            if let Ok(xml) = convert_html_to_xml(&base_html.trim(), &target_url, &encoding) {
                 xml
             } else {
                 Default::default()
