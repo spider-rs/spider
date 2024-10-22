@@ -185,16 +185,7 @@ pub struct Page {
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
     match domain.host_str() {
-        Some(b) => {
-            let b = b.split('.').collect::<Vec<&str>>();
-            let bsize = b.len();
-
-            if bsize > 0 {
-                b[bsize - 1]
-            } else {
-                ""
-            }
-        }
+        Some(host) => host,
         _ => "",
     }
 }
@@ -245,19 +236,48 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     }
 }
 
+/// extract the valid domains from a url.
+fn extract_root_domain(domain: &str) -> &str {
+    let parts: Vec<&str> = domain.split('.').collect();
+
+    if parts.len() >= 3 {
+        let start_index = parts.len() - 2;
+        if let Some(start_pos) = domain.find(parts[start_index]) {
+            &domain[start_pos..]
+        } else {
+            domain
+        }
+    } else if parts.len() == 2 {
+        &parts[0]
+    } else {
+        domain
+    }
+}
+
+/// check for subdomain matches
+fn is_subdomain(subdomain: &str, domain: &str) -> bool {
+    extract_root_domain(subdomain) == extract_root_domain(domain)
+}
+
 /// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host' and 'base_host' being the input start domain.
 pub fn parent_host_match(
     host_name: Option<&str>,
-    base_domain: &str,
-    parent_host: &CompactString,
-    base_host: &CompactString,
+    base_domain: &str,           // the base domain input
+    parent_host: &CompactString, // the main parent host
+    base_host: &CompactString,   // the host before any redirections - entered in Website::new()
+    sub_matcher: &CompactString, // matches TLDS or subdomains. If tlds the domain is stripped.
 ) -> bool {
     match host_name {
         Some(host) => {
             if base_domain.is_empty() {
                 parent_host.eq(&host) || base_host.eq(&host)
             } else {
-                host.ends_with(parent_host.as_str()) || host.ends_with(base_host.as_str())
+                let valid = host.ends_with(parent_host.as_str())
+                    || host.ends_with(base_host.as_str())
+                    || is_subdomain(host, &parent_host)
+                    || is_subdomain(host, &sub_matcher);
+
+                valid
             }
         }
         _ => false,
@@ -276,8 +296,14 @@ pub fn get_page_selectors_base(u: &Url, subdomains: bool, tld: bool) -> Option<R
     Some(if tld || subdomains {
         let dname = domain_name(&u);
 
+        let dname = if tld {
+            extract_root_domain(dname)
+        } else {
+            dname
+        };
+
         (
-            dname.into(),
+            dname.into(), // match for tlds or subdomains
             smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
             CompactString::default(),
         )
@@ -838,17 +864,22 @@ impl Page {
         &self,
         href: &str,
         map: &mut HashSet<A>,
-        base_domain: &CompactString,
-        parent_host: &CompactString,
+        base_domain: &CompactString, // subdomains handling
+        parent_host: &CompactString, // tld handling
         parent_host_scheme: &CompactString,
         base_input_domain: &CompactString,
+        sub_matcher: &CompactString,
     ) {
         match self.abs_path(href) {
             Some(mut abs) => {
                 let host_name = abs.host_str();
-                let mut can_process =
-                    parent_host_match(host_name, base_domain, parent_host, base_input_domain);
-                let mut external_domain = false;
+                let mut can_process = parent_host_match(
+                    host_name,
+                    base_domain,
+                    parent_host,
+                    base_input_domain,
+                    sub_matcher,
+                );
 
                 if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
                 {
@@ -858,7 +889,6 @@ impl Page {
                         || self
                             .external_domains_caseless
                             .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                    external_domain = can_process;
                 }
 
                 if can_process {
@@ -876,11 +906,7 @@ impl Page {
                         }
                     }
 
-                    if can_process
-                        && (base_domain.is_empty()
-                            || external_domain
-                            || base_domain.as_str() == domain_name(&abs))
-                    {
+                    if can_process {
                         map.insert(abs.as_str().to_string().into());
                     }
                 }
@@ -910,6 +936,7 @@ impl Page {
         let parent_host = &selectors.1[0];
         let parent_host_scheme = &selectors.1[1];
         let base_input_domain = &selectors.2;
+        let sub_matcher = &selectors.0;
 
         let mut is_link_tag = false;
 
@@ -936,6 +963,7 @@ impl Page {
                                         parent_host,
                                         parent_host_scheme,
                                         base_input_domain,
+                                        sub_matcher,
                                     );
                                 }
                                 _ => (),
@@ -980,9 +1008,14 @@ impl Page {
                 let html = Box::new(Html::parse_fragment(html));
                 let mut stream = tokio_stream::iter(html.tree);
 
+                // the original url
                 let parent_host = &selectors.1[0];
+                // the host schemes
                 let parent_host_scheme = &selectors.1[1];
-                let base_input_domain = &selectors.2;
+                let base_input_domain = &selectors.2; // the domain after redirects
+
+                // the base matcher to
+                let sub_matcher = &selectors.0;
 
                 while let Some(node) = stream.next().await {
                     if let Some(element) = node.as_element() {
@@ -998,6 +1031,7 @@ impl Page {
                                         parent_host,
                                         parent_host_scheme,
                                         base_input_domain,
+                                        sub_matcher,
                                     );
                                 }
                                 _ => (),
@@ -1048,12 +1082,11 @@ impl Page {
                     .await;
             } else {
                 let base_domain = &selectors.0;
+                let base_input_domain: &CompactString = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
-                let base_input_domain = &selectors.2;
-
                 let parent_host = &parent_frags[0];
                 let parent_host_scheme = &parent_frags[1];
-
+                let sub_matcher = &selectors.0;
                 let html = Box::new(Html::parse_document(&html));
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -1224,6 +1257,7 @@ impl Page {
                                             &base_domain,
                                             parent_host,
                                             base_input_domain,
+                                            sub_matcher,
                                         );
 
                                         if can_process {
@@ -1304,10 +1338,11 @@ impl Page {
                 let mut stream = tokio_stream::iter(html.tree);
 
                 let base_domain = &selectors.0;
-                let base_input_domain = &selectors.2;
+                let base_input_domain: &CompactString = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
                 let parent_host = &parent_frags[0];
                 let parent_host_scheme = &parent_frags[1];
+                let sub_matcher = &selectors.0;
 
                 while let Some(node) = stream.next().await {
                     if let Some(element) = node.as_element() {
@@ -1330,6 +1365,7 @@ impl Page {
                                         base_domain,
                                         parent_host,
                                         base_input_domain,
+                                        sub_matcher,
                                     );
 
                                     let mut external_domain = false;
@@ -1652,3 +1688,18 @@ async fn test_duration() {
         duration_elasped,
     );
 }
+
+// #[tokio::test]
+// async fn test_domain_names() {
+//     let u = Url::parse("https://example.net").unwrap();
+//     let d = domain_name(&u);
+//     assert_eq!(d, "example");
+
+//     let u = Url::parse("https://example.net.uk").unwrap();
+//     let d = domain_name(&u);
+//     assert_eq!(d, "example");
+
+//     let u = Url::parse("https://docs.example.net").unwrap();
+//     let d = domain_name(&u);
+//     assert_eq!(d, "example");
+// }
