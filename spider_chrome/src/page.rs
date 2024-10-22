@@ -48,6 +48,8 @@ pub struct Page {
     inner: Arc<PageInner>,
 }
 
+const DEFAULT_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
 /// List of chrome plugins.
 static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "internal-pdf-viewer",
@@ -142,7 +144,7 @@ impl Page {
     pub async fn enable_stealth_mode(&self) -> Result<()> {
         let _ = tokio::join!(
             self._enable_stealth_mode(),
-            self.set_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"),
+            self.set_user_agent(DEFAULT_AGENT),
         );
 
         Ok(())
@@ -177,11 +179,9 @@ impl Page {
                         if (parameter === 37445) {
                             return 'Google Inc. (NVIDIA)';
                         }
-    
                         if (parameter === 37446) {
                             return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)';
                         }
-    
                         return getParameter(parameter);
                     };"
                 .to_string(),
@@ -197,25 +197,15 @@ impl Page {
     async fn hide_plugins(&self) -> Result<(), CdpError> {
         let plugins = get_plugin_filenames();
         let plugin_script = format!(
-            "Object.defineProperty(
-                navigator,
-                'plugins',
-                {{
-                    get: () => [
-                        {{ filename: '{}' }},
-                        {{ filename: '{}' }},
-                        {{ filename: '{}' }},
-                        {{ filename: '{}' }}
-                    ],
-                }}
-            );",
+            "Object.defineProperty(navigator, 'plugins', {{ get: () => [ {{ filename: '{}' }}, {{ filename: '{}' }}, {{ filename: '{}' }}, {{ filename: '{}' }} ] }} );",
             plugins[0], plugins[1], plugins[2], plugins[3]
         );
 
-        let navigator_script = "Object.defineProperty(window, 'navigator', { value: {} });";
+        let navigator_script = "Object.defineProperty(navigator, 'pdfViewerEnabled', { value: true, writable: true, configurable: true, enumerable: true });";
+        let source = format!("{}{}", navigator_script, plugin_script).to_string();
 
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: format!("{}{}", navigator_script, plugin_script).to_string(),
+            source: source,
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
