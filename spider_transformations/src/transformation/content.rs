@@ -4,6 +4,8 @@ use html2md;
 use phf::phf_set;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
+use spider::auto_encoder::is_binary_file;
+use spider::bytes::Bytes;
 use spider::lazy_static::lazy_static;
 use spider::packages::scraper::Html;
 use spider::packages::scraper::{ElementRef, Selector};
@@ -105,6 +107,15 @@ pub struct TransformConfig {
     pub filter_images: bool,
     /// Trim the content for LLMs.
     pub clean_html: bool,
+}
+
+/// Select elements to show or hide using a CSS selector.
+#[derive(Debug, Default, Clone)]
+pub struct SelectorConfiguration {
+    /// The root html selector.
+    pub root_selector: Option<String>,
+    /// Exclude the matching css selector from the output.
+    pub exclude_selector: Option<String>,
 }
 
 /// ignore tags for markdown transformation
@@ -259,22 +270,42 @@ fn get_html(res: &Page, encoding: &Option<String>) -> String {
 fn get_html_with_selector(
     res: &Page,
     encoding: &Option<String>,
-    root_selector: Option<&String>,
+    selector_config: &Option<SelectorConfiguration>,
 ) -> String {
     let html = get_html(&res, &encoding);
 
-    if let Some(selector) = root_selector {
-        if let Ok(parsed_selector) = Selector::parse(selector) {
-            let fragment = Html::parse_fragment(&html);
-            let root_element = fragment.select(&parsed_selector).next();
-            if let Some(root_node) = root_element {
-                let content = root_node.html();
-                if !content.is_empty() {
-                    return content;
+    if let Some(selector_config) = selector_config.as_ref() {
+        let mut fragment = Html::parse_fragment(&html);
+
+        if let Some(selector) = selector_config.root_selector.as_ref() {
+            if let Ok(parsed_selector) = Selector::parse(&selector) {
+                if let Some(root_node) = fragment.select(&parsed_selector).next() {
+                    if selector_config.exclude_selector.is_some() {
+                        fragment.clone_from(&Html::parse_fragment(&root_node.html()));
+                    } else {
+                        // return the direct html found
+                        return root_node.html();
+                    }
                 }
             }
         }
-    };
+
+        if let Some(exclude_selector) = selector_config.exclude_selector.as_ref() {
+            if let Ok(exclude_sel) = Selector::parse(&exclude_selector) {
+                let mut elements_to_remove = vec![];
+
+                for elem in fragment.root_element().select(&exclude_sel) {
+                    elements_to_remove.push(elem.id());
+                }
+
+                for id in elements_to_remove {
+                    fragment.remove_node(id);
+                }
+            }
+        }
+
+        return fragment.root_element().html();
+    }
 
     html
 }
@@ -284,12 +315,18 @@ pub fn transform_content(
     res: &Page,
     c: &TransformConfig,
     encoding: &Option<String>,
-    root_selector: &Option<String>,
+    selector_config: &Option<SelectorConfiguration>,
 ) -> String {
+    // prevent transforming binary files or re-encoding it
+    if is_binary_file(res.get_html_bytes_u8()) {
+        return Default::default();
+    }
+
     let return_format = c.return_format;
     let filter_images = c.filter_images;
+
     let url_parsed = res.get_url_parsed().as_ref();
-    let base_html = get_html_with_selector(res, encoding, root_selector.as_ref());
+    let base_html = get_html_with_selector(res, encoding, selector_config);
 
     // process readability
     let base_html = if c.readability {
@@ -395,5 +432,26 @@ pub fn transform_content(
                 Default::default()
             }
         }
+    }
+}
+
+/// transform the content to bytes to prevent loss of precision.
+pub fn transform_content_to_bytes(
+    res: &Page,
+    c: &TransformConfig,
+    encoding: &Option<String>,
+    selector_config: &Option<SelectorConfiguration>,
+) -> Bytes {
+    if is_binary_file(res.get_html_bytes_u8()) {
+        let b = res.get_bytes();
+        if let Some(b) = b {
+            b.clone()
+        } else {
+            Default::default()
+        }
+    } else {
+        let content = transform_content(res, c, encoding, selector_config);
+        let b = content.as_bytes();
+        Bytes::copy_from_slice(b)
     }
 }

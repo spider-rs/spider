@@ -7,9 +7,16 @@ pub mod text_extract;
 
 #[cfg(test)]
 mod tests {
-    use crate::transformation::content::{self, ReturnFormat};
+    use std::vec;
+
+    use crate::transformation::content::{self, ReturnFormat, SelectorConfiguration};
     use maud::PreEscaped;
-    use spider::{bytes::Bytes, page::build, utils::PageResponse};
+    use spider::{
+        bytes::Bytes,
+        page::build,
+        tokio::{self, fs::File},
+        utils::PageResponse,
+    };
 
     /// the template to re-use
     fn template() -> PreEscaped<String> {
@@ -126,11 +133,62 @@ mod tests {
 
         conf.return_format = ReturnFormat::Markdown;
 
-        let content = content::transform_content(&page, &conf, &None, &Some("pre".into()));
+        let mut select_config = SelectorConfiguration::default();
+
+        select_config.root_selector = Some("pre".into());
+
+        let content = content::transform_content(&page, &conf, &None, &Some(select_config));
 
         assert!(
             content.contains(&"The content is ready"),
             "The tranform to markdown is invalid"
         );
+    }
+
+    #[test]
+    fn test_transformations_exclude_selector() {
+        let markup = template().into_string();
+        let url = "https://spider.cloud";
+
+        let mut conf = content::TransformConfig::default();
+        let mut page_response = PageResponse::default();
+
+        page_response.content = Some(Bytes::from(markup));
+        let page = build(url, page_response);
+
+        conf.return_format = ReturnFormat::Markdown;
+
+        let mut select_config = SelectorConfiguration::default();
+
+        select_config.exclude_selector = Some("pre".into());
+
+        let content = content::transform_content(&page, &conf, &None, &Some(select_config));
+
+        assert!(
+            content.contains(&"Transform Test# Fun is fun\n[Spider Cloud](https://spider.cloud)"),
+            "The tranform to markdown is invalid"
+        );
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_transformations_pdf_handling() {
+        use spider::tokio::io::AsyncReadExt;
+        let mut f = File::open("./example.pdf").await.unwrap();
+        let mut data = vec![];
+        f.read_to_end(&mut data).await.unwrap();
+
+        let mut conf = content::TransformConfig::default();
+        conf.return_format = ReturnFormat::XML;
+        let mut page_response = PageResponse::default();
+        let b = Bytes::from(data);
+
+        page_response.content = Some(b);
+
+        let page = build("https://example.com/example.pdf", page_response);
+
+        let content = content::transform_content(&page, &conf, &None, &None);
+
+        assert!(content.is_empty(), "The tranform to markdown is invalid");
     }
 }

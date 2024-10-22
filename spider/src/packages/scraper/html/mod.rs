@@ -1,7 +1,7 @@
 //! HTML documents and fragments.
 
 use ego_tree::iter::Nodes;
-use ego_tree::Tree;
+use ego_tree::{NodeId, Tree};
 use fast_html5ever::serialize::SerializeOpts;
 use fast_html5ever::tree_builder::QuirksMode;
 use fast_html5ever::QualName;
@@ -11,6 +11,10 @@ use tendril::TendrilSink;
 use crate::packages::scraper::element_ref::ElementRef;
 use crate::packages::scraper::node::Node;
 use crate::packages::scraper::selector::Selector;
+
+lazy_static! {
+    static ref HTML_SELECTOR: Selector = Selector::parse("html").unwrap();
+}
 
 /// An HTML tree.
 ///
@@ -22,9 +26,10 @@ use crate::packages::scraper::selector::Selector;
 pub struct Html {
     /// The quirks mode.
     pub quirks_mode: QuirksMode,
-
     /// The node tree.
     pub tree: Tree<Node>,
+    /// The html language of the document.
+    pub lang: String,
 }
 
 impl Html {
@@ -33,6 +38,7 @@ impl Html {
         Html {
             quirks_mode: QuirksMode::NoQuirks,
             tree: Tree::new(Node::Document),
+            lang: Default::default(),
         }
     }
 
@@ -41,6 +47,7 @@ impl Html {
         Html {
             quirks_mode: QuirksMode::NoQuirks,
             tree: Tree::new(Node::Fragment),
+            lang: Default::default(),
         }
     }
 
@@ -96,6 +103,25 @@ impl Html {
         ElementRef::wrap(root_node).unwrap()
     }
 
+    /// Set the html language of the document by getting the lang attr
+    pub fn set_language(&mut self, lang: String) {
+        self.lang = lang;
+    }
+
+    /// Get the language for the page.
+    pub fn get_lang(&self) -> &str {
+        if self.lang.is_empty() {
+            if let Some(element) = self.select(&HTML_SELECTOR).next() {
+                if let Some(lang) = element.value().attr("lang") {
+                    return lang;
+                }
+            }
+            &self.lang
+        } else {
+            &self.lang
+        }
+    }
+
     /// Serialize entire document into HTML.
     pub fn html(&self) -> String {
         let opts = SerializeOpts {
@@ -107,7 +133,14 @@ impl Html {
         match serialize(&mut buf, self, opts) {
             _ => (),
         };
-        crate::page::encode_bytes_from_language(&buf, "")
+        crate::page::encode_bytes_from_language(&buf, self.get_lang())
+    }
+
+    /// Find and remove a node
+    pub fn remove_node(&mut self, node_id: NodeId) {
+        if let Some(mut node) = self.tree.get_mut(node_id) {
+            node.detach();
+        }
     }
 }
 

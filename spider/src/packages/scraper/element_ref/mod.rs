@@ -17,11 +17,13 @@ use crate::packages::scraper::selector::Selector;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElementRef<'a> {
     node: NodeRef<'a, Node>,
+    /// The language of the element. Not used atm.
+    pub lang: &'a str,
 }
 
 impl<'a> ElementRef<'a> {
     fn new(node: NodeRef<'a, Node>) -> Self {
-        ElementRef { node }
+        ElementRef { node, lang: "" }
     }
 
     /// Wraps a `NodeRef` only if it references a `Node::Element`.
@@ -60,7 +62,8 @@ impl<'a> ElementRef<'a> {
         match serialize(&mut buf, self, opts) {
             _ => (),
         };
-        crate::page::encode_bytes_from_language(&buf, "")
+        // we need to get the initial encoding of the html lang if used.
+        crate::page::encode_bytes_from_language(&buf, self.lang)
     }
 
     /// Returns the HTML of this element.
