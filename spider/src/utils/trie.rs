@@ -99,7 +99,7 @@ impl<V: Debug> Trie<V> {
     pub fn search(&self, input: &str) -> Option<&V> {
         let mut node = &self.root;
 
-        if node.children.is_empty() {
+        if node.children.is_empty() && node.value.is_none() {
             return None;
         }
 
