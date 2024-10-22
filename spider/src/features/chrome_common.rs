@@ -577,22 +577,6 @@ pub type ExecutionScripts = Trie<String>;
 /// Automation scripts to run on the page when using chrome by url.
 pub type AutomationScripts = Trie<Vec<WebAutomation>>;
 
-/// Convert ExecutionScripts to Trie.
-pub fn convert_to_trie_execution_scripts(
-    input: &Option<ExecutionScriptsMap>,
-) -> Option<Trie<String>> {
-    match input {
-        Some(ref scripts) => {
-            let mut trie = Trie::new();
-            for (path, script) in scripts {
-                trie.insert(path, script.clone());
-            }
-            Some(trie)
-        }
-        None => None,
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Chrome request interception configurations.
@@ -629,6 +613,22 @@ impl RequestInterceptConfiguration {
     }
 }
 
+/// Convert ExecutionScripts to Trie.
+pub fn convert_to_trie_execution_scripts(
+    input: &Option<ExecutionScriptsMap>,
+) -> Option<Trie<String>> {
+    match input {
+        Some(ref scripts) => {
+            let mut trie = Trie::new();
+            for (path, script) in scripts {
+                trie.insert(path, script.clone());
+            }
+            Some(trie)
+        }
+        None => None,
+    }
+}
+
 /// Convert AutomationScripts to Trie.
 pub fn convert_to_trie_automation_scripts(
     input: &Option<AutomationScriptsMap>,
@@ -653,12 +653,18 @@ pub async fn eval_execution_scripts(
     execution_scripts: &Option<ExecutionScripts>,
 ) {
     match execution_scripts {
-        Some(ref scripts) => match scripts.search(target_url) {
-            Some(script) => {
+        Some(ref scripts) => {
+            if let Some(script) = scripts.search(target_url) {
                 let _ = page.evaluate(script.as_str()).await;
+            } else if scripts.match_all {
+                match scripts.root.value.as_ref() {
+                    Some(script) => {
+                        let _ = page.evaluate(script.as_str()).await;
+                    }
+                    _ => (),
+                }
             }
-            _ => (),
-        },
+        }
         _ => (),
     }
 }
@@ -673,15 +679,28 @@ pub async fn eval_automation_scripts(
     if let Some(script_map) = automation_scripts {
         if let Some(scripts) = script_map.search(target_url) {
             for script in scripts {
-                let result =
+                if let Err(elasped) =
                     tokio::time::timeout(tokio::time::Duration::from_secs(60), script.run(page))
-                        .await;
-                match result {
-                    Ok(_) => (),
-                    Err(_) => {
-                        crate::utils::log("Script execution timed out for - ", target_url);
+                        .await
+                {
+                    log::warn!("Script execution timed out for: {target_url} - {elasped}",);
+                }
+            }
+        } else if script_map.match_all {
+            match script_map.root.value.as_ref() {
+                Some(scripts) => {
+                    for script in scripts {
+                        if let Err(elasped) = tokio::time::timeout(
+                            tokio::time::Duration::from_secs(60),
+                            script.run(page),
+                        )
+                        .await
+                        {
+                            log::warn!("Script execution timed out for: {target_url} - {elasped}",);
+                        }
                     }
                 }
+                _ => (),
             }
         }
     }
