@@ -1088,7 +1088,6 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
                     .await;
             } else {
-                let base_domain = &selectors.0;
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
                 let parent_host = &parent_frags[0];
@@ -1255,49 +1254,17 @@ impl Page {
 
                         if element_name == "a" {
                             // add fullresources?
-                            match element.attr("href") {
-                                Some(href) => match self.abs_path(href) {
-                                    Some(mut abs) => {
-                                        let host_name = abs.host_str();
-                                        let mut can_process = parent_host_match(
-                                            host_name,
-                                            &base_domain,
-                                            parent_host,
-                                            base_input_domain,
-                                            sub_matcher,
-                                        );
-
-                                        if can_process {
-                                            if abs.scheme() != parent_host_scheme.as_str() {
-                                                let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                            }
-                                            let hchars = abs.path();
-
-                                            if let Some(position) = hchars.rfind('.') {
-                                                let resource_ext =
-                                                    &hchars[position + 1..hchars.len()];
-
-                                                if !ONLY_RESOURCES
-                                                    .contains::<CaseInsensitiveString>(
-                                                        &resource_ext.into(),
-                                                    )
-                                                {
-                                                    can_process = false;
-                                                }
-                                            }
-
-                                            if can_process
-                                                && (base_domain.is_empty()
-                                                    || base_domain.as_str() == domain_name(&abs))
-                                            {
-                                                map.insert(abs.as_str().to_string().into());
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                },
-                                _ => (),
-                            };
+                            if let Some(href) = element.attr("href") {
+                                self.push_link(
+                                    href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                );
+                            }
                         }
                     }
                 }
@@ -1375,8 +1342,6 @@ impl Page {
                                         sub_matcher,
                                     );
 
-                                    let mut external_domain = false;
-
                                     if !can_process
                                         && host_name.is_some()
                                         && !self.external_domains_caseless.is_empty()
@@ -1390,7 +1355,6 @@ impl Page {
                                             .contains::<CaseInsensitiveString>(
                                             &CASELESS_WILD_CARD,
                                         );
-                                        external_domain = can_process;
                                     }
 
                                     if can_process {
@@ -1400,11 +1364,7 @@ impl Page {
 
                                         let h = abs.as_str();
 
-                                        if can_process
-                                            && (base_domain.is_empty()
-                                                || external_domain
-                                                || base_domain.as_str() == domain_name(&abs))
-                                        {
+                                        if can_process {
                                             map.insert(h.to_string().into());
                                         }
                                     }
