@@ -247,8 +247,10 @@ pub struct Website {
     channel_guard: Option<ChannelGuard>,
     /// Send links to process during the crawl.
     channel_queue: Option<(broadcast::Sender<String>, Arc<broadcast::Receiver<String>>)>,
-    /// The status of the active crawl.
+    /// The status of the active crawl this is mapped to a general status and not the HTTP status code.
     status: CrawlStatus,
+    /// The initial status code of the first request
+    initial_status_code: StatusCode,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     #[cfg(feature = "control")]
     pub crawl_id: Box<String>,
@@ -564,6 +566,11 @@ impl Website {
     /// Drain the extra links used for things like the sitemap.
     pub fn drain_extra_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
         self.extra_links.drain()
+    }
+
+    /// Get the initial status code of the request
+    pub fn get_initial_status_code(&self) -> &StatusCode {
+        &self.initial_status_code
     }
 
     /// Drain the links visited.
@@ -1334,6 +1341,8 @@ impl Website {
                 Default::default()
             };
 
+            self.initial_status_code = page.status_code;
+
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -1487,6 +1496,8 @@ impl Website {
                 self.status = CrawlStatus::Empty;
                 Default::default()
             };
+
+            self.initial_status_code = page.status_code;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
