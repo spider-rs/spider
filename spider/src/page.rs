@@ -347,7 +347,9 @@ pub fn validate_empty(content: &Option<Bytes>, is_success: bool) -> bool {
 pub fn build(url: &str, res: PageResponse) -> Page {
     let success = res.status_code.is_success();
     let resource_found = validate_empty(&res.content, success);
+
     let mut should_retry = resource_found && !success
+        || !resource_found && success
         || res.status_code.is_server_error()
         || res.status_code == StatusCode::TOO_MANY_REQUESTS
         || res.status_code == StatusCode::FORBIDDEN
