@@ -798,25 +798,6 @@ impl Page {
         }
     }
 
-    /// Set the language for the page.
-    pub fn detect_language(&mut self) {
-        if self.lang.is_none() {
-            match self.html.as_ref() {
-                Some(html) => {
-                    if !html.is_empty() {
-                        match auto_encoder::detect_language(html) {
-                            Some(lang) => {
-                                self.lang.replace(lang);
-                            }
-                            _ => (),
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
     /// Html getter for bytes on the page as string.
     pub fn get_html(&self) -> String {
         match self.html.as_ref() {
@@ -824,11 +805,7 @@ impl Page {
                 if html.is_empty() {
                     Default::default()
                 } else {
-                    let language = self.lang.as_ref();
-                    match language {
-                        Some(l) => encode_bytes_from_language(html, &l),
-                        _ => encode_bytes_from_language(html, &""),
-                    }
+                    auto_encoder::auto_encode_bytes(html)
                 }
             }
             _ => Default::default(),
@@ -1490,17 +1467,6 @@ impl Page {
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 pub fn encode_bytes(html: &Bytes, label: &str) -> String {
     auto_encoder::encode_bytes(html, label)
-}
-
-/// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
-pub fn encode_bytes_from_language(html: &[u8], language: &str) -> String {
-    auto_encoder::encode_bytes_from_language(html, language)
-}
-
-/// Get the content with proper encoding from a language. Pass in a proper language like "jp". This does nothing without the "encoding" flag.
-#[cfg(not(feature = "encoding"))]
-pub fn encode_bytes_from_language(html: &[u8], _language: &str) -> String {
-    String::from_utf8_lossy(html).to_string()
 }
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.

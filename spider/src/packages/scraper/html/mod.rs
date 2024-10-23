@@ -133,7 +133,7 @@ impl Html {
         match serialize(&mut buf, self, opts) {
             _ => (),
         };
-        crate::page::encode_bytes_from_language(&buf, self.get_lang())
+        auto_encoder::auto_encode_bytes(&buf)
     }
 
     /// Find and remove a node
