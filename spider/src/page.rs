@@ -269,11 +269,12 @@ pub fn parent_host_match(
 ) -> bool {
     match host_name {
         Some(host) => {
+            let exact_match = parent_host.eq(&host) || base_host.eq(&host);
+
             if base_domain.is_empty() {
-                parent_host.eq(&host) || base_host.eq(&host)
+                exact_match
             } else {
-                let valid = host.ends_with(parent_host.as_str())
-                    || host.ends_with(base_host.as_str())
+                let valid = exact_match
                     || is_subdomain(host, &parent_host)
                     || is_subdomain(host, &sub_matcher);
 
@@ -872,42 +873,52 @@ impl Page {
     ) {
         match self.abs_path(href) {
             Some(mut abs) => {
-                let host_name = abs.host_str();
-                let mut can_process = parent_host_match(
-                    host_name,
-                    base_domain,
-                    parent_host,
-                    base_input_domain,
-                    sub_matcher,
-                );
+                let scheme = abs.scheme();
 
-                if !can_process && host_name.is_some() && !self.external_domains_caseless.is_empty()
-                {
-                    can_process = self
-                        .external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                        || self
+                if scheme == "https" || scheme == "http" {
+                    let host_name = abs.host_str();
+                    let mut can_process = parent_host_match(
+                        host_name,
+                        base_domain,
+                        parent_host,
+                        base_input_domain,
+                        sub_matcher,
+                    );
+
+                    if !can_process
+                        && host_name.is_some()
+                        && !self.external_domains_caseless.is_empty()
+                    {
+                        can_process = self
                             .external_domains_caseless
-                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                }
-
-                if can_process {
-                    if abs.scheme() != parent_host_scheme.as_str() {
-                        let _ = abs.set_scheme(parent_host_scheme.as_str());
-                    }
-
-                    let hchars = abs.path();
-
-                    if let Some(position) = hchars.rfind('.') {
-                        let resource_ext = &hchars[position + 1..hchars.len()];
-
-                        if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
-                            can_process = false;
-                        }
+                            .contains::<CaseInsensitiveString>(
+                                &host_name.unwrap_or_default().into(),
+                            )
+                            || self
+                                .external_domains_caseless
+                                .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
                     }
 
                     if can_process {
-                        map.insert(abs.as_str().to_string().into());
+                        if abs.scheme() != parent_host_scheme.as_str() {
+                            let _ = abs.set_scheme(parent_host_scheme.as_str());
+                        }
+
+                        let hchars = abs.path();
+
+                        if let Some(position) = hchars.rfind('.') {
+                            let resource_ext = &hchars[position + 1..hchars.len()];
+
+                            if !ONLY_RESOURCES
+                                .contains::<CaseInsensitiveString>(&resource_ext.into())
+                            {
+                                can_process = false;
+                            }
+                        }
+
+                        if can_process {
+                            map.insert(abs.as_str().to_string().into());
+                        }
                     }
                 }
             }
@@ -1013,8 +1024,7 @@ impl Page {
                 // the host schemes
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
-
-                // the base matcher to
+                                                      // the base matcher to
                 let sub_matcher = &selectors.0;
 
                 while let Some(node) = stream.next().await {
@@ -1022,20 +1032,17 @@ impl Page {
                         let element_name = element.name();
 
                         if element_name == "a" {
-                            match element.attr("href") {
-                                Some(href) => {
-                                    self.push_link(
-                                        href,
-                                        &mut map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                    );
-                                }
-                                _ => (),
-                            };
+                            if let Some(href) = element.attr("href") {
+                                self.push_link(
+                                    href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                );
+                            }
                         }
                     }
                 }

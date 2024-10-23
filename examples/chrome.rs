@@ -1,3 +1,5 @@
+//! `cargo run --example chrome --features chrome`
+
 extern crate spider;
 use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::tokio;
@@ -6,7 +8,7 @@ use std::io::Result;
 
 async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
-        .with_limit(1)
+        .with_limit(100)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
         // .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
