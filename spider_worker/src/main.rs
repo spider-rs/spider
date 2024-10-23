@@ -42,7 +42,7 @@ async fn forward(
         )
     };
 
-    let mut page = spider::page::Page::new_page(&url_path, &CLIENT).await;
+    let page = spider::page::Page::new_page(&url_path, &CLIENT).await;
 
     let extracted = if !page.get_html().is_empty() {
         let (subdomains, tld) = match referer {
@@ -52,8 +52,6 @@ async fn forward(
 
         match spider::page::get_page_selectors(&url_path, subdomains, tld) {
             Some(selectors) => {
-                page.detect_language();
-
                 let links = page.links_stream::<spider::bytes::Bytes>(&selectors).await;
 
                 let mut s = flexbuffers::FlexbufferSerializer::new();

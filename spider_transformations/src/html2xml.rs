@@ -3,7 +3,8 @@ use html5ever::tendril::TendrilSink;
 use html5ever::{parse_document, QualName};
 use markup5ever::namespace_url;
 use markup5ever::ns;
-use spider::page::{encode_bytes_from_language, get_html_encoded};
+use spider::auto_encoder::auto_encode_bytes;
+use spider::page::get_html_encoded;
 use std::default::Default;
 use std::error::Error;
 use std::io::{self, Write};
@@ -23,23 +24,10 @@ pub fn convert_html_to_xml(
             },
         ))
     } else {
-        convert_html_to_xml_with_language(html, url, &None)
+        Ok(auto_encode_bytes(
+            &base_convert_xml(html, url, &Default::default())?.as_slice(),
+        ))
     }
-}
-
-/// Convert HTML to well-formed XML by language.
-pub fn convert_html_to_xml_with_language(
-    html: &str,
-    url: &str,
-    language: &Option<String>,
-) -> Result<String, Box<dyn Error>> {
-    Ok(encode_bytes_from_language(
-        &base_convert_xml(html, url, language)?.as_slice(),
-        &match language {
-            Some(encoding) => encoding,
-            _ => "",
-        },
-    ))
 }
 
 /// Convert HTML to well-formed XML.

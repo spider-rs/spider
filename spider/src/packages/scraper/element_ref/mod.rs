@@ -63,7 +63,7 @@ impl<'a> ElementRef<'a> {
             _ => (),
         };
         // we need to get the initial encoding of the html lang if used.
-        crate::page::encode_bytes_from_language(&buf, self.lang)
+        auto_encoder::auto_encode_bytes(&buf)
     }
 
     /// Returns the HTML of this element.
