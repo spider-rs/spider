@@ -895,7 +895,9 @@ pub async fn fetch_page_html_chrome_base(
                     .await;
             }
         } else {
-            let _ = navigate(page, source, &mut chrome_http_req_res).await;
+            if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
+                return Err(e);
+            };
         }
     }
 
@@ -1327,7 +1329,11 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
         },
         Err(_) => {
             log("- error parsing html text {}", target_url);
-            Default::default()
+            let mut page_response = PageResponse::default();
+            if let Ok(status_code) = StatusCode::from_u16(599) {
+                page_response.status_code = status_code;
+            }
+            page_response
         }
     }
 }
@@ -1737,10 +1743,11 @@ pub async fn fetch_page_html_chrome(
             .await
             {
                 Ok(page) => page,
-                _ => {
-                    log(
-                        "- error parsing html text defaulting to raw http request {}",
-                        &target_url,
+                Err(err) => {
+                    log::error!(
+                        "{:?}. Error requesting: {} - defaulting to raw http request",
+                        err,
+                        target_url
                     );
 
                     use crate::bytes::BufMut;
@@ -1792,7 +1799,11 @@ pub async fn fetch_page_html_chrome(
                         },
                         Err(_) => {
                             log("- error parsing html text {}", &target_url);
-                            Default::default()
+                            let mut page_response = PageResponse::default();
+                            if let Ok(status_code) = StatusCode::from_u16(599) {
+                                page_response.status_code = status_code;
+                            }
+                            page_response
                         }
                     }
                 }

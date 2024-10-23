@@ -1698,6 +1698,8 @@ impl Website {
                 Default::default()
             };
 
+            self.initial_status_code = page.status_code;
+
             if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
