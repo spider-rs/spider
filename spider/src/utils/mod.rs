@@ -1967,7 +1967,7 @@ pub async fn openai_request_base(
             let json_mode = gpt_configs.extra_ai_data;
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
-                .content(&string_concat!("URL: ", url, "\n", "HTML: ", resource))
+                .content(string_concat!("URL: ", url, "\n", "HTML: ", resource))
                 .build()
             {
                 Ok(resource_completion) => {
@@ -1998,12 +1998,10 @@ pub async fn openai_request_base(
                     let v = match gpt_base
                         .max_tokens(max_tokens as u32)
                         .messages(messages)
-                        .response_format(async_openai::types::ChatCompletionResponseFormat {
-                            r#type: if json_mode {
-                                async_openai::types::ChatCompletionResponseFormatType::JsonObject
-                            } else {
-                                async_openai::types::ChatCompletionResponseFormatType::Text
-                            },
+                        .response_format(if json_mode {
+                            async_openai::types::ResponseFormat::JsonObject
+                        } else {
+                            async_openai::types::ResponseFormat::Text
                         })
                         .build()
                     {
