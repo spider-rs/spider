@@ -107,6 +107,8 @@ pub struct TransformConfig {
     pub filter_images: bool,
     /// Trim the content for LLMs.
     pub clean_html: bool,
+    /// Filter svgs.
+    pub filter_svg: bool,
 }
 
 /// Select elements to show or hide using a CSS selector.
@@ -228,7 +230,7 @@ pub fn aho_clean_markdown(html: &str) -> String {
     }
 }
 
-/// transform the content to markdown
+/// transform the content to markdown shortcut
 pub fn transform_markdown(html: &str, commonmark: bool) -> String {
     let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> = HashMap::new();
     let tag = Box::new(IgnoreTagFactory {});
@@ -248,7 +250,7 @@ pub fn transform_markdown(html: &str, commonmark: bool) -> String {
     html
 }
 
-/// transform the content to text raw
+/// transform the content to text raw shortcut
 pub fn transform_text(html: &str) -> String {
     let fragment = Html::parse_document(&html);
     let d = fragment
@@ -325,8 +327,6 @@ pub fn transform_content(
     }
 
     let return_format = c.return_format;
-    let filter_images = c.filter_images;
-
     let url_parsed = res.get_url_parsed().as_ref();
 
     // process readability
@@ -357,9 +357,13 @@ pub fn transform_content(
             tag_factory.insert(String::from("style"), tag.clone());
             tag_factory.insert(String::from("noscript"), tag.clone());
 
-            if filter_images {
+            if c.filter_images {
                 tag_factory.insert(String::from("img"), tag.clone());
                 tag_factory.insert(String::from("picture"), tag.clone());
+            }
+
+            if c.filter_svg {
+                tag_factory.insert(String::from("svg"), tag.clone());
             }
 
             let base_html = if c.clean_html {
@@ -386,10 +390,13 @@ pub fn transform_content(
             tag_factory.insert(String::from("noscript"), tag.clone());
             tag_factory.insert(String::from("br"), tag.clone());
 
-            if filter_images {
-                tag_factory.insert(String::from("svg"), tag.clone());
+            if c.filter_images {
                 tag_factory.insert(String::from("img"), tag.clone());
                 tag_factory.insert(String::from("picture"), tag.clone());
+            }
+
+            if c.filter_svg {
+                tag_factory.insert(String::from("svg"), tag.clone());
             }
 
             let base_html = if c.clean_html {

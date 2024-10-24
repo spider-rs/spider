@@ -93,6 +93,11 @@ static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "DivX Browser Plug-In",
 };
 
+const HIDE_CHROME: &str = "window.chrome = {runtime:{}};['log','warn','error','info','debug','table'].forEach((method) => { console[method] = () => {}; });";
+const HIDE_WEBGL: &str = "const getParameter = WebGLRenderingContext.getParameter; WebGLRenderingContext.prototype.getParameter = function (parameter) { if (parameter === 37445) { return 'Google Inc. (NVIDIA)'; } if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter); };";
+const HIDE_PERMISSIONS: &str = "const originalQuery = window.navigator.permissions.query; window.navigator.permissions.__proto__.query = parameters => { return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters); }";
+const HIDE_WEBDRIVER: &str = "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
+
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
     let mut rng = thread_rng();
@@ -122,19 +127,37 @@ fn get_plugin_filenames() -> Vec<String> {
     plugins
 }
 
+/// Generate the hide plugins script.
+fn generate_hide_plugins() -> String {
+    let plugins = get_plugin_filenames();
+    let plugin_script = format!(
+        "Object.defineProperty(navigator,'plugins',{{get:()=>[{{filename:'{}'}},{{filename:'{}'}},{{filename:'{}'}},{{filename:'{}'}}]}});",
+        plugins[0], plugins[1], plugins[2], plugins[3]
+    );
+
+    let navigator_script = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
+
+    format!("{}{}", navigator_script, plugin_script)
+}
+
+/// Generate the initial stealth script to send in one command.
+fn build_stealth_script() -> String {
+    let plugins = generate_hide_plugins();
+    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}")
+}
+
 impl Page {
     /// Removes the `navigator.webdriver` property
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     async fn _enable_stealth_mode(&self) -> Result<()> {
-        let _ = tokio::join!(
-            self.hide_webdriver(),
-            self.hide_permissions(),
-            self.hide_plugins(),
-            self.hide_webgl_vendor(),
-            self.hide_chrome(),
-        );
-
+        self.execute(AddScriptToEvaluateOnNewDocumentParams {
+            source: build_stealth_script(),
+            world_name: None,
+            include_command_line_api: None,
+            run_immediately: None,
+        })
+        .await?;
         Ok(())
     }
 
@@ -159,9 +182,9 @@ impl Page {
     }
 
     /// Sets `window.chrome` on frame creation and console.log methods.
-    async fn hide_chrome(&self) -> Result<(), CdpError> {
+    pub async fn hide_chrome(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "window.chrome = { runtime: {} };['log', 'warn', 'error', 'info', 'debug', 'table'].forEach((method) => { console[method] = () => {}; });".to_string(),
+            source: HIDE_CHROME.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -171,41 +194,21 @@ impl Page {
     }
 
     /// Obfuscates WebGL vendor on frame creation
-    async fn hide_webgl_vendor(&self) -> Result<(), CdpError> {
-        self
-            .execute(AddScriptToEvaluateOnNewDocumentParams {
-                source: "const getParameter = WebGLRenderingContext.getParameter;
-                    WebGLRenderingContext.prototype.getParameter = function (parameter) {
-                        if (parameter === 37445) {
-                            return 'Google Inc. (NVIDIA)';
-                        }
-                        if (parameter === 37446) {
-                            return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)';
-                        }
-                        return getParameter(parameter);
-                    };"
-                .to_string(),
-                world_name: None,
-                include_command_line_api: None,
-                run_immediately: None,
-            })
-            .await?;
+    pub async fn hide_webgl_vendor(&self) -> Result<(), CdpError> {
+        self.execute(AddScriptToEvaluateOnNewDocumentParams {
+            source: HIDE_WEBGL.to_string(),
+            world_name: None,
+            include_command_line_api: None,
+            run_immediately: None,
+        })
+        .await?;
         Ok(())
     }
 
     /// Obfuscates browser plugins and hides the navigator object on frame creation
-    async fn hide_plugins(&self) -> Result<(), CdpError> {
-        let plugins = get_plugin_filenames();
-        let plugin_script = format!(
-            "Object.defineProperty(navigator, 'plugins', {{ get: () => [ {{ filename: '{}' }}, {{ filename: '{}' }}, {{ filename: '{}' }}, {{ filename: '{}' }} ] }} );",
-            plugins[0], plugins[1], plugins[2], plugins[3]
-        );
-
-        let navigator_script = "Object.defineProperty(navigator, 'pdfViewerEnabled', { value: true, writable: true, configurable: true, enumerable: true });";
-        let source = format!("{}{}", navigator_script, plugin_script).to_string();
-
+    pub async fn hide_plugins(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: source,
+            source: generate_hide_plugins(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -216,15 +219,9 @@ impl Page {
     }
 
     /// Obfuscates browser permissions on frame creation
-    async fn hide_permissions(&self) -> Result<(), CdpError> {
+    pub async fn hide_permissions(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "const originalQuery = window.navigator.permissions.query;
-                    window.navigator.permissions.__proto__.query = parameters => {
-                        return parameters.name === 'notifications'
-                            ? Promise.resolve({ state: Notification.permission })
-                            : originalQuery(parameters);
-                    }"
-            .to_string(),
+            source: HIDE_PERMISSIONS.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -234,14 +231,9 @@ impl Page {
     }
 
     /// Removes the `navigator.webdriver` property on frame creation
-    async fn hide_webdriver(&self) -> Result<(), CdpError> {
+    pub async fn hide_webdriver(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: "Object.defineProperty(
-                        navigator,
-                        'webdriver',
-                        { get: () => undefined }
-                    );"
-            .to_string(),
+            source: HIDE_WEBDRIVER.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,

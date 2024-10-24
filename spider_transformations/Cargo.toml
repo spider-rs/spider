@@ -1,6 +1,6 @@
 [package]
 name = "spider_transformations"
-version = "2.10.15"
+version = "2.10.16"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -18,7 +18,7 @@ indexmap = { version = "1", optional = true }
 aho-corasick = "1"
 regex = "1"
 html5ever = "0.27"
-unicode-width = "0.1"
+unicode-width = "0.2"
 markup5ever = "0.12"
 tendril = "0.4"
 llm_readability = "0"

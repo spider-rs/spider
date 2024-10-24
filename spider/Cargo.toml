@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.10.15"
+version = "2.10.16"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -19,7 +19,7 @@ maintenance = { status = "as-is" }
 [dependencies]
 url = "2"
 tokio-stream = "0.1"
-hashbrown = { version = "0.14", default-features = true }
+hashbrown = { version = "0.15", default-features = true }
 log = "0.4"
 percent-encoding = "2"
 regex = { version = "1", optional = true }
@@ -48,7 +48,7 @@ async_job = { version = "0.1", optional = true }
 reqwest-middleware = { version = "0.3", optional = true }
 http-cache-reqwest = { version = "0.14.0", optional = true }
 const_format = { version = "0.2", optional = true }
-async-openai = { version = "0.23", optional = true }
+async-openai = { version = "0.25", optional = true }
 tiktoken-rs = { version = "0.5", optional = true }
 lol_html = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }

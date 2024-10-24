@@ -431,11 +431,8 @@ impl TreeSink for RcDom {
         let mut new_children = new_parent.children.borrow_mut();
         for child in children.iter() {
             let previous_parent = child.parent.replace(Some(Rc::downgrade(new_parent)));
-            match previous_parent {
-                Some(p) => {
-                    let _ = p.upgrade();
-                }
-                _ => {}
+            if let Some(p) = previous_parent {
+                let _ = p.upgrade();
             }
         }
         new_children.extend(mem::take(&mut *children));
