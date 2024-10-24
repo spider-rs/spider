@@ -36,7 +36,7 @@ lazy_static! {
         phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
             "vue.global.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js"
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js"
         }
     };
 }
@@ -51,7 +51,7 @@ lazy_static! {
             "react.development.js", "react-dom.development.js", "react.production.min.js",
             "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
-            "d3.js",
+            "d3.js", "layui.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
@@ -1121,6 +1121,7 @@ impl Page {
                                                                                 r"/.append/gm",
                                                                                 r"/.appendChild/gm",
                                                                                 r"/.write/gm",
+                                                                                r"\$\s*\(.*?\)",
                                                                             ])
                                                                             .unwrap_unchecked()
                                                                                 };
