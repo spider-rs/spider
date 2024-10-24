@@ -2,6 +2,7 @@
 extern crate spider;
 
 use spider::configuration::{GPTConfigs, WaitForIdleNetwork};
+use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::moka::future::Cache;
 use spider::tokio;
 use spider::website::Website;

@@ -1406,7 +1406,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
     use bytes::BytesMut;
     use percent_encoding::utf8_percent_encode;
     use percent_encoding::NON_ALPHANUMERIC;
-    use std::time::SystemTime;
     use tendril::fmt::Slice;
 
     match client.get(target_url).send().await {
@@ -1458,10 +1457,11 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                                     _ => data.put(text),
                                 };
                             } else {
-                                match &file.as_mut().unwrap().write_all(&text).await {
-                                    Ok(_) => (),
-                                    _ => data.put(text),
-                                };
+                                if let Some(f) = file.as_mut() {
+                                    if let Err(_) = f.write_all(&text).await {
+                                        data.put(text)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1510,7 +1510,11 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
         },
         Err(_) => {
             log("- error parsing html text {}", &target_url);
-            Default::default()
+            let mut page_response = PageResponse::default();
+            if let Ok(status_code) = StatusCode::from_u16(599) {
+                page_response.status_code = status_code;
+            }
+            page_response
         }
     }
 }
@@ -1528,7 +1532,7 @@ pub async fn fetch_page_html(
     openai_config: &Option<crate::configuration::GPTConfigs>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
-    viewport: &crate::configuration::Viewport,
+    viewport: &Option<crate::configuration::Viewport>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::utf8_percent_encode;
@@ -1549,7 +1553,7 @@ pub async fn fetch_page_html(
                 None,
                 execution_scripts,
                 automation_scripts,
-                viewport,
+                &viewport,
             )
             .await
             {
@@ -1663,7 +1667,11 @@ pub async fn fetch_page_html(
                         },
                         Err(_) => {
                             log("- error parsing html text {}", &target_url);
-                            Default::default()
+                            let mut page_response = PageResponse::default();
+                            if let Ok(status_code) = StatusCode::from_u16(599) {
+                                page_response.status_code = status_code;
+                            }
+                            page_response
                         }
                     }
                 }
