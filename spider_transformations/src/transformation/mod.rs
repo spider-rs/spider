@@ -55,7 +55,7 @@ mod tests {
 
         conf.return_format = ReturnFormat::Markdown;
 
-        let content = content::transform_content(&page, &conf, &None, &None);
+        let content = content::transform_content(&page, &conf, &None, &None, &None);
 
         assert!(
             content
@@ -65,7 +65,7 @@ mod tests {
 
         conf.return_format = ReturnFormat::Html2Text;
 
-        let content = content::transform_content(&page, &conf, &None, &None);
+        let content = content::transform_content(&page, &conf, &None, &None, &None);
 
         assert!(
             content
@@ -76,7 +76,7 @@ mod tests {
         conf.return_format = ReturnFormat::Bytes;
         conf.readability = true;
 
-        let content = content::transform_content(&page, &conf, &None, &None);
+        let content = content::transform_content(&page, &conf, &None, &None, &None);
 
         assert!(
             content
@@ -85,7 +85,7 @@ mod tests {
         );
 
         conf.return_format = ReturnFormat::XML;
-        let content = content::transform_content(&page, &conf, &Some("UTF-8".into()), &None);
+        let content = content::transform_content(&page, &conf, &Some("UTF-8".into()), &None, &None);
         assert!(
             content
                 == r#"<html xmlns="http://www.w3.org/1999/xhtml" class="paper"><head>
@@ -112,7 +112,7 @@ mod tests {
         conf.return_format = ReturnFormat::XML;
         page_response.content = Some(Bytes::from(markup));
         let page = build(url, page_response);
-        let content = content::transform_content(&page, &conf, &None, &None);
+        let content = content::transform_content(&page, &conf, &None, &None, &None);
         assert!(
             content
                 == r#"<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8" /><title>Transform Test</title></head><body><h1>Fun is fun</h1><a href="https://spider.cloud">Spider Cloud</a><pre>The content is ready</pre><script><![CDATA[document.querySelector(&amp;quot;pre&amp;quot;)]]></script></body></html>"#,
@@ -137,7 +137,7 @@ mod tests {
 
         select_config.root_selector = Some("pre".into());
 
-        let content = content::transform_content(&page, &conf, &None, &Some(select_config));
+        let content = content::transform_content(&page, &conf, &None, &Some(select_config), &None);
 
         assert!(
             content.contains(&"The content is ready"),
@@ -162,7 +162,7 @@ mod tests {
 
         select_config.exclude_selector = Some("pre".into());
 
-        let content = content::transform_content(&page, &conf, &None, &Some(select_config));
+        let content = content::transform_content(&page, &conf, &None, &Some(select_config), &None);
 
         assert!(
             content.contains(&"Transform Test# Fun is fun\n[Spider Cloud](https://spider.cloud)"),
@@ -187,7 +187,7 @@ mod tests {
 
         let page = build("https://example.com/example.pdf", page_response);
 
-        let content = content::transform_content(&page, &conf, &None, &None);
+        let content = content::transform_content(&page, &conf, &None, &None, &None);
 
         assert!(content.is_empty(), "The tranform to markdown is invalid");
     }

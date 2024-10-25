@@ -109,6 +109,8 @@ pub struct TransformConfig {
     pub clean_html: bool,
     /// Filter svgs.
     pub filter_svg: bool,
+    /// Main content for the page. Exclude the nav, footer, and etc.
+    pub main_content: bool,
 }
 
 /// Select elements to show or hide using a CSS selector.
@@ -318,6 +320,7 @@ pub fn transform_content(
     c: &TransformConfig,
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
+    ignore_tags: &Option<Vec<String>>,
 ) -> String {
     let base_html = get_html_with_selector(res, encoding, selector_config);
 
@@ -337,7 +340,6 @@ pub fn transform_content(
                 Some(u) => u,
                 _ => &EXAMPLE_URL,
             },
-            &None,
         ) {
             Ok(product) => product.content,
             _ => base_html,
@@ -364,6 +366,18 @@ pub fn transform_content(
 
             if c.filter_svg {
                 tag_factory.insert(String::from("svg"), tag.clone());
+            }
+
+            if c.main_content {
+                tag_factory.insert(String::from("nav"), tag.clone());
+                tag_factory.insert(String::from("footer"), tag.clone());
+                tag_factory.insert(String::from("aside"), tag.clone());
+            }
+
+            if let Some(ignore) = ignore_tags {
+                for ignore_tag_name in ignore {
+                    tag_factory.insert(ignore_tag_name.into(), tag.clone());
+                }
             }
 
             let base_html = if c.clean_html {
@@ -397,6 +411,18 @@ pub fn transform_content(
 
             if c.filter_svg {
                 tag_factory.insert(String::from("svg"), tag.clone());
+            }
+
+            if c.main_content {
+                tag_factory.insert(String::from("nav"), tag.clone());
+                tag_factory.insert(String::from("footer"), tag.clone());
+                tag_factory.insert(String::from("aside"), tag.clone());
+            }
+
+            if let Some(ignore) = ignore_tags {
+                for ignore_tag_name in ignore {
+                    tag_factory.insert(ignore_tag_name.into(), tag.clone());
+                }
             }
 
             let base_html = if c.clean_html {
@@ -449,6 +475,7 @@ pub fn transform_content_to_bytes(
     c: &TransformConfig,
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
+    ignore_tags: &Option<Vec<String>>,
 ) -> Bytes {
     if is_binary_file(res.get_html_bytes_u8()) {
         let b = res.get_bytes();
@@ -458,7 +485,7 @@ pub fn transform_content_to_bytes(
             Default::default()
         }
     } else {
-        let content = transform_content(res, c, encoding, selector_config);
+        let content = transform_content(res, c, encoding, selector_config, ignore_tags);
         let b = content.as_bytes();
         Bytes::copy_from_slice(b)
     }
