@@ -354,10 +354,14 @@ impl Website {
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
         if self.links_visited.contains(link) {
             ProcessLinkStatus::Blocked
-        } else if self.is_over_budget(link) {
-            ProcessLinkStatus::BudgetExceeded
         } else {
-            self.is_allowed_default(link.inner())
+            let status = self.is_allowed_default(link.inner());
+
+            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(link) {
+                ProcessLinkStatus::BudgetExceeded
+            } else {
+                status
+            }
         }
     }
 
@@ -373,15 +377,13 @@ impl Website {
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
         if self.links_visited.contains(link) {
             ProcessLinkStatus::Blocked
-        } else if self.is_over_budget(&link) {
-            ProcessLinkStatus::BudgetExceeded
-        } else if self
-            .is_allowed_default(link)
-            .eq(&ProcessLinkStatus::Allowed)
-        {
-            ProcessLinkStatus::Allowed
         } else {
-            ProcessLinkStatus::Blocked
+            let status = self.is_allowed_default(link);
+            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(&link) {
+                ProcessLinkStatus::BudgetExceeded
+            } else {
+                status
+            }
         }
     }
 
