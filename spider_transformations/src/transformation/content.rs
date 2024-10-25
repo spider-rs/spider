@@ -232,6 +232,52 @@ pub fn aho_clean_markdown(html: &str) -> String {
     }
 }
 
+/// Clean the html elements from the markup.
+pub fn clean_html_elements(html: &str, tags: Vec<&str>) -> String {
+    use lol_html::{element, rewrite_str, RewriteStrSettings};
+    match rewrite_str(
+        html,
+        RewriteStrSettings {
+            element_content_handlers: tags
+                .iter()
+                .map(|tag| {
+                    element!(tag, |el| {
+                        el.remove();
+                        Ok(())
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            ..RewriteStrSettings::default()
+        },
+    ) {
+        Ok(r) => r,
+        _ => html.into(),
+    }
+}
+
+/// Buld the static ignore list of html elements.
+pub(crate) fn build_static_vector(config: &TransformConfig) -> Vec<&'static str> {
+    let mut tags = Vec::new();
+
+    if config.filter_images {
+        tags.push("img");
+        tags.push("picture");
+    }
+
+    if config.filter_svg {
+        tags.push("svg");
+    }
+
+    if config.main_content {
+        tags.push("nav");
+        tags.push("footer");
+        tags.push("aside");
+    }
+
+    tags
+}
+
 /// transform the content to markdown shortcut
 pub fn transform_markdown(html: &str, commonmark: bool) -> String {
     let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> = HashMap::new();
@@ -329,8 +375,25 @@ pub fn transform_content(
         return base_html;
     }
 
-    let return_format = c.return_format;
     let url_parsed = res.get_url_parsed().as_ref();
+
+    let base_html = if c.return_format.eq(&ReturnFormat::CommonMark)
+        || c.return_format.eq(&ReturnFormat::Markdown)
+    {
+        base_html
+    } else {
+        let mut ignore_list = build_static_vector(c);
+
+        if let Some(ignore) = ignore_tags {
+            ignore_list.extend(ignore.iter().map(|s| s.as_str()));
+        }
+
+        if ignore_list.is_empty() {
+            base_html
+        } else {
+            clean_html_elements(&base_html, ignore_list)
+        }
+    };
 
     // process readability
     let base_html = if c.readability {
@@ -348,7 +411,7 @@ pub fn transform_content(
         base_html
     };
 
-    match return_format {
+    match c.return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
         ReturnFormat::CommonMark => {
             let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
@@ -455,12 +518,14 @@ pub fn transform_content(
             super::text_extract::extract_text(&d)
         }
         ReturnFormat::XML => {
-            let target_url = match url_parsed {
-                Some(u) => u.to_string(),
-                _ => EXAMPLE_URL.to_string(),
-            };
-
-            if let Ok(xml) = convert_html_to_xml(&base_html.trim(), &target_url, &encoding) {
+            if let Ok(xml) = convert_html_to_xml(
+                &base_html.trim(),
+                &match url_parsed {
+                    Some(u) => u.to_string(),
+                    _ => EXAMPLE_URL.to_string(),
+                },
+                &encoding,
+            ) {
                 xml
             } else {
                 Default::default()

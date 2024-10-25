@@ -3909,7 +3909,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3970,7 +3970,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4005,7 +4005,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "clap",
  "env_logger",
@@ -4029,13 +4029,14 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
  "html5ever",
  "indexmap 1.9.3",
  "llm_readability",
+ "lol_html",
  "markup5ever 0.12.1",
  "maud",
  "phf 0.11.2",
@@ -4050,7 +4051,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4062,7 +4063,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.10.22"
+version = "2.10.23"
 dependencies = [
  "env_logger",
  "lazy_static",

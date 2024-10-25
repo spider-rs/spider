@@ -1,6 +1,6 @@
 [package]
 name = "spider_transformations"
-version = "2.10.22"
+version = "2.10.23"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -27,6 +27,7 @@ serde = { version = "1", features = ["derive"] }
 fast_html2md = "0"
 phf = "0.11"
 phf_codegen = "0.11"
+lol_html = { version = "1" }
 
 [dependencies.spider]
 version = "2"
