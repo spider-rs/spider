@@ -64,6 +64,31 @@ impl Default for Prompt {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    all(
+        not(feature = "regex"),
+        not(feature = "openai"),
+        not(feature = "cache_openai")
+    ),
+    derive(PartialEq)
+)]
+/// Structured data response format.
+pub struct ResponseFormatJsonSchema {
+    /// A description of what the response format is for, used by the model to determine how to respond in the format.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub description: Option<String>,
+    /// The name of the response format. Must be a-z, A-Z, 0-9, or contain underscores and dashes, with a maximum length
+    pub name: String,
+    /// The schema for the response format, described as a JSON Schema object.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub schema: Option<String>,
+    /// Whether to enable strict schema adherence when generating the output. If set to true, the model will always follow the exact schema defined in the `schema` field. Only a subset of JSON Schema is supported when `strict` is `true`. To learn more, read the [Structured Outputs guide](https://platform.openai.com/docs/guides/structured-outputs).
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub strict: Option<bool>,
+}
+
 /// The GPT configs to use for dynamic Javascript execution and other functionality.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -115,6 +140,9 @@ pub struct GPTConfigs {
     )]
     /// Use caching to cache the prompt. This does nothing without the 'cache_openai' flag enabled.
     pub cache: Option<AICache>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    /// Use structured JSON mode.
+    pub json_schema: Option<ResponseFormatJsonSchema>,
 }
 
 #[derive(Debug, Default, Clone)]

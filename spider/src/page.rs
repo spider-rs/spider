@@ -1164,7 +1164,7 @@ impl Page {
                                                             )
                                                             .await;
 
-                                                            crate::website::Website::setup_chrome_events(&new_page, &configuration).await;
+                                                            crate::features::chrome::setup_chrome_events(&new_page, &configuration).await;
 
                                                             let page_resource =
                                                             crate::utils::fetch_page_html_chrome_base(

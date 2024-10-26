@@ -1974,6 +1974,25 @@ pub async fn openai_request_base(
             let mut tokens_used = crate::features::openai_common::OpenAIUsage::default();
             let json_mode = gpt_configs.extra_ai_data;
 
+            let response_format = match gpt_configs.json_schema {
+                Some(ref structure) => async_openai::types::ResponseFormat::JsonSchema {
+                    json_schema: async_openai::types::ResponseFormatJsonSchema {
+                        description: structure.description.clone(),
+                        name: structure.name.clone(),
+                        schema: serde_json::from_str(&structure.schema.clone().unwrap_or_default())
+                            .unwrap_or_default(),
+                        strict: structure.strict,
+                    },
+                },
+                _ => {
+                    if json_mode {
+                        async_openai::types::ResponseFormat::JsonObject
+                    } else {
+                        async_openai::types::ResponseFormat::Text
+                    }
+                }
+            };
+
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(string_concat!("URL: ", url, "\n", "HTML: ", resource))
                 .build()
@@ -2006,11 +2025,7 @@ pub async fn openai_request_base(
                     let v = match gpt_base
                         .max_tokens(max_tokens as u32)
                         .messages(messages)
-                        .response_format(if json_mode {
-                            async_openai::types::ResponseFormat::JsonObject
-                        } else {
-                            async_openai::types::ResponseFormat::Text
-                        })
+                        .response_format(response_format)
                         .build()
                     {
                         Ok(request) => {

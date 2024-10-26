@@ -27,9 +27,6 @@ use tokio::{
 use tokio_stream::StreamExt;
 use url::Url;
 
-#[cfg(feature = "chrome")]
-use crate::features::chrome::{configure_browser, launch_browser};
-
 #[cfg(feature = "cache")]
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 
@@ -249,7 +246,7 @@ pub struct Website {
     channel_queue: Option<(broadcast::Sender<String>, Arc<broadcast::Receiver<String>>)>,
     /// The status of the active crawl this is mapped to a general status and not the HTTP status code.
     status: CrawlStatus,
-    /// The initial status code of the first request
+    /// The initial status code of the first request.
     initial_status_code: StatusCode,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     #[cfg(feature = "control")]
@@ -450,7 +447,7 @@ impl Website {
     }
 
     /// Validate if url exceeds crawl budget and should not be handled.
-    pub fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
+    pub(crate) fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
         if self.configuration.inner_budget.is_some() || self.configuration.depth_distance > 0 {
             match Url::parse(link.inner()) {
                 Ok(r) => {
@@ -1297,7 +1294,7 @@ impl Website {
                 retry_count -= 1;
             }
 
-            log("fetch", &url);
+            log::info!("fetch {}", &url);
 
             // allow initial page mutation
             match page.final_redirect_destination.as_deref() {
@@ -1367,48 +1364,6 @@ impl Website {
         }
     }
 
-    /// establish all the page events.
-    #[cfg(feature = "chrome")]
-    pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
-        let stealth = async {
-            if cfg!(feature = "chrome_stealth") || config.stealth_mode {
-                match config.user_agent.as_ref() {
-                    Some(agent) => {
-                        let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
-                    }
-                    _ => {
-                        let _ = chrome_page.enable_stealth_mode().await;
-                    }
-                }
-            }
-        };
-        let eval_docs = async {
-            match config.evaluate_on_new_document {
-                Some(ref script) => {
-                    if config.fingerprint {
-                        let _ = chrome_page
-                            .evaluate_on_new_document(string_concat!(
-                                crate::features::chrome::FP_JS,
-                                script.as_str()
-                            ))
-                            .await;
-                    } else {
-                        let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
-                    }
-                }
-                _ => {
-                    if config.fingerprint {
-                        let _ = chrome_page
-                            .evaluate_on_new_document(crate::features::chrome::FP_JS)
-                            .await;
-                    }
-                }
-            }
-        };
-
-        tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config));
-    }
-
     /// Expand links for crawl.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     async fn crawl_establish(
@@ -1422,7 +1377,7 @@ impl Website {
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            Website::setup_chrome_events(chrome_page, &self.configuration).await;
+            crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration).await;
 
             let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
 
@@ -1440,43 +1395,34 @@ impl Website {
             )
             .await;
 
-            match intercept_handle {
-                Some(h) => {
-                    let _ = h.await;
-                }
-                _ => (),
+            if let Some(h) = intercept_handle {
+                let _ = h.await;
             }
 
-            match page.final_redirect_destination {
-                Some(ref domain) => {
-                    let domain: Box<CaseInsensitiveString> =
-                        CaseInsensitiveString::new(&domain).into();
-
-                    let prior_domain = self.domain_parsed.take();
-
-                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                        _ => None,
-                    };
-                    self.url = domain;
-                    match self.setup_selectors() {
-                        Some(s) => {
-                            base.0 = s.0;
-                            base.1 = s.1;
-                            match prior_domain {
-                                Some(prior_domain) => match prior_domain.host_str() {
-                                    Some(dname) => {
-                                        base.2 = dname.into();
-                                    }
-                                    _ => (),
-                                },
+            if let Some(ref domain) = page.final_redirect_destination {
+                let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
+                let prior_domain = self.domain_parsed.take();
+                self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                    _ => None,
+                };
+                self.url = domain;
+                match self.setup_selectors() {
+                    Some(s) => {
+                        base.0 = s.0;
+                        base.1 = s.1;
+                        match prior_domain {
+                            Some(prior_domain) => match prior_domain.host_str() {
+                                Some(dname) => {
+                                    base.2 = dname.into();
+                                }
                                 _ => (),
-                            }
+                            },
+                            _ => (),
                         }
-                        _ => (),
                     }
+                    _ => (),
                 }
-                _ => (),
             }
 
             let links = if !page.is_empty() {
@@ -1543,7 +1489,7 @@ impl Website {
         )
         .await
         {
-            Website::setup_chrome_events(&chrome_page, &config).await;
+            crate::features::chrome::setup_chrome_events(&chrome_page, &config).await;
             let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
                 &chrome_page,
                 config.chrome_intercept.enabled,
@@ -2267,7 +2213,7 @@ impl Website {
                                             continue;
                                         }
 
-                                        log("fetch", &link);
+                                        log::info!("fetch {}", &link);
                                         self.links_visited.insert(link.clone());
 
                                         let shared = shared.clone();
@@ -2413,7 +2359,11 @@ impl Website {
                 .await
                 {
                     Ok(new_page) => {
-                        Website::setup_chrome_events(&new_page, &self.configuration).await;
+                        crate::features::chrome::setup_chrome_events(
+                            &new_page,
+                            &self.configuration,
+                        )
+                        .await;
 
                         let semaphore = if self.configuration.shared_queue {
                             SEM_SHARED.clone()
@@ -2505,7 +2455,7 @@ impl Website {
                                                     continue;
                                                 }
 
-                                                log("fetch", &link);
+                                                log::info!("fetch {}", &link);
                                                 self.links_visited.insert(link.clone());
 
                                                 let shared = shared.clone();
@@ -2522,7 +2472,7 @@ impl Website {
                                                             let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
                                                         ).await {
                                                                 Ok(new_page) => {
-                                                                    Website::setup_chrome_events(&new_page, &shared.5).await;
+                                                                     crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
                                                                     let mut page = Page::new(
                                                                         &target_url,
                                                                         &shared.0,
@@ -2745,7 +2695,6 @@ impl Website {
                                 } else {
                                     Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
                                 };
-                                Website::setup_chrome_events(&new_page, &self.configuration).await;
                                 let mut q = match &self.channel_queue {
                                     Some(q) => Some(q.0.subscribe()),
                                     _ => None,
@@ -2759,6 +2708,9 @@ impl Website {
                                     self.crawl_establish(&client, &mut selectors, false, &new_page)
                                         .await,
                                 );
+
+                                self.configuration.configure_allowlist();
+
                                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
                                     JoinSet::new();
                                 let chandle = Handle::current();
@@ -2776,7 +2728,6 @@ impl Website {
                                 ));
 
                                 let add_external = shared.3.len() > 0;
-                                self.configuration.configure_allowlist();
                                 let on_link_find_callback = self.on_link_find_callback;
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
@@ -2815,7 +2766,7 @@ impl Website {
                                                         continue;
                                                     }
 
-                                                    log("fetch", &link);
+                                                    log::info!("fetch {}", &link);
                                                     self.links_visited.insert(link.clone());
 
                                                     let shared = shared.clone();
@@ -2825,7 +2776,7 @@ impl Website {
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
                                                     ).await {
                                                             Ok(new_page) => {
-                                                                Website::setup_chrome_events(&new_page, &shared.6).await;
+                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
 
                                                                 let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
                                                                     &new_page,
@@ -3073,7 +3024,7 @@ impl Website {
                                     continue;
                                 }
 
-                                log("fetch", &link);
+                                log::info!("fetch {}", &link);
 
                                 self.links_visited.insert(link.clone());
 
@@ -3194,7 +3145,6 @@ impl Website {
                             self.drain_extra_links().collect();
 
                         let (mut interval, throttle) = self.setup_crawl();
-                        self.configuration.configure_allowlist();
                         let on_link_find_callback = self.on_link_find_callback;
                         let return_page_links = self.configuration.return_page_links;
 
@@ -3213,6 +3163,7 @@ impl Website {
                             )
                             .await,
                         );
+                        self.configuration.configure_allowlist();
 
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                         let chandle = Handle::current();
@@ -3260,7 +3211,7 @@ impl Website {
                                                 continue;
                                             }
 
-                                            log("fetch", &link);
+                                            log::info!("fetch {}", &link);
                                             self.links_visited.insert(link.clone());
                                             let shared = shared.clone();
 
@@ -3833,7 +3784,7 @@ impl Website {
                                                                                 )
                                                                                 .await;
 
-                                                                                Website::setup_chrome_events(&new_page, &shared.3).await;
+                                                                                crate::features::chrome::setup_chrome_events(&new_page, &shared.3).await;
 
                                                                                 let page = Page::new(
                                                                                     &link.inner(),
@@ -4017,7 +3968,9 @@ impl Website {
         tokio::task::JoinHandle<()>,
         Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     )> {
-        match launch_browser(&self.configuration, self.get_url_parsed()).await {
+        match crate::features::chrome::launch_browser(&self.configuration, self.get_url_parsed())
+            .await
+        {
             Some((browser, browser_handle, context_id)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
 

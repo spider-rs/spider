@@ -515,6 +515,47 @@ pub async fn setup_chrome_interception_base(
     None
 }
 
+/// establish all the page events.
+pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+    let stealth = async {
+        if cfg!(feature = "chrome_stealth") || config.stealth_mode {
+            match config.user_agent.as_ref() {
+                Some(agent) => {
+                    let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                }
+                _ => {
+                    let _ = chrome_page.enable_stealth_mode().await;
+                }
+            }
+        }
+    };
+    let eval_docs = async {
+        match config.evaluate_on_new_document {
+            Some(ref script) => {
+                if config.fingerprint {
+                    let _ = chrome_page
+                        .evaluate_on_new_document(string_concat!(
+                            crate::features::chrome::FP_JS,
+                            script.as_str()
+                        ))
+                        .await;
+                } else {
+                    let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
+                }
+            }
+            _ => {
+                if config.fingerprint {
+                    let _ = chrome_page
+                        .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                        .await;
+                }
+            }
+        }
+    };
+
+    tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config));
+}
+
 /// static chrome arguments to start
 #[cfg(all(feature = "chrome_cpu", feature = "real_browser"))]
 pub static CHROME_ARGS: [&'static str; 27] = [
