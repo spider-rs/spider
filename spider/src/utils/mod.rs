@@ -1974,23 +1974,43 @@ pub async fn openai_request_base(
             let mut tokens_used = crate::features::openai_common::OpenAIUsage::default();
             let json_mode = gpt_configs.extra_ai_data;
 
-            let response_format = match gpt_configs.json_schema {
-                Some(ref structure) => async_openai::types::ResponseFormat::JsonSchema {
-                    json_schema: async_openai::types::ResponseFormatJsonSchema {
-                        description: structure.description.clone(),
-                        name: structure.name.clone(),
-                        schema: serde_json::from_str(&structure.schema.clone().unwrap_or_default())
-                            .unwrap_or_default(),
-                        strict: structure.strict,
-                    },
-                },
-                _ => {
-                    if json_mode {
-                        async_openai::types::ResponseFormat::JsonObject
-                    } else {
-                        async_openai::types::ResponseFormat::Text
+            let response_format = {
+                let mut mode = if json_mode {
+                    async_openai::types::ResponseFormat::JsonObject
+                } else {
+                    async_openai::types::ResponseFormat::Text
+                };
+
+                if let Some(ref structure) = gpt_configs.json_schema {
+                    if let Some(ref schema) = structure.schema {
+                        if let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&schema) {
+                            if json_mode {
+                                // Insert the "js" property into the schema's properties. Todo: capture if the js property exist and re-word prompt to match new js property with after removal.
+                                if let Some(properties) = schema.get_mut("properties") {
+                                    if let Some(properties_map) = properties.as_object_mut() {
+                                        properties_map.insert(
+                                            "js".to_string(),
+                                            serde_json::json!({
+                                                "type": "string"
+                                            }),
+                                        );
+                                    }
+                                }
+                            }
+
+                            mode = async_openai::types::ResponseFormat::JsonSchema {
+                                json_schema: async_openai::types::ResponseFormatJsonSchema {
+                                    description: structure.description.clone(),
+                                    name: structure.name.clone(),
+                                    schema: if schema.is_null() { None } else { Some(schema) },
+                                    strict: structure.strict,
+                                },
+                            }
+                        }
                     }
                 }
+
+                mode
             };
 
             match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
