@@ -1,6 +1,7 @@
 use crate::html2xml::convert_html_to_xml;
 use aho_corasick::AhoCorasick;
 use html2md;
+use html2md::ignore::IgnoreTagFactory;
 use phf::phf_set;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
@@ -120,24 +121,6 @@ pub struct SelectorConfiguration {
     pub root_selector: Option<String>,
     /// Exclude the matching css selector from the output.
     pub exclude_selector: Option<String>,
-}
-
-/// ignore tags for markdown transformation
-#[derive(Clone)]
-pub struct IgnoreTagFactory;
-
-impl html2md::TagHandlerFactory for IgnoreTagFactory {
-    fn instantiate(&self) -> Box<dyn html2md::TagHandler> {
-        Box::new(self.clone())
-    }
-}
-
-impl html2md::TagHandler for IgnoreTagFactory {
-    fn handle(&mut self, _tag: &html2md::Handle, _printer: &mut html2md::StructuredPrinter) {}
-    fn after_handle(&mut self, _printer: &mut html2md::StructuredPrinter) {}
-    fn skip_descendants(&self) -> bool {
-        true
-    }
 }
 
 /// is the content html and safe for formatting.
@@ -375,13 +358,9 @@ pub fn transform_content(
         return base_html;
     }
 
-    let url_parsed = res.get_url_parsed().as_ref();
+    let url_parsed = res.get_url_parsed();
 
-    let base_html = if c.return_format.eq(&ReturnFormat::CommonMark)
-        || c.return_format.eq(&ReturnFormat::Markdown)
-    {
-        base_html
-    } else {
+    let base_html = {
         let mut ignore_list = build_static_vector(c);
 
         if let Some(ignore) = ignore_tags {
@@ -422,21 +401,6 @@ pub fn transform_content(
             tag_factory.insert(String::from("style"), tag.clone());
             tag_factory.insert(String::from("noscript"), tag.clone());
 
-            if c.filter_images {
-                tag_factory.insert(String::from("img"), tag.clone());
-                tag_factory.insert(String::from("picture"), tag.clone());
-            }
-
-            if c.filter_svg {
-                tag_factory.insert(String::from("svg"), tag.clone());
-            }
-
-            if c.main_content {
-                tag_factory.insert(String::from("nav"), tag.clone());
-                tag_factory.insert(String::from("footer"), tag.clone());
-                tag_factory.insert(String::from("aside"), tag.clone());
-            }
-
             if let Some(ignore) = ignore_tags {
                 for ignore_tag_name in ignore {
                     tag_factory.insert(ignore_tag_name.into(), tag.clone());
@@ -451,7 +415,12 @@ pub fn transform_content(
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&base_html.trim(), &tag_factory, true);
+            let html = html2md::parse_html_custom_with_url(
+                &base_html.trim(),
+                &tag_factory,
+                true,
+                &url_parsed,
+            );
             let html = aho_clean_markdown(&html);
 
             html
@@ -465,22 +434,6 @@ pub fn transform_content(
             tag_factory.insert(String::from("script"), tag.clone());
             tag_factory.insert(String::from("style"), tag.clone());
             tag_factory.insert(String::from("noscript"), tag.clone());
-            tag_factory.insert(String::from("br"), tag.clone());
-
-            if c.filter_images {
-                tag_factory.insert(String::from("img"), tag.clone());
-                tag_factory.insert(String::from("picture"), tag.clone());
-            }
-
-            if c.filter_svg {
-                tag_factory.insert(String::from("svg"), tag.clone());
-            }
-
-            if c.main_content {
-                tag_factory.insert(String::from("nav"), tag.clone());
-                tag_factory.insert(String::from("footer"), tag.clone());
-                tag_factory.insert(String::from("aside"), tag.clone());
-            }
 
             if let Some(ignore) = ignore_tags {
                 for ignore_tag_name in ignore {
@@ -496,7 +449,12 @@ pub fn transform_content(
 
             tag_factory.insert(String::from("iframe"), tag);
 
-            let html = html2md::parse_html_custom(&base_html.trim(), &tag_factory, false);
+            let html = html2md::parse_html_custom_with_url(
+                &base_html.trim(),
+                &tag_factory,
+                false,
+                url_parsed,
+            );
             let html = aho_clean_markdown(&html);
 
             html
