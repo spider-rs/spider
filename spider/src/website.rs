@@ -257,6 +257,9 @@ pub struct Website {
     client: Option<Client>,
 }
 
+/// The batch timeout
+const BATCH_TIMEOUT: Duration = Duration::from_millis(200);
+
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
@@ -2157,12 +2160,6 @@ impl Website {
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
                     let (mut interval, throttle) = self.setup_crawl();
-                    let semaphore = if self.configuration.shared_queue {
-                        SEM_SHARED.clone()
-                    } else {
-                        Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                    };
-
                     links.extend(self._crawl_establish(client, &mut selector, false).await);
                     self.configuration.configure_allowlist();
                     let on_link_find_callback = self.on_link_find_callback;
@@ -2171,6 +2168,12 @@ impl Website {
                     let mut q = match &self.channel_queue {
                         Some(q) => Some(q.0.subscribe()),
                         _ => None,
+                    };
+
+                    let semaphore = if self.configuration.shared_queue {
+                        SEM_SHARED.clone()
+                    } else {
+                        Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
                     };
 
                     let shared = Arc::new((
@@ -2185,153 +2188,122 @@ impl Website {
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                     let chandle = Handle::current();
 
-                    while !links.is_empty() {
+                    loop {
+                        let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                            links.drain().collect(),
+                        )
+                        .throttle(*throttle);
+
+                        tokio::pin!(stream);
+
                         loop {
-                            let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                links.drain().collect(),
-                            )
-                            .throttle(*throttle);
+                            tokio::select! {
+                                Some(link) = stream.next() => {
+                                    if !self.handle_process(handle, &mut interval, set.shutdown()).await {
+                                        break;
+                                    }
 
-                            tokio::pin!(stream);
+                                    let allowed = self.is_allowed(&link);
 
-                            loop {
-                                match stream.next().await {
-                                    Some(link) => {
-                                        if !self
-                                            .handle_process(handle, &mut interval, set.shutdown())
-                                            .await
-                                        {
-                                            break;
-                                        }
+                                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                        break;
+                                    }
+                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                        continue;
+                                    }
 
-                                        let allowed = self.is_allowed(&link);
+                                    log::info!("fetch {}", &link);
+                                    self.links_visited.insert(link.clone());
 
-                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            break;
-                                        }
-                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                            continue;
-                                        }
+                                    let shared = shared.clone();
+                                    let semaphore = semaphore.clone();
 
-                                        log::info!("fetch {}", &link);
-                                        self.links_visited.insert(link.clone());
+                                    set.spawn_on(
+                                        run_task(semaphore, move || async move {
+                                            let link_result = match on_link_find_callback {
+                                                Some(cb) => cb(link, None),
+                                                _ => (link, None),
+                                            };
+                                            let mut page = Page::new_page(link_result.0.as_ref(), &shared.0).await;
+                                            let mut retry_count = shared.5;
 
-                                        let shared = shared.clone();
-                                        let semaphore = semaphore.clone();
-
-                                        set.spawn_on(
-                                            run_task(semaphore, move || async move {
-                                                let link_result = match on_link_find_callback {
-                                                    Some(cb) => cb(link, None),
-                                                    _ => (link, None),
-                                                };
-                                                let mut page = Page::new_page(
-                                                    link_result.0.as_ref(),
-                                                    &shared.0,
-                                                )
-                                                .await;
-                                                let mut retry_count = shared.5;
-
-                                                while page.should_retry && retry_count > 0 {
-                                                    if page.status_code
-                                                        == StatusCode::GATEWAY_TIMEOUT
-                                                    {
-                                                        let next_page = backoff::future::retry(
-                                                            ExponentialBackoff::default(),
-                                                            || async {
-                                                                let p = Page::new_page(
-                                                                    link_result.0.as_ref(),
-                                                                    &shared.0,
-                                                                )
-                                                                .await;
-                                                                Ok::<
-                                                                    Page,
-                                                                    backoff::Error<std::io::Error>,
-                                                                >(
-                                                                    p
-                                                                )
-                                                            },
-                                                        );
-                                                        if let Ok(next_page) = next_page.await {
-                                                            page.clone_from(&next_page);
-                                                        };
-                                                    } else {
-                                                        if let Some(timeout) = page.get_timeout() {
-                                                            tokio::time::sleep(timeout).await;
-                                                        }
-                                                        page.clone_from(
-                                                            &Page::new_page(
-                                                                link_result.0.as_ref(),
-                                                                &shared.0,
-                                                            )
-                                                            .await,
-                                                        );
-                                                    }
-                                                    retry_count -= 1;
-                                                }
-
-                                                page.set_external(shared.3.to_owned());
-
-                                                let links = if full_resources {
-                                                    page.links_full(&shared.1).await
-                                                } else {
-                                                    page.links(&shared.1).await
-                                                };
-
-                                                if return_page_links {
-                                                    page.page_links = if links.is_empty() {
-                                                        None
-                                                    } else {
-                                                        Some(Box::new(links.clone()))
+                                            while page.should_retry && retry_count > 0 {
+                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                    let next_page = backoff::future::retry(
+                                                        ExponentialBackoff::default(),
+                                                        || async {
+                                                            let p = Page::new_page(link_result.0.as_ref(), &shared.0).await;
+                                                            Ok::<Page, backoff::Error<std::io::Error>>(p)
+                                                        },
+                                                    );
+                                                    if let Ok(next_page) = next_page.await {
+                                                        page.clone_from(&next_page);
                                                     };
-                                                }
-
-                                                channel_send_page(&shared.2, page, &shared.4);
-
-                                                links
-                                            }),
-                                            &chandle,
-                                        );
-
-                                        match q.as_mut() {
-                                            Some(q) => {
-                                                while let Ok(link) = q.try_recv() {
-                                                    let s = link.into();
-                                                    let allowed = self.is_allowed(&s);
-
-                                                    if allowed
-                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                    {
-                                                        break;
+                                                } else {
+                                                    if let Some(timeout) = page.get_timeout() {
+                                                        tokio::time::sleep(timeout).await;
                                                     }
-                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                        continue;
-                                                    }
-                                                    self.links_visited
-                                                        .extend_with_new_links(&mut links, s);
+                                                    page.clone_from(&Page::new_page(link_result.0.as_ref(), &shared.0).await);
                                                 }
+                                                retry_count -= 1;
                                             }
-                                            _ => (),
+
+                                            page.set_external(shared.3.to_owned());
+
+                                            let links = if full_resources {
+                                                page.links_full(&shared.1).await
+                                            } else {
+                                                page.links(&shared.1).await
+                                            };
+
+                                            if return_page_links {
+                                                page.page_links = if links.is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(Box::new(links.clone()))
+                                                };
+                                            }
+
+                                            channel_send_page(&shared.2, page, &shared.4);
+                                            links
+                                        }),
+                                        &chandle,
+                                    );
+
+                                    if let Some(q) = &mut q {
+                                        while let Ok(link) = q.try_recv() {
+                                            let s = link.into();
+                                            let allowed = self.is_allowed(&s);
+
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                continue;
+                                            }
+                                            self.links_visited.extend_with_new_links(&mut links, s);
                                         }
                                     }
-                                    _ => break,
+                                },
+                                result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                    match result {
+                                        Ok(res) =>                                                 match res {
+                                            Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
+                                            _ => ()
+                                        },
+                                        Err(_) => break
+                                    }
                                 }
-                            }
-
-                            while let Some(res) = set.join_next().await {
-                                match res {
-                                    Ok(msg) => self.links_visited.extend_links(&mut links, msg),
-                                    _ => (),
-                                };
-                            }
-
-                            if links.is_empty() {
-                                break;
+                                else => break,
                             }
                         }
 
-                        self.subscription_guard();
+                        if links.is_empty() && set.is_empty() {
+                            break;
+                        }
                     }
+
+                    self.subscription_guard();
                 }
             }
             _ => log("", INVALID_URL),
@@ -2423,107 +2395,76 @@ impl Website {
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
 
-                            while !links.is_empty() {
+                            loop {
+                                let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                    links.drain().collect(),
+                                )
+                                .throttle(*throttle);
+                                tokio::pin!(stream);
+
                                 loop {
-                                    let stream =
-                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                            links.drain().collect(),
-                                        )
-                                        .throttle(*throttle);
-                                    tokio::pin!(stream);
+                                    tokio::select! {
+                                        Some(link) = stream.next() => {
+                                            if !self
+                                                .handle_process(
+                                                    handle,
+                                                    &mut interval,
+                                                    set.shutdown(),
+                                                )
+                                                .await
+                                            {
+                                                break;
+                                            }
 
-                                    loop {
-                                        match stream.next().await {
-                                            Some(link) => {
-                                                if !self
-                                                    .handle_process(
-                                                        handle,
-                                                        &mut interval,
-                                                        set.shutdown(),
-                                                    )
-                                                    .await
-                                                {
-                                                    break;
-                                                }
+                                            let allowed = self.is_allowed(&link);
 
-                                                let allowed = self.is_allowed(&link);
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                break;
+                                            }
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                continue;
+                                            }
 
-                                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                    break;
-                                                }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                    continue;
-                                                }
+                                            log::info!("fetch {}", &link);
+                                            self.links_visited.insert(link.clone());
 
-                                                log::info!("fetch {}", &link);
-                                                self.links_visited.insert(link.clone());
+                                            let shared = shared.clone();
 
-                                                let shared = shared.clone();
+                                            set.spawn_on(
+                                                run_task(
+                                                    semaphore.clone(),
+                                                    move || async move {
+                                                        let link_result = match on_link_find_callback {
+                                                            Some(cb) => cb(link, None),
+                                                            _ => (link, None),
+                                                        };
+                                                        let target_url = link_result.0.as_ref();
+                                                        let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
+                                                    ).await {
+                                                            Ok(new_page) => {
+                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
+                                                                let mut page = Page::new(
+                                                                    &target_url,
+                                                                    &shared.0,
+                                                                    &new_page,
+                                                                    &shared.5.wait_for,
+                                                                    &shared.5.screenshot,
+                                                                    false,
+                                                                    &shared.5.openai_config,
+                                                                    &shared.5.execution_scripts,
+                                                                    &shared.5.automation_scripts,
+                                                                    &shared.5.viewport,
+                                                                )
+                                                                .await;
 
-                                                set.spawn_on(
-                                                    run_task(
-                                                        semaphore.clone(),
-                                                        move || async move {
-                                                            let link_result = match on_link_find_callback {
-                                                                Some(cb) => cb(link, None),
-                                                                _ => (link, None),
-                                                            };
-                                                            let target_url = link_result.0.as_ref();
-                                                            let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
-                                                        ).await {
-                                                                Ok(new_page) => {
-                                                                     crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
-                                                                    let mut page = Page::new(
-                                                                        &target_url,
-                                                                        &shared.0,
-                                                                        &new_page,
-                                                                        &shared.5.wait_for,
-                                                                        &shared.5.screenshot,
-                                                                        false,
-                                                                        &shared.5.openai_config,
-                                                                        &shared.5.execution_scripts,
-                                                                        &shared.5.automation_scripts,
-                                                                        &shared.5.viewport,
-                                                                    )
-                                                                    .await;
+                                                                let mut retry_count = shared.5.retry;
 
-                                                                    let mut retry_count = shared.5.retry;
-
-                                                                    while page.should_retry && retry_count > 0 {
-                                                                        if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                            let next_page = backoff::future::retry(
-                                                                                ExponentialBackoff::default(),
-                                                                                || async {
-                                                                                    let p = Page::new(
-                                                                                        &target_url,
-                                                                                        &shared.0,
-                                                                                        &new_page,
-                                                                                        &shared.5.wait_for,
-                                                                                        &shared.5.screenshot,
-                                                                                        false,
-                                                                                        &shared.5.openai_config,
-                                                                                        &shared.5.execution_scripts,
-                                                                                        &shared.5.automation_scripts,
-                                                                                        &shared.5.viewport,
-                                                                                    )
-                                                                                    .await;
-                                                                                    Ok::<
-                                                                                        Page,
-                                                                                        backoff::Error<std::io::Error>,
-                                                                                    >(
-                                                                                        p
-                                                                                    )
-                                                                                },
-                                                                            );
-                                                                            if let Ok(next_page) = next_page.await {
-                                                                                page.clone_from(&next_page);
-                                                                            };
-                                                                        } else {
-                                                                            if let Some(timeout) = page.get_timeout() {
-                                                                                tokio::time::sleep(timeout).await;
-                                                                            }
-                                                                            page.clone_from(
-                                                                                &Page::new(
+                                                                while page.should_retry && retry_count > 0 {
+                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                                        let next_page = backoff::future::retry(
+                                                                            ExponentialBackoff::default(),
+                                                                            || async {
+                                                                                let p = Page::new(
                                                                                     &target_url,
                                                                                     &shared.0,
                                                                                     &new_page,
@@ -2535,105 +2476,126 @@ impl Website {
                                                                                     &shared.5.automation_scripts,
                                                                                     &shared.5.viewport,
                                                                                 )
-                                                                                .await,
-                                                                            );
+                                                                                .await;
+                                                                                Ok::<
+                                                                                    Page,
+                                                                                    backoff::Error<std::io::Error>,
+                                                                                >(
+                                                                                    p
+                                                                                )
+                                                                            },
+                                                                        );
+                                                                        if let Ok(next_page) = next_page.await {
+                                                                            page.clone_from(&next_page);
+                                                                        };
+                                                                    } else {
+                                                                        if let Some(timeout) = page.get_timeout() {
+                                                                            tokio::time::sleep(timeout).await;
                                                                         }
-                                                                        retry_count -= 1;
-                                                                    }
-
-                                                                    if add_external {
-                                                                        page.set_external(
-                                                                            shared
-                                                                                .5
-                                                                                .external_domains_caseless
-                                                                                .clone(),
+                                                                        page.clone_from(
+                                                                            &Page::new(
+                                                                                &target_url,
+                                                                                &shared.0,
+                                                                                &new_page,
+                                                                                &shared.5.wait_for,
+                                                                                &shared.5.screenshot,
+                                                                                false,
+                                                                                &shared.5.openai_config,
+                                                                                &shared.5.execution_scripts,
+                                                                                &shared.5.automation_scripts,
+                                                                                &shared.5.viewport,
+                                                                            )
+                                                                            .await,
                                                                         );
                                                                     }
-
-                                                                    let links = if full_resources {
-                                                                        page.links_full(&shared.1).await
-                                                                    } else {
-                                                                        page.links(&shared.1).await
-                                                                    };
-
-                                                                    if return_page_links {
-                                                                        page.page_links = if links.is_empty() {
-                                                                            None
-                                                                        } else {
-                                                                            Some(Box::new(links.clone()))
-                                                                        };
-                                                                    }
-
-                                                                    channel_send_page(
-                                                                        &shared.2, page, &shared.3,
-                                                                    );
-
-                                                                    links
+                                                                    retry_count -= 1;
                                                                 }
-                                                                _ => Default::default(),
-                                                            };
 
-                                                            next
-                                                        },
-                                                    ),
-                                                    &chandle,
-                                                );
+                                                                if add_external {
+                                                                    page.set_external(
+                                                                        shared
+                                                                            .5
+                                                                            .external_domains_caseless
+                                                                            .clone(),
+                                                                    );
+                                                                }
 
-                                                match q.as_mut() {
-                                                    Some(q) => {
-                                                        while let Ok(link) = q.try_recv() {
-                                                            let s = link.into();
-                                                            let allowed = self.is_allowed(&s);
+                                                                let links = if full_resources {
+                                                                    page.links_full(&shared.1).await
+                                                                } else {
+                                                                    page.links(&shared.1).await
+                                                                };
 
-                                                            if allowed.eq(
-                                                                &ProcessLinkStatus::BudgetExceeded,
-                                                            ) {
-                                                                break;
-                                                            }
-                                                            if allowed
-                                                                .eq(&ProcessLinkStatus::Blocked)
-                                                            {
-                                                                continue;
-                                                            }
+                                                                if return_page_links {
+                                                                    page.page_links = if links.is_empty() {
+                                                                        None
+                                                                    } else {
+                                                                        Some(Box::new(links.clone()))
+                                                                    };
+                                                                }
 
-                                                            self.links_visited
-                                                                .extend_with_new_links(
-                                                                    &mut links, s,
+                                                                channel_send_page(
+                                                                    &shared.2, page, &shared.3,
                                                                 );
+
+                                                                links
+                                                            }
+                                                            _ => Default::default(),
+                                                        };
+
+                                                        next
+                                                    },
+                                                ),
+                                                &chandle,
+                                            );
+
+                                            match q.as_mut() {
+                                                Some(q) => {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        let allowed = self.is_allowed(&s);
+
+                                                        if allowed.eq(
+                                                            &ProcessLinkStatus::BudgetExceeded,
+                                                        ) {
+                                                            break;
                                                         }
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::Blocked)
+                                                        {
+                                                            continue;
+                                                        }
+
+                                                        self.links_visited
+                                                            .extend_with_new_links(
+                                                                &mut links, s,
+                                                            );
                                                     }
-                                                    _ => (),
                                                 }
+                                                _ => (),
                                             }
-                                            _ => break,
                                         }
-                                    }
-
-                                    while let Some(res) = set.join_next().await {
-                                        match res {
-                                            Ok(msg) => {
-                                                self.links_visited.extend_links(&mut links, msg)
+                                        result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                            match result {
+                                                Ok(res) =>                                                 match res {
+                                                    Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
+                                                    _ => ()
+                                                },
+                                                Err(_) => break
                                             }
-                                            Err(e) => {
-                                                if set.is_empty() {
-                                                    break;
-                                                } else {
-                                                    if e.is_panic() {
-                                                        set.shutdown().await;
-                                                    }
-                                                    continue;
-                                                }
-                                            }
-                                        };
-                                    }
+                                        }
+                                        else => break,
 
-                                    if links.is_empty() {
-                                        break;
                                     }
                                 }
 
-                                self.subscription_guard();
+                                if links.is_empty() && set.is_empty() {
+                                    break;
+                                }
                             }
+
+                            self.subscription_guard();
+
                             crate::features::chrome::close_browser(
                                 browser_handle,
                                 &shared.4,
@@ -2732,119 +2694,90 @@ impl Website {
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
 
-                                while !links.is_empty() {
+                                loop {
+                                    let stream =
+                                        tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                            links.drain().collect(),
+                                        )
+                                        .throttle(*throttle);
+                                    tokio::pin!(stream);
+
                                     loop {
-                                        let stream =
-                                            tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                                links.drain().collect(),
-                                            )
-                                            .throttle(*throttle);
-                                        tokio::pin!(stream);
+                                        tokio::select! {
+                                            Some(link) = stream.next() => {
+                                                if !self
+                                                    .handle_process(
+                                                        handle,
+                                                        &mut interval,
+                                                        set.shutdown(),
+                                                    )
+                                                    .await
+                                                {
+                                                    break;
+                                                }
 
-                                        loop {
-                                            match stream.next().await {
-                                                Some(link) => {
-                                                    if !self
-                                                        .handle_process(
-                                                            handle,
-                                                            &mut interval,
-                                                            set.shutdown(),
-                                                        )
-                                                        .await
-                                                    {
-                                                        break;
-                                                    }
+                                                let allowed = self.is_allowed(&link);
 
-                                                    let allowed = self.is_allowed(&link);
+                                                if allowed
+                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                {
+                                                    break;
+                                                }
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                    continue;
+                                                }
 
-                                                    if allowed
-                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                    {
-                                                        break;
-                                                    }
-                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                        continue;
-                                                    }
+                                                log::info!("fetch {}", &link);
+                                                self.links_visited.insert(link.clone());
 
-                                                    log::info!("fetch {}", &link);
-                                                    self.links_visited.insert(link.clone());
+                                                let shared = shared.clone();
 
-                                                    let shared = shared.clone();
+                                                set.spawn_on(
+                                                run_task(semaphore.clone(), move || async move {
+                                                    match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
+                                                ).await {
+                                                        Ok(new_page) => {
+                                                             crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
 
-                                                    set.spawn_on(
-                                                    run_task(semaphore.clone(), move || async move {
-                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
-                                                    ).await {
-                                                            Ok(new_page) => {
-                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
+                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                                                                &new_page,
+                                                                shared.6.chrome_intercept.enabled,
+                                                                &shared.6.auth_challenge_response,
+                                                                shared.6.chrome_intercept.block_visuals,
+                                                                &shared.7,
+                                                            )
+                                                            .await;
 
-                                                                let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                                    &new_page,
-                                                                    shared.6.chrome_intercept.enabled,
-                                                                    &shared.6.auth_challenge_response,
-                                                                    shared.6.chrome_intercept.block_visuals,
-                                                                    &shared.7,
-                                                                )
-                                                                .await;
+                                                            let link_result =
+                                                                match on_link_find_callback {
+                                                                    Some(cb) => cb(link, None),
+                                                                    _ => (link, None),
+                                                                };
 
-                                                                let link_result =
-                                                                    match on_link_find_callback {
-                                                                        Some(cb) => cb(link, None),
-                                                                        _ => (link, None),
-                                                                    };
+                                                            let target_url = link_result.0.as_ref();
 
-                                                                let target_url = link_result.0.as_ref();
+                                                            let mut page = Page::new(
+                                                                &target_url,
+                                                                &shared.0,
+                                                                &new_page,
+                                                                &shared.6.wait_for,
+                                                                &shared.6.screenshot,
+                                                                false,
+                                                                &shared.6.openai_config,
+                                                                &shared.6.execution_scripts,
+                                                                &shared.6.automation_scripts,
+                                                                &shared.6.viewport,
+                                                            )
+                                                            .await;
 
-                                                                let mut page = Page::new(
-                                                                    &target_url,
-                                                                    &shared.0,
-                                                                    &new_page,
-                                                                    &shared.6.wait_for,
-                                                                    &shared.6.screenshot,
-                                                                    false,
-                                                                    &shared.6.openai_config,
-                                                                    &shared.6.execution_scripts,
-                                                                    &shared.6.automation_scripts,
-                                                                    &shared.6.viewport,
-                                                                )
-                                                                .await;
+                                                            let mut retry_count = shared.6.retry;
 
-                                                                let mut retry_count = shared.6.retry;
-
-                                                                while page.should_retry && retry_count > 0 {
-                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                        let next_page = backoff::future::retry(
-                                                                            ExponentialBackoff::default(),
-                                                                            || async {
-                                                                                let p =    Page::new(
-                                                                                    &target_url,
-                                                                                    &shared.0,
-                                                                                    &new_page,
-                                                                                    &shared.6.wait_for,
-                                                                                    &shared.6.screenshot,
-                                                                                    false,
-                                                                                    &shared.6.openai_config,
-                                                                                    &shared.6.execution_scripts,
-                                                                                    &shared.6.automation_scripts,
-                                                                                    &shared.6.viewport,
-                                                                                ).await;
-                                                                                Ok::<
-                                                                                    Page,
-                                                                                    backoff::Error<std::io::Error>,
-                                                                                >(
-                                                                                    p
-                                                                                )
-                                                                            },
-                                                                        );
-                                                                        if let Ok(next_page) = next_page.await {
-                                                                            page.clone_from(&next_page);
-                                                                        };
-                                                                    } else {
-                                                                        if let Some(timeout) = page.get_timeout() {
-                                                                            tokio::time::sleep(timeout).await;
-                                                                        }
-                                                                        page.clone_from(
-                                                                            &Page::new(
+                                                            while page.should_retry && retry_count > 0 {
+                                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                                    let next_page = backoff::future::retry(
+                                                                        ExponentialBackoff::default(),
+                                                                        || async {
+                                                                            let p =    Page::new(
                                                                                 &target_url,
                                                                                 &shared.0,
                                                                                 &new_page,
@@ -2855,95 +2788,123 @@ impl Website {
                                                                                 &shared.6.execution_scripts,
                                                                                 &shared.6.automation_scripts,
                                                                                 &shared.6.viewport,
+                                                                            ).await;
+                                                                            Ok::<
+                                                                                Page,
+                                                                                backoff::Error<std::io::Error>,
+                                                                            >(
+                                                                                p
                                                                             )
-                                                                            .await,
-                                                                        );
-                                                                    }
-                                                                    retry_count -= 1;
-                                                                }
-
-                                                                match intercept_handle {
-                                                                    Some(h) => {
-                                                                        let _ = h.await;
-                                                                    }
-                                                                    _ => ()
-                                                                }
-
-                                                                if add_external {
-                                                                    page.set_external(shared.3.clone());
-                                                                }
-
-                                                                let links = if full_resources {
-                                                                    page.links_full(&shared.1).await
-                                                                } else {
-                                                                    page.links(&shared.1).await
-                                                                };
-
-                                                                if return_page_links {
-                                                                    page.page_links = if links.is_empty() {
-                                                                        None
-                                                                    } else {
-                                                                        Some(Box::new(links.clone()))
-                                                                    };
-                                                                }
-
-                                                                channel_send_page(
-                                                                    &shared.2, page, &shared.4,
-                                                                );
-
-                                                                links
-                                                            }
-                                                            _ => Default::default(),
-                                                        }
-                                                        }),
-                                                    &chandle,
-                                                );
-
-                                                    match q.as_mut() {
-                                                        Some(q) => {
-                                                            while let Ok(link) = q.try_recv() {
-                                                                let s = link.into();
-                                                                let allowed = self.is_allowed(&s);
-
-                                                                if allowed.eq(
-                                                                &ProcessLinkStatus::BudgetExceeded,
-                                                            ) {
-                                                                break;
-                                                            }
-                                                                if allowed
-                                                                    .eq(&ProcessLinkStatus::Blocked)
-                                                                {
-                                                                    continue;
-                                                                }
-
-                                                                self.links_visited
-                                                                    .extend_with_new_links(
-                                                                        &mut links, s,
+                                                                        },
                                                                     );
+                                                                    if let Ok(next_page) = next_page.await {
+                                                                        page.clone_from(&next_page);
+                                                                    };
+                                                                } else {
+                                                                    if let Some(timeout) = page.get_timeout() {
+                                                                        tokio::time::sleep(timeout).await;
+                                                                    }
+                                                                    page.clone_from(
+                                                                        &Page::new(
+                                                                            &target_url,
+                                                                            &shared.0,
+                                                                            &new_page,
+                                                                            &shared.6.wait_for,
+                                                                            &shared.6.screenshot,
+                                                                            false,
+                                                                            &shared.6.openai_config,
+                                                                            &shared.6.execution_scripts,
+                                                                            &shared.6.automation_scripts,
+                                                                            &shared.6.viewport,
+                                                                        )
+                                                                        .await,
+                                                                    );
+                                                                }
+                                                                retry_count -= 1;
                                                             }
+
+                                                            match intercept_handle {
+                                                                Some(h) => {
+                                                                    let _ = h.await;
+                                                                }
+                                                                _ => ()
+                                                            }
+
+                                                            if add_external {
+                                                                page.set_external(shared.3.clone());
+                                                            }
+
+                                                            let links = if full_resources {
+                                                                page.links_full(&shared.1).await
+                                                            } else {
+                                                                page.links(&shared.1).await
+                                                            };
+
+                                                            if return_page_links {
+                                                                page.page_links = if links.is_empty() {
+                                                                    None
+                                                                } else {
+                                                                    Some(Box::new(links.clone()))
+                                                                };
+                                                            }
+
+                                                            channel_send_page(
+                                                                &shared.2, page, &shared.4,
+                                                            );
+
+                                                            links
                                                         }
-                                                        _ => (),
+                                                        _ => Default::default(),
                                                     }
+                                                    }),
+                                                &chandle,
+                                            );
+
+                                                match q.as_mut() {
+                                                    Some(q) => {
+                                                        while let Ok(link) = q.try_recv() {
+                                                            let s = link.into();
+                                                            let allowed = self.is_allowed(&s);
+
+                                                            if allowed.eq(
+                                                            &ProcessLinkStatus::BudgetExceeded,
+                                                        ) {
+                                                            break;
+                                                        }
+                                                            if allowed
+                                                                .eq(&ProcessLinkStatus::Blocked)
+                                                            {
+                                                                continue;
+                                                            }
+
+                                                            self.links_visited
+                                                                .extend_with_new_links(
+                                                                    &mut links, s,
+                                                                );
+                                                        }
+                                                    }
+                                                    _ => (),
                                                 }
-                                                _ => break,
                                             }
-                                        }
-
-                                        while let Some(res) = set.join_next().await {
-                                            match res {
-                                                Ok(msg) => {
-                                                    self.links_visited.extend_links(&mut links, msg)
+                                            result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                                match result {
+                                                    Ok(res) =>                                                 match res {
+                                                        Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
+                                                        _ => ()
+                                                    },
+                                                    Err(_) => break
                                                 }
-                                                _ => (),
-                                            };
-                                        }
-
-                                        if links.is_empty() {
-                                            break;
+                                            }
+                                            else => break,
                                         }
                                     }
-                                    self.subscription_guard();
+
+                                    if links.is_empty() && set.is_empty() {
+                                        break;
+                                    }
                                 }
+
+                                self.subscription_guard();
 
                                 crate::features::chrome::close_browser(
                                     browser_handle,
@@ -3148,11 +3109,6 @@ impl Website {
                         let on_link_find_callback = self.on_link_find_callback;
                         let return_page_links = self.configuration.return_page_links;
 
-                        let semaphore = if self.configuration.shared_queue {
-                            SEM_SHARED.clone()
-                        } else {
-                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                        };
                         links.extend(
                             self.crawl_establish_smart(
                                 &client,
@@ -3168,6 +3124,12 @@ impl Website {
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                         let chandle = Handle::current();
 
+                        let semaphore = if self.configuration.shared_queue {
+                            SEM_SHARED.clone()
+                        } else {
+                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
+                        };
+
                         let shared = Arc::new((
                             client.to_owned(),
                             selectors,
@@ -3180,174 +3142,174 @@ impl Website {
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
 
-                        while !links.is_empty() {
+                        loop {
+                            let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                                links.drain().collect(),
+                            )
+                            .throttle(*throttle);
+                            tokio::pin!(stream);
+
                             loop {
-                                let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                    links.drain().collect(),
-                                )
-                                .throttle(*throttle);
-                                tokio::pin!(stream);
-
-                                loop {
-                                    match stream.next().await {
-                                        Some(link) => {
-                                            if !self
-                                                .handle_process(
-                                                    handle,
-                                                    &mut interval,
-                                                    set.shutdown(),
-                                                )
-                                                .await
-                                            {
-                                                break;
-                                            }
-
-                                            let allowed = self.is_allowed(&link);
-
-                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                break;
-                                            }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                continue;
-                                            }
-
-                                            log::info!("fetch {}", &link);
-                                            self.links_visited.insert(link.clone());
-                                            let shared = shared.clone();
-
-                                            set.spawn_on(
-                                                run_task(semaphore.clone(), move || async move {
-                                                    let link_result = match on_link_find_callback {
-                                                        Some(cb) => cb(link, None),
-                                                        _ => (link, None),
-                                                    };
-
-                                                    let url = link_result.0.as_ref();
-                                                    let mut page =
-                                                        Page::new_page(&url, &shared.0).await;
-
-                                                    let mut retry_count = shared.5.retry;
-
-                                                    while page.should_retry && retry_count > 0 {
-                                                        if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                            let next_page = backoff::future::retry(
-                                                                ExponentialBackoff::default(),
-                                                                || async {
-                                                                    let mut page = page.clone();
-                                                                    let p = if retry_count.is_power_of_two() {
-                                                                        Website::render_chrome_page(
-                                                                            &shared.5, &shared.0, &shared.4,
-                                                                            &shared.6, &mut page, url,
-                                                                        )
-                                                                        .await;
-                                                                        page
-                                                                    } else {
-                                                                        Page::new_page(url, &shared.0).await
-                                                                    };
-
-                                                                    Ok::<
-                                                                        Page,
-                                                                        backoff::Error<std::io::Error>,
-                                                                    >(
-                                                                        p
-                                                                    )
-                                                                },
-                                                            );
-                                                            if let Ok(next_page) = next_page.await {
-                                                                page.clone_from(&next_page);
-                                                            };
-                                                        } else {
-                                                            if let Some(timeout) = page.get_timeout() {
-                                                                tokio::time::sleep(timeout).await;
-                                                            }
-                                                            if retry_count.is_power_of_two() {
-                                                                Website::render_chrome_page(
-                                                                    &shared.5, &shared.0, &shared.4,
-                                                                    &shared.6, &mut page, url,
-                                                                )
-                                                                .await;
-                                                            } else {
-                                                                page.clone_from(
-                                                                    &Page::new_page(url, &shared.0)
-                                                                        .await,
-                                                                );
-                                                            }
-                                                        }
-
-                                                        retry_count -= 1;
-                                                    }
-
-                                                    if add_external {
-                                                        page.set_external(
-                                                            shared
-                                                                .5
-                                                                .external_domains_caseless
-                                                                .clone(),
-                                                        );
-                                                    }
-
-                                                    let links = page
-                                                        .smart_links(
-                                                            &shared.1, &shared.4, &shared.5,
-                                                            &shared.6,
-                                                        )
-                                                        .await;
-
-                                                    if return_page_links {
-                                                        page.page_links = if links.is_empty() {
-                                                            None
-                                                        } else {
-                                                            Some(Box::new(links.clone()))
-                                                        };
-                                                    }
-
-                                                    channel_send_page(&shared.2, page, &shared.3);
-
-                                                    links
-                                                }),
-                                                &chandle,
-                                            );
-
-                                            match q.as_mut() {
-                                                Some(q) => {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed = self.is_allowed(&s);
-
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                        {
-                                                            break;
-                                                        }
-                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                            continue;
-                                                        }
-
-                                                        self.links_visited
-                                                            .extend_with_new_links(&mut links, s);
-                                                    }
-                                                }
-                                                _ => (),
-                                            }
+                                tokio::select! {
+                                    Some(link) = stream.next() => {
+                                        if !self
+                                            .handle_process(
+                                                handle,
+                                                &mut interval,
+                                                set.shutdown(),
+                                            )
+                                            .await
+                                        {
+                                            break;
                                         }
-                                        _ => break,
+
+                                        let allowed = self.is_allowed(&link);
+
+                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                            break;
+                                        }
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                            continue;
+                                        }
+
+                                        log::info!("fetch {}", &link);
+                                        self.links_visited.insert(link.clone());
+                                        let shared = shared.clone();
+
+                                        set.spawn_on(
+                                            run_task(semaphore.clone(), move || async move {
+                                                let link_result = match on_link_find_callback {
+                                                    Some(cb) => cb(link, None),
+                                                    _ => (link, None),
+                                                };
+
+                                                let url = link_result.0.as_ref();
+                                                let mut page =
+                                                    Page::new_page(&url, &shared.0).await;
+
+                                                let mut retry_count = shared.5.retry;
+
+                                                while page.should_retry && retry_count > 0 {
+                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                        let next_page = backoff::future::retry(
+                                                            ExponentialBackoff::default(),
+                                                            || async {
+                                                                let mut page = page.clone();
+                                                                let p = if retry_count.is_power_of_two() {
+                                                                    Website::render_chrome_page(
+                                                                        &shared.5, &shared.0, &shared.4,
+                                                                        &shared.6, &mut page, url,
+                                                                    )
+                                                                    .await;
+                                                                    page
+                                                                } else {
+                                                                    Page::new_page(url, &shared.0).await
+                                                                };
+
+                                                                Ok::<
+                                                                    Page,
+                                                                    backoff::Error<std::io::Error>,
+                                                                >(
+                                                                    p
+                                                                )
+                                                            },
+                                                        );
+                                                        if let Ok(next_page) = next_page.await {
+                                                            page.clone_from(&next_page);
+                                                        };
+                                                    } else {
+                                                        if let Some(timeout) = page.get_timeout() {
+                                                            tokio::time::sleep(timeout).await;
+                                                        }
+                                                        if retry_count.is_power_of_two() {
+                                                            Website::render_chrome_page(
+                                                                &shared.5, &shared.0, &shared.4,
+                                                                &shared.6, &mut page, url,
+                                                            )
+                                                            .await;
+                                                        } else {
+                                                            page.clone_from(
+                                                                &Page::new_page(url, &shared.0)
+                                                                    .await,
+                                                            );
+                                                        }
+                                                    }
+
+                                                    retry_count -= 1;
+                                                }
+
+                                                if add_external {
+                                                    page.set_external(
+                                                        shared
+                                                            .5
+                                                            .external_domains_caseless
+                                                            .clone(),
+                                                    );
+                                                }
+
+                                                let links = page
+                                                    .smart_links(
+                                                        &shared.1, &shared.4, &shared.5,
+                                                        &shared.6,
+                                                    )
+                                                    .await;
+
+                                                if return_page_links {
+                                                    page.page_links = if links.is_empty() {
+                                                        None
+                                                    } else {
+                                                        Some(Box::new(links.clone()))
+                                                    };
+                                                }
+
+                                                channel_send_page(&shared.2, page, &shared.3);
+
+                                                links
+                                            }),
+                                            &chandle,
+                                        );
+
+                                        match q.as_mut() {
+                                            Some(q) => {
+                                                while let Ok(link) = q.try_recv() {
+                                                    let s = link.into();
+                                                    let allowed = self.is_allowed(&s);
+
+                                                    if allowed
+                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                    {
+                                                        break;
+                                                    }
+                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                        continue;
+                                                    }
+
+                                                    self.links_visited
+                                                        .extend_with_new_links(&mut links, s);
+                                                }
+                                            }
+                                            _ => (),
+                                        }
                                     }
-                                }
-
-                                while let Some(res) = set.join_next().await {
-                                    match res {
-                                        Ok(msg) => self.links_visited.extend_links(&mut links, msg),
-                                        _ => (),
-                                    };
-                                }
-
-                                if links.is_empty() {
-                                    break;
+                                    result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                        match result {
+                                            Ok(res) => match res {
+                                                Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
+                                                _ => ()
+                                            },
+                                            Err(_) => break
+                                        }
+                                    }
+                                    else => break,
                                 }
                             }
 
-                            self.subscription_guard();
+                            if links.is_empty() && set.is_empty() {
+                                break;
+                            }
                         }
+
+                        self.subscription_guard();
                         crate::features::chrome::close_browser(
                             browser_handle,
                             &shared.4,
