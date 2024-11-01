@@ -4185,6 +4185,15 @@ impl Website {
         self
     }
 
+    /// Wait for idle dom mutations for target element. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_dom(
+        &mut self,
+        wait_for_selector: Option<crate::configuration::WaitForSelector>,
+    ) -> &mut Self {
+        self.configuration.with_wait_for_idle_dom(wait_for_selector);
+        self
+    }
+
     /// Wait for a delay. Should only be used for testing. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_wait_for_delay(
         &mut self,
