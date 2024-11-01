@@ -12,7 +12,6 @@ use crate::Client;
 use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
-use phf::phf_set;
 use reqwest::StatusCode;
 use tokio::time::Duration;
 
@@ -186,48 +185,17 @@ pub fn domain_name(domain: &Url) -> &str {
     }
 }
 
-static URL_JOIN_SYMBOLS: phf::Set<&'static str> = phf_set! {
-    "?", "#", "/"
-};
-
 /// Convert to absolute path
 #[inline]
 pub fn convert_abs_path(base: &Url, href: &str) -> Url {
-    let should_adjust = !base.path().ends_with('/') && !href.is_empty();
-    let needs_slash = if should_adjust {
-        match href.chars().next() {
-            Some(c) => !URL_JOIN_SYMBOLS.contains(&c.to_string()) && !href.starts_with("http"),
-            _ => false,
+    match base.join(&href) {
+        Ok(mut joined) => {
+            joined.set_fragment(None);
+            joined
         }
-    } else {
-        false
-    };
-
-    if needs_slash {
-        let mut base = base.clone();
-        let mut path = base.path().to_string();
-        path.push('/');
-        base.set_path(&path);
-        match base.join(&href) {
-            Ok(mut joined) => {
-                joined.set_fragment(None);
-                joined
-            }
-            Err(e) => {
-                log("URL Parse Error: ", e.to_string());
-                base.clone()
-            }
-        }
-    } else {
-        match base.join(&href) {
-            Ok(mut joined) => {
-                joined.set_fragment(None);
-                joined
-            }
-            Err(e) => {
-                log("URL Parse Error: ", e.to_string());
-                base.clone()
-            }
+        Err(e) => {
+            log("URL Parse Error: ", e.to_string());
+            base.clone()
         }
     }
 }
@@ -1563,24 +1531,26 @@ async fn test_status_code() {
     assert_eq!(page.status_code.as_u16(), 404);
 }
 
-#[cfg(all(
-    not(feature = "decentralized"),
-    not(feature = "chrome"),
-    not(feature = "cache")
-))]
 #[tokio::test]
 async fn test_abs_path() {
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .expect("a valid agent");
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new(link_result, &client).await;
+    let page: Page = build(&link_result, Default::default());
+
+    assert_eq!(
+        page.abs_path("?query=keyword").expect("a valid url"),
+        Url::parse("https://choosealicense.com?query=keyword").expect("a valid url")
+    );
+
+    assert_eq!(
+        page.abs_path("#query=keyword").expect("a valid url"),
+        Url::parse("https://choosealicense.com").expect("a valid url")
+    );
 
     assert_eq!(
         page.abs_path("/page").expect("a valid url"),
         Url::parse("https://choosealicense.com/page").expect("a valid url")
     );
+
     assert_eq!(
         page.abs_path("/page?query=keyword").expect("a valid url"),
         Url::parse("https://choosealicense.com/page?query=keyword").expect("a valid url")
@@ -1601,6 +1571,13 @@ async fn test_abs_path() {
     assert_eq!(
         page.abs_path("tel://+212 3456").unwrap(),
         Url::parse("https://choosealicense.com/").expect("a valid url")
+    );
+
+    let page: Page = build(&format!("{}index.php", link_result), Default::default());
+
+    assert_eq!(
+        page.abs_path("index.html").expect("a valid url"),
+        Url::parse("https://choosealicense.com/index.html").expect("a valid url")
     );
 }
 
