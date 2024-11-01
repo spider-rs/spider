@@ -232,6 +232,47 @@ pub async fn wait_for_selector(
     }
 }
 
+/// wait for a selector
+#[cfg(feature = "chrome")]
+pub async fn wait_for_dom(
+    page: &chromiumoxide::Page,
+    timeout: Option<core::time::Duration>,
+    selector: &str,
+) {
+    let script = crate::features::chrome_common::generate_wait_for_dom_js_code_with_selector_base(
+        if let Some(dur) = timeout {
+            dur.as_millis() as u32
+        } else {
+            500
+        },
+        selector,
+    );
+
+    let wait_until = async {
+        loop {
+            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(50));
+            tokio::pin!(sleep);
+
+            tokio::select! {
+                _ = &mut sleep => (),
+                v = page
+                .evaluate(
+                    script.clone(),
+                ) => {
+                    if v.is_ok() {
+                        break
+                    }
+                }
+            }
+        }
+    };
+
+    match timeout {
+        Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+        _ => wait_until.await,
+    }
+}
+
 /// Get the output path of a screenshot and create any parent folders if needed.
 #[cfg(feature = "chrome")]
 pub async fn create_output_path(
@@ -281,6 +322,18 @@ pub async fn page_wait(
             match wait_for.selector {
                 Some(ref await_for_selector) => {
                     wait_for_selector(
+                        page,
+                        await_for_selector.timeout,
+                        &await_for_selector.selector,
+                    )
+                    .await;
+                }
+                _ => (),
+            }
+
+            match wait_for.dom {
+                Some(ref await_for_selector) => {
+                    wait_for_dom(
                         page,
                         await_for_selector.timeout,
                         &await_for_selector.selector,
