@@ -2196,6 +2196,8 @@ impl Website {
 
                         tokio::pin!(stream);
 
+                        let mut batch_timeout = BATCH_TIMEOUT;
+
                         loop {
                             tokio::select! {
                                 Some(link) = stream.next() => {
@@ -2285,13 +2287,16 @@ impl Website {
                                         }
                                     }
                                 },
-                                result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                     match result {
                                         Ok(res) =>                                                 match res {
                                             Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                             _ => ()
                                         },
-                                        Err(_) => break
+                                        Err(_) => {
+                                            batch_timeout += batch_timeout;
+                                            break
+                                        }
                                     }
                                 }
                                 else => break,
@@ -2401,6 +2406,7 @@ impl Website {
                                 )
                                 .throttle(*throttle);
                                 tokio::pin!(stream);
+                                let mut batch_timeout = BATCH_TIMEOUT;
 
                                 loop {
                                     tokio::select! {
@@ -2575,13 +2581,16 @@ impl Website {
                                                 _ => (),
                                             }
                                         }
-                                        result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                        result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                             match result {
                                                 Ok(res) =>                                                 match res {
                                                     Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                                     _ => ()
                                                 },
-                                                Err(_) => break
+                                                Err(_) => {
+                                                    batch_timeout += batch_timeout;
+                                                    break
+                                                }
                                             }
                                         }
                                         else => break,
@@ -2701,6 +2710,7 @@ impl Website {
                                         )
                                         .throttle(*throttle);
                                     tokio::pin!(stream);
+                                    let mut batch_timeout = BATCH_TIMEOUT;
 
                                     loop {
                                         tokio::select! {
@@ -2734,7 +2744,7 @@ impl Website {
 
                                                 set.spawn_on(
                                                 run_task(semaphore.clone(), move || async move {
-                                                    match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout,                      &shared.8
+                                                    match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8
                                                 ).await {
                                                         Ok(new_page) => {
                                                              crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
@@ -2886,13 +2896,16 @@ impl Website {
                                                     _ => (),
                                                 }
                                             }
-                                            result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                            result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                                 match result {
                                                     Ok(res) =>                                                 match res {
                                                         Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                                         _ => ()
                                                     },
-                                                    Err(_) => break
+                                                    Err(_) => {
+                                                        batch_timeout += batch_timeout;
+                                                        break
+                                                    }
                                                 }
                                             }
                                             else => break,
@@ -3148,6 +3161,7 @@ impl Website {
                             )
                             .throttle(*throttle);
                             tokio::pin!(stream);
+                            let mut batch_timeout = BATCH_TIMEOUT;
 
                             loop {
                                 tokio::select! {
@@ -3291,13 +3305,16 @@ impl Website {
                                             _ => (),
                                         }
                                     }
-                                    result = tokio::time::timeout(BATCH_TIMEOUT, set.join_next()), if !set.is_empty() => {
+                                    result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                         match result {
                                             Ok(res) => match res {
                                                 Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                                 _ => ()
                                             },
-                                            Err(_) => break
+                                            Err(_) => {
+                                                batch_timeout += batch_timeout;
+                                                break
+                                            }
                                         }
                                     }
                                     else => break,
