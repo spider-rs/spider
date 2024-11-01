@@ -762,6 +762,32 @@ impl Configuration {
     }
 
     #[cfg(feature = "chrome")]
+    /// Wait for idle dom mutations for target element. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_dom(
+        &mut self,
+        wait_for_idle_dom: Option<WaitForSelector>,
+    ) -> &mut Self {
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.dom = wait_for_idle_dom,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.dom = wait_for_idle_dom;
+                self.wait_for = Some(wait_for);
+            }
+        }
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for idle dom mutations for target element. This method does nothing if the [chrome] feature is not enabled.
+    pub fn with_wait_for_idle_dom(
+        &mut self,
+        _wait_for_idle_dom: Option<WaitForSelector>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
     /// Wait for a selector. This method does nothing if the [chrome] feature is not enabled.
     pub fn with_wait_for_selector(
         &mut self,

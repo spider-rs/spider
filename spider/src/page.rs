@@ -1150,6 +1150,7 @@ impl Page {
                                                                     true,
                                                                     true,
                                                                     None,
+                                                                    Some(crate::configuration::WaitForSelector::new(  Some(core::time::Duration::from_millis(500)), "body".into()))
                                                                 )),
                                                                 &configuration.screenshot,
                                                                 false,

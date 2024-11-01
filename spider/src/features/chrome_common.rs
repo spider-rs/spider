@@ -57,6 +57,8 @@ pub struct WaitFor {
     pub idle_network: Option<WaitForIdleNetwork>,
     /// Wait for delay. Should only be used for testing.
     pub delay: Option<WaitForDelay>,
+    /// Wait for dom element to stop updating.
+    pub dom: Option<WaitForSelector>,
     #[cfg_attr(feature = "serde", serde(default))]
     /// Wait for page navigations.
     pub page_navigations: bool,
@@ -70,6 +72,7 @@ impl WaitFor {
         page_navigations: bool,
         idle_network: bool,
         selector: Option<String>,
+        dom: Option<WaitForSelector>,
     ) -> Self {
         Self {
             page_navigations,
@@ -84,6 +87,7 @@ impl WaitFor {
                 None
             },
             delay,
+            dom,
         }
     }
 }
@@ -447,6 +451,13 @@ pub enum WebAutomation {
     Wait(u64),
     /// Waits for the next navigation event.
     WaitForNavigation,
+    /// Wait for dom updates to stop.
+    WaitForDom {
+        /// The selector of the element to wait for updates.
+        selector: Option<String>,
+        ///  The timeout to wait for.
+        timeout: u32,
+    },
     /// Waits for an element to appear.
     WaitFor(String),
     /// Waits for an element to appear and then clicks on it.
@@ -475,6 +486,43 @@ pub enum WebAutomation {
     },
 }
 
+#[cfg(feature = "chrome")]
+/// Generate the wait for Dom function targeting the element. This defaults to using the body.
+pub(crate) fn generate_wait_for_dom_js_code_with_selector(
+    timeout: u32,
+    selector: Option<&str>,
+) -> String {
+    let clamped_timeout = if timeout > 60000 { 60000 } else { timeout };
+    let query_selector = selector.unwrap_or("body");
+
+    format!(
+        "new Promise((r,j)=>{{ \
+            let t={}; \
+            let i=setTimeout(()=>{{j(new Error('Timeout: DOM did not update within the allowed time.'))}},t); \
+            if(document.querySelector('{}')){{clearTimeout(i);r();}}else{{ \
+            const o=new MutationObserver((m,a)=>{{ \
+                if(document.querySelector('{}')){{a.disconnect();clearTimeout(i);r();}}}}); \
+            o.observe(document,{{childList:true,subtree:true}});}}}});",
+        clamped_timeout, query_selector, query_selector
+    )
+}
+
+#[cfg(feature = "chrome")]
+/// Generate the wait for Dom function targeting the element. This defaults to using the body.
+pub(crate) fn generate_wait_for_dom_js_code_with_selector_base(
+    timeout: u32,
+    selector: &str,
+) -> String {
+    generate_wait_for_dom_js_code_with_selector(
+        timeout,
+        if selector.is_empty() {
+            None
+        } else {
+            Some(selector)
+        },
+    )
+}
+
 impl WebAutomation {
     #[cfg(feature = "chrome")]
     /// Run the web automation step.
@@ -496,6 +544,14 @@ impl WebAutomation {
             },
             WebAutomation::Wait(ms) => {
                 tokio::time::sleep(Duration::from_millis(*ms).min(Duration::from_secs(60))).await;
+            }
+            WebAutomation::WaitForDom { selector, timeout } => {
+                let _ = page
+                    .evaluate(
+                        generate_wait_for_dom_js_code_with_selector(*timeout, selector.as_deref())
+                            .as_str(),
+                    )
+                    .await;
             }
             WebAutomation::WaitFor(selector) => {
                 wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
