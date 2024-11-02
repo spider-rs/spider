@@ -10,13 +10,15 @@ use rand::Rng;
 /// to simulate and test varying screen resolutions and viewports in
 /// web development, ensuring that web applications render correctly
 /// across different platforms.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DeviceType {
     /// Represents a mobile device.
     ///
     /// Mobile devices generally have smaller screens, and their
     /// viewport sizes range from small to medium dimensions, typically
     /// used for smartphones.
+    #[cfg_attr(feature = "serde", serde(rename = "mobile"))]
     Mobile,
     /// Represents a tablet device.
     ///
@@ -24,6 +26,7 @@ pub enum DeviceType {
     /// those of mobile devices but smaller than desktop monitors.
     /// Viewport dimensions for tablets are typically larger than mobiles
     /// and intended for medium-scale interfaces.
+    #[cfg_attr(feature = "serde", serde(rename = "tablet"))]
     Tablet,
     #[default]
     /// Represents a desktop device.
@@ -32,6 +35,7 @@ pub enum DeviceType {
     /// tablet devices. Viewport dimensions for desktops are typically
     /// the largest among the three, intended for full-scale applications
     /// on monitors.
+    #[cfg_attr(feature = "serde", serde(rename = "desktop"))]
     Desktop,
 }
 
