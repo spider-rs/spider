@@ -93,12 +93,13 @@ static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "DivX Browser Plug-In",
 };
 
-const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
-const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
-const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
-const HIDE_WEBDRIVER: &str = "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
-const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
-const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
+pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
+pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
+pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
+pub const HIDE_WEBDRIVER: &str =
+    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
+pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
+pub const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
 
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
@@ -143,16 +144,20 @@ fn generate_hide_plugins() -> String {
 /// Generate the initial stealth script to send in one command.
 fn build_stealth_script() -> String {
     let plugins = generate_hide_plugins();
-    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}{DISABLE_DIALOGS}")
+    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}")
 }
 
 impl Page {
     /// Removes the `navigator.webdriver` property
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
-    async fn _enable_stealth_mode(&self) -> Result<()> {
+    async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: build_stealth_script(),
+            source: if let Some(cs) = custom_script {
+                format!("{}{cs}", build_stealth_script())
+            } else {
+                build_stealth_script()
+            },
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -166,7 +171,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode(&self) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(),
+            self._enable_stealth_mode(None),
             self.set_user_agent(DEFAULT_AGENT),
         );
 
@@ -177,7 +182,18 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode_with_agent(&self, ua: &str) -> Result<()> {
-        let _ = tokio::join!(self._enable_stealth_mode(), self.set_user_agent(ua));
+        let _ = tokio::join!(self._enable_stealth_mode(None), self.set_user_agent(ua));
+        Ok(())
+    }
+
+    /// Changes your user_agent with a custom agent, removes the `navigator.webdriver` property
+    /// changes permissions, pluggins rendering contexts and the `window.chrome`
+    /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
+    pub async fn enable_stealth_mode_with_agent_and_dimiss_dialogs(&self, ua: &str) -> Result<()> {
+        let _ = tokio::join!(
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS)),
+            self.set_user_agent(ua)
+        );
         Ok(())
     }
 

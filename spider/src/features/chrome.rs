@@ -4,6 +4,7 @@ use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::error::CdpError;
+use chromiumoxide::page::DISABLE_DIALOGS;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use reqwest::cookie::CookieStore;
@@ -532,11 +533,20 @@ pub async fn setup_chrome_interception_base(
 
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+    let stealth_mode = cfg!(feature = "chrome_stealth") || config.stealth_mode;
+    let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true); // polyfill window.alert.
+
     let stealth = async {
-        if cfg!(feature = "chrome_stealth") || config.stealth_mode {
+        if stealth_mode {
             match config.user_agent.as_ref() {
                 Some(agent) => {
-                    let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                    let _ = if dismiss_dialogs {
+                        chrome_page
+                            .enable_stealth_mode_with_agent_and_dimiss_dialogs(agent)
+                            .await
+                    } else {
+                        chrome_page.enable_stealth_mode_with_agent(agent).await
+                    };
                 }
                 _ => {
                     let _ = chrome_page.enable_stealth_mode().await;
@@ -544,6 +554,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             }
         }
     };
+
     let eval_docs = async {
         match config.evaluate_on_new_document {
             Some(ref script) => {
@@ -551,17 +562,38 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     let _ = chrome_page
                         .evaluate_on_new_document(string_concat!(
                             crate::features::chrome::FP_JS,
-                            script.as_str()
+                            script.as_str(),
+                            if dismiss_dialogs && !stealth_mode {
+                                DISABLE_DIALOGS
+                            } else {
+                                ""
+                            }
                         ))
                         .await;
                 } else {
-                    let _ = chrome_page.evaluate_on_new_document(script.as_str()).await;
+                    let _ = chrome_page
+                        .evaluate_on_new_document(string_concat!(
+                            script.as_str(),
+                            if dismiss_dialogs && !stealth_mode {
+                                DISABLE_DIALOGS
+                            } else {
+                                ""
+                            }
+                        ))
+                        .await;
                 }
             }
             _ => {
                 if config.fingerprint {
                     let _ = chrome_page
-                        .evaluate_on_new_document(crate::features::chrome::FP_JS)
+                        .evaluate_on_new_document(string_concat!(
+                            crate::features::chrome::FP_JS,
+                            if dismiss_dialogs && !stealth_mode {
+                                DISABLE_DIALOGS
+                            } else {
+                                ""
+                            }
+                        ))
                         .await;
                 }
             }

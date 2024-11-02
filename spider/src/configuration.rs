@@ -138,6 +138,9 @@ pub struct Configuration {
     /// Collect all the resources found on the page.
     pub full_resources: bool,
     #[cfg(feature = "chrome")]
+    /// Dismiss dialogs.
+    pub dismiss_dialogs: Option<bool>,
+    #[cfg(feature = "chrome")]
     /// Wait for options for the page.
     pub wait_for: Option<WaitFor>,
     #[cfg(feature = "chrome")]
