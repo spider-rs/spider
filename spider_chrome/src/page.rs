@@ -93,10 +93,12 @@ static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "DivX Browser Plug-In",
 };
 
-const HIDE_CHROME: &str = "window.chrome = {runtime:{}};['log','warn','error','info','debug','table'].forEach((method) => { console[method] = () => {}; });";
-const HIDE_WEBGL: &str = "const getParameter = WebGLRenderingContext.getParameter; WebGLRenderingContext.prototype.getParameter = function (parameter) { if (parameter === 37445) { return 'Google Inc. (NVIDIA)'; } if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter); };";
-const HIDE_PERMISSIONS: &str = "const originalQuery = window.navigator.permissions.query; window.navigator.permissions.__proto__.query = parameters => { return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters); }";
+const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
+const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
+const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
 const HIDE_WEBDRIVER: &str = "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
+const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
+const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
 
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
@@ -135,15 +137,13 @@ fn generate_hide_plugins() -> String {
         plugins[0], plugins[1], plugins[2], plugins[3]
     );
 
-    let navigator_script = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
-
-    format!("{}{}", navigator_script, plugin_script)
+    format!("{}{}", NAVIGATOR_SCRIPT, plugin_script)
 }
 
 /// Generate the initial stealth script to send in one command.
 fn build_stealth_script() -> String {
     let plugins = generate_hide_plugins();
-    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}")
+    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}{DISABLE_DIALOGS}")
 }
 
 impl Page {

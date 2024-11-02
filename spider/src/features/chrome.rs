@@ -233,7 +233,9 @@ pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> 
 #[cfg(feature = "real_browser")]
 pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
     use super::chrome_viewport::get_random_viewport;
-    Some(chromiumoxide::handler::viewport::Viewport::from(get_random_viewport()))
+    Some(chromiumoxide::handler::viewport::Viewport::from(
+        get_random_viewport(),
+    ))
 }
 
 /// Setup the browser configuration.
