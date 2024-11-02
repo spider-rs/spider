@@ -6,6 +6,9 @@ pub mod chrome_common;
 #[cfg(feature = "real_browser")]
 /// Mouse movements
 pub mod chrome_mouse_movements;
+#[cfg(feature = "real_browser")]
+/// Viewport
+pub mod chrome_viewport;
 /// Decentralized header handling
 #[cfg(feature = "decentralized_headers")]
 pub mod decentralized_headers;

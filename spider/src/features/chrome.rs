@@ -198,7 +198,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
                 v.to_owned(),
             )),
-            _ => None,
+            _ => default_viewport(),
         },
         ignore_visuals: config.chrome_intercept.block_visuals,
         ignore_ads: config.chrome_intercept.block_ads,
@@ -221,6 +221,19 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
 
 lazy_static! {
     static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
+}
+
+/// Get the default viewport
+#[cfg(not(feature = "real_browser"))]
+pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
+    None
+}
+
+/// Get the default viewport
+#[cfg(feature = "real_browser")]
+pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
+    use super::chrome_viewport::get_random_viewport;
+    Some(chromiumoxide::handler::viewport::Viewport::from(get_random_viewport()))
 }
 
 /// Setup the browser configuration.
@@ -251,7 +264,7 @@ pub async fn setup_browser_configuration(
                 Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
                     v.to_owned(),
                 )),
-                _ => None,
+                _ => default_viewport(),
             },
             &config.request_timeout,
         ) {
