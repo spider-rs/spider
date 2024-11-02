@@ -536,7 +536,15 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         if cfg!(feature = "chrome_stealth") || config.stealth_mode {
             match config.user_agent.as_ref() {
                 Some(agent) => {
-                    let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                    let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
+
+                    let _ = if dismiss_dialogs {
+                        chrome_page
+                            .enable_stealth_mode_with_agent_and_dimiss_dialogs(agent)
+                            .await
+                    } else {
+                        chrome_page.enable_stealth_mode_with_agent(agent).await
+                    };
                 }
                 _ => {
                     let _ = chrome_page.enable_stealth_mode().await;
@@ -544,6 +552,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             }
         }
     };
+
     let eval_docs = async {
         match config.evaluate_on_new_document {
             Some(ref script) => {
