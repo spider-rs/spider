@@ -63,7 +63,7 @@ pub struct NetworkManager {
     /// Made first request. Used to track crawling
     made_request: bool,
     /// Only html from loading.
-    only_html: bool,
+    pub only_html: bool,
 }
 
 impl NetworkManager {

@@ -209,6 +209,7 @@ impl Browser {
             ignore_javascript: config.ignore_javascript,
             ignore_ads: config.ignore_ads,
             extra_headers: config.extra_headers.clone(),
+            only_html: config.only_html,
         };
 
         let fut = Handler::new(conn, rx, handler_config);
@@ -687,6 +688,8 @@ pub struct BrowserConfig {
     pub ignore_ads: bool,
     /// Extra headers.
     pub extra_headers: Option<HashMap<String, String>>,
+    /// Only html
+    pub only_html: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -713,6 +716,7 @@ pub struct BrowserConfigBuilder {
     ignore_ads: bool,
     ignore_javascript: bool,
     ignore_stylesheets: bool,
+    only_html: bool,
     extra_headers: Option<HashMap<String, String>>,
 }
 
@@ -751,6 +755,7 @@ impl Default for BrowserConfigBuilder {
             ignore_ads: false,
             ignore_javascript: false,
             ignore_stylesheets: false,
+            only_html: false,
             extra_headers: Default::default(),
         }
     }
@@ -941,6 +946,7 @@ impl BrowserConfigBuilder {
             ignore_javascript: self.ignore_javascript,
             ignore_stylesheets: self.ignore_stylesheets,
             extra_headers: self.extra_headers,
+            only_html: self.only_html,
         })
     }
 }

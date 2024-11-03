@@ -216,6 +216,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             }
             _ => None,
         },
+        only_html: config.only_html && !config.full_resources,
         ..HandlerConfig::default()
     }
 }
@@ -288,6 +289,7 @@ pub async fn setup_browser_configuration(
                     }
                     _ => None,
                 };
+                browser_config.only_html = config.only_html && !config.full_resources;
 
                 match Browser::launch(browser_config).await {
                     Ok(browser) => Some(browser),

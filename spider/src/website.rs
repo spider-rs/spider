@@ -2162,7 +2162,7 @@ impl Website {
                     let on_link_find_callback = self.on_link_find_callback;
                     let full_resources = self.configuration.full_resources;
                     let return_page_links = self.configuration.return_page_links;
-                    let only_html = self.configuration.only_html;
+                    let only_html = self.configuration.only_html && !full_resources;
 
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
