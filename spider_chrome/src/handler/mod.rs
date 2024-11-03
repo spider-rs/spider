@@ -246,6 +246,9 @@ impl Handler {
                 }
                 PendingRequest::Navigate(id) => {
                     self.on_navigation_response(id, resp);
+                    if self.config.only_html && !self.config.created_first_target {
+                        self.config.created_first_target = true;
+                    }
                 }
                 PendingRequest::ExternalCommand(tx) => {
                     let _ = tx.send(Ok(resp)).ok();
@@ -460,10 +463,11 @@ impl Handler {
                 cache_enabled: self.config.cache_enabled,
                 ignore_visuals: self.config.ignore_visuals,
                 extra_headers: self.config.extra_headers.clone(),
-                only_html: self.config.only_html,
+                only_html: self.config.only_html && self.config.created_first_target,
             },
             browser_ctx,
         );
+
         self.target_ids.push(target.target_id().clone());
         self.targets.insert(target.target_id().clone(), target);
     }
@@ -701,6 +705,8 @@ pub struct HandlerConfig {
     pub extra_headers: Option<HashMap<String, String>>,
     /// Only Html.
     pub only_html: bool,
+    /// Created the first target.
+    pub created_first_target: bool,
 }
 
 impl Default for HandlerConfig {
@@ -718,6 +724,7 @@ impl Default for HandlerConfig {
             ignore_javascript: false,
             only_html: false,
             extra_headers: Default::default(),
+            created_first_target: false,
         }
     }
 }

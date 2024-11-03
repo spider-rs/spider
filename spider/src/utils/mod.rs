@@ -27,7 +27,7 @@ use reqwest::{
 };
 
 /// Ignore the content types.
-static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
+pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
     "application/pdf",
     "application/zip",
     "application/x-rar-compressed",

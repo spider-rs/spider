@@ -36,6 +36,47 @@ lazy_static::lazy_static! {
             "https://js.stripe.com/v3/"
         }
     };
+
+    /// Ignore the content types.
+    pub static ref IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf::phf_set! {
+        "application/pdf",
+        "application/zip",
+        "application/x-rar-compressed",
+        "application/x-tar",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/bmp",
+        "image/svg+xml",
+        "video/mp4",
+        "video/x-msvideo",
+        "video/x-matroska",
+        "video/webm",
+        "audio/mpeg",
+        "audio/ogg",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/x-7z-compressed",
+        "application/x-rpm",
+        "application/x-shockwave-flash",
+    };
+
+    /// Ignore the resources for visual content types.
+    pub static ref IGNORE_VISUAL_RESOURCE_MAP: phf::Set<&'static str> = phf::phf_set! {
+        "Image",
+        "Media",
+        "Font",
+        "Other",
+    };
+
+    /// Ignore the resources for visual content types.
+    pub static ref IGNORE_NETWORKING_RESOURCE_MAP: phf::Set<&'static str> = phf::phf_set! {
+        "Prefetch",
+        "Ping"
+    };
 }
 
 #[derive(Debug)]
@@ -60,8 +101,6 @@ pub struct NetworkManager {
     block_stylesheets: bool,
     /// Block javascript.
     block_javascript: bool,
-    /// Made first request. Used to track crawling
-    made_request: bool,
     /// Only html from loading.
     pub only_html: bool,
 }
@@ -85,7 +124,6 @@ impl NetworkManager {
             ignore_visuals: true,
             block_javascript: false,
             block_stylesheets: false,
-            made_request: false,
             only_html: false,
         }
     }
@@ -187,18 +225,20 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
-                    if self.ignore_visuals
-                        && (ResourceType::Image == event.resource_type
-                            || ResourceType::Media == event.resource_type
-                            || self.block_stylesheets
-                                && ResourceType::Stylesheet == event.resource_type)
-                        || ResourceType::Prefetch == event.resource_type
-                        || ResourceType::Ping == event.resource_type
+                    let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
+                        .contains(&event.resource_type.as_ref())
+                        || self.ignore_visuals
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref())
+                                || self.block_stylesheets
+                                    && ResourceType::Stylesheet == event.resource_type)
                         || self.block_javascript
                             && ResourceType::Script == event.resource_type
-                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
-                    // add one off stripe framework check for now...
-                    {
+                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
+
+                    // perform the http request here and insert the body.
+                    // if self.only_html && !skip_networking {}
+
+                    if skip_networking {
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -224,19 +264,17 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
-                    if self.detect_ad(event)
+                    let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
+                        .contains(&event.resource_type.as_ref())
                         || self.ignore_visuals
-                            && (ResourceType::Image == event.resource_type
-                                || ResourceType::Media == event.resource_type
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref())
                                 || self.block_stylesheets
                                     && ResourceType::Stylesheet == event.resource_type)
-                        || ResourceType::Prefetch == event.resource_type
-                        || ResourceType::Ping == event.resource_type
                         || self.block_javascript
                             && ResourceType::Script == event.resource_type
-                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
-                    // add one off stripe framework check for now...
-                    {
+                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
+
+                    if self.detect_ad(event) || skip_networking {
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -248,6 +286,10 @@ impl NetworkManager {
                     }
                 }
             }
+        }
+
+        if self.only_html {
+            self.made_request = true;
         }
     }
 

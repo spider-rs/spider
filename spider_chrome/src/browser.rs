@@ -210,6 +210,7 @@ impl Browser {
             ignore_ads: config.ignore_ads,
             extra_headers: config.extra_headers.clone(),
             only_html: config.only_html,
+            created_first_target: false,
         };
 
         let fut = Handler::new(conn, rx, handler_config);
