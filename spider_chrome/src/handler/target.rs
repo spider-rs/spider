@@ -109,6 +109,8 @@ impl Target {
             network_manager.set_extra_headers(headers.clone());
         }
 
+        network_manager.only_html = config.only_html;
+
         Self {
             info,
             r#type: ty,
@@ -608,6 +610,7 @@ pub struct TargetConfig {
     pub request_intercept: bool,
     pub cache_enabled: bool,
     pub ignore_visuals: bool,
+    pub only_html: bool,
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -620,6 +623,7 @@ impl Default for TargetConfig {
             request_intercept: false,
             cache_enabled: true,
             ignore_visuals: false,
+            only_html: false,
             extra_headers: Default::default(),
         }
     }

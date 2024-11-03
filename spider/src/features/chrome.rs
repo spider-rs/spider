@@ -216,6 +216,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             }
             _ => None,
         },
+        only_html: config.only_html,
         ..HandlerConfig::default()
     }
 }
