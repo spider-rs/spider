@@ -180,6 +180,8 @@ pub struct Configuration {
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub(crate) inner_budget:
         Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
+    /// Expect only to handle HTML to save on resources. This mainly only blocks the crawling and returning of resources from the server.
+    pub only_html: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -332,6 +334,7 @@ impl Configuration {
             delay: 0,
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_secs(15))),
+            only_html: true,
             ..Default::default()
         }
     }
@@ -346,6 +349,7 @@ impl Configuration {
             chrome_intercept: RequestInterceptConfiguration::new(cfg!(
                 feature = "chrome_intercept"
             )),
+            only_html: true,
             ..Default::default()
         }
     }
@@ -1007,6 +1011,12 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     pub fn with_screenshot(&mut self, screenshot_config: Option<ScreenShotConfig>) -> &mut Self {
         self.screenshot = screenshot_config;
+        self
+    }
+
+    /// Block assets from loading from the network
+    pub fn with_block_assets(&mut self, only_html: bool) -> &mut Self {
+        self.only_html = only_html;
         self
     }
 

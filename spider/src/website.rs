@@ -2162,6 +2162,7 @@ impl Website {
                     let on_link_find_callback = self.on_link_find_callback;
                     let full_resources = self.configuration.full_resources;
                     let return_page_links = self.configuration.return_page_links;
+                    let only_html = self.configuration.only_html;
 
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
@@ -2231,7 +2232,7 @@ impl Website {
                                                 _ => (link, None),
                                             };
 
-                                            let mut page = if full_resources {
+                                            let mut page = if !only_html {
                                                 Page::new_page(link_result.0.as_ref(), &shared.0).await
                                             } else {
                                                 Page::new_page_only_html(link_result.0.as_ref(), &shared.0).await
@@ -4336,6 +4337,12 @@ impl Website {
     ) -> &mut Self {
         self.configuration
             .with_automation_scripts(automation_scripts);
+        self
+    }
+
+    /// Block assets from loading from the network. Focus primarly on HTML documents.
+    pub fn with_block_assets(&mut self, only_html: bool) -> &mut Self {
+        self.configuration.with_block_assets(only_html);
         self
     }
 
