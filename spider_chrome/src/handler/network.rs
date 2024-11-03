@@ -60,6 +60,10 @@ pub struct NetworkManager {
     block_stylesheets: bool,
     /// Block javascript.
     block_javascript: bool,
+    /// Made first request. Used to track crawling
+    made_request: bool,
+    /// Only html from loading.
+    only_html: bool,
 }
 
 impl NetworkManager {
@@ -81,28 +85,40 @@ impl NetworkManager {
             ignore_visuals: true,
             block_javascript: false,
             block_stylesheets: false,
+            made_request: false,
+            only_html: false,
         }
     }
 
     pub fn init_commands(&self) -> CommandChain {
         let enable = EnableParams::default();
+        let mut v = vec![];
+
+        if let Ok(c) = serde_json::to_value(&enable) {
+            v.push((enable.identifier(), c));
+        }
+
         let cmds = if self.ignore_httpserrors {
             let ignore = SetIgnoreCertificateErrorsParams::new(true);
-            vec![
-                (enable.identifier(), serde_json::to_value(enable).unwrap()),
-                (ignore.identifier(), serde_json::to_value(ignore).unwrap()),
-            ]
+
+            if let Ok(ignored) = serde_json::to_value(&ignore) {
+                v.push((ignore.identifier(), ignored));
+            }
+
+            v
         } else {
-            vec![(enable.identifier(), serde_json::to_value(enable).unwrap())]
+            v
         };
+
         CommandChain::new(cmds, self.request_timeout)
     }
 
     fn push_cdp_request<T: Command>(&mut self, cmd: T) {
         let method = cmd.identifier();
-        let params = serde_json::to_value(cmd).expect("Command should not panic");
-        self.queued_events
-            .push_back(NetworkEvent::SendCdpRequest((method, params)));
+        if let Ok(params) = serde_json::to_value(cmd) {
+            self.queued_events
+                .push_back(NetworkEvent::SendCdpRequest((method, params)));
+        }
     }
 
     /// The next event to handle
@@ -116,8 +132,9 @@ impl NetworkManager {
 
     pub fn set_extra_headers(&mut self, headers: HashMap<String, String>) {
         self.extra_headers = headers;
-        let headers = serde_json::to_value(self.extra_headers.clone()).unwrap_or_default();
-        self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
+        if let Ok(headers) = serde_json::to_value(self.extra_headers.clone()) {
+            self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
+        }
     }
 
     pub fn set_request_interception(&mut self, enabled: bool) {
@@ -303,15 +320,15 @@ impl NetworkManager {
             return;
         }
         self.offline = value;
-        self.push_cdp_request(
-            EmulateNetworkConditionsParams::builder()
-                .offline(self.offline)
-                .latency(0)
-                .download_throughput(-1.)
-                .upload_throughput(-1.)
-                .build()
-                .unwrap(),
-        );
+        if let Ok(network) = EmulateNetworkConditionsParams::builder()
+            .offline(self.offline)
+            .latency(0)
+            .download_throughput(-1.)
+            .upload_throughput(-1.)
+            .build()
+        {
+            self.push_cdp_request(network);
+        }
     }
 
     /// Request interception doesn't happen for data URLs with Network Service.

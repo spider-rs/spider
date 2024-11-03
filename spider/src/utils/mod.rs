@@ -10,6 +10,7 @@ use std::str::FromStr;
 use crate::bytes::BufMut;
 use auto_encoder::is_binary_file;
 use bytes::BytesMut;
+use phf::phf_set;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
@@ -23,6 +24,33 @@ use log::{info, log_enabled, Level};
 use reqwest::{
     header::{HeaderName, HeaderValue},
     Error, Response, StatusCode,
+};
+
+/// Ignore the content types.
+static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
+    "application/pdf",
+    "application/zip",
+    "application/x-rar-compressed",
+    "application/x-tar",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/bmp",
+    "image/svg+xml",
+    "video/mp4",
+    "video/x-msvideo",
+    "video/x-matroska",
+    "video/webm",
+    "audio/mpeg",
+    "audio/ogg",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/x-7z-compressed",
+    "application/x-rpm",
+    "application/x-shockwave-flash",
 };
 
 #[cfg(feature = "fs")]
@@ -1315,14 +1343,10 @@ pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
     let mut headers = reqwest::header::HeaderMap::new();
 
     for cookie in res.cookies() {
-        match HeaderValue::from_str(cookie.value()) {
-            Ok(h) => match HeaderName::from_str(cookie.name()) {
-                Ok(n) => {
-                    headers.insert(n, h);
-                }
-                _ => (),
-            },
-            _ => (),
+        if let Ok(h) = HeaderValue::from_str(cookie.value()) {
+            if let Ok(n) = HeaderName::from_str(cookie.name()) {
+                headers.insert(n, h);
+            }
         }
     }
 
@@ -1357,33 +1381,50 @@ pub async fn handle_response_bytes(
     let headers = res.headers().clone();
     let cookies = get_cookies(&res);
 
-    let mut stream = res.bytes_stream();
-    let mut data: BytesMut = BytesMut::new();
+    let mut block_streaming = false;
 
-    let mut first_bytes = true;
-
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(text) => {
-                if only_html && first_bytes {
-                    first_bytes = false;
-                    if is_binary_file(&text) {
-                        break;
-                    }
+    if only_html {
+        if let Some(content_type) = res.headers().get(reqwest::header::CONTENT_TYPE) {
+            if let Ok(content_type_str) = content_type.to_str() {
+                if IGNORE_CONTENT_TYPES.contains(content_type_str) {
+                    block_streaming = true;
                 }
-                let limit = *MAX_SIZE_BYTES;
-
-                if limit > 0 && data.len() + text.len() > limit {
-                    break;
-                }
-
-                data.put(text)
-            }
-            Err(e) => {
-                log::error!("{e} in {}", target_url);
-                break;
             }
         }
+    }
+
+    let mut content: Option<bytes::Bytes> = None;
+
+    if !block_streaming {
+        let mut stream = res.bytes_stream();
+        let mut data: BytesMut = BytesMut::new();
+        let mut first_bytes = true;
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(text) => {
+                    if only_html && first_bytes {
+                        first_bytes = false;
+                        if is_binary_file(&text) {
+                            break;
+                        }
+                    }
+                    let limit = *MAX_SIZE_BYTES;
+
+                    if limit > 0 && data.len() + text.len() > limit {
+                        break;
+                    }
+
+                    data.put(text)
+                }
+                Err(e) => {
+                    log::error!("{e} in {}", target_url);
+                    break;
+                }
+            }
+        }
+
+        content.replace(data.into());
     }
 
     PageResponse {
@@ -1391,7 +1432,7 @@ pub async fn handle_response_bytes(
         headers: Some(headers),
         #[cfg(feature = "cookies")]
         cookies,
-        content: Some(data.into()),
+        content,
         final_url: rd,
         status_code,
         ..Default::default()
