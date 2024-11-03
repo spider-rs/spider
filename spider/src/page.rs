@@ -397,6 +397,12 @@ impl Page {
         build(url, page_resource)
     }
 
+    /// Instantiate a new page and gather the html repro of standard fetch_page_html only gathering resources to crawl.
+    pub async fn new_page_only_html(url: &str, client: &Client) -> Self {
+        let page_resource = crate::utils::fetch_page_html_raw_only_html(url, client).await;
+        build(url, page_resource)
+    }
+
     /// Instantiate a new page and gather the html.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     pub async fn new(url: &str, client: &Client) -> Self {
@@ -417,6 +423,7 @@ impl Page {
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
+        request_timeout: &Option<Box<Duration>>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -429,6 +436,7 @@ impl Page {
             execution_scripts,
             automation_scripts,
             viewport,
+            request_timeout,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -1160,7 +1168,8 @@ impl Page {
                                                                         .execution_scripts,
                                                                 &configuration
                                                                         .automation_scripts,
-                                                                &configuration.viewport
+                                                                &configuration.viewport,
+                                                                &configuration.request_timeout
                                                             )
                                                             .await;
 

@@ -7,6 +7,10 @@ pub mod trie;
 
 use std::str::FromStr;
 
+use crate::bytes::BufMut;
+use auto_encoder::is_binary_file;
+use bytes::BytesMut;
+
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
 use crate::tokio_stream::StreamExt;
@@ -931,28 +935,42 @@ pub async fn fetch_page_html_chrome_base(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
-    if !page_set {
-        // used for smart mode re-rendering direct assigning html
-        if content {
-            if let Ok(frame) = page.mainframe().await {
-                let _ = page
-                    .execute(
-                        chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                            frame_id: frame.unwrap_or_default(),
-                            html: source.to_string(),
-                        },
-                    )
-                    .await;
+    let page_navigation = async {
+        if !page_set {
+            // used for smart mode re-rendering direct assigning html
+            if content {
+                if let Ok(frame) = page.mainframe().await {
+                    let _ = page
+                        .execute(
+                            chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                                frame_id: frame.unwrap_or_default(),
+                                html: source.to_string(),
+                            },
+                        )
+                        .await;
+                }
+            } else {
+                if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
+                    return Err(e);
+                };
             }
-        } else {
-            if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
-                return Err(e);
-            };
         }
-    }
+
+        Ok(())
+    };
+
+    let _ = tokio::time::timeout(
+        match request_timeout {
+            Some(timeout) => **timeout,
+            _ => tokio::time::Duration::from_secs(60),
+        },
+        page_navigation,
+    )
+    .await;
 
     if chrome_http_req_res.waf_check {
         perform_smart_mouse_movement(&page, &viewport).await;
@@ -1321,56 +1339,74 @@ pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
     None
 }
 
-/// Perform a network request to a resource extracting all content streaming.
-pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
-    use crate::bytes::BufMut;
-    use bytes::BytesMut;
+/// Handle the response bytes
+pub async fn handle_response_bytes(
+    res: Response,
+    target_url: &str,
+    only_html: bool,
+) -> PageResponse {
+    let u = res.url().as_str();
 
-    match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => {
-            let u = res.url().as_str();
+    let rd = if target_url != u {
+        Some(u.into())
+    } else {
+        None
+    };
+    let status_code: StatusCode = res.status();
+    #[cfg(feature = "headers")]
+    let headers = res.headers().clone();
+    let cookies = get_cookies(&res);
 
-            let rd = if target_url != u {
-                Some(u.into())
-            } else {
-                None
-            };
-            let status_code: StatusCode = res.status();
-            #[cfg(feature = "headers")]
-            let headers = res.headers().clone();
-            let cookies = get_cookies(&res);
+    let mut stream = res.bytes_stream();
+    let mut data: BytesMut = BytesMut::new();
 
-            let mut stream = res.bytes_stream();
-            let mut data: BytesMut = BytesMut::new();
+    let mut first_bytes = true;
 
-            while let Some(item) = stream.next().await {
-                match item {
-                    Ok(text) => {
-                        let limit = *MAX_SIZE_BYTES;
-
-                        if limit > 0 && data.len() + text.len() > limit {
-                            break;
-                        }
-
-                        data.put(text)
-                    }
-                    Err(e) => {
-                        log::error!("{e} in {}", target_url);
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(text) => {
+                if only_html && first_bytes {
+                    first_bytes = false;
+                    if is_binary_file(&text) {
                         break;
                     }
                 }
-            }
+                let limit = *MAX_SIZE_BYTES;
 
-            PageResponse {
-                #[cfg(feature = "headers")]
-                headers: Some(headers),
-                #[cfg(feature = "cookies")]
-                cookies,
-                content: Some(data.into()),
-                final_url: rd,
-                status_code,
-                ..Default::default()
+                if limit > 0 && data.len() + text.len() > limit {
+                    break;
+                }
+
+                data.put(text)
             }
+            Err(e) => {
+                log::error!("{e} in {}", target_url);
+                break;
+            }
+        }
+    }
+
+    PageResponse {
+        #[cfg(feature = "headers")]
+        headers: Some(headers),
+        #[cfg(feature = "cookies")]
+        cookies,
+        content: Some(data.into()),
+        final_url: rd,
+        status_code,
+        ..Default::default()
+    }
+}
+
+/// Perform a network request to a resource extracting all content streaming.
+async fn fetch_page_html_raw_base(
+    target_url: &str,
+    client: &Client,
+    only_html: bool,
+) -> PageResponse {
+    match client.get(target_url).send().await {
+        Ok(res) if res.status().is_success() => {
+            handle_response_bytes(res, target_url, only_html).await
         }
         Ok(res) => PageResponse {
             #[cfg(feature = "headers")]
@@ -1389,6 +1425,16 @@ pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageRespo
             page_response
         }
     }
+}
+
+/// Perform a network request to a resource extracting all content streaming.
+pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
+    fetch_page_html_raw_base(target_url, client, false).await
+}
+
+/// Perform a network request to a resource extracting all content streaming.
+pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) -> PageResponse {
+    fetch_page_html_raw_base(target_url, client, false).await
 }
 
 /// Perform a network request to a resource extracting all content as text.
@@ -1586,6 +1632,7 @@ pub async fn fetch_page_html(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<tokio::time::Duration>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::utf8_percent_encode;
@@ -1607,6 +1654,7 @@ pub async fn fetch_page_html(
                 execution_scripts,
                 automation_scripts,
                 &viewport,
+                request_timeout,
             )
             .await
             {
@@ -1746,6 +1794,7 @@ pub async fn fetch_page_html(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -1760,6 +1809,7 @@ pub async fn fetch_page_html(
         execution_scripts,
         automation_scripts,
         viewport,
+        request_timeout,
     )
     .await
     {
@@ -1784,6 +1834,7 @@ pub async fn fetch_page_html_chrome(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<tokio::time::Duration>>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -1800,6 +1851,7 @@ pub async fn fetch_page_html_chrome(
                 execution_scripts,
                 automation_scripts,
                 viewport,
+                request_timeout,
             )
             .await
             {
