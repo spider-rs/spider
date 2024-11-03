@@ -1395,6 +1395,7 @@ impl Website {
                 &self.configuration.execution_scripts,
                 &self.configuration.automation_scripts,
                 &self.configuration.viewport,
+                &self.configuration.request_timeout,
             )
             .await;
 
@@ -1513,6 +1514,7 @@ impl Website {
                 &config.execution_scripts,
                 &config.automation_scripts,
                 &config.viewport,
+                &config.request_timeout,
             )
             .await;
 
@@ -2157,14 +2159,16 @@ impl Website {
                     self.status = CrawlStatus::Active;
                     self._crawl_establish(client, &mut selector, false).await;
                 } else {
+                    let on_link_find_callback = self.on_link_find_callback;
+                    let full_resources = self.configuration.full_resources;
+                    let return_page_links = self.configuration.return_page_links;
+
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
                     let (mut interval, throttle) = self.setup_crawl();
                     links.extend(self._crawl_establish(client, &mut selector, false).await);
                     self.configuration.configure_allowlist();
-                    let on_link_find_callback = self.on_link_find_callback;
-                    let full_resources = self.configuration.full_resources;
-                    let return_page_links = self.configuration.return_page_links;
+
                     let mut q = match &self.channel_queue {
                         Some(q) => Some(q.0.subscribe()),
                         _ => None,
@@ -2226,7 +2230,13 @@ impl Website {
                                                 Some(cb) => cb(link, None),
                                                 _ => (link, None),
                                             };
-                                            let mut page = Page::new_page(link_result.0.as_ref(), &shared.0).await;
+
+                                            let mut page = if full_resources {
+                                                Page::new_page(link_result.0.as_ref(), &shared.0).await
+                                            } else {
+                                                Page::new_page_only_html(link_result.0.as_ref(), &shared.0).await
+                                            };
+
                                             let mut retry_count = shared.5;
 
                                             while page.should_retry && retry_count > 0 {
@@ -2234,7 +2244,12 @@ impl Website {
                                                     let next_page = backoff::future::retry(
                                                         ExponentialBackoff::default(),
                                                         || async {
-                                                            let p = Page::new_page(link_result.0.as_ref(), &shared.0).await;
+                                                            let p = if full_resources {
+                                                                Page::new_page(link_result.0.as_ref(), &shared.0).await
+                                                            } else {
+                                                                Page::new_page_only_html(link_result.0.as_ref(), &shared.0).await
+                                                            };
+
                                                             Ok::<Page, backoff::Error<std::io::Error>>(p)
                                                         },
                                                     );
@@ -2460,6 +2475,7 @@ impl Website {
                                                                     &shared.5.execution_scripts,
                                                                     &shared.5.automation_scripts,
                                                                     &shared.5.viewport,
+                                                                    &shared.5.request_timeout
                                                                 )
                                                                 .await;
 
@@ -2481,6 +2497,7 @@ impl Website {
                                                                                     &shared.5.execution_scripts,
                                                                                     &shared.5.automation_scripts,
                                                                                     &shared.5.viewport,
+                                                                                    &shared.5.request_timeout
                                                                                 )
                                                                                 .await;
                                                                                 Ok::<
@@ -2510,6 +2527,7 @@ impl Website {
                                                                                 &shared.5.execution_scripts,
                                                                                 &shared.5.automation_scripts,
                                                                                 &shared.5.viewport,
+                                                                                &shared.5.request_timeout,
                                                                             )
                                                                             .await,
                                                                         );
@@ -2777,6 +2795,7 @@ impl Website {
                                                                 &shared.6.execution_scripts,
                                                                 &shared.6.automation_scripts,
                                                                 &shared.6.viewport,
+                                                                &shared.6.request_timeout
                                                             )
                                                             .await;
 
@@ -2798,6 +2817,7 @@ impl Website {
                                                                                 &shared.6.execution_scripts,
                                                                                 &shared.6.automation_scripts,
                                                                                 &shared.6.viewport,
+                                                                                &shared.6.request_timeout
                                                                             ).await;
                                                                             Ok::<
                                                                                 Page,
@@ -2826,6 +2846,8 @@ impl Website {
                                                                             &shared.6.execution_scripts,
                                                                             &shared.6.automation_scripts,
                                                                             &shared.6.viewport,
+                                                                            &shared.6.request_timeout,
+
                                                                         )
                                                                         .await,
                                                                     );
@@ -3776,6 +3798,7 @@ impl Website {
                                                                                     &shared.3.execution_scripts,
                                                                                     &shared.3.automation_scripts,
                                                                                     &shared.3.viewport,
+                                                                                    &shared.3.request_timeout
                                                                                 )
                                                                                 .await;
 
