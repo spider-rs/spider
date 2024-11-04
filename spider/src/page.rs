@@ -12,6 +12,7 @@ use crate::Client;
 use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
+use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
 
@@ -26,6 +27,7 @@ use url::Url;
 lazy_static! {
     /// Wildcard match all domains.
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
+    static ref SSG_CAPTURE: Regex =  Regex::new(r#""(.*?)""#).unwrap();
 }
 
 #[cfg(any(feature = "smart", feature = "chrome_intercept"))]
@@ -967,20 +969,16 @@ impl Page {
             } else {
                 let html = Box::new(Html::parse_fragment(html));
                 let mut stream = tokio_stream::iter(html.tree);
-
                 // the original url
                 let parent_host = &selectors.1[0];
                 // the host schemes
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
-                                                      // the base matcher to
                 let sub_matcher = &selectors.0;
 
                 while let Some(node) = stream.next().await {
                     if let Some(element) = node.as_element() {
-                        let element_name = element.name();
-
-                        if element_name == "a" {
+                        if element.name() == "a" {
                             if let Some(href) = element.attr("href") {
                                 self.push_link(
                                     href,
@@ -1002,7 +1000,119 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources"),))]
+    pub async fn links_stream_base_ssg<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        selectors: &RelativeSelectors,
+        html: &str,
+        client: &Client,
+    ) -> HashSet<A> {
+        use auto_encoder::auto_encode_bytes;
+
+        let mut map = HashSet::new();
+
+        if !html.is_empty() {
+            if html.starts_with("<?xml") {
+                self.links_stream_xml_links_stream_base(selectors, html, &mut map)
+                    .await;
+            } else {
+                let html = Box::new(crate::packages::scraper::Html::parse_fragment(html));
+                let mut stream = tokio_stream::iter(html.tree);
+
+                // the original url
+                let parent_host = &selectors.1[0];
+                // the host schemes
+                let parent_host_scheme = &selectors.1[1];
+                let base_input_domain = &selectors.2; // the domain after redirects
+                let sub_matcher = &selectors.0;
+
+                let mut build_ssg_path = None;
+
+                while let Some(node) = stream.next().await {
+                    if let Some(element) = node.as_element() {
+                        match element.name() {
+                            "a" => {
+                                if let Some(href) = element.attr("href") {
+                                    self.push_link(
+                                        href,
+                                        &mut map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                    );
+                                }
+                            }
+                            "script" if build_ssg_path.is_none() => {
+                                if let Some(source) = element.attr("src") {
+                                    if source.starts_with("/_next/static/")
+                                        && source.ends_with("/_ssgManifest.js")
+                                    {
+                                        build_ssg_path = Some(self.abs_path(source));
+                                    }
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+
+                if let Some(build_ssg_path) = build_ssg_path {
+                    if let Some(s) = build_ssg_path {
+                        let build_page = Page::new_page(s.as_str(), &client).await;
+
+                        for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                            if let Some(matched) = cap.get(1) {
+                                let href = auto_encode_bytes(&matched.as_bytes())
+                                    .replace(r#"\u002F"#, "/");
+
+                                fn get_last_segment(path: &str) -> &str {
+                                    if let Some(pos) = path.rfind('/') {
+                                        &path[pos + 1..]
+                                    } else {
+                                        path
+                                    }
+                                }
+
+                                let last_segment = get_last_segment(&href);
+
+                                // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                    self.push_link(
+                                        &href,
+                                        &mut map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
+    pub async fn links_stream_ssg<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+        &self,
+        selectors: &RelativeSelectors,
+        client: &Client,
+    ) -> HashSet<A> {
+        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+            return Default::default();
+        }
+        self.links_stream_base_ssg(selectors, &self.get_html(), client)
+            .await
+    }
+
+    /// Find the links as a stream using string resource validation
+    #[inline(always)]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
     pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         &self,
         selectors: &RelativeSelectors,
@@ -1362,6 +1472,22 @@ impl Page {
         match self.html.is_some() {
             false => Default::default(),
             true => self.links_stream::<CaseInsensitiveString>(selectors).await,
+        }
+    }
+
+    /// Find all href links and return them using CSS selectors.
+    #[inline(always)]
+    pub async fn links_ssg(
+        &self,
+        selectors: &RelativeSelectors,
+        client: &Client,
+    ) -> HashSet<CaseInsensitiveString> {
+        match self.html.is_some() {
+            false => Default::default(),
+            true => {
+                self.links_stream_ssg::<CaseInsensitiveString>(selectors, client)
+                    .await
+            }
         }
     }
 

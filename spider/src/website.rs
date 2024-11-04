@@ -1300,33 +1300,24 @@ impl Website {
             log::info!("fetch {}", &url);
 
             // allow initial page mutation
-            match page.final_redirect_destination.as_deref() {
-                Some(domain) => {
-                    let prior_domain = self.domain_parsed.take();
-                    self.domain_parsed = match url::Url::parse(domain) {
-                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                        _ => None,
-                    };
-                    self.url = Box::new(domain.into());
-                    match self.setup_selectors() {
-                        Some(s) => {
-                            base.0 = s.0;
-                            base.1 = s.1;
-                            match prior_domain {
-                                Some(prior_domain) => match prior_domain.host_str() {
-                                    Some(dname) => {
-                                        base.2 = dname.into();
-                                    }
-                                    _ => (),
-                                },
-                                _ => (),
-                            }
+            if let Some(domain) = page.final_redirect_destination.as_deref() {
+                let prior_domain = self.domain_parsed.take();
+                self.domain_parsed = match url::Url::parse(domain) {
+                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                    _ => None,
+                };
+                self.url = Box::new(domain.into());
+                if let Some(s) = self.setup_selectors() {
+                    base.0 = s.0;
+                    base.1 = s.1;
+
+                    if let Some(prior_domain) = prior_domain {
+                        if let Some(dname) = prior_domain.host_str() {
+                            base.2 = dname.into();
                         }
-                        _ => (),
                     }
                 }
-                _ => (),
-            };
+            }
 
             let links = if !page.is_empty() {
                 self.links_visited.insert(match self.on_link_find_callback {
@@ -1336,7 +1327,7 @@ impl Website {
                     }
                     _ => *self.url.clone(),
                 });
-                page.links(base).await
+                page.links_ssg(base, client).await
             } else {
                 self.status = CrawlStatus::Empty;
                 Default::default()
@@ -1438,7 +1429,8 @@ impl Website {
                     }
                     _ => *self.url.clone(),
                 });
-                let links = HashSet::from(page.links(&base).await);
+
+                let links = HashSet::from(page.links_ssg(&base, &client).await);
 
                 links
             } else {
@@ -2164,10 +2156,13 @@ impl Website {
                     let return_page_links = self.configuration.return_page_links;
                     let only_html = self.configuration.only_html && !full_resources;
 
+                    let (mut interval, throttle) = self.setup_crawl();
+
                     let mut links: HashSet<CaseInsensitiveString> =
                         self.drain_extra_links().collect();
-                    let (mut interval, throttle) = self.setup_crawl();
+
                     links.extend(self._crawl_establish(client, &mut selector, false).await);
+
                     self.configuration.configure_allowlist();
 
                     let mut q = match &self.channel_queue {
