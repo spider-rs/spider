@@ -1000,19 +1000,16 @@ pub async fn fetch_page_html_chrome_base(
     )
     .await;
 
-    if chrome_http_req_res.waf_check {
-        perform_smart_mouse_movement(&page, &viewport).await;
-    }
-
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation {
         let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
             match page.wait_for_navigation_response().await {
-                Ok(u) => get_last_redirect(&source, &u),
+                Ok(u) => get_last_redirect(&source, &u, &page).await,
                 _ => None,
             }
         })
         .await;
+
         match last_redirect {
             Ok(last) => last,
             _ => None,
@@ -1020,6 +1017,10 @@ pub async fn fetch_page_html_chrome_base(
     } else {
         None
     };
+
+    if chrome_http_req_res.waf_check {
+        perform_smart_mouse_movement(&page, &viewport).await;
+    }
 
     page_wait(&page, &wait_for).await;
 
@@ -1317,24 +1318,23 @@ pub async fn perform_screenshot(
 
 #[cfg(feature = "chrome")]
 /// Check if url matches the last item in a redirect chain for chrome CDP
-pub fn get_last_redirect(
+pub async fn get_last_redirect(
     target_url: &str,
     u: &Option<std::sync::Arc<chromiumoxide::handler::http::HttpRequest>>,
+    page: &chromiumoxide::Page,
 ) -> Option<String> {
-    match u {
-        Some(u) => match u.redirect_chain.last()? {
-            r => match r.url.as_ref()? {
-                u => {
-                    if target_url != u {
-                        Some(u.into())
-                    } else {
-                        None
-                    }
-                }
-            },
-        },
-        _ => None,
+    if let Some(http_request) = u {
+        if let Some(redirect) = http_request.redirect_chain.last() {
+            if let Some(url) = redirect.url.as_ref() {
+                return if target_url != url {
+                    Some(url.clone())
+                } else {
+                    None
+                };
+            }
+        }
     }
+    page.url().await.ok()?
 }
 
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
