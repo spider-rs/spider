@@ -10,6 +10,7 @@ use crate::Client;
 use crate::RelativeSelectors;
 use bytes::Bytes;
 use hashbrown::HashSet;
+use lol_html::Settings;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
@@ -999,7 +1000,7 @@ impl Page {
 
                 let _ = rewrite_str_empty(
                     &html,
-                    lol_html::RewriteStrSettings {
+                    Settings {
                         element_content_handlers: vec![lol_html::element!("a", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 self.push_link(
@@ -1014,7 +1015,8 @@ impl Page {
                             }
                             Ok(())
                         })],
-                        ..lol_html::RewriteStrSettings::default()
+                        adjust_charset_on_meta_tag: true,
+                        ..Settings::default()
                     },
                 );
             }
@@ -1051,7 +1053,7 @@ impl Page {
 
                 let _ = rewrite_str_empty(
                     &html,
-                    lol_html::RewriteStrSettings {
+                    Settings {
                         element_content_handlers: vec![
                             lol_html::element!("a", |el| {
                                 if let Some(href) = el.get_attribute("href") {
@@ -1080,7 +1082,8 @@ impl Page {
                                 Ok(())
                             }),
                         ],
-                        ..lol_html::RewriteStrSettings::default()
+                        adjust_charset_on_meta_tag: true,
+                        ..Settings::default()
                     },
                 );
 
@@ -1132,10 +1135,11 @@ impl Page {
         client: &Client,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
-            return Default::default();
+            Default::default()
+        } else {
+            self.links_stream_base_ssg(selectors, &Box::pin(self.get_html()), client)
+                .await
         }
-        self.links_stream_base_ssg(selectors, &self.get_html(), client)
-            .await
     }
 
     /// Find the links as a stream using string resource validation
@@ -1146,9 +1150,11 @@ impl Page {
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
-            return Default::default();
+            Default::default()
+        } else {
+            self.links_stream_base(selectors, &Box::pin(self.get_html()))
+                .await
         }
-        self.links_stream_base(selectors, &self.get_html()).await
     }
 
     /// Find the links as a stream using string resource validation
@@ -1172,13 +1178,13 @@ impl Page {
         let mut map = HashSet::new();
 
         if !self.is_empty() {
-            let html_resource = self.get_html();
+            let html_resource = Box::pin(self.get_html());
 
             if html_resource.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map)
                     .await;
             } else {
-                use lol_html::{doc_comments, element, RewriteStrSettings};
+                use lol_html::{doc_comments, element};
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -1193,7 +1199,7 @@ impl Page {
 
                 let rewrited_bytes = match rewrite_str_as_bytes(
                     &html_resource,
-                    RewriteStrSettings {
+                    Settings {
                         element_content_handlers: vec![
                             element!("script", |element| {
                                 if !static_app {
@@ -1252,7 +1258,8 @@ impl Page {
                             c.remove();
                             Ok(())
                         })],
-                        ..RewriteStrSettings::default()
+                        adjust_charset_on_meta_tag: true,
+                        ..Settings::default()
                     },
                 ) {
                     Ok(s) => s,
@@ -1370,7 +1377,8 @@ impl Page {
         let mut map = HashSet::new();
 
         if !self.is_empty() {
-            let html = self.get_html();
+            let html = Box::pin(self.get_html());
+
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
                     .await;
@@ -1455,9 +1463,10 @@ impl Page {
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
-            return Default::default();
+            Default::default()
+        } else {
+            self.links_stream_full_resource(selectors).await
         }
-        self.links_stream_full_resource(selectors).await
     }
 
     #[inline(always)]
