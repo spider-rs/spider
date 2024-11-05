@@ -180,7 +180,7 @@ async fn cf_handle(
 #[derive(Debug, Default)]
 pub struct PageResponse {
     /// The page response resource.
-    pub content: Option<bytes::Bytes>,
+    pub content: Option<Box<bytes::Bytes>>,
     #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
@@ -660,7 +660,7 @@ pub async fn run_openai_request(
 
                         // perform the js script on the page.
                         if !json_res.js.is_empty() {
-                            let html: Option<bytes::Bytes> = match page
+                            let html: Option<Box<bytes::Bytes>> = match page
                                 .evaluate_function(string_concat!(
                                     "async function() { ",
                                     json_res.js,
@@ -682,7 +682,7 @@ pub async fn run_openai_request(
                                 {
                                     match page.content_bytes().await {
                                         Ok(b) => {
-                                            page_response.content = Some(b);
+                                            page_response.content = Some(b.into());
                                         }
                                         _ => (),
                                     }
@@ -1062,9 +1062,9 @@ pub async fn fetch_page_html_chrome_base(
     let res =
         tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content_bytes()).await;
 
-    let mut res: bytes::Bytes = match res {
+    let mut res: Box<bytes::Bytes> = match res {
         Ok(b) => match b {
-            Ok(b) => b,
+            Ok(b) => b.into(),
             _ => Default::default(),
         },
         _ => Default::default(),
@@ -1157,12 +1157,12 @@ pub async fn fetch_page_html_chrome_base(
 #[cfg(feature = "chrome")]
 fn set_page_response(
     ok: bool,
-    res: bytes::Bytes,
+    res: Box<bytes::Bytes>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     final_url: Option<String>,
 ) -> PageResponse {
     let page_response = PageResponse {
-        content: if ok { Some(res) } else { None },
+        content: if ok { Some(res.into()) } else { None },
         status_code: chrome_http_req_res.status_code,
         final_url,
         ..Default::default()
@@ -1402,7 +1402,7 @@ pub async fn handle_response_bytes(
         }
     }
 
-    let mut content: Option<bytes::Bytes> = None;
+    let mut content: Option<Box<bytes::Bytes>> = None;
 
     if !block_streaming {
         let mut stream = res.bytes_stream();
@@ -1433,7 +1433,7 @@ pub async fn handle_response_bytes(
             }
         }
 
-        content.replace(data.into());
+        content.replace(Box::new(data.into()));
     }
 
     PageResponse {
@@ -1947,7 +1947,7 @@ pub async fn fetch_page_html_chrome(
                                 headers: Some(headers),
                                 #[cfg(feature = "cookies")]
                                 cookies,
-                                content: Some(data.into()),
+                                content: Some(Box::new(data.into())),
                                 status_code,
                                 ..Default::default()
                             }

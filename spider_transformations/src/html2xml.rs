@@ -4,6 +4,7 @@ use html5ever::{parse_document, QualName};
 use markup5ever::namespace_url;
 use markup5ever::ns;
 use spider::auto_encoder::auto_encode_bytes;
+use spider::bytes::Bytes;
 use spider::page::get_html_encoded;
 use std::default::Default;
 use std::error::Error;
@@ -16,8 +17,10 @@ pub fn convert_html_to_xml(
     encoding: &Option<String>,
 ) -> Result<String, Box<dyn Error>> {
     if encoding.is_some() {
+        let bytes: Box<Bytes> = Box::new(base_convert_xml(html, url, encoding)?.into());
+
         Ok(get_html_encoded(
-            &Some(base_convert_xml(html, url, encoding)?.into()),
+            &Some(bytes),
             &match encoding {
                 Some(encoding) => encoding,
                 _ => "UTF-8",
