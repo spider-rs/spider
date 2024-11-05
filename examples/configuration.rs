@@ -12,6 +12,7 @@ async fn main() -> Result<(), Error> {
         .with_user_agent(Some("SpiderBot"))
         .with_blacklist_url(Some(Vec::from(["https://rsseau.fr/resume".into()])))
         .with_subdomains(true)
+        .with_concurrency_limit(None)
         .with_tld(true)
         .with_respect_robots_txt(true)
         .with_external_domains(Some(

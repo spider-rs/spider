@@ -182,6 +182,8 @@ pub struct Configuration {
         Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
     /// Expect only to handle HTML to save on resources. This mainly only blocks the crawling and returning of resources from the server.
     pub only_html: bool,
+    /// The concurrency limits to apply.
+    pub concurrency_limit: Option<usize>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -644,6 +646,12 @@ impl Configuration {
     /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.with_budget(Some(hashbrown::HashMap::from([("*", limit)])));
+        self
+    }
+
+    /// Set the concurrency limits. If you set the value to None to use the default limits using the system CPU cors * n.
+    pub fn with_concurrency_limit(&mut self, limit: Option<usize>) -> &mut Self {
+        self.concurrency_limit = limit;
         self
     }
 

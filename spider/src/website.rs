@@ -123,7 +123,7 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
-/// Semaphore low priority tasks to run
+/// Semaphore low priority tasks to run.
 #[cfg(not(feature = "cowboy"))]
 async fn run_task<F, Fut>(
     semaphore: Arc<Semaphore>,
@@ -2136,6 +2136,19 @@ impl Website {
         };
     }
 
+    /// Setup the Semaphore for the crawl.
+    fn setup_semaphore(&self) -> Arc<Semaphore> {
+        if self.configuration.shared_queue {
+            SEM_SHARED.clone()
+        } else {
+            Arc::new(Semaphore::const_new(
+                self.configuration
+                    .concurrency_limit
+                    .unwrap_or(*DEFAULT_PERMITS),
+            ))
+        }
+    }
+
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
@@ -2170,11 +2183,7 @@ impl Website {
                         _ => None,
                     };
 
-                    let semaphore = if self.configuration.shared_queue {
-                        SEM_SHARED.clone()
-                    } else {
-                        Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                    };
+                    let semaphore = self.setup_semaphore();
 
                     let shared = Arc::new((
                         client.to_owned(),
@@ -2353,11 +2362,8 @@ impl Website {
                         )
                         .await;
 
-                        let semaphore = if self.configuration.shared_queue {
-                            SEM_SHARED.clone()
-                        } else {
-                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                        };
+                        let semaphore = self.setup_semaphore();
+
                         let mut q = match &self.channel_queue {
                             Some(q) => Some(q.0.subscribe()),
                             _ => None,
@@ -2675,11 +2681,8 @@ impl Website {
                                 )
                                 .await;
                             } else {
-                                let semaphore = if self.configuration.shared_queue {
-                                    SEM_SHARED.clone()
-                                } else {
-                                    Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                                };
+                                let semaphore = self.setup_semaphore();
+
                                 let mut q = match &self.channel_queue {
                                     Some(q) => Some(q.0.subscribe()),
                                     _ => None,
@@ -3155,11 +3158,7 @@ impl Website {
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                         let chandle = Handle::current();
 
-                        let semaphore = if self.configuration.shared_queue {
-                            SEM_SHARED.clone()
-                        } else {
-                            Arc::new(Semaphore::const_new(*DEFAULT_PERMITS))
-                        };
+                        let semaphore = self.setup_semaphore();
 
                         let shared = Arc::new((
                             client.to_owned(),
@@ -4051,6 +4050,12 @@ impl Website {
     /// Use proxies for request.
     pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
         self.configuration.with_proxies(proxies);
+        self
+    }
+
+    /// Set the concurrency limits. If you set the value to None to use the default limits using the system CPU cors * n.
+    pub fn with_concurrency_limit(&mut self, limit: Option<usize>) -> &mut Self {
+        self.configuration.with_concurrency_limit(limit);
         self
     }
 
