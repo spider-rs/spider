@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.11.20"
+version = "2.12.3"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -50,7 +50,7 @@ http-cache-reqwest = { version = "0.14.0", optional = true }
 const_format = { version = "0.2", optional = true }
 async-openai = { version = "0.25", optional = true }
 tiktoken-rs = { version = "0.5", optional = true }
-lol_html = { version = "1", optional = true }
+lol_html = { version = "1" }
 serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.36", features = ["serde", "serialize", "async-tokio"]}
 moka = { version = "0.12", features = ["future"], optional = true }
@@ -147,7 +147,7 @@ smart = ["chrome", "dep:rand", "chrome_intercept"]
 encoding = []
 headers = ["dep:httpdate"]
 real_browser = ["dep:statrs", "dep:rand"]
-openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:lol_html", "dep:serde_json"]
+openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:serde_json"]
 openai_slim_fit = []
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]

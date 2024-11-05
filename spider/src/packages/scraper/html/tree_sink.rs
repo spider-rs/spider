@@ -164,15 +164,16 @@ impl TreeSink for Html {
 
     // Detach the given node from its parent.
     fn remove_from_parent(&mut self, target: &Self::Handle) {
-        self.tree.get_mut(*target).unwrap().detach();
+        if let Some(mut p) = self.tree.get_mut(*target) {
+            p.detach();
+        }
     }
 
     // Remove all the children from node and append them to new_parent.
     fn reparent_children(&mut self, node: &Self::Handle, new_parent: &Self::Handle) {
-        self.tree
-            .get_mut(*new_parent)
-            .unwrap()
-            .reparent_from_id_append(*node);
+        if let Some(mut p) = self.tree.get_mut(*new_parent) {
+            p.reparent_from_id_append(*node);
+        }
     }
 
     // Add each attribute to the given element, if no attribute with that name already exists. The
