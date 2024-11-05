@@ -180,7 +180,7 @@ async fn cf_handle(
 #[derive(Debug, Default)]
 pub struct PageResponse {
     /// The page response resource.
-    pub content: Option<bytes::Bytes>,
+    pub content: Option<Box<bytes::Bytes>>,
     #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
@@ -1402,7 +1402,7 @@ pub async fn handle_response_bytes(
         }
     }
 
-    let mut content: Option<bytes::Bytes> = None;
+    let mut content: Option<Box<bytes::Bytes>> = None;
 
     if !block_streaming {
         let mut stream = res.bytes_stream();
@@ -1433,7 +1433,7 @@ pub async fn handle_response_bytes(
             }
         }
 
-        content.replace(data.into());
+        content.replace(Box::new(data.into()));
     }
 
     PageResponse {

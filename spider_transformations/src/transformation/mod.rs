@@ -50,7 +50,7 @@ mod tests {
         let mut conf = content::TransformConfig::default();
         let mut page_response = PageResponse::default();
 
-        page_response.content = Some(Bytes::from(markup));
+        page_response.content = Some(Bytes::from(markup).into());
         let page = build(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
@@ -110,7 +110,7 @@ mod tests {
         let mut conf = content::TransformConfig::default();
         let mut page_response = PageResponse::default();
         conf.return_format = ReturnFormat::XML;
-        page_response.content = Some(Bytes::from(markup));
+        page_response.content = Some(Bytes::from(markup).into());
         let page = build(url, page_response);
         let content = content::transform_content(&page, &conf, &None, &None, &None);
         assert!(
@@ -128,7 +128,7 @@ mod tests {
         let mut conf = content::TransformConfig::default();
         let mut page_response = PageResponse::default();
 
-        page_response.content = Some(Bytes::from(markup));
+        page_response.content = Some(Bytes::from(markup).into());
         let page = build(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
@@ -153,7 +153,7 @@ mod tests {
         let mut conf = content::TransformConfig::default();
         let mut page_response = PageResponse::default();
 
-        page_response.content = Some(Bytes::from(markup));
+        page_response.content = Some(Bytes::from(markup).into());
         let page = build(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
@@ -183,7 +183,7 @@ mod tests {
         let mut page_response = PageResponse::default();
         let b = Bytes::from(data);
 
-        page_response.content = Some(b);
+        page_response.content = Some(b.into());
 
         let page = build("https://example.com/example.pdf", page_response);
 
