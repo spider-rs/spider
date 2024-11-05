@@ -11,7 +11,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_limit(100)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
-        // .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
+        .with_chrome_connection(Some("http://127.0.0.1:6000/json/version".into()))
         .build()
         .unwrap();
 
@@ -24,7 +24,7 @@ async fn crawl_website(url: &str) -> Result<()> {
     });
 
     let start = crate::tokio::time::Instant::now();
-    website.crawl().await;
+    website.crawl_smart().await;
 
     let duration = start.elapsed();
 
@@ -42,9 +42,9 @@ async fn crawl_website(url: &str) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = tokio::join!(
-        crawl_website("https://choosealicense.com"),
-        crawl_website("https://jeffmendez.com"),
-        crawl_website("https://example.com"),
+        // crawl_website("https://choosealicense.com"),
+        // crawl_website("https://jeffmendez.com"),
+        crawl_website("https://www.feishu.cn/community"),
     );
 
     Ok(())
