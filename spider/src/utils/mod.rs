@@ -980,6 +980,15 @@ pub async fn fetch_page_html_chrome_base(
                             },
                         )
                         .await;
+
+                    // perform extra navigate to trigger page actions.
+                    if let Some(u) = url_target {
+                        if u.starts_with("http") {
+                            let _ = page
+                                .evaluate(format!(r#"window.location = "{}";"#, u))
+                                .await;
+                        }
+                    }
                 }
             } else {
                 if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
