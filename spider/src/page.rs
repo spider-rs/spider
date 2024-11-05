@@ -123,7 +123,7 @@ pub struct AIResults {
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Bytes>,
+    html: Option<Box<Bytes>>,
     /// Base absolute url for page.
     base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
@@ -170,7 +170,7 @@ pub struct Page {
 #[derive(Debug, Clone, Default)]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Bytes>,
+    html: Option<Box<Bytes>>,
     #[cfg(feature = "headers")]
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
@@ -318,10 +318,10 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<Rela
 
 #[cfg(not(feature = "decentralized"))]
 /// Is the resource valid?
-pub fn validate_empty(content: &Option<Bytes>, is_success: bool) -> bool {
+pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
-            if content.is_empty() || content == "<html><head></head><body></body></html>" || is_success &&
+            if content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
             content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
             content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n") {
                 false
@@ -743,7 +743,10 @@ impl Page {
 
     /// Set the html directly of the page
     pub fn set_html_bytes(&mut self, html: Option<Bytes>) {
-        self.html = html;
+        self.html = match html {
+            Some(html) => Some(Box::new(html)),
+            _ => None,
+        };
     }
 
     /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
@@ -1585,7 +1588,7 @@ pub fn encode_bytes(html: &Bytes, label: &str) -> String {
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 #[cfg(feature = "encoding")]
-pub fn get_html_encoded(html: &Option<Bytes>, label: &str) -> String {
+pub fn get_html_encoded(html: &Option<Box<Bytes>>, label: &str) -> String {
     match html.as_ref() {
         Some(html) => encode_bytes(html, label),
         _ => Default::default(),
