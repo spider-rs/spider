@@ -3,8 +3,6 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 
-#[cfg(not(feature = "decentralized"))]
-use crate::packages::scraper::Html;
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
@@ -28,6 +26,7 @@ lazy_static! {
     /// Wildcard match all domains.
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
     static ref SSG_CAPTURE: Regex =  Regex::new(r#""(.*?)""#).unwrap();
+    static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
 }
 
 #[cfg(any(feature = "smart", feature = "chrome_intercept"))]
@@ -39,6 +38,35 @@ lazy_static! {
             "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
             "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js"
         }
+    };
+}
+
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "full_resources"),
+    feature = "smart"
+))]
+lazy_static! {
+    static ref DOM_WATCH_METHODS: regex::bytes::RegexSet = {
+        let set = unsafe {
+            regex::bytes::RegexSet::new(&[
+                r"\.createElementNS",
+                r"\.removeChild",
+                r"\.insertBefore",
+                r"\.createElement",
+                r"\.setAttribute",
+                r"\.createTextNode",
+                r"\.replaceChildren",
+                r"\.prepend",
+                r"\.append",
+                r"\.appendChild",
+                r"\.write",
+                r"\$\s*\(.*?\)",
+            ])
+            .unwrap_unchecked()
+        };
+
+        set
     };
 }
 
@@ -967,21 +995,19 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
                     .await;
             } else {
-                let html = Box::new(Html::parse_fragment(html));
-                let mut stream = tokio_stream::iter(html.tree);
-                // the original url
                 let parent_host = &selectors.1[0];
                 // the host schemes
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        if element.name() == "a" {
-                            if let Some(href) = element.attr("href") {
+                let _ = rewrite_str_empty(
+                    &html,
+                    lol_html::RewriteStrSettings {
+                        element_content_handlers: vec![lol_html::element!("a", |el| {
+                            if let Some(href) = el.get_attribute("href") {
                                 self.push_link(
-                                    href,
+                                    &href,
                                     &mut map,
                                     &selectors.0,
                                     parent_host,
@@ -990,11 +1016,14 @@ impl Page {
                                     sub_matcher,
                                 );
                             }
-                        }
-                    }
-                }
+                            Ok(())
+                        })],
+                        ..lol_html::RewriteStrSettings::default()
+                    },
+                );
             }
         }
+
         map
     }
 
@@ -1015,9 +1044,6 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
                     .await;
             } else {
-                let html = Box::new(crate::packages::scraper::Html::parse_fragment(html));
-                let mut stream = tokio_stream::iter(html.tree);
-
                 // the original url
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -1027,13 +1053,14 @@ impl Page {
 
                 let mut build_ssg_path = None;
 
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        match element.name() {
-                            "a" => {
-                                if let Some(href) = element.attr("href") {
+                let _ = rewrite_str_empty(
+                    &html,
+                    lol_html::RewriteStrSettings {
+                        element_content_handlers: vec![
+                            lol_html::element!("a", |el| {
+                                if let Some(href) = el.get_attribute("href") {
                                     self.push_link(
-                                        href,
+                                        &href,
                                         &mut map,
                                         &selectors.0,
                                         parent_host,
@@ -1042,20 +1069,24 @@ impl Page {
                                         sub_matcher,
                                     );
                                 }
-                            }
-                            "script" if build_ssg_path.is_none() => {
-                                if let Some(source) = element.attr("src") {
-                                    if source.starts_with("/_next/static/")
-                                        && source.ends_with("/_ssgManifest.js")
-                                    {
-                                        build_ssg_path = Some(self.abs_path(source));
+                                Ok(())
+                            }),
+                            lol_html::element!("script", |el| {
+                                if build_ssg_path.is_none() {
+                                    if let Some(source) = el.get_attribute("src") {
+                                        if source.starts_with("/_next/static/")
+                                            && source.ends_with("/_ssgManifest.js")
+                                        {
+                                            build_ssg_path = Some(self.abs_path(&source));
+                                        }
                                     }
                                 }
-                            }
-                            _ => (),
-                        }
-                    }
-                }
+                                Ok(())
+                            }),
+                        ],
+                        ..lol_html::RewriteStrSettings::default()
+                    },
+                );
 
                 if let Some(build_ssg_path) = build_ssg_path {
                     if let Some(s) = build_ssg_path {
@@ -1094,6 +1125,7 @@ impl Page {
                 }
             }
         }
+
         map
     }
 
@@ -1139,211 +1171,181 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<A> {
-        let mut map = HashSet::new();
-        let html = self.get_html();
+        use auto_encoder::auto_encode_bytes;
 
-        if !html.is_empty() {
-            if html.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
+        let mut map = HashSet::new();
+
+        if !self.is_empty() {
+            let html_resource = self.get_html();
+
+            if html_resource.starts_with("<?xml") {
+                self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map)
                     .await;
             } else {
+                use lol_html::{doc_comments, element, RewriteStrSettings};
+
+                let (tx, rx) = tokio::sync::oneshot::channel();
+
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
                 let parent_host = &parent_frags[0];
                 let parent_host_scheme = &parent_frags[1];
                 let sub_matcher = &selectors.0;
-                let html = Box::new(Html::parse_document(&html));
-                let (tx, rx) = tokio::sync::oneshot::channel();
 
-                let mut stream = tokio_stream::iter(html.tree);
                 let mut rerender = false;
                 let mut static_app = false;
 
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        let element_name = element.name();
+                let rewrited_bytes = match rewrite_str_as_bytes(
+                    &html_resource,
+                    RewriteStrSettings {
+                        element_content_handlers: vec![
+                            element!("script", |element| {
+                                if !static_app {
+                                    if let Some(src) = element.get_attribute("src") {
+                                        if src.starts_with("/") {
+                                            if src.starts_with("/_next/static/chunks/pages/")
+                                                || src.starts_with("/webpack-runtime-")
+                                                || element.get_attribute("id").eq(&*GATSBY)
+                                            {
+                                                static_app = true;
+                                            }
 
-                        // check scripts for non SSR/SSG pages. We need to check for lazy loading elements done by the static app for re-rendering.
-                        if !static_app && element_name == "script" {
-                            match element.attr("src") {
-                                Some(src) => {
-                                    if src.starts_with("/") {
-                                        if src.starts_with("/_next/static/chunks/pages/")
-                                            || src.starts_with("/webpack-runtime-")
-                                            || element.attr("id") == Some("gatsby-chunk-mapping")
-                                        {
-                                            static_app = true;
-                                            continue;
-                                        }
-
-                                        match self.abs_path(src) {
-                                            Some(abs) => {
-                                                match abs
+                                            if let Some(abs) = self.abs_path(&src) {
+                                                if let Ok(mut paths) = abs
                                                     .path_segments()
                                                     .ok_or_else(|| "cannot be base")
                                                 {
-                                                    Ok(mut paths) => {
-                                                        while let Some(p) = paths.next() {
-                                                            // todo: get the path last before None instead of checking for ends_with
-                                                            if p.ends_with(".js")
-                                                                && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                            {
-                                                                rerender = true;
-                                                            } else {
-                                                                match node.as_text() {
-                                                                    Some(text) => {
-                                                                        lazy_static! {
-                                                                            static ref DOM_WATCH_METHODS: regex::RegexSet = {
-                                                                                let set = unsafe {
-                                                                                    regex::RegexSet::new(&[
-                                                                                r"/.createElementNS/gm",
-                                                                                r"/.removeChild/gm",
-                                                                                r"/.insertBefore/gm",
-                                                                                r"/.createElement/gm",
-                                                                                r"/.setAttribute/gm",
-                                                                                r"/.createTextNode/gm",
-                                                                                r"/.replaceChildren/gm",
-                                                                                r"/.prepend/gm",
-                                                                                r"/.append/gm",
-                                                                                r"/.appendChild/gm",
-                                                                                r"/.write/gm",
-                                                                                r"\$\s*\(.*?\)",
-                                                                            ])
-                                                                            .unwrap_unchecked()
-                                                                                };
-
-                                                                                set
-                                                                            };
-                                                                        }
-                                                                        rerender =
-                                                                            DOM_WATCH_METHODS
-                                                                                .is_match(text);
-                                                                    }
-                                                                    _ => (),
-                                                                }
-                                                            }
+                                                    while let Some(p) = paths.next() {
+                                                        // todo: get the path last before None instead of checking for ends_with
+                                                        if p.ends_with(".js")
+                                                            && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                        {
+                                                            rerender = true;
                                                         }
                                                     }
-                                                    _ => (),
-                                                };
-
-                                                if rerender {
-                                                    // we should re-use the html content instead with events.
-                                                    let uu = self.get_html();
-                                                    let browser = browser.to_owned();
-                                                    let configuration = configuration.clone();
-                                                    let target_url = self.url.clone();
-                                                    let context_id = context_id.clone();
-                                                    let parent_host = parent_host.clone();
-
-                                                    tokio::task::spawn(async move {
-                                                        // we need to use about:blank here since we set the HTML content directly
-                                                        match crate::features::chrome::attempt_navigation("about:blank", &browser, &configuration.request_timeout, &context_id).await {
-                                                        Ok(new_page) => {
-
-                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                                &new_page,
-                                                                configuration.chrome_intercept.enabled,
-                                                                &configuration.auth_challenge_response,
-                                                                configuration.chrome_intercept.block_visuals,
-                                                                &parent_host,
-                                                            )
-                                                            .await;
-
-                                                            crate::features::chrome::setup_chrome_events(&new_page, &configuration).await;
-
-                                                            let page_resource =
-                                                            crate::utils::fetch_page_html_chrome_base(
-                                                                &uu,
-                                                                &new_page,
-                                                                true,
-                                                                true,
-                                                                &Some(crate::configuration::WaitFor::new(
-                                                                    Some(
-                                                                        core::time::Duration::from_secs(
-                                                                            120,
-                                                                        ), // default a duration for smart handling. (maybe expose later on.)
-                                                                    ),
-                                                                    None,
-                                                                    true,
-                                                                    true,
-                                                                    None,
-                                                                    Some(crate::configuration::WaitForSelector::new(  Some(core::time::Duration::from_millis(500)), "body".into()))
-                                                                )),
-                                                                &configuration.screenshot,
-                                                                false,
-                                                                &configuration.openai_config,
-                                                                Some(&target_url),
-                                                                &configuration
-                                                                        .execution_scripts,
-                                                                &configuration
-                                                                        .automation_scripts,
-                                                                &configuration.viewport,
-                                                                &configuration.request_timeout
-                                                            )
-                                                            .await;
-
-                                                        match intercept_handle {
-                                                            Some(h) => {
-                                                                let _ = h.await;
-                                                            }
-                                                            _ => (),
-                                                        }
-                                                        if let Ok(resource) = page_resource {
-                                                                if let Err(_) = tx.send(resource)
-                                                                {
-                                                                    crate::utils::log(
-                                                                        "the receiver dropped",
-                                                                        "",
-                                                                    );
-                                                                }
-                                                            }
-                                                        }
-                                                        _ => (),
-                                                    }
-                                                    });
-
-                                                    break;
                                                 }
                                             }
-                                            _ => (),
                                         }
                                     }
                                 }
-                                _ => (),
+                                Ok(())
+                            }),
+                            element!("a", |el| {
+                                if let Some(href) = el.get_attribute("href") {
+                                    self.push_link(
+                                        &href,
+                                        &mut map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                    );
+                                }
+
+                                el.remove();
+
+                                Ok(())
+                            }),
+                            element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                                el.remove();
+                                Ok(())
+                            }),
+                        ],
+                        document_content_handlers: vec![doc_comments!(|c| {
+                            c.remove();
+                            Ok(())
+                        })],
+                        ..RewriteStrSettings::default()
+                    },
+                ) {
+                    Ok(s) => s,
+                    _ => html_resource.as_bytes().to_vec(),
+                };
+
+                if rerender || DOM_WATCH_METHODS.is_match(&rewrited_bytes) {
+                    // we should re-use the html content instead with events.
+                    let browser = browser.to_owned();
+                    let configuration = configuration.clone();
+                    let target_url = self.url.clone();
+                    let context_id = context_id.clone();
+                    let parent_host = parent_host.clone();
+
+                    tokio::task::spawn(async move {
+                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                            "about:blank",
+                            &browser,
+                            &configuration.request_timeout,
+                            &context_id,
+                        )
+                        .await
+                        {
+                            let intercept_handle =
+                                crate::features::chrome::setup_chrome_interception_base(
+                                    &new_page,
+                                    configuration.chrome_intercept.enabled,
+                                    &configuration.auth_challenge_response,
+                                    configuration.chrome_intercept.block_visuals,
+                                    &parent_host,
+                                )
+                                .await;
+
+                            crate::features::chrome::setup_chrome_events(&new_page, &configuration)
+                                .await;
+
+                            let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                &html_resource,
+                                &new_page,
+                                true,
+                                true,
+                                &Some(crate::configuration::WaitFor::new(
+                                    Some(
+                                        core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
+                                    ),
+                                    None,
+                                    true,
+                                    true,
+                                    None,
+                                    Some(crate::configuration::WaitForSelector::new(
+                                        Some(core::time::Duration::from_millis(500)),
+                                        "body".into(),
+                                    )),
+                                )),
+                                &configuration.screenshot,
+                                false,
+                                &configuration.openai_config,
+                                Some(&target_url),
+                                &configuration.execution_scripts,
+                                &configuration.automation_scripts,
+                                &configuration.viewport,
+                                &configuration.request_timeout,
+                            )
+                            .await;
+
+                            if let Some(h) = intercept_handle {
+                                let _ = h.await;
+                            }
+
+                            if let Ok(resource) = page_resource {
+                                if let Err(_) = tx.send(resource) {
+                                    crate::utils::log("the receiver dropped", "");
+                                }
                             }
                         }
+                    });
 
-                        if element_name == "a" {
-                            // add fullresources?
-                            if let Some(href) = element.attr("href") {
-                                self.push_link(
-                                    href,
-                                    &mut map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                );
-                            }
-                        }
-                    }
-                }
-
-                if rerender {
-                    drop(stream);
                     match rx.await {
                         Ok(v) => {
                             let extended_map = self
                                 .links_stream_base::<A>(
                                     selectors,
                                     &match v.content {
-                                        Some(h) => String::from_utf8_lossy(&h).to_string(),
+                                        Some(h) => auto_encode_bytes(&h),
                                         _ => Default::default(),
                                     },
                                 )
                                 .await;
+
                             map.extend(extended_map)
                         }
                         Err(e) => {
@@ -1353,6 +1355,7 @@ impl Page {
                 }
             }
         }
+
         map
     }
 
@@ -1363,22 +1366,22 @@ impl Page {
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
-        let html = self.get_html();
 
-        if !html.is_empty() {
+        if !self.is_empty() {
+            let html = self.get_html();
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
                     .await;
             } else {
-                let html = Box::new(crate::packages::scraper::Html::parse_document(&html));
-                let mut stream = tokio_stream::iter(html.tree);
-
                 let base_domain = &selectors.0;
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
                 let parent_host = &parent_frags[0];
                 let parent_host_scheme = &parent_frags[1];
                 let sub_matcher = &selectors.0;
+
+                let html = Box::new(crate::packages::scraper::Html::parse_document(&html));
+                let mut stream = tokio_stream::iter(html.tree);
 
                 while let Some(node) = stream.next().await {
                     if let Some(element) = node.as_element() {
@@ -1585,6 +1588,42 @@ pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
         Some(b) => String::from_utf8_lossy(b).to_string(),
         _ => Default::default(),
     }
+}
+
+/// Rewrite a string without encoding it.
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "full_resources"),
+    feature = "smart"
+))]
+pub fn rewrite_str_as_bytes<'h, 's>(
+    html: &str,
+    settings: impl Into<lol_html::Settings<'h, 's>>,
+) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
+    let mut output = vec![];
+
+    let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |c: &[u8]| {
+        output.extend_from_slice(c);
+    });
+
+    rewriter.write(html.as_bytes())?;
+    rewriter.end()?;
+
+    Ok(output)
+}
+
+/// Basic rewriter without rewriting.
+pub fn rewrite_str_empty<'h, 's>(
+    html: &str,
+    settings: impl Into<lol_html::Settings<'h, 's>>,
+) -> Result<(), lol_html::errors::RewritingError> {
+    // we should use this in our chunks to rewrite while streaming.
+    let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
+
+    rewriter.write(html.as_bytes())?;
+    rewriter.end()?;
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -130,9 +130,7 @@ impl Html {
             create_missing_parent: false,
         };
         let mut buf = Vec::new();
-        match serialize(&mut buf, self, opts) {
-            _ => (),
-        };
+        let _ = serialize(&mut buf, self, opts);
         auto_encoder::auto_encode_bytes(&buf)
     }
 

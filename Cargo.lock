@@ -2223,9 +2223,9 @@ checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "lol_html"
-version = "1.2.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4629ff9c2deeb7aad9b2d0f379fc41937a02f3b739f007732c46af40339dee5"
+checksum = "964b47c14635e111f7efddcd8f1f8794195f66225fef19822fa942b217a859cf"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -3917,7 +3917,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "ahash",
  "async-openai",
@@ -3978,7 +3978,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "clap",
  "env_logger",
@@ -4037,7 +4037,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4059,7 +4059,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.11.20"
+version = "2.12.4"
 dependencies = [
  "env_logger",
  "lazy_static",
