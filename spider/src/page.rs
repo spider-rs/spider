@@ -47,26 +47,22 @@ lazy_static! {
     feature = "smart"
 ))]
 lazy_static! {
-    static ref DOM_WATCH_METHODS: regex::bytes::RegexSet = {
-        let set = unsafe {
-            regex::bytes::RegexSet::new(&[
-                r"\.createElementNS",
-                r"\.removeChild",
-                r"\.insertBefore",
-                r"\.createElement",
-                r"\.setAttribute",
-                r"\.createTextNode",
-                r"\.replaceChildren",
-                r"\.prepend",
-                r"\.append",
-                r"\.appendChild",
-                r"\.write",
-                r"\$\s*\(.*?\)",
-            ])
-            .unwrap_unchecked()
-        };
+    static ref DOM_WATCH_METHODS: aho_corasick::AhoCorasick = {
+        let patterns = &[
+            ".createElementNS",
+            ".removeChild",
+            ".insertBefore",
+            ".createElement",
+            ".setAttribute",
+            ".createTextNode",
+            ".replaceChildren",
+            ".prepend",
+            ".append",
+            ".appendChild",
+            ".write",
+        ];
 
-        set
+        aho_corasick::AhoCorasick::new(patterns).unwrap()
     };
 }
 
@@ -1263,7 +1259,13 @@ impl Page {
                     _ => html_resource.as_bytes().to_vec(),
                 };
 
-                if rerender || DOM_WATCH_METHODS.is_match(&rewrited_bytes) {
+                if !rerender {
+                    if let Some(_) = DOM_WATCH_METHODS.find(&rewrited_bytes) {
+                        rerender = true;
+                    }
+                }
+
+                if rerender {
                     // we should re-use the html content instead with events.
                     let browser = browser.to_owned();
                     let configuration = configuration.clone();
