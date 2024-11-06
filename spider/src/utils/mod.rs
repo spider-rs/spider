@@ -509,7 +509,6 @@ pub async fn perform_chrome_http_request(
                         }
                         _ => (),
                     }
-
                     request_headers.clone_from(&http_request.headers);
 
                     match http_request.response {
@@ -948,6 +947,50 @@ async fn perform_smart_mouse_movement(
 ) {
 }
 
+/// Cache the chrome response
+#[cfg(all(feature = "chrome", feature = "cache_chrome_hybrid"))]
+pub async fn cache_chrome_response(
+    target_url: &str,
+    page_response: &PageResponse,
+    chrome_http_req_res: ChromeHTTPReqRes,
+) {
+    if let Ok(u) = url::Url::parse(target_url) {
+        let http_response = HttpResponse {
+            url: u,
+            body: match page_response.content.as_ref() {
+                Some(b) => b.clone().to_vec(),
+                _ => Default::default(),
+            },
+            status: chrome_http_req_res.status_code.into(),
+            version: match chrome_http_req_res.protocol.as_str() {
+                "http/0.9" => HttpVersion::Http09,
+                "http/1" | "http/1.0" => HttpVersion::Http10,
+                "http/1.1" => HttpVersion::Http11,
+                "http/2.0" | "http/2" => HttpVersion::H2,
+                "http/3.0" | "http/3" => HttpVersion::H3,
+                _ => HttpVersion::Http11,
+            },
+            headers: chrome_http_req_res.response_headers,
+        };
+        put_hybrid_cache(
+            &string_concat!("GET", ":", target_url),
+            http_response,
+            &"GET",
+            chrome_http_req_res.request_headers,
+        )
+        .await;
+    }
+}
+
+/// Cache the chrome response
+#[cfg(all(feature = "chrome", not(feature = "cache_chrome_hybrid")))]
+pub async fn cache_chrome_response(
+    _target_url: &str,
+    _page_response: &PageResponse,
+    _chrome_http_req_res: ChromeHTTPReqRes,
+) {
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -1000,7 +1043,7 @@ pub async fn fetch_page_html_chrome_base(
         Ok(())
     };
 
-    let _ = tokio::time::timeout(
+    let request_timeout = tokio::time::timeout(
         match request_timeout {
             Some(timeout) => **timeout,
             _ => tokio::time::Duration::from_secs(60),
@@ -1009,146 +1052,135 @@ pub async fn fetch_page_html_chrome_base(
     )
     .await;
 
-    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation {
-        let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
-            match page.wait_for_navigation_response().await {
-                Ok(u) => get_last_redirect(&source, &u, &page).await,
-                _ => None,
-            }
-        })
-        .await;
-
-        match last_redirect {
-            Ok(last) => last,
-            _ => None,
-        }
+    let timeout_error = if let Err(elasped) = request_timeout {
+        Some(elasped)
     } else {
         None
     };
 
-    if chrome_http_req_res.waf_check {
-        perform_smart_mouse_movement(&page, &viewport).await;
-    }
+    let page_response = if timeout_error.is_none() && chrome_http_req_res.status_code.is_success() {
+        // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+        let final_url = if wait_for_navigation {
+            let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
+                match page.wait_for_navigation_response().await {
+                    Ok(u) => get_last_redirect(&source, &u, &page).await,
+                    _ => None,
+                }
+            })
+            .await;
 
-    page_wait(&page, &wait_for).await;
-
-    if execution_scripts.is_some() || automation_scripts.is_some() {
-        let target_url = if final_url.is_some() {
-            match final_url.as_ref() {
-                Some(ref u) => u.to_string(),
-                _ => Default::default(),
+            match last_redirect {
+                Ok(last) => last,
+                _ => None,
             }
-        } else if url_target.is_some() {
-            url_target.unwrap_or_default().to_string()
         } else {
-            source.to_string()
+            None
         };
 
-        tokio::join!(
-            crate::features::chrome_common::eval_execution_scripts(
-                &page,
-                &target_url,
-                &execution_scripts
-            ),
-            crate::features::chrome_common::eval_automation_scripts(
-                &page,
-                &target_url,
-                &automation_scripts
-            )
-        );
-    }
-
-    let res =
-        tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content_bytes()).await;
-
-    let mut res: Box<bytes::Bytes> = match res {
-        Ok(b) => match b {
-            Ok(b) => b.into(),
-            _ => Default::default(),
-        },
-        _ => Default::default(),
-    };
-
-    if cfg!(feature = "real_browser") {
-        let _ = cf_handle(&mut res, &page).await;
-    };
-
-    let ok = res.len() > 0;
-
-    if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
-        chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
-    }
-
-    let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
-
-    set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
-    set_page_response_cookies(&mut page_response, &page).await;
-
-    if openai_config.is_some() {
-        run_openai_request(
-            match url_target {
-                Some(ref ut) => ut,
-                _ => source,
-            },
-            page,
-            wait_for,
-            openai_config,
-            &mut page_response,
-            ok,
-        )
-        .await;
-    }
-
-    if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
-        let _ = tokio::time::timeout(
-            tokio::time::Duration::from_secs(30),
-            perform_screenshot(source, page, screenshot, &mut page_response),
-        )
-        .await;
-    }
-
-    if !page_set
-        && cfg!(feature = "cache_chrome_hybrid")
-        && chrome_http_req_res.status_code.is_success()
-    {
-        match url::Url::parse(source) {
-            Ok(u) => {
-                let http_response = HttpResponse {
-                    url: u,
-                    body: match page_response.content.as_ref() {
-                        Some(b) => b.clone().to_vec(),
-                        _ => Default::default(),
-                    },
-                    status: chrome_http_req_res.status_code.into(),
-                    version: match chrome_http_req_res.protocol.as_str() {
-                        "http/0.9" => HttpVersion::Http09,
-                        "http/1" | "http/1.0" => HttpVersion::Http10,
-                        "http/1.1" => HttpVersion::Http11,
-                        "http/2.0" | "http/2" => HttpVersion::H2,
-                        "http/3.0" | "http/3" => HttpVersion::H3,
-                        _ => HttpVersion::Http11,
-                    },
-                    headers: chrome_http_req_res.response_headers,
-                };
-                put_hybrid_cache(
-                    &string_concat!("GET", ":", source),
-                    http_response,
-                    &"GET",
-                    chrome_http_req_res.request_headers,
-                )
-                .await;
-            }
-            _ => (),
+        if chrome_http_req_res.waf_check {
+            perform_smart_mouse_movement(&page, &viewport).await;
         }
-    }
+
+        page_wait(&page, &wait_for).await;
+
+        if execution_scripts.is_some() || automation_scripts.is_some() {
+            let target_url = if final_url.is_some() {
+                match final_url.as_ref() {
+                    Some(ref u) => u.to_string(),
+                    _ => Default::default(),
+                }
+            } else if url_target.is_some() {
+                url_target.unwrap_or_default().to_string()
+            } else {
+                source.to_string()
+            };
+
+            tokio::join!(
+                crate::features::chrome_common::eval_execution_scripts(
+                    &page,
+                    &target_url,
+                    &execution_scripts
+                ),
+                crate::features::chrome_common::eval_automation_scripts(
+                    &page,
+                    &target_url,
+                    &automation_scripts
+                )
+            );
+        }
+
+        let res =
+            tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content_bytes()).await;
+
+        let mut res: Box<bytes::Bytes> = match res {
+            Ok(b) => match b {
+                Ok(b) => b.into(),
+                _ => Default::default(),
+            },
+            _ => Default::default(),
+        };
+
+        if cfg!(feature = "real_browser") {
+            let _ = cf_handle(&mut res, &page).await;
+        };
+
+        let ok = res.len() > 0;
+
+        if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
+            chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
+        }
+
+        let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
+
+        set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+        set_page_response_cookies(&mut page_response, &page).await;
+
+        if openai_config.is_some() {
+            run_openai_request(
+                match url_target {
+                    Some(ref ut) => ut,
+                    _ => source,
+                },
+                page,
+                wait_for,
+                openai_config,
+                &mut page_response,
+                ok,
+            )
+            .await;
+        }
+
+        if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
+            let _ = tokio::time::timeout(
+                tokio::time::Duration::from_secs(30),
+                perform_screenshot(source, page, screenshot, &mut page_response),
+            )
+            .await;
+        }
+        page_response.status_code = chrome_http_req_res.status_code;
+        page_response.waf_check = chrome_http_req_res.waf_check;
+        if !page_set {
+            cache_chrome_response(&source, &page_response, chrome_http_req_res).await;
+        }
+
+        page_response
+    } else {
+        let mut page_response = PageResponse::default();
+        set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+        page_response.status_code = chrome_http_req_res.status_code;
+        page_response.waf_check = chrome_http_req_res.waf_check;
+
+        if let Some(_elasped) = timeout_error {
+            page_response.status_code = StatusCode::REQUEST_TIMEOUT;
+        }
+
+        page_response
+    };
 
     if cfg!(not(feature = "chrome_store_page")) {
         page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
             .await?;
     }
-
-    page_response.waf_check = chrome_http_req_res.waf_check;
 
     Ok(page_response)
 }
@@ -1161,13 +1193,12 @@ fn set_page_response(
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     final_url: Option<String>,
 ) -> PageResponse {
-    let page_response = PageResponse {
+    PageResponse {
         content: if ok { Some(res.into()) } else { None },
         status_code: chrome_http_req_res.status_code,
         final_url,
         ..Default::default()
-    };
-    page_response
+    }
 }
 
 /// Set the page response.
