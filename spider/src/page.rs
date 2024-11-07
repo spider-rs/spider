@@ -2,12 +2,12 @@ use crate::compact_str::CompactString;
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
-
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
+use auto_encoder::auto_encode_bytes;
 use bytes::Bytes;
 use hashbrown::HashSet;
 use lol_html::Settings;
@@ -20,6 +20,7 @@ use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
+#[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -204,6 +205,62 @@ pub struct Page {
     pub waf_check: bool,
 }
 
+/// Validate link and push into the map
+pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    base: &Option<Url>,
+    href: &str,
+    map: &mut HashSet<A>,
+    base_domain: &CompactString,
+    parent_host: &CompactString,
+    parent_host_scheme: &CompactString,
+    base_input_domain: &CompactString,
+    sub_matcher: &CompactString,
+    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+) {
+    if let Some(b) = base {
+        let mut abs = convert_abs_path(&b, href);
+        let scheme = abs.scheme();
+
+        if scheme == "https" || scheme == "http" {
+            let host_name = abs.host_str();
+            let mut can_process = parent_host_match(
+                host_name,
+                base_domain,
+                parent_host,
+                base_input_domain,
+                sub_matcher,
+            );
+
+            if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
+                can_process = external_domains_caseless
+                    .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                    || external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+            }
+
+            if can_process {
+                if abs.scheme() != parent_host_scheme.as_str() {
+                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                }
+
+                let hchars = abs.path();
+
+                if let Some(position) = hchars.rfind('.') {
+                    let resource_ext = &hchars[position + 1..hchars.len()];
+
+                    if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
+                        can_process = false;
+                    }
+                }
+
+                if can_process {
+                    map.insert(abs.as_str().to_string().into());
+                }
+            }
+        }
+    }
+}
+
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
     match domain.host_str() {
@@ -338,7 +395,6 @@ pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
 pub fn build(url: &str, res: PageResponse) -> Page {
     let success = res.status_code.is_success();
     let resource_found = validate_empty(&res.content, success);
-
     let mut should_retry = resource_found && !success
         || res.status_code.is_server_error()
         || res.status_code == StatusCode::TOO_MANY_REQUESTS
@@ -351,9 +407,13 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         headers: res.headers,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
-        base: match Url::parse(url) {
-            Ok(u) => Some(u),
-            _ => None,
+        base: if !url.is_empty() {
+            match Url::parse(url) {
+                Ok(u) => Some(u),
+                _ => None,
+            }
+        } else {
+            None
         },
         url: url.into(),
         #[cfg(feature = "time")]
@@ -417,11 +477,264 @@ pub fn build(_: &str, res: PageResponse) -> Page {
     }
 }
 
+/// Settings for streaming rewriter
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PageLinkBuildSettings {
+    /// If the SSG build is in progress.
+    pub ssg_build: bool,
+    /// If full resources should be included.
+    pub full_resources: bool,
+    /// TLD handling resources.
+    pub tld: bool,
+    /// Subdomain handling resources.
+    pub subdomains: bool,
+}
+
+impl PageLinkBuildSettings {
+    /// New build link settings.
+    pub fn new(ssg_build: bool, full_resources: bool) -> Self {
+        Self {
+            ssg_build,
+            full_resources,
+            ..Default::default()
+        }
+    }
+
+    /// New build full link settings.
+    pub fn new_full(ssg_build: bool, full_resources: bool, subdomains: bool, tld: bool) -> Self {
+        Self {
+            ssg_build,
+            full_resources,
+            subdomains,
+            tld,
+        }
+    }
+}
+
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     pub async fn new_page(url: &str, client: &Client) -> Self {
-        let page_resource = crate::utils::fetch_page_html_raw(url, client).await;
+        let page_resource: PageResponse = crate::utils::fetch_page_html_raw(url, client).await;
         build(url, page_resource)
+    }
+
+    /// New page with rewriter
+    pub async fn new_page_streaming<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
+        url: &str,
+        client: &Client,
+        only_html: bool,
+        mut selectors: &mut RelativeSelectors,
+        external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+        r_settings: &PageLinkBuildSettings,
+        mut map: &mut hashbrown::HashSet<A>,
+        ssg_map: Option<&mut hashbrown::HashSet<A>>,
+        prior_domain: &Option<Box<Url>>,
+        mut domain_parsed: &mut Option<Box<Url>>,
+    ) -> Self {
+        use crate::utils::{
+            handle_response_bytes_writer, modify_selectors, setup_default_response,
+            AllowedDomainTypes,
+        };
+
+        let page_response = match client.get(url).send().await {
+            Ok(res) if res.status().is_success() => {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let mut senders: Option<(
+                    tokio::sync::mpsc::UnboundedSender<String>,
+                    tokio::sync::mpsc::UnboundedReceiver<String>,
+                )> = None;
+
+                let base = match Url::parse(url) {
+                    Ok(u) => Some(u),
+                    _ => None,
+                };
+
+                if url != res.url().as_str() {
+                    let domain = res.url().as_str();
+                    let mut url = Box::new(CaseInsensitiveString::new(&url));
+
+                    modify_selectors(
+                        &prior_domain,
+                        domain,
+                        &mut domain_parsed,
+                        &mut url,
+                        &mut selectors,
+                        AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+                    );
+                };
+
+                let parent_host = &selectors.1[0];
+                // the host schemes
+                let parent_host_scheme = &selectors.1[1];
+                let base_input_domain = &selectors.2; // the domain after redirects
+                let sub_matcher = &selectors.0;
+
+                // let prior_domain = self.domain_parsed.take();
+
+                let external_domains_caseless = external_domains_caseless.clone();
+
+                let base_links_settings = if r_settings.full_resources {
+                    lol_html::element!("a[href],script[src],link[href]", |el| {
+                        let attribute = if el.tag_name() == "script" {
+                            "src"
+                        } else {
+                            "href"
+                        };
+                        if let Some(href) = el.get_attribute(attribute) {
+                            push_link(
+                                &base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &external_domains_caseless,
+                            );
+                        }
+                        Ok(())
+                    })
+                } else {
+                    lol_html::element!("a[href]", |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            push_link(
+                                &base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &external_domains_caseless,
+                            );
+                        }
+                        Ok(())
+                    })
+                };
+
+                let mut element_content_handlers = vec![base_links_settings];
+
+                if r_settings.ssg_build {
+                    let c = tokio::sync::mpsc::unbounded_channel();
+                    let ctx = c.0.clone();
+
+                    element_content_handlers.push(lol_html::element!("script", move |el| {
+                        if let Some(source) = el.get_attribute("src") {
+                            if source.starts_with("/_next/static/")
+                                && source.ends_with("/_ssgManifest.js")
+                            {
+                                let _ = ctx.send(source);
+                            }
+                        }
+                        Ok(())
+                    }));
+
+                    senders.replace(c);
+                }
+
+                let settings = lol_html::send::Settings {
+                    element_content_handlers,
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
+                };
+
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(settings.into(), move |c: &[u8]| {
+                        let _ = tx.send(c.to_vec());
+                    });
+
+                let mut response =
+                    handle_response_bytes_writer(res, url, only_html, &mut rewriter).await;
+
+                let rewrite_error = response.1;
+
+                if !rewrite_error {
+                    let _ = rewriter.end();
+                }
+
+                let mut collected_bytes: Vec<u8> = Vec::new();
+
+                while let Some(c) = rx.recv().await {
+                    collected_bytes.extend_from_slice(&c);
+                }
+
+                response.0.content.replace(Box::new(collected_bytes.into()));
+
+                drop(rx);
+
+                if let Some(ctx) = senders {
+                    let mut rtx = ctx.1;
+                    drop(ctx.0);
+
+                    if r_settings.ssg_build {
+                        if let Some(mut ssg_map) = ssg_map {
+                            let rc = rtx.recv().await;
+
+                            if let Some(source) = rc {
+                                if let Some(ref url_base) = base {
+                                    let build_ssg_path = convert_abs_path(&url_base, &source);
+                                    let build_page =
+                                        Page::new_page(build_ssg_path.as_str(), &client).await;
+
+                                    for cap in
+                                        SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
+                                    {
+                                        if let Some(matched) = cap.get(1) {
+                                            let href = auto_encode_bytes(&matched.as_bytes())
+                                                .replace(r#"\u002F"#, "/");
+
+                                            fn get_last_segment(path: &str) -> &str {
+                                                if let Some(pos) = path.rfind('/') {
+                                                    &path[pos + 1..]
+                                                } else {
+                                                    path
+                                                }
+                                            }
+
+                                            let last_segment = get_last_segment(&href);
+
+                                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                            if !(last_segment.starts_with("[")
+                                                && last_segment.ends_with("]"))
+                                            {
+                                                push_link(
+                                                    &base,
+                                                    &href,
+                                                    &mut ssg_map,
+                                                    &selectors.0,
+                                                    parent_host,
+                                                    parent_host_scheme,
+                                                    base_input_domain,
+                                                    sub_matcher,
+                                                    &external_domains_caseless,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                response.0
+            }
+            Ok(res) => setup_default_response(&res),
+            Err(_) => {
+                log("- error parsing html text {}", url);
+                let mut page_response = PageResponse::default();
+                if let Ok(status_code) = StatusCode::from_u16(599) {
+                    page_response.status_code = status_code;
+                }
+                page_response
+            }
+        };
+
+        build(url, page_response)
     }
 
     /// Instantiate a new page and gather the html repro of standard fetch_page_html only gathering resources to crawl.
@@ -839,75 +1152,10 @@ impl Page {
         self.duration.elapsed()
     }
 
-    /// Validate link and push into the map
-    pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-        &self,
-        href: &str,
-        map: &mut HashSet<A>,
-        base_domain: &CompactString,
-        parent_host: &CompactString,
-        parent_host_scheme: &CompactString,
-        base_input_domain: &CompactString,
-        sub_matcher: &CompactString,
-    ) {
-        match self.abs_path(href) {
-            Some(mut abs) => {
-                let scheme = abs.scheme();
-
-                if scheme == "https" || scheme == "http" {
-                    let host_name = abs.host_str();
-                    let mut can_process = parent_host_match(
-                        host_name,
-                        base_domain,
-                        parent_host,
-                        base_input_domain,
-                        sub_matcher,
-                    );
-
-                    if !can_process
-                        && host_name.is_some()
-                        && !self.external_domains_caseless.is_empty()
-                    {
-                        can_process = self
-                            .external_domains_caseless
-                            .contains::<CaseInsensitiveString>(
-                                &host_name.unwrap_or_default().into(),
-                            )
-                            || self
-                                .external_domains_caseless
-                                .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                    }
-
-                    if can_process {
-                        if abs.scheme() != parent_host_scheme.as_str() {
-                            let _ = abs.set_scheme(parent_host_scheme.as_str());
-                        }
-
-                        let hchars = abs.path();
-
-                        if let Some(position) = hchars.rfind('.') {
-                            let resource_ext = &hchars[position + 1..hchars.len()];
-
-                            if !ONLY_RESOURCES
-                                .contains::<CaseInsensitiveString>(&resource_ext.into())
-                            {
-                                can_process = false;
-                            }
-                        }
-
-                        if can_process {
-                            map.insert(abs.as_str().to_string().into());
-                        }
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
-
     /// Find the links as a stream using string resource validation for XML files
+    #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_xml_links_stream_base<
-        A: PartialEq + Eq + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
         &self,
         selectors: &RelativeSelectors,
@@ -946,7 +1194,8 @@ impl Page {
                         if is_link_tag {
                             match e.unescape() {
                                 Ok(v) => {
-                                    self.push_link(
+                                    push_link(
+                                        &self.base,
                                         &v,
                                         map,
                                         &selectors.0,
@@ -954,6 +1203,7 @@ impl Page {
                                         parent_host_scheme,
                                         base_input_domain,
                                         sub_matcher,
+                                        &self.external_domains_caseless,
                                     );
                                 }
                                 _ => (),
@@ -983,7 +1233,9 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
-    pub async fn links_stream_base<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    pub async fn links_stream_base<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
         html: &str,
@@ -1001,27 +1253,50 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let _ = rewrite_str_empty(
-                    &html,
-                    Settings {
-                        element_content_handlers: vec![lol_html::element!("a", |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                self.push_link(
-                                    &href,
-                                    &mut map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                );
-                            }
-                            Ok(())
-                        })],
-                        adjust_charset_on_meta_tag: true,
-                        ..Settings::default()
-                    },
-                );
+                let rewriter_settings = Settings {
+                    element_content_handlers: vec![lol_html::element!("a", |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            push_link(
+                                &self.base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &self.external_domains_caseless,
+                            );
+                        }
+                        Ok(())
+                    })],
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
+                };
+
+                let mut wrote_error = false;
+
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+
+                let html_bytes = html.as_bytes();
+                let chunk_size = 8192;
+                let chunks = html_bytes.chunks(chunk_size);
+
+                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+
+                while let Some(chunk) = stream.next().await {
+                    if let Ok(chunk) = chunk {
+                        if let Err(_) = rewriter.write(chunk) {
+                            wrote_error = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !wrote_error {
+                    let _ = rewriter.end();
+                }
             }
         }
 
@@ -1030,7 +1305,10 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    pub async fn links_stream_base_ssg<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    #[cfg(all(not(feature = "decentralized")))]
+    pub async fn links_stream_base_ssg<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
         html: &str,
@@ -1039,12 +1317,15 @@ impl Page {
         use auto_encoder::auto_encode_bytes;
 
         let mut map = HashSet::new();
+        let mut map_ssg = HashSet::new();
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
                     .await;
             } else {
+                let c = tokio::sync::mpsc::unbounded_channel();
+
                 // the original url
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -1052,75 +1333,100 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let mut build_ssg_path = None;
+                let txx = c.0.clone();
 
-                let _ = rewrite_str_empty(
-                    &html,
-                    Settings {
-                        element_content_handlers: vec![
-                            lol_html::element!("a", |el| {
-                                if let Some(href) = el.get_attribute("href") {
-                                    self.push_link(
-                                        &href,
-                                        &mut map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                    );
-                                }
-                                Ok(())
-                            }),
-                            lol_html::element!("script", |el| {
-                                if build_ssg_path.is_none() {
-                                    if let Some(source) = el.get_attribute("src") {
-                                        if source.starts_with("/_next/static/")
-                                            && source.ends_with("/_ssgManifest.js")
-                                        {
-                                            build_ssg_path = Some(self.abs_path(&source));
-                                        }
+                let rewriter_settings = Settings {
+                    element_content_handlers: vec![
+                        lol_html::element!("a", |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                push_link(
+                                    &self.base,
+                                    &href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &self.external_domains_caseless,
+                                );
+                            }
+                            Ok(())
+                        }),
+                        lol_html::element!("script", move |el| {
+                            if let Some(source) = el.get_attribute("src") {
+                                if source.starts_with("/_next/static/")
+                                    && source.ends_with("/_ssgManifest.js")
+                                {
+                                    if let Some(build_path) = self.abs_path(&source) {
+                                        let _ = txx.send(build_path.as_str().to_string());
                                     }
                                 }
-                                Ok(())
-                            }),
-                        ],
-                        adjust_charset_on_meta_tag: true,
-                        ..Settings::default()
-                    },
-                );
+                            }
+                            Ok(())
+                        }),
+                    ],
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
+                };
 
-                if let Some(build_ssg_path) = build_ssg_path {
-                    if let Some(s) = build_ssg_path {
-                        let build_page = Page::new_page(s.as_str(), &client).await;
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
-                        for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
-                            if let Some(matched) = cap.get(1) {
-                                let href = auto_encode_bytes(&matched.as_bytes())
-                                    .replace(r#"\u002F"#, "/");
+                let html_bytes = html.as_bytes();
+                let chunk_size = 8192;
+                let chunks = html_bytes.chunks(chunk_size);
+                let mut wrote_error = false;
 
-                                fn get_last_segment(path: &str) -> &str {
-                                    if let Some(pos) = path.rfind('/') {
-                                        &path[pos + 1..]
-                                    } else {
-                                        path
-                                    }
+                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+
+                while let Some(chunk) = stream.next().await {
+                    if let Ok(chunk) = chunk {
+                        if let Err(_) = rewriter.write(chunk) {
+                            wrote_error = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !wrote_error {
+                    let _ = rewriter.end();
+                }
+
+                drop(c.0);
+                let mut rx = c.1;
+
+                if let Some(build_ssg_path) = rx.recv().await {
+                    let build_page = Page::new_page(&build_ssg_path, &client).await;
+
+                    for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                        if let Some(matched) = cap.get(1) {
+                            let href =
+                                auto_encode_bytes(&matched.as_bytes()).replace(r#"\u002F"#, "/");
+
+                            fn get_last_segment(path: &str) -> &str {
+                                if let Some(pos) = path.rfind('/') {
+                                    &path[pos + 1..]
+                                } else {
+                                    path
                                 }
+                            }
 
-                                let last_segment = get_last_segment(&href);
+                            let last_segment = get_last_segment(&href);
 
-                                // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
-                                if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
-                                    self.push_link(
-                                        &href,
-                                        &mut map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                    );
-                                }
+                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                            if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                push_link(
+                                    &self.base,
+                                    &href,
+                                    &mut map_ssg,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &self.external_domains_caseless,
+                                );
                             }
                         }
                     }
@@ -1128,11 +1434,16 @@ impl Page {
             }
         }
 
+        map.extend(map_ssg);
+
         map
     }
 
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
-    pub async fn links_stream_ssg<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    #[cfg(all(not(feature = "decentralized")))]
+    pub async fn links_stream_ssg<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
         client: &Client,
@@ -1145,10 +1456,29 @@ impl Page {
         }
     }
 
+    /// Find all href links and return them using CSS selectors.
+    #[inline(always)]
+    #[cfg(all(not(feature = "decentralized")))]
+    pub async fn links_ssg(
+        &self,
+        selectors: &RelativeSelectors,
+        client: &Client,
+    ) -> HashSet<CaseInsensitiveString> {
+        match self.html.is_some() {
+            false => Default::default(),
+            true => {
+                self.links_stream_ssg::<CaseInsensitiveString>(selectors, client)
+                    .await
+            }
+        }
+    }
+
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
-    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    pub async fn links_stream<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
@@ -1168,7 +1498,7 @@ impl Page {
     ))]
     #[inline(always)]
     pub async fn links_stream_smart<
-        A: PartialEq + std::fmt::Debug + Eq + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
         &self,
         selectors: &RelativeSelectors,
@@ -1177,8 +1507,10 @@ impl Page {
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<A> {
         use auto_encoder::auto_encode_bytes;
+        use lol_html::{doc_comments, element};
 
         let mut map = HashSet::new();
+        let mut inner_map: HashSet<A> = map.clone();
 
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
@@ -1187,9 +1519,10 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map)
                     .await;
             } else {
-                use lol_html::{doc_comments, element};
-
                 let (tx, rx) = tokio::sync::oneshot::channel();
+
+                let (txx, mut rxx) = tokio::sync::mpsc::unbounded_channel();
+                let (txxx, mut rxxx) = tokio::sync::mpsc::unbounded_channel();
 
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -1197,77 +1530,116 @@ impl Page {
                 let parent_host_scheme = &parent_frags[1];
                 let sub_matcher = &selectors.0;
 
-                let mut rerender = false;
+                let external_domains_caseless = self.external_domains_caseless.clone();
+
+                let base = self.base.clone();
+                let base1 = base.clone();
+
+                let txxx2 = txxx.clone();
+
                 let mut static_app = false;
 
-                let rewrited_bytes = match rewrite_str_as_bytes(
-                    &html_resource,
-                    Settings {
-                        element_content_handlers: vec![
-                            element!("script", |element| {
-                                if !static_app {
-                                    if let Some(src) = element.get_attribute("src") {
-                                        if src.starts_with("/") {
-                                            if src.starts_with("/_next/static/chunks/pages/")
-                                                || src.starts_with("/webpack-runtime-")
-                                                || element.get_attribute("id").eq(&*GATSBY)
-                                            {
-                                                static_app = true;
-                                            }
+                let rewriter_settings = Settings {
+                    element_content_handlers: vec![
+                        element!("script", move |element| {
+                            if !static_app {
+                                if let Some(src) = element.get_attribute("src") {
+                                    if src.starts_with("/") {
+                                        if src.starts_with("/_next/static/chunks/pages/")
+                                            || src.starts_with("/webpack-runtime-")
+                                            || element.get_attribute("id").eq(&*GATSBY)
+                                        {
+                                            static_app = true;
+                                        }
 
-                                            if let Some(abs) = self.abs_path(&src) {
-                                                if let Ok(mut paths) = abs
-                                                    .path_segments()
-                                                    .ok_or_else(|| "cannot be base")
-                                                {
-                                                    while let Some(p) = paths.next() {
-                                                        // todo: get the path last before None instead of checking for ends_with
-                                                        if p.ends_with(".js")
-                                                            && JS_FRAMEWORK_ASSETS.contains(&p)
-                                                        {
-                                                            rerender = true;
-                                                        }
+                                        if let Some(ref base) = base1 {
+                                            let abs = convert_abs_path(&base, &src);
+
+                                            if let Ok(mut paths) =
+                                                abs.path_segments().ok_or_else(|| "cannot be base")
+                                            {
+                                                while let Some(p) = paths.next() {
+                                                    // todo: get the path last before None instead of checking for ends_with
+                                                    if p.ends_with(".js")
+                                                        && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                    {
+                                                        let _ = txxx2.send(true);
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                Ok(())
-                            }),
-                            element!("a", |el| {
-                                if let Some(href) = el.get_attribute("href") {
-                                    self.push_link(
-                                        &href,
-                                        &mut map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                    );
-                                }
-
-                                el.remove();
-
-                                Ok(())
-                            }),
-                            element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
-                                el.remove();
-                                Ok(())
-                            }),
-                        ],
-                        document_content_handlers: vec![doc_comments!(|c| {
-                            c.remove();
+                            }
                             Ok(())
-                        })],
-                        adjust_charset_on_meta_tag: true,
-                        ..Settings::default()
-                    },
-                ) {
-                    Ok(s) => s,
-                    _ => html_resource.as_bytes().to_vec(),
+                        }),
+                        element!("a", |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut inner_map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &external_domains_caseless,
+                                );
+                            }
+
+                            el.remove();
+
+                            Ok(())
+                        }),
+                        element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                            el.remove();
+                            Ok(())
+                        }),
+                    ],
+                    document_content_handlers: vec![doc_comments!(|c| {
+                        c.remove();
+                        Ok(())
+                    })],
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
                 };
+
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |c: &[u8]| {
+                        let _ = txx.send(c.to_vec());
+                    });
+
+                let html_bytes = html_resource.as_bytes();
+                let chunk_size = 8192;
+                let chunks = html_bytes.chunks(chunk_size);
+                let mut wrote_error = false;
+
+                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+
+                while let Some(chunk) = stream.next().await {
+                    if let Ok(chunk) = chunk {
+                        if let Err(_) = rewriter.write(chunk) {
+                            wrote_error = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !wrote_error {
+                    let _ = rewriter.end();
+                }
+
+                drop(txxx);
+                drop(txx);
+
+                let mut rewrited_bytes: Vec<u8> = Vec::new();
+
+                while let Some(c) = rxx.recv().await {
+                    rewrited_bytes.extend_from_slice(&c);
+                }
+
+                let mut rerender = rxxx.recv().await.unwrap_or_default();
 
                 if !rerender {
                     if let Some(_) = DOM_WATCH_METHODS.find(&rewrited_bytes) {
@@ -1366,6 +1738,7 @@ impl Page {
                     };
                 }
             }
+            map.extend(inner_map);
         }
 
         map
@@ -1373,7 +1746,10 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    pub async fn links_stream_full_resource<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    #[cfg(all(not(feature = "decentralized")))]
+    pub async fn links_stream_full_resource<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
@@ -1461,7 +1837,9 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
-    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    pub async fn links_stream<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
@@ -1475,7 +1853,9 @@ impl Page {
     #[inline(always)]
     #[cfg(feature = "decentralized")]
     /// Find the links as a stream using string resource validation
-    pub async fn links_stream<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    pub async fn links_stream<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
         &self,
         _: &RelativeSelectors,
     ) -> HashSet<A> {
@@ -1492,24 +1872,9 @@ impl Page {
         }
     }
 
-    /// Find all href links and return them using CSS selectors.
-    #[inline(always)]
-    pub async fn links_ssg(
-        &self,
-        selectors: &RelativeSelectors,
-        client: &Client,
-    ) -> HashSet<CaseInsensitiveString> {
-        match self.html.is_some() {
-            false => Default::default(),
-            true => {
-                self.links_stream_ssg::<CaseInsensitiveString>(selectors, client)
-                    .await
-            }
-        }
-    }
-
     /// Find all href links and return them using CSS selectors gathering all resources.
     #[inline(always)]
+    #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_full(
         &self,
         selectors: &RelativeSelectors,

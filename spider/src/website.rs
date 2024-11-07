@@ -5,8 +5,9 @@ use crate::configuration::{
 };
 use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{get_page_selectors, get_page_selectors_base, Page};
+use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::{interner::ListBucket, log};
+use crate::utils::{setup_website_selectors, AllowedDomainTypes};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -1181,16 +1182,11 @@ impl Website {
 
     /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<RelativeSelectors> {
-        match self.get_url_parsed() {
-            Some(u) => {
-                get_page_selectors_base(u, self.configuration.subdomains, self.configuration.tld)
-            }
-            _ => get_page_selectors(
-                self.get_url().inner(),
-                self.configuration.subdomains,
-                self.configuration.tld,
-            ),
-        }
+        setup_website_selectors(
+            &self.get_url_parsed(),
+            self.get_url().inner(),
+            AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
+        )
     }
 
     /// Setup config for crawl.
@@ -1272,9 +1268,32 @@ impl Website {
             .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            let url = self.url.inner();
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+            let mut links_ssg = links.clone();
 
-            let mut page = Page::new_page(url, client).await;
+            let url = self.url.inner();
+            let mut page_links_settings =
+                PageLinkBuildSettings::new(true, self.configuration.full_resources);
+
+            page_links_settings.subdomains = self.configuration.subdomains;
+            page_links_settings.tld = self.configuration.tld;
+
+            let mut domain_parsed = self.domain_parsed.take();
+
+            let mut page = Page::new_page_streaming(
+                url,
+                client,
+                false,
+                base,
+                &self.configuration.external_domains_caseless,
+                &page_links_settings,
+                &mut links,
+                Some(&mut links_ssg),
+                &mut domain_parsed,
+                &mut self.domain_parsed,
+            )
+            .await;
+
             let mut retry_count = self.configuration.retry;
 
             while page.should_retry && retry_count > 0 {
@@ -1292,46 +1311,40 @@ impl Website {
                     if let Some(timeout) = page.get_timeout() {
                         tokio::time::sleep(timeout).await;
                     }
-                    page.clone_from(&Page::new_page(url, client).await);
+                    page.clone_from(
+                        &Page::new_page_streaming(
+                            url,
+                            client,
+                            false,
+                            base,
+                            &self.configuration.external_domains_caseless,
+                            &page_links_settings,
+                            &mut links,
+                            Some(&mut links_ssg),
+                            &mut domain_parsed,
+                            &mut self.domain_parsed,
+                        )
+                        .await,
+                    );
                 }
                 retry_count -= 1;
             }
 
             log::info!("fetch {}", &url);
 
-            // allow initial page mutation
-            if let Some(domain) = page.final_redirect_destination.as_deref() {
-                let prior_domain = self.domain_parsed.take();
-                self.domain_parsed = match url::Url::parse(domain) {
-                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                    _ => None,
-                };
-                self.url = Box::new(domain.into());
-                if let Some(s) = self.setup_selectors() {
-                    base.0 = s.0;
-                    base.1 = s.1;
-
-                    if let Some(prior_domain) = prior_domain {
-                        if let Some(dname) = prior_domain.host_str() {
-                            base.2 = dname.into();
-                        }
-                    }
+            self.links_visited.insert(match self.on_link_find_callback {
+                Some(cb) => {
+                    let c = cb(*self.url.clone(), None);
+                    c.0
                 }
+                _ => *self.url.clone(),
+            });
+
+            if page.is_empty() {
+                self.status = CrawlStatus::Empty;
             }
 
-            let links = if !page.is_empty() {
-                self.links_visited.insert(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.url.clone(), None);
-                        c.0
-                    }
-                    _ => *self.url.clone(),
-                });
-                page.links_ssg(base, client).await
-            } else {
-                self.status = CrawlStatus::Empty;
-                Default::default()
-            };
+            links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
 
@@ -1530,7 +1543,7 @@ impl Website {
     async fn crawl_establish_smart(
         &mut self,
         client: &Client,
-        base: &mut RelativeSelectors,
+        mut base: &mut RelativeSelectors,
         _: bool,
         browser: &Arc<chromiumoxide::Browser>,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
@@ -1540,7 +1553,9 @@ impl Website {
             .eq(&ProcessLinkStatus::Allowed)
         {
             let url = self.url.inner();
+
             let mut page = Page::new_page(&url, &client).await;
+
             let mut retry_count = self.configuration.retry;
 
             while page.should_retry && retry_count > 0 {
@@ -1593,35 +1608,16 @@ impl Website {
                 .smart_links(&base, &browser, &self.configuration, &context_id)
                 .await;
 
-            match page.final_redirect_destination {
-                Some(ref domain) => {
-                    let domain: Box<CaseInsensitiveString> =
-                        CaseInsensitiveString::new(&domain).into();
-                    let prior_domain = self.domain_parsed.take();
-
-                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                        _ => None,
-                    };
-                    self.url = domain;
-                    match self.setup_selectors() {
-                        Some(s) => {
-                            base.0 = s.0;
-                            base.1 = s.1;
-                            match prior_domain {
-                                Some(prior_domain) => match prior_domain.host_str() {
-                                    Some(dname) => {
-                                        base.2 = dname.into();
-                                    }
-                                    _ => (),
-                                },
-                                _ => (),
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-                _ => (),
+            if let Some(ref domain) = page.final_redirect_destination {
+                let prior_domain = self.domain_parsed.take();
+                crate::utils::modify_selectors(
+                    &prior_domain,
+                    domain,
+                    &mut self.domain_parsed,
+                    &mut self.url,
+                    &mut base,
+                    AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
+                );
             }
 
             let links = if !page_links.is_empty() {
@@ -2192,6 +2188,13 @@ impl Website {
                         self.configuration.external_domains_caseless.clone(),
                         self.channel_guard.clone(),
                         self.configuration.retry,
+                        self.configuration.full_resources,
+                        PageLinkBuildSettings::new_full(
+                            false,
+                            self.configuration.full_resources,
+                            self.configuration.subdomains,
+                            self.configuration.tld,
+                        ),
                     ));
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -2236,11 +2239,19 @@ impl Website {
                                                 _ => (link, None),
                                             };
 
-                                            let mut page = if !only_html {
-                                                Page::new_page(link_result.0.as_ref(), &shared.0).await
-                                            } else {
-                                                Page::new_page_only_html(link_result.0.as_ref(), &shared.0).await
-                                            };
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut relative_selectors = shared.1.clone();
+                                            let mut r_settings = shared.7;
+                                            r_settings.ssg_build = true;
+                                            let target_url = link_result.0.as_ref();
+                                            let external_domains_caseless = &shared.3;
+                                            let client = &shared.0;
+
+                                            let mut domain_parsed = None;
+
+                                            let page_stream = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors, external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed);
+
+                                            let mut page =  page_stream.await;
 
                                             let mut retry_count = shared.5;
 
@@ -2249,34 +2260,25 @@ impl Website {
                                                     let next_page = backoff::future::retry(
                                                         ExponentialBackoff::default(),
                                                         || async {
-                                                            let p = if full_resources {
-                                                                Page::new_page(link_result.0.as_ref(), &shared.0).await
-                                                            } else {
-                                                                Page::new_page_only_html(link_result.0.as_ref(), &shared.0).await
-                                                            };
+                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                            let mut domain_parsed = None;
+                                                            let p = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
 
-                                                            Ok::<Page, backoff::Error<std::io::Error>>(p)
+                                                            Ok::<(Page, HashSet<CaseInsensitiveString>), backoff::Error<std::io::Error>>((p, links))
                                                         },
                                                     );
                                                     if let Ok(next_page) = next_page.await {
-                                                        page.clone_from(&next_page);
+                                                        page.clone_from(&next_page.0);
+                                                        links.extend(next_page.1);
                                                     };
                                                 } else {
                                                     if let Some(timeout) = page.get_timeout() {
                                                         tokio::time::sleep(timeout).await;
                                                     }
-                                                    page.clone_from(&Page::new_page(link_result.0.as_ref(), &shared.0).await);
+                                                    page.clone_from(&Page::new_page_streaming(target_url, &client, only_html, &mut relative_selectors.clone(), external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await);
                                                 }
                                                 retry_count -= 1;
                                             }
-
-                                            page.set_external(shared.3.to_owned());
-
-                                            let links = if full_resources {
-                                                page.links_full(&shared.1).await
-                                            } else {
-                                                page.links(&shared.1).await
-                                            };
 
                                             if return_page_links {
                                                 page.page_links = if links.is_empty() {
@@ -2287,6 +2289,7 @@ impl Website {
                                             }
 
                                             channel_send_page(&shared.2, page, &shared.4);
+
                                             links
                                         }),
                                         &chandle,

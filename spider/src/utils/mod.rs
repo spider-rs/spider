@@ -7,10 +7,15 @@ pub mod trie;
 
 use std::str::FromStr;
 
-use crate::bytes::BufMut;
+use crate::{bytes::BufMut, RelativeSelectors};
 use auto_encoder::is_binary_file;
 use bytes::BytesMut;
+use case_insensitive_string::CaseInsensitiveString;
+use lol_html::send::HtmlRewriter;
+use lol_html::OutputSink;
+
 use phf::phf_set;
+use url::Url;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
@@ -1403,6 +1408,22 @@ pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
     None
 }
 
+/// Block streaming
+fn block_streaming(res: &Response, only_html: bool) -> bool {
+    let mut block_streaming = false;
+
+    if only_html {
+        if let Some(content_type) = res.headers().get(reqwest::header::CONTENT_TYPE) {
+            if let Ok(content_type_str) = content_type.to_str() {
+                if IGNORE_CONTENT_TYPES.contains(content_type_str) {
+                    block_streaming = true;
+                }
+            }
+        }
+    }
+    block_streaming
+}
+
 /// Handle the response bytes
 pub async fn handle_response_bytes(
     res: Response,
@@ -1416,26 +1437,15 @@ pub async fn handle_response_bytes(
     } else {
         None
     };
+
     let status_code: StatusCode = res.status();
     #[cfg(feature = "headers")]
     let headers = res.headers().clone();
     let cookies = get_cookies(&res);
 
-    let mut block_streaming = false;
-
-    if only_html {
-        if let Some(content_type) = res.headers().get(reqwest::header::CONTENT_TYPE) {
-            if let Ok(content_type_str) = content_type.to_str() {
-                if IGNORE_CONTENT_TYPES.contains(content_type_str) {
-                    block_streaming = true;
-                }
-            }
-        }
-    }
-
     let mut content: Option<Box<bytes::Bytes>> = None;
 
-    if !block_streaming {
+    if !block_streaming(&res, only_html) {
         let mut stream = res.bytes_stream();
         let mut data: BytesMut = BytesMut::new();
         let mut first_bytes = true;
@@ -1479,6 +1489,96 @@ pub async fn handle_response_bytes(
     }
 }
 
+/// Handle the response bytes writing links while crawling
+pub async fn handle_response_bytes_writer<'h, O>(
+    res: Response,
+    target_url: &str,
+    only_html: bool,
+    rewriter: &mut HtmlRewriter<'h, O>,
+) -> (PageResponse, bool)
+where
+    O: OutputSink + Send + 'static,
+{
+    let u = res.url().as_str();
+
+    let final_url = if target_url != u {
+        Some(u.into())
+    } else {
+        None
+    };
+
+    let status_code: StatusCode = res.status();
+    #[cfg(feature = "headers")]
+    let headers = res.headers().clone();
+    let cookies = get_cookies(&res);
+
+    // let mut content: Option<Box<bytes::Bytes>> = None;
+    let mut rewrite_error = false;
+
+    if !block_streaming(&res, only_html) {
+        let mut stream = res.bytes_stream();
+        // let mut data: BytesMut = BytesMut::new();
+        let mut first_bytes = true;
+        let mut data_len = 0;
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(text) => {
+                    if only_html && first_bytes {
+                        first_bytes = false;
+                        if is_binary_file(&text) {
+                            break;
+                        }
+                    }
+                    let limit = *MAX_SIZE_BYTES;
+
+                    if limit > 0 && data_len + text.len() > limit {
+                        break;
+                    }
+
+                    if !rewrite_error {
+                        if let Err(_) = rewriter.write(&text) {
+                            rewrite_error = true;
+                        }
+                    }
+
+                    data_len += text.len();
+                }
+                Err(e) => {
+                    log::error!("{e} in {}", target_url);
+                    break;
+                }
+            }
+        }
+    }
+
+    (
+        PageResponse {
+            #[cfg(feature = "headers")]
+            headers: Some(headers),
+            #[cfg(feature = "cookies")]
+            cookies,
+            // content,
+            final_url,
+            status_code,
+            ..Default::default()
+        },
+        rewrite_error,
+    )
+}
+
+/// Setup default response
+pub(crate) fn setup_default_response(res: &Response) -> PageResponse {
+    PageResponse {
+        #[cfg(feature = "headers")]
+        headers: Some(res.headers().clone()),
+        #[cfg(feature = "cookies")]
+        cookies: get_cookies(&res),
+        status_code: res.status(),
+        ..Default::default()
+    }
+}
+
 /// Perform a network request to a resource extracting all content streaming.
 async fn fetch_page_html_raw_base(
     target_url: &str,
@@ -1489,14 +1589,7 @@ async fn fetch_page_html_raw_base(
         Ok(res) if res.status().is_success() => {
             handle_response_bytes(res, target_url, only_html).await
         }
-        Ok(res) => PageResponse {
-            #[cfg(feature = "headers")]
-            headers: Some(res.headers().clone()),
-            #[cfg(feature = "cookies")]
-            cookies: get_cookies(&res),
-            status_code: res.status(),
-            ..Default::default()
-        },
+        Ok(res) => setup_default_response(&res),
         Err(_) => {
             log("- error parsing html text {}", target_url);
             let mut page_response = PageResponse::default();
@@ -1506,6 +1599,50 @@ async fn fetch_page_html_raw_base(
             page_response
         }
     }
+}
+
+/// Perform a network request to a resource extracting all content streaming.
+async fn fetch_page_html_raw_base_handler<'h, O>(
+    target_url: &str,
+    client: &Client,
+    only_html: bool,
+    rewriter: &mut HtmlRewriter<'h, O>,
+    rewrite_error: &mut bool,
+) -> PageResponse
+where
+    O: OutputSink + Send + 'static,
+{
+    match client.get(target_url).send().await {
+        Ok(res) if res.status().is_success() => {
+            // todo: add the rewriter here.
+            let response = handle_response_bytes_writer(res, target_url, only_html, rewriter).await;
+            *rewrite_error = response.1;
+            response.0
+        }
+        Ok(res) => setup_default_response(&res),
+        Err(_) => {
+            log("- error parsing html text {}", target_url);
+            let mut page_response = PageResponse::default();
+            if let Ok(status_code) = StatusCode::from_u16(599) {
+                page_response.status_code = status_code;
+            }
+            page_response
+        }
+    }
+}
+
+/// Perform a network request to a resource extracting all content streaming.
+pub async fn fetch_page_html_raw_rewriter<'h, O>(
+    target_url: &str,
+    client: &Client,
+    only_html: bool,
+    rewriter: &mut HtmlRewriter<'h, O>,
+    rewrite_error: &mut bool,
+) -> PageResponse
+where
+    O: OutputSink + Send + 'static,
+{
+    fetch_page_html_raw_base_handler(target_url, client, only_html, rewriter, rewrite_error).await
 }
 
 /// Perform a network request to a resource extracting all content streaming.
@@ -2699,4 +2836,60 @@ pub async fn reset(target: &str) {
     {
         _ => (),
     };
+}
+
+/// Setup selectors for handling link targets.
+pub(crate) fn setup_website_selectors(
+    domain_parsed: &Option<Box<Url>>,
+    url: &str,
+    allowed: AllowedDomainTypes,
+) -> Option<RelativeSelectors> {
+    use crate::page::{get_page_selectors, get_page_selectors_base};
+    let subdomains = allowed.subdomains;
+    let tld = allowed.tld;
+    match domain_parsed {
+        Some(u) => get_page_selectors_base(&u, subdomains, tld),
+        _ => get_page_selectors(url, subdomains, tld),
+    }
+}
+
+/// Allow subdomains or tlds.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AllowedDomainTypes {
+    /// Subdomains
+    pub subdomains: bool,
+    /// Tlds
+    pub tld: bool,
+}
+
+impl AllowedDomainTypes {
+    /// A new domain type.
+    pub fn new(subdomains: bool, tld: bool) -> Self {
+        Self { subdomains, tld }
+    }
+}
+
+/// Modify the selectors for targetting a website.
+pub(crate) fn modify_selectors(
+    prior_domain: &Option<Box<Url>>,
+    domain: &str,
+    domain_parsed: &mut Option<Box<Url>>,
+    url: &mut Box<CaseInsensitiveString>,
+    base: &mut RelativeSelectors,
+    allowed: AllowedDomainTypes,
+) {
+    *domain_parsed = match url::Url::parse(domain) {
+        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+        _ => None,
+    };
+    *url = Box::new(domain.into());
+    if let Some(s) = setup_website_selectors(domain_parsed, url.inner(), allowed) {
+        base.0 = s.0;
+        base.1 = s.1;
+        if let Some(prior_domain) = prior_domain {
+            if let Some(dname) = prior_domain.host_str() {
+                base.2 = dname.into();
+            }
+        }
+    }
 }
