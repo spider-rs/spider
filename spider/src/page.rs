@@ -537,14 +537,10 @@ impl Page {
             handle_response_bytes_writer, modify_selectors, setup_default_response,
             AllowedDomainTypes,
         };
-
         let page_response = match client.get(url).send().await {
             Ok(res) if res.status().is_success() => {
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                let mut senders: Option<(
-                    tokio::sync::mpsc::UnboundedSender<String>,
-                    tokio::sync::mpsc::UnboundedReceiver<String>,
-                )> = None;
+                let cell = tokio::sync::OnceCell::new();
 
                 let base = match Url::parse(url) {
                     Ok(u) => Some(u),
@@ -570,8 +566,6 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
-
-                // let prior_domain = self.domain_parsed.take();
 
                 let external_domains_caseless = external_domains_caseless.clone();
 
@@ -619,21 +613,16 @@ impl Page {
                 let mut element_content_handlers = vec![base_links_settings];
 
                 if r_settings.ssg_build {
-                    let c = tokio::sync::mpsc::unbounded_channel();
-                    let ctx = c.0.clone();
-
-                    element_content_handlers.push(lol_html::element!("script", move |el| {
-                        if let Some(source) = el.get_attribute("src") {
-                            if source.starts_with("/_next/static/")
-                                && source.ends_with("/_ssgManifest.js")
+                    element_content_handlers.push(lol_html::element!("script", |el| {
+                        if let Some(build_path) = el.get_attribute("src") {
+                            if build_path.starts_with("/_next/static/")
+                                && build_path.ends_with("/_ssgManifest.js")
                             {
-                                let _ = ctx.send(source);
+                                let _ = cell.set(build_path.to_string());
                             }
                         }
                         Ok(())
                     }));
-
-                    senders.replace(c);
                 }
 
                 let settings = lol_html::send::Settings {
@@ -666,53 +655,45 @@ impl Page {
 
                 drop(rx);
 
-                if let Some(ctx) = senders {
-                    let mut rtx = ctx.1;
-                    drop(ctx.0);
+                if r_settings.ssg_build {
+                    if let Some(mut ssg_map) = ssg_map {
+                        if let Some(source) = cell.get() {
+                            if let Some(ref url_base) = base {
+                                let build_ssg_path = convert_abs_path(&url_base, &source);
+                                let build_page =
+                                    Page::new_page(build_ssg_path.as_str(), &client).await;
 
-                    if r_settings.ssg_build {
-                        if let Some(mut ssg_map) = ssg_map {
-                            let rc = rtx.recv().await;
+                                for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
+                                {
+                                    if let Some(matched) = cap.get(1) {
+                                        let href = auto_encode_bytes(&matched.as_bytes())
+                                            .replace(r#"\u002F"#, "/");
 
-                            if let Some(source) = rc {
-                                if let Some(ref url_base) = base {
-                                    let build_ssg_path = convert_abs_path(&url_base, &source);
-                                    let build_page =
-                                        Page::new_page(build_ssg_path.as_str(), &client).await;
-
-                                    for cap in
-                                        SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
-                                    {
-                                        if let Some(matched) = cap.get(1) {
-                                            let href = auto_encode_bytes(&matched.as_bytes())
-                                                .replace(r#"\u002F"#, "/");
-
-                                            fn get_last_segment(path: &str) -> &str {
-                                                if let Some(pos) = path.rfind('/') {
-                                                    &path[pos + 1..]
-                                                } else {
-                                                    path
-                                                }
+                                        fn get_last_segment(path: &str) -> &str {
+                                            if let Some(pos) = path.rfind('/') {
+                                                &path[pos + 1..]
+                                            } else {
+                                                path
                                             }
+                                        }
 
-                                            let last_segment = get_last_segment(&href);
+                                        let last_segment = get_last_segment(&href);
 
-                                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
-                                            if !(last_segment.starts_with("[")
-                                                && last_segment.ends_with("]"))
-                                            {
-                                                push_link(
-                                                    &base,
-                                                    &href,
-                                                    &mut ssg_map,
-                                                    &selectors.0,
-                                                    parent_host,
-                                                    parent_host_scheme,
-                                                    base_input_domain,
-                                                    sub_matcher,
-                                                    &external_domains_caseless,
-                                                );
-                                            }
+                                        // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                        if !(last_segment.starts_with("[")
+                                            && last_segment.ends_with("]"))
+                                        {
+                                            push_link(
+                                                &base,
+                                                &href,
+                                                &mut ssg_map,
+                                                &selectors.0,
+                                                parent_host,
+                                                parent_host_scheme,
+                                                base_input_domain,
+                                                sub_matcher,
+                                                &external_domains_caseless,
+                                            );
                                         }
                                     }
                                 }
@@ -1324,7 +1305,7 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
                     .await;
             } else {
-                let c = tokio::sync::mpsc::unbounded_channel();
+                let cell = tokio::sync::OnceCell::new();
 
                 // the original url
                 let parent_host = &selectors.1[0];
@@ -1332,8 +1313,6 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
-
-                let txx = c.0.clone();
 
                 let rewriter_settings = Settings {
                     element_content_handlers: vec![
@@ -1353,13 +1332,13 @@ impl Page {
                             }
                             Ok(())
                         }),
-                        lol_html::element!("script", move |el| {
+                        lol_html::element!("script", |el| {
                             if let Some(source) = el.get_attribute("src") {
                                 if source.starts_with("/_next/static/")
                                     && source.ends_with("/_ssgManifest.js")
                                 {
                                     if let Some(build_path) = self.abs_path(&source) {
-                                        let _ = txx.send(build_path.as_str().to_string());
+                                        let _ = cell.set(build_path.to_string());
                                     }
                                 }
                             }
@@ -1393,40 +1372,39 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                drop(c.0);
-                let mut rx = c.1;
+                if let Some(build_ssg_path) = cell.get() {
+                    if !build_ssg_path.is_empty() {
+                        let build_page = Page::new_page(&build_ssg_path, &client).await;
 
-                if let Some(build_ssg_path) = rx.recv().await {
-                    let build_page = Page::new_page(&build_ssg_path, &client).await;
+                        for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                            if let Some(matched) = cap.get(1) {
+                                let href = auto_encode_bytes(&matched.as_bytes())
+                                    .replace(r#"\u002F"#, "/");
 
-                    for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
-                        if let Some(matched) = cap.get(1) {
-                            let href =
-                                auto_encode_bytes(&matched.as_bytes()).replace(r#"\u002F"#, "/");
-
-                            fn get_last_segment(path: &str) -> &str {
-                                if let Some(pos) = path.rfind('/') {
-                                    &path[pos + 1..]
-                                } else {
-                                    path
+                                fn get_last_segment(path: &str) -> &str {
+                                    if let Some(pos) = path.rfind('/') {
+                                        &path[pos + 1..]
+                                    } else {
+                                        path
+                                    }
                                 }
-                            }
 
-                            let last_segment = get_last_segment(&href);
+                                let last_segment = get_last_segment(&href);
 
-                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
-                            if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
-                                push_link(
-                                    &self.base,
-                                    &href,
-                                    &mut map_ssg,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &self.external_domains_caseless,
-                                );
+                                // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                    push_link(
+                                        &self.base,
+                                        &href,
+                                        &mut map_ssg,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        &self.external_domains_caseless,
+                                    );
+                                }
                             }
                         }
                     }
@@ -1506,6 +1484,8 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<A> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         use auto_encoder::auto_encode_bytes;
         use lol_html::{doc_comments, element};
 
@@ -1520,9 +1500,7 @@ impl Page {
                     .await;
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-
                 let (txx, mut rxx) = tokio::sync::mpsc::unbounded_channel();
-                let (txxx, mut rxxx) = tokio::sync::mpsc::unbounded_channel();
 
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -1535,13 +1513,13 @@ impl Page {
                 let base = self.base.clone();
                 let base1 = base.clone();
 
-                let txxx2 = txxx.clone();
+                let rerender = AtomicBool::new(false);
 
                 let mut static_app = false;
 
                 let rewriter_settings = Settings {
                     element_content_handlers: vec![
-                        element!("script", move |element| {
+                        element!("script", |element| {
                             if !static_app {
                                 if let Some(src) = element.get_attribute("src") {
                                     if src.starts_with("/") {
@@ -1563,7 +1541,7 @@ impl Page {
                                                     if p.ends_with(".js")
                                                         && JS_FRAMEWORK_ASSETS.contains(&p)
                                                     {
-                                                        let _ = txxx2.send(true);
+                                                        rerender.swap(true, Ordering::Relaxed);
                                                     }
                                                 }
                                             }
@@ -1630,7 +1608,6 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                drop(txxx);
                 drop(txx);
 
                 let mut rewrited_bytes: Vec<u8> = Vec::new();
@@ -1639,7 +1616,7 @@ impl Page {
                     rewrited_bytes.extend_from_slice(&c);
                 }
 
-                let mut rerender = rxxx.recv().await.unwrap_or_default();
+                let mut rerender = rerender.load(Ordering::Relaxed);
 
                 if !rerender {
                     if let Some(_) = DOM_WATCH_METHODS.find(&rewrited_bytes) {
