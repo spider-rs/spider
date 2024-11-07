@@ -23,6 +23,7 @@ async fn forward(
 ) -> Result<impl warp::Reply, Infallible> {
     use spider::{
         flexbuffers,
+        page::build,
         serde::Serialize,
         string_concat::{string_concat, string_concat_impl},
     };
@@ -42,30 +43,43 @@ async fn forward(
         )
     };
 
-    let page = spider::page::Page::new_page(&url_path, &CLIENT).await;
+    let (subdomains, tld) = match referer {
+        Some(r) => (r == "3" || r == "1", r == "3" || r == "2"),
+        _ => (false, false),
+    };
 
-    let extracted = if !page.get_html().is_empty() {
-        let (subdomains, tld) = match referer {
-            Some(r) => (r == "3" || r == "1", r == "3" || r == "2"),
-            _ => (false, false),
-        };
+    let mut page = build(&"", Default::default());
 
-        match spider::page::get_page_selectors(&url_path, subdomains, tld) {
-            Some(selectors) => {
-                let links = page.links_stream::<spider::bytes::Bytes>(&selectors).await;
+    let extracted = match spider::page::get_page_selectors(&url_path, subdomains, tld) {
+        Some(mut selectors) => {
+            let mut links: spider::hashbrown::HashSet<spider::CaseInsensitiveString> =
+                spider::hashbrown::HashSet::new();
 
-                let mut s = flexbuffers::FlexbufferSerializer::new();
+            page.clone_from(
+                &spider::page::Page::new_page_streaming(
+                    &url_path,
+                    &CLIENT,
+                    false,
+                    &mut selectors,
+                    &Default::default(),
+                    &Default::default(),
+                    &mut links,
+                    None,
+                    &None,
+                    &mut None,
+                )
+                .await,
+            );
 
-                match links.serialize(&mut s) {
-                    _ => (),
-                };
+            let mut s = flexbuffers::FlexbufferSerializer::new();
 
-                s.take_buffer()
-            }
-            _ => Default::default(),
+            match links.serialize(&mut s) {
+                _ => (),
+            };
+
+            s.take_buffer()
         }
-    } else {
-        Default::default()
+        _ => Default::default(),
     };
 
     #[cfg(feature = "headers")]
