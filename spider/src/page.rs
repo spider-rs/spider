@@ -1739,72 +1739,68 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
                     .await;
             } else {
-                let base_domain = &selectors.0;
-                let base_input_domain = &selectors.2;
-                let parent_frags = &selectors.1; // todo: allow mix match tpt
-                let parent_host = &parent_frags[0];
-                let parent_host_scheme = &parent_frags[1];
+                // let base_domain = &selectors.0;
+                let parent_host = &selectors.1[0];
+                // the host schemes
+                let parent_host_scheme = &selectors.1[1];
+                let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let html = Box::new(crate::packages::scraper::Html::parse_document(&html));
-                let mut stream = tokio_stream::iter(html.tree);
+                let base = self.base.clone();
+                let external_domains_caseless = self.external_domains_caseless.clone();
 
-                while let Some(node) = stream.next().await {
-                    if let Some(element) = node.as_element() {
-                        let element_name = element.name();
-
-                        let ele_attribute = if element_name == "a" || element_name == "link" {
-                            "href"
-                        } else if element_name == "script" {
+                let base_links_settings =
+                    lol_html::element!("a[href],script[src],link[href]", |el| {
+                        let attribute = if el.tag_name() == "script" {
                             "src"
                         } else {
                             "href"
                         };
+                        if let Some(href) = el.get_attribute(attribute) {
+                            push_link(
+                                &base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &external_domains_caseless,
+                            );
+                        }
+                        Ok(())
+                    });
 
-                        match element.attr(ele_attribute) {
-                            Some(href) => match self.abs_path(href) {
-                                Some(mut abs) => {
-                                    let host_name = abs.host_str();
-                                    let mut can_process = parent_host_match(
-                                        host_name,
-                                        base_domain,
-                                        parent_host,
-                                        base_input_domain,
-                                        sub_matcher,
-                                    );
+                let element_content_handlers = vec![base_links_settings];
 
-                                    if !can_process
-                                        && host_name.is_some()
-                                        && !self.external_domains_caseless.is_empty()
-                                    {
-                                        can_process = self
-                                            .external_domains_caseless
-                                            .contains::<CaseInsensitiveString>(
-                                            &host_name.unwrap_or_default().into(),
-                                        ) || self
-                                            .external_domains_caseless
-                                            .contains::<CaseInsensitiveString>(
-                                            &CASELESS_WILD_CARD,
-                                        );
-                                    }
+                let settings = lol_html::send::Settings {
+                    element_content_handlers,
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
+                };
 
-                                    if can_process {
-                                        if abs.scheme() != parent_host_scheme.as_str() {
-                                            let _ = abs.set_scheme(parent_host_scheme.as_str());
-                                        }
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
 
-                                        let h = abs.as_str();
+                let html_bytes = html.as_bytes();
+                let chunk_size = 8192;
+                let chunks = html_bytes.chunks(chunk_size);
+                let mut wrote_error = false;
 
-                                        if can_process {
-                                            map.insert(h.to_string().into());
-                                        }
-                                    }
-                                }
-                                _ => (),
-                            },
-                            _ => (),
-                        };
+                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+
+                while let Some(chunk) = stream.next().await {
+                    if let Ok(chunk) = chunk {
+                        if let Err(_) = rewriter.write(chunk) {
+                            wrote_error = true;
+                            break;
+                        }
                     }
+                }
+
+                if !wrote_error {
+                    let _ = rewriter.end();
                 }
             }
         }
@@ -1952,7 +1948,7 @@ pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
     not(feature = "full_resources"),
     feature = "smart"
 ))]
-pub fn rewrite_str_as_bytes<'h, 's>(
+pub(crate) fn rewrite_str_as_bytes<'h, 's>(
     html: &str,
     settings: impl Into<lol_html::Settings<'h, 's>>,
 ) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
@@ -1969,7 +1965,7 @@ pub fn rewrite_str_as_bytes<'h, 's>(
 }
 
 /// Basic rewriter without rewriting.
-pub fn rewrite_str_empty<'h, 's>(
+pub(crate) fn rewrite_str_empty<'h, 's>(
     html: &str,
     settings: impl Into<lol_html::Settings<'h, 's>>,
 ) -> Result<(), lol_html::errors::RewritingError> {

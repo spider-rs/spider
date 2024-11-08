@@ -625,7 +625,7 @@ impl Website {
     }
 
     /// Crawl delay getter.
-    fn get_delay(&self) -> Duration {
+    pub fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
     }
 
@@ -1951,6 +1951,19 @@ impl Website {
         }
     }
 
+    /// Setup the Semaphore for the crawl.
+    fn setup_semaphore(&self) -> Arc<Semaphore> {
+        if self.configuration.shared_queue {
+            SEM_SHARED.clone()
+        } else {
+            Arc::new(Semaphore::const_new(
+                self.configuration
+                    .concurrency_limit
+                    .unwrap_or(*DEFAULT_PERMITS),
+            ))
+        }
+    }
+
     /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
         self.start();
@@ -2130,19 +2143,6 @@ impl Website {
             }
             _ => (),
         };
-    }
-
-    /// Setup the Semaphore for the crawl.
-    fn setup_semaphore(&self) -> Arc<Semaphore> {
-        if self.configuration.shared_queue {
-            SEM_SHARED.clone()
-        } else {
-            Arc::new(Semaphore::const_new(
-                self.configuration
-                    .concurrency_limit
-                    .unwrap_or(*DEFAULT_PERMITS),
-            ))
-        }
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
