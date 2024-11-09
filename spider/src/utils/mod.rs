@@ -7,9 +7,9 @@ pub mod trie;
 
 use std::str::FromStr;
 
-use crate::{bytes::BufMut, RelativeSelectors};
+use crate::RelativeSelectors;
 use auto_encoder::is_binary_file;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use case_insensitive_string::CaseInsensitiveString;
 use lol_html::send::HtmlRewriter;
 use lol_html::OutputSink;
@@ -1495,6 +1495,7 @@ pub async fn handle_response_bytes_writer<'h, O>(
     target_url: &str,
     only_html: bool,
     rewriter: &mut HtmlRewriter<'h, O>,
+    collected_bytes: &mut BytesMut,
 ) -> (PageResponse, bool)
 where
     O: OutputSink + Send + 'static,
@@ -1523,26 +1524,29 @@ where
 
         while let Some(item) = stream.next().await {
             match item {
-                Ok(text) => {
+                Ok(res_bytes) => {
                     if only_html && first_bytes {
                         first_bytes = false;
-                        if is_binary_file(&text) {
+                        if is_binary_file(&res_bytes) {
                             break;
                         }
                     }
                     let limit = *MAX_SIZE_BYTES;
+                    let bytes_len = res_bytes.len();
 
-                    if limit > 0 && data_len + text.len() > limit {
+                    if limit > 0 && data_len + bytes_len > limit {
                         break;
                     }
 
+                    data_len += bytes_len;
+
                     if !rewrite_error {
-                        if let Err(_) = rewriter.write(&text) {
+                        if let Err(_) = rewriter.write(&res_bytes) {
                             rewrite_error = true;
                         }
                     }
 
-                    data_len += text.len();
+                    collected_bytes.put(res_bytes);
                 }
                 Err(e) => {
                     log::error!("{e} in {}", target_url);
@@ -1599,50 +1603,6 @@ async fn fetch_page_html_raw_base(
             page_response
         }
     }
-}
-
-/// Perform a network request to a resource extracting all content streaming.
-async fn fetch_page_html_raw_base_handler<'h, O>(
-    target_url: &str,
-    client: &Client,
-    only_html: bool,
-    rewriter: &mut HtmlRewriter<'h, O>,
-    rewrite_error: &mut bool,
-) -> PageResponse
-where
-    O: OutputSink + Send + 'static,
-{
-    match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => {
-            // todo: add the rewriter here.
-            let response = handle_response_bytes_writer(res, target_url, only_html, rewriter).await;
-            *rewrite_error = response.1;
-            response.0
-        }
-        Ok(res) => setup_default_response(&res),
-        Err(_) => {
-            log("- error parsing html text {}", target_url);
-            let mut page_response = PageResponse::default();
-            if let Ok(status_code) = StatusCode::from_u16(599) {
-                page_response.status_code = status_code;
-            }
-            page_response
-        }
-    }
-}
-
-/// Perform a network request to a resource extracting all content streaming.
-pub async fn fetch_page_html_raw_rewriter<'h, O>(
-    target_url: &str,
-    client: &Client,
-    only_html: bool,
-    rewriter: &mut HtmlRewriter<'h, O>,
-    rewrite_error: &mut bool,
-) -> PageResponse
-where
-    O: OutputSink + Send + 'static,
-{
-    fetch_page_html_raw_base_handler(target_url, client, only_html, rewriter, rewrite_error).await
 }
 
 /// Perform a network request to a resource extracting all content streaming.
