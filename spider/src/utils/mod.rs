@@ -2853,3 +2853,17 @@ pub(crate) fn modify_selectors(
         }
     }
 }
+
+/// Get the last segment path.
+pub fn get_last_segment(path: &str) -> &str {
+    if let Some(pos) = path.rfind('/') {
+        let next_position = pos + 1;
+        if next_position < path.len() {
+            &path[next_position..]
+        } else {
+            ""
+        }
+    } else {
+        path
+    }
+}

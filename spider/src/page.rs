@@ -245,10 +245,17 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
                 let hchars = abs.path();
 
                 if let Some(position) = hchars.rfind('.') {
-                    let resource_ext = &hchars[position + 1..hchars.len()];
+                    let hlen = hchars.len();
+                    let has_asset = hlen - position;
 
-                    if !ONLY_RESOURCES.contains::<CaseInsensitiveString>(&resource_ext.into()) {
-                        can_process = false;
+                    if has_asset >= 3 {
+                        let next_position = position + 1;
+
+                        if !ONLY_RESOURCES
+                            .contains::<CaseInsensitiveString>(&hchars[next_position..].into())
+                        {
+                            can_process = false;
+                        }
                     }
                 }
 
@@ -673,15 +680,7 @@ impl Page {
                                         let href = auto_encode_bytes(&matched.as_bytes())
                                             .replace(r#"\u002F"#, "/");
 
-                                        fn get_last_segment(path: &str) -> &str {
-                                            if let Some(pos) = path.rfind('/') {
-                                                &path[pos + 1..]
-                                            } else {
-                                                path
-                                            }
-                                        }
-
-                                        let last_segment = get_last_segment(&href);
+                                        let last_segment = crate::utils::get_last_segment(&href);
 
                                         // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                         if !(last_segment.starts_with("[")
@@ -1385,15 +1384,7 @@ impl Page {
                                 let href = auto_encode_bytes(&matched.as_bytes())
                                     .replace(r#"\u002F"#, "/");
 
-                                fn get_last_segment(path: &str) -> &str {
-                                    if let Some(pos) = path.rfind('/') {
-                                        &path[pos + 1..]
-                                    } else {
-                                        path
-                                    }
-                                }
-
-                                let last_segment = get_last_segment(&href);
+                                let last_segment = crate::utils::get_last_segment(&href);
 
                                 // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
