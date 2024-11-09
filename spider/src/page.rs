@@ -14,7 +14,6 @@ use lol_html::Settings;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
-
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
@@ -490,6 +489,9 @@ pub struct PageLinkBuildSettings {
     pub subdomains: bool,
 }
 
+/// Default byte capacity for response stream collecting.
+const DEFAULT_BYTE_CAPACITY: u64 = 8 * 1024;
+
 impl PageLinkBuildSettings {
     /// New build link settings.
     pub fn new(ssg_build: bool, full_resources: bool) -> Self {
@@ -539,8 +541,11 @@ impl Page {
         };
         let page_response = match client.get(url).send().await {
             Ok(res) if res.status().is_success() => {
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 let cell = tokio::sync::OnceCell::new();
+
+                let mut collected_bytes = bytes::BytesMut::with_capacity(
+                    res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
+                );
 
                 let base = match Url::parse(url) {
                     Ok(u) => Some(u),
@@ -632,12 +637,16 @@ impl Page {
                 };
 
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(settings.into(), move |c: &[u8]| {
-                        let _ = tx.send(c.to_vec());
-                    });
+                    lol_html::send::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
 
-                let mut response =
-                    handle_response_bytes_writer(res, url, only_html, &mut rewriter).await;
+                let mut response = handle_response_bytes_writer(
+                    res,
+                    url,
+                    only_html,
+                    &mut rewriter,
+                    &mut collected_bytes,
+                )
+                .await;
 
                 let rewrite_error = response.1;
 
@@ -645,15 +654,10 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let mut collected_bytes: Vec<u8> = Vec::new();
-
-                while let Some(c) = rx.recv().await {
-                    collected_bytes.extend_from_slice(&c);
-                }
-
-                response.0.content.replace(Box::new(collected_bytes.into()));
-
-                drop(rx);
+                response
+                    .0
+                    .content
+                    .replace(Box::new(collected_bytes.freeze().into()));
 
                 if r_settings.ssg_build {
                     if let Some(mut ssg_map) = ssg_map {
@@ -1962,20 +1966,6 @@ pub(crate) fn rewrite_str_as_bytes<'h, 's>(
     rewriter.end()?;
 
     Ok(output)
-}
-
-/// Basic rewriter without rewriting.
-pub(crate) fn rewrite_str_empty<'h, 's>(
-    html: &str,
-    settings: impl Into<lol_html::Settings<'h, 's>>,
-) -> Result<(), lol_html::errors::RewritingError> {
-    // we should use this in our chunks to rewrite while streaming.
-    let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
-
-    rewriter.write(html.as_bytes())?;
-    rewriter.end()?;
-
-    Ok(())
 }
 
 #[cfg(test)]
