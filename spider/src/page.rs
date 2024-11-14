@@ -1412,6 +1412,42 @@ impl Page {
         map
     }
 
+    // /// Extract raw links into the list.
+    // #[inline(always)]
+    // #[cfg(all(not(feature = "decentralized")))]
+    // pub async fn extract_links_raw<
+    //     A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    // >(
+    //     &self,
+    //     selectors: &RelativeSelectors,
+    //     links: &HashSet<CaseInsensitiveString>,
+    // ) -> HashSet<A> {
+    //     let mut map = HashSet::new();
+
+    //     // the original url
+    //     let parent_host = &selectors.1[0];
+    //     // the host schemes
+    //     let parent_host_scheme: &CompactString = &selectors.1[1];
+    //     let base_input_domain = &selectors.2; // the domain after redirects
+    //     let sub_matcher: &CompactString = &selectors.0;
+
+    //     for link in links.iter() {
+    //         push_link(
+    //             &self.base,
+    //             &link.inner(),
+    //             &mut map,
+    //             &selectors.0,
+    //             parent_host,
+    //             parent_host_scheme,
+    //             base_input_domain,
+    //             sub_matcher,
+    //             &self.external_domains_caseless,
+    //         );
+    //     }
+
+    //     map
+    // }
+
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_ssg<

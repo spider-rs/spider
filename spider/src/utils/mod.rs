@@ -1182,6 +1182,13 @@ pub async fn fetch_page_html_chrome_base(
         page_response
     };
 
+    // run initial handling hidden anchors
+    // if let Ok(new_links) = page.evaluate(crate::features::chrome::ANCHOR_EVENTS).await {
+    //     if let Ok(results) = new_links.into_value::<hashbrown::HashSet<CaseInsensitiveString>>() {
+    //         links.extend(page.extract_links_raw(&base, &results).await);
+    //     }
+    // }
+
     if cfg!(not(feature = "chrome_store_page")) {
         page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
             .await?;

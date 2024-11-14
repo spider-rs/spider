@@ -1433,19 +1433,17 @@ impl Website {
                 }
             }
 
+            self.links_visited.insert(match self.on_link_find_callback {
+                Some(cb) => {
+                    let c = cb(*self.url.clone(), None);
+
+                    c.0
+                }
+                _ => *self.url.clone(),
+            });
+
             let links = if !page.is_empty() {
-                self.links_visited.insert(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.url.clone(), None);
-
-                        c.0
-                    }
-                    _ => *self.url.clone(),
-                });
-
-                let links = HashSet::from(page.links_ssg(&base, &client).await);
-
-                links
+                page.links_ssg(&base, &client).await
             } else {
                 self.status = CrawlStatus::Empty;
                 Default::default()
@@ -1620,16 +1618,16 @@ impl Website {
                 );
             }
 
+            self.links_visited.insert(match self.on_link_find_callback {
+                Some(cb) => {
+                    let c = cb(*self.url.clone(), None);
+
+                    c.0
+                }
+                _ => *self.url.clone(),
+            });
+
             let links = if !page_links.is_empty() {
-                self.links_visited.insert(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.url.clone(), None);
-
-                        c.0
-                    }
-                    _ => *self.url.clone(),
-                });
-
                 page_links
             } else {
                 self.status = CrawlStatus::Empty;
@@ -1911,14 +1909,15 @@ impl Website {
                 _ => (),
             }
 
-            if !page.is_empty() {
-                let u = page.get_url().into();
-                let link_result = match self.on_link_find_callback {
-                    Some(cb) => cb(u, None),
-                    _ => (u, None),
-                };
+            let u = page.get_url().into();
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u, None),
+                _ => (u, None),
+            };
 
-                self.links_visited.insert(link_result.0);
+            self.links_visited.insert(link_result.0);
+
+            if !page.is_empty() {
                 let page_links = HashSet::from(page.links(&base).await);
 
                 links.extend(page_links);

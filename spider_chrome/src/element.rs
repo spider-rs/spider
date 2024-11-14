@@ -228,28 +228,7 @@ impl Element {
     pub async fn scroll_into_view(&self) -> Result<&Self> {
         let resp = self
             .call_js_fn(
-                "async function() {
-                if (!this.isConnected)
-                    return 'Node is detached from document';
-                if (this.nodeType !== Node.ELEMENT_NODE)
-                    return 'Node is not of type HTMLElement';
-
-                const visibleRatio = await new Promise(resolve => {
-                    const observer = new IntersectionObserver(entries => {
-                        resolve(entries[0].intersectionRatio);
-                        observer.disconnect();
-                    });
-                    observer.observe(this);
-                });
-
-                if (visibleRatio !== 1.0)
-                    this.scrollIntoView({
-                        block: 'center',
-                        inline: 'center',
-                        behavior: 'instant'
-                    });
-                return false;
-            }",
+                "async function(){if(!this.isConnected)return'Node is detached from document';if(this.nodeType!==Node.ELEMENT_NODE)return'Node is not of type HTMLElement';const e=await new Promise(t=>{const o=new IntersectionObserver(e=>{t(e[0].intersectionRatio),o.disconnect()});o.observe(this)});return 1!==e&&this.scrollIntoView({block:'center',inline:'center',behavior:'instant'}),!1}",
                 true,
             )
             .await?;
