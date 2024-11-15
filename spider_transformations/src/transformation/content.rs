@@ -1,7 +1,6 @@
 use crate::html2xml::convert_html_to_xml;
 use aho_corasick::AhoCorasick;
 use html2md;
-use html2md::ignore::IgnoreTagFactory;
 use phf::phf_set;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
@@ -13,7 +12,6 @@ use spider::packages::scraper::{ElementRef, Selector};
 use spider::page::Page;
 use spider::url::Url;
 use spider::utils::clean_html;
-use std::collections::HashMap;
 
 lazy_static! {
     static ref AHO: AhoCorasick = AhoCorasick::new(["\n\n\n", "\n  \n  ", "\n\n\n\n\n"]).unwrap();
@@ -263,22 +261,7 @@ pub(crate) fn build_static_vector(config: &TransformConfig) -> Vec<&'static str>
 
 /// transform the content to markdown shortcut
 pub fn transform_markdown(html: &str, commonmark: bool) -> String {
-    let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> = HashMap::new();
-    let tag = Box::new(IgnoreTagFactory {});
-
-    tag_factory.insert(String::from("script"), tag.clone());
-    tag_factory.insert(String::from("style"), tag.clone());
-    tag_factory.insert(String::from("noscript"), tag.clone());
-
-    if !commonmark {
-        tag_factory.insert(String::from("meta"), tag.clone());
-    }
-
-    tag_factory.insert(String::from("iframe"), tag);
-
-    let html = html2md::parse_html_custom(&html, &tag_factory, commonmark);
-    let html = aho_clean_markdown(&html);
-    html
+    html2md::rewrite_html_custom_with_url(&html, &None, commonmark, &None)
 }
 
 /// transform the content to text raw shortcut
@@ -393,18 +376,14 @@ pub fn transform_content(
     match c.return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
         ReturnFormat::CommonMark => {
-            let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
-                HashMap::new();
-            let tag = Box::new(IgnoreTagFactory {});
-
-            tag_factory.insert(String::from("script"), tag.clone());
-            tag_factory.insert(String::from("style"), tag.clone());
-            tag_factory.insert(String::from("noscript"), tag.clone());
+            let mut tag_factory = None;
 
             if let Some(ignore) = ignore_tags {
+                let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
                 for ignore_tag_name in ignore {
-                    tag_factory.insert(ignore_tag_name.into(), tag.clone());
+                    tag_factor.insert(ignore_tag_name.into());
                 }
+                tag_factory.replace(tag_factor);
             }
 
             let base_html = if c.clean_html {
@@ -413,32 +392,22 @@ pub fn transform_content(
                 base_html
             };
 
-            tag_factory.insert(String::from("iframe"), tag);
-
-            let html = html2md::parse_html_custom_with_url(
-                &base_html.trim(),
+            html2md::rewrite_html_custom_with_url(
+                &base_html,
                 &tag_factory,
                 true,
                 &url_parsed,
-            );
-            let html = aho_clean_markdown(&html);
-
-            html
+            )
         }
         ReturnFormat::Markdown => {
-            let mut tag_factory: HashMap<String, Box<dyn html2md::TagHandlerFactory>> =
-                HashMap::new();
-
-            let tag = Box::new(IgnoreTagFactory {});
-
-            tag_factory.insert(String::from("script"), tag.clone());
-            tag_factory.insert(String::from("style"), tag.clone());
-            tag_factory.insert(String::from("noscript"), tag.clone());
+            let mut tag_factory = None;
 
             if let Some(ignore) = ignore_tags {
+                let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
                 for ignore_tag_name in ignore {
-                    tag_factory.insert(ignore_tag_name.into(), tag.clone());
+                    tag_factor.insert(ignore_tag_name.into());
                 }
+                tag_factory.replace(tag_factor);
             }
 
             let base_html = if c.clean_html {
@@ -447,17 +416,12 @@ pub fn transform_content(
                 base_html
             };
 
-            tag_factory.insert(String::from("iframe"), tag);
-
-            let html = html2md::parse_html_custom_with_url(
-                &base_html.trim(),
+            html2md::rewrite_html_custom_with_url(
+                &base_html,
                 &tag_factory,
                 false,
-                url_parsed,
-            );
-            let html = aho_clean_markdown(&html);
-
-            html
+                &url_parsed,
+            )
         }
         ReturnFormat::Html2Text => {
             if !base_html.is_empty() {

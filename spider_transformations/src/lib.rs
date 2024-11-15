@@ -5,3 +5,5 @@ pub mod html2xml;
 mod markup5ever_rcdom;
 /// Base transformations.
 pub mod transformation;
+// shortcut
+pub use transformation::content::{transform_content, transform_content_to_bytes};
