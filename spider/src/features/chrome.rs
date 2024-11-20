@@ -349,15 +349,12 @@ pub async fn launch_browser(
                 let mut create_content = CreateBrowserContextParams::default();
                 create_content.dispose_on_detach = Some(true);
 
-                match config.proxies {
-                    Some(ref p) => match p.get(0) {
-                        Some(p) => {
-                            create_content.proxy_server = Some(p.into());
-                        }
-                        _ => (),
-                    },
-                    _ => (),
-                };
+                if let Some(ref p) = config.proxies {
+                    if let Some(p) = p.get(0) {
+                        create_content.proxy_server = Some(p.into());
+                        create_content.proxy_bypass_list = Some("<-loopback>".into())
+                    }
+                }
 
                 match browser.create_browser_context(create_content).await {
                     Ok(c) => {

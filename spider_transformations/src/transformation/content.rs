@@ -392,12 +392,7 @@ pub fn transform_content(
                 base_html
             };
 
-            html2md::rewrite_html_custom_with_url(
-                &base_html,
-                &tag_factory,
-                true,
-                &url_parsed,
-            )
+            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, true, &url_parsed)
         }
         ReturnFormat::Markdown => {
             let mut tag_factory = None;
@@ -416,12 +411,7 @@ pub fn transform_content(
                 base_html
             };
 
-            html2md::rewrite_html_custom_with_url(
-                &base_html,
-                &tag_factory,
-                false,
-                &url_parsed,
-            )
+            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, &url_parsed)
         }
         ReturnFormat::Html2Text => {
             if !base_html.is_empty() {
