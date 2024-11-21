@@ -44,19 +44,17 @@ impl EmulationManager {
 
         let set_touch = SetTouchEmulationEnabledParams::new(true);
 
-        let chain = CommandChain::new(
-            vec![
-                (
-                    set_device.identifier(),
-                    serde_json::to_value(set_device).unwrap(),
-                ),
-                (
-                    set_touch.identifier(),
-                    serde_json::to_value(set_touch).unwrap(),
-                ),
-            ],
-            self.request_timeout,
-        );
+        let mut chains = Vec::with_capacity(2);
+
+        if let Ok(set_device_value) = serde_json::to_value(&set_device) {
+            chains.push((set_device.identifier(), set_device_value));
+        }
+
+        if let Ok(set_touch_value) = serde_json::to_value(&set_touch) {
+            chains.push((set_touch.identifier(), set_touch_value));
+        }
+
+        let chain = CommandChain::new(chains, self.request_timeout);
 
         self.needs_reload = self.emulating_mobile != viewport.emulating_mobile
             || self.has_touch != viewport.has_touch;
