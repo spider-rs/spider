@@ -351,8 +351,10 @@ pub async fn launch_browser(
 
                 if let Some(ref p) = config.proxies {
                     if let Some(p) = p.get(0) {
+                        if p.starts_with("http://localhost") {
+                            create_content.proxy_bypass_list = Some("<-loopback>".into());
+                        }
                         create_content.proxy_server = Some(p.into());
-                        create_content.proxy_bypass_list = Some("<-loopback>".into())
                     }
                 }
 
