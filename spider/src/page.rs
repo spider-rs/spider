@@ -215,6 +215,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     base_input_domain: &CompactString,
     sub_matcher: &CompactString,
     external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    full_resources: bool,
 ) {
     if let Some(b) = base {
         let mut abs = convert_abs_path(&b, href);
@@ -251,8 +252,9 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
                     if has_asset >= 3 {
                         let next_position = position + 1;
 
-                        if !ONLY_RESOURCES
-                            .contains::<CaseInsensitiveString>(&hchars[next_position..].into())
+                        if !full_resources
+                            && !ONLY_RESOURCES
+                                .contains::<CaseInsensitiveString>(&hchars[next_position..].into())
                         {
                             can_process = false;
                         }
@@ -599,6 +601,7 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
+                                r_settings.full_resources,
                             );
                         }
                         Ok(())
@@ -616,6 +619,7 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
+                                r_settings.full_resources,
                             );
                         }
                         Ok(())
@@ -696,6 +700,7 @@ impl Page {
                                                 base_input_domain,
                                                 sub_matcher,
                                                 &external_domains_caseless,
+                                                false,
                                             );
                                         }
                                     }
@@ -1188,6 +1193,7 @@ impl Page {
                                         base_input_domain,
                                         sub_matcher,
                                         &self.external_domains_caseless,
+                                        false,
                                     );
                                 }
                                 _ => (),
@@ -1250,6 +1256,7 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &self.external_domains_caseless,
+                                false,
                             );
                         }
                         Ok(())
@@ -1331,6 +1338,7 @@ impl Page {
                                     base_input_domain,
                                     sub_matcher,
                                     &self.external_domains_caseless,
+                                    false,
                                 );
                             }
                             Ok(())
@@ -1398,6 +1406,7 @@ impl Page {
                                         base_input_domain,
                                         sub_matcher,
                                         &self.external_domains_caseless,
+                                        false,
                                     );
                                 }
                             }
@@ -1582,7 +1591,7 @@ impl Page {
                             }
                             Ok(())
                         }),
-                        element!("a", |el| {
+                        element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
                                     &base,
@@ -1594,6 +1603,7 @@ impl Page {
                                     base_input_domain,
                                     sub_matcher,
                                     &external_domains_caseless,
+                                    false,
                                 );
                             }
 
@@ -1798,6 +1808,7 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
+                                true,
                             );
                         }
                         Ok(())
