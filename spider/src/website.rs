@@ -2905,7 +2905,7 @@ impl Website {
                                             }
                                             result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                                 match result {
-                                                    Ok(res) =>                                                 match res {
+                                                    Ok(res) => match res {
                                                         Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                                         _ => ()
                                                     },

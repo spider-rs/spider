@@ -118,7 +118,7 @@ pub struct AIResults {
     pub error: Option<String>,
 }
 
-/// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
+/// Represent a page visited.
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
@@ -165,7 +165,7 @@ pub struct Page {
     pub waf_check: bool,
 }
 
-/// Represent a page visited. This page contains HTML scraped with [scraper](https://crates.io/crates/scraper).
+/// Represent a page visited.
 #[cfg(feature = "decentralized")]
 #[derive(Debug, Clone, Default)]
 pub struct Page {

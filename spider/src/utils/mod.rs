@@ -2464,21 +2464,7 @@ pub async fn openai_request(
 
 /// Clean the html removing css and js default using the scraper crate.
 pub fn clean_html_raw(html: &str) -> String {
-    use crate::packages::scraper;
-    lazy_static! {
-        static ref SCRIPT_SELECTOR: scraper::Selector = scraper::Selector::parse("script").unwrap();
-        static ref STYLE_SELECTOR: scraper::Selector = scraper::Selector::parse("style").unwrap();
-    }
-    let fragment = scraper::Html::parse_document(&html);
-    let without_scripts: String = fragment
-        .select(&SCRIPT_SELECTOR)
-        .fold(html.to_string(), |acc, script| {
-            acc.replace(&script.html(), "")
-        });
-
-    fragment
-        .select(&STYLE_SELECTOR)
-        .fold(without_scripts, |acc, style| acc.replace(&style.html(), ""))
+    html.to_string()
 }
 
 /// Clean the html removing css and js
@@ -2545,7 +2531,7 @@ pub fn clean_html_base(html: &str) -> String {
         },
     ) {
         Ok(r) => r,
-        _ => clean_html_raw(html),
+        _ => html.into(),
     }
 }
 
@@ -2644,7 +2630,7 @@ pub fn clean_html_slim(html: &str) -> String {
         },
     ) {
         Ok(r) => r,
-        _ => clean_html_raw(html),
+        _ => html.into(),
     }
 }
 
@@ -2696,7 +2682,7 @@ pub fn clean_html_full(html: &str) -> String {
         },
     ) {
         Ok(r) => r,
-        _ => clean_html_raw(html),
+        _ => html.into(),
     }
 }
 

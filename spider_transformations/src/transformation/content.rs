@@ -7,8 +7,6 @@ use serde::{Deserialize, Deserializer};
 use spider::auto_encoder::is_binary_file;
 use spider::bytes::Bytes;
 use spider::lazy_static::lazy_static;
-use spider::packages::scraper::Html;
-use spider::packages::scraper::{ElementRef, Selector};
 use spider::page::Page;
 use spider::url::Url;
 use spider::utils::clean_html;
@@ -25,12 +23,6 @@ lazy_static! {
             r"(?m)^[ \t]+|[ \t]+$|[ \t]+|\s*\n\s*\n\s*"
         ).unwrap()
 
-    };
-
-    pub static ref SELECTOR: std::sync::Arc<Selector> = unsafe {
-        Selector::parse(&r##"body"##)
-            .unwrap_unchecked()
-            .into()
     };
     static ref EXAMPLE_URL: Url = Url::parse("https://example.net").expect("invalid url");
 }
@@ -266,12 +258,7 @@ pub fn transform_markdown(html: &str, commonmark: bool) -> String {
 
 /// transform the content to text raw shortcut
 pub fn transform_text(html: &str) -> String {
-    let fragment = Html::parse_document(&html);
-    let d = fragment
-        .select(SELECTOR.as_ref())
-        .filter_map(|c| ElementRef::wrap(*c))
-        .collect::<Vec<_>>();
-    super::text_extract::extract_text(&d)
+    super::text_extract::extract_text(&html)
 }
 
 /// get the HTML content for the page.
@@ -288,6 +275,7 @@ fn get_html_with_selector(
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
 ) -> String {
+    use spider::packages::scraper::{Html, Selector};
     let html = get_html(&res, &encoding);
 
     if let Some(selector_config) = selector_config.as_ref() {
@@ -373,6 +361,12 @@ pub fn transform_content(
         base_html
     };
 
+    let base_html = if c.clean_html {
+        clean_html(&base_html)
+    } else {
+        base_html
+    };
+
     match c.return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
         ReturnFormat::CommonMark => {
@@ -385,12 +379,6 @@ pub fn transform_content(
                 }
                 tag_factory.replace(tag_factor);
             }
-
-            let base_html = if c.clean_html {
-                clean_html(&base_html)
-            } else {
-                base_html
-            };
 
             html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, true, &url_parsed)
         }
@@ -405,12 +393,6 @@ pub fn transform_content(
                 tag_factory.replace(tag_factor);
             }
 
-            let base_html = if c.clean_html {
-                clean_html(&base_html)
-            } else {
-                base_html
-            };
-
             html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, &url_parsed)
         }
         ReturnFormat::Html2Text => {
@@ -420,15 +402,7 @@ pub fn transform_content(
                 base_html
             }
         }
-        ReturnFormat::Text => {
-            let fragment = Html::parse_document(&base_html.trim());
-            let d = fragment
-                .select(SELECTOR.as_ref())
-                .filter_map(|c| ElementRef::wrap(*c))
-                .collect::<Vec<_>>();
-
-            super::text_extract::extract_text(&d)
-        }
+        ReturnFormat::Text => super::text_extract::extract_text(&base_html),
         ReturnFormat::XML => {
             if let Ok(xml) = convert_html_to_xml(
                 &base_html.trim(),
