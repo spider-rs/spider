@@ -20,7 +20,7 @@ async fn main() {
 
     let join_handle = tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {
-            let markup = transform_content(&res, &conf, &None, &None);
+            let markup = transform_content(&res, &conf, &None, &None, &None);
 
             let _ = stdout
                 .write_all(format!("- {}\n {}\n", res.get_url(), markup).as_bytes())

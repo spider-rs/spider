@@ -11,11 +11,12 @@ use crate::utils::{setup_website_selectors, AllowedDomainTypes};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
+#[cfg(feature = "cron")]
+use async_job::{async_trait, Job, Runner};
 use backoff::ExponentialBackoff;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
 use reqwest::StatusCode;
-use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,15 +30,24 @@ use tokio_stream::StreamExt;
 use url::Url;
 
 #[cfg(feature = "cache")]
-use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+use http_cache_reqwest::{Cache, CacheMode, HttpCache, HttpCacheOptions};
 
-#[cfg(feature = "cron")]
-use async_job::{async_trait, Job, Runner};
+#[cfg(all(feature = "cache", not(feature = "cache_mem")))]
+use http_cache_reqwest::CACacheManager;
+
+#[cfg(all(feature = "cache", feature = "cache_mem"))]
+use http_cache_reqwest::MokaManager;
+
+#[cfg(all(feature = "cache", feature = "cache_mem"))]
+type CacheManager = MokaManager;
+
+#[cfg(all(feature = "cache", not(feature = "cache_mem")))]
+type CacheManager = CACacheManager;
 
 #[cfg(feature = "cache")]
 lazy_static! {
     /// Cache manager for request.
-    pub static ref CACACHE_MANAGER: CACacheManager = CACacheManager::default();
+    pub static ref CACACHE_MANAGER: CacheManager = CacheManager::default();
 }
 
 /// calculate the base limits
@@ -2196,9 +2206,9 @@ impl Website {
                                     log::info!("fetch {}", &link);
                                     self.links_visited.insert(link.clone());
 
-                                    let shared = shared.clone();
+                                    if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                                        let shared = shared.clone();
 
-                                    if let Ok(_) = semaphore.acquire().await {
                                         set.spawn_on(async move {
                                             let link_result = match on_link_find_callback {
                                                 Some(cb) => cb(link, None),
@@ -2255,6 +2265,7 @@ impl Website {
                                             }
 
                                             channel_send_page(&shared.2, page, &shared.4);
+                                            drop(permit);
 
                                             links
                                         },
@@ -2278,7 +2289,7 @@ impl Website {
                                 },
                                 result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                     match result {
-                                        Ok(res) =>                                                 match res {
+                                        Ok(res) => match res {
                                             Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                             _ => ()
                                         },
@@ -2424,9 +2435,9 @@ impl Website {
                                             log::info!("fetch {}", &link);
                                             self.links_visited.insert(link.clone());
 
-                                            let shared = shared.clone();
 
-                                            if let Ok(_) = semaphore.acquire().await {
+                                            if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                                                let shared = shared.clone();
                                                 set.spawn_on(async move {
                                                     let link_result = match on_link_find_callback {
                                                         Some(cb) => cb(link, None),
@@ -2534,6 +2545,8 @@ impl Website {
                                                             channel_send_page(
                                                                 &shared.2, page, &shared.3,
                                                             );
+
+                                                            drop(permit);
 
                                                             links
                                                         }
@@ -2727,7 +2740,7 @@ impl Website {
                                                 log::info!("fetch {}", &link);
                                                 self.links_visited.insert(link.clone());
 
-                                                if let Ok(_) = semaphore.acquire().await {
+                                                if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                     let shared = shared.clone();
 
                                                     set.spawn_on(async move {
@@ -2851,6 +2864,8 @@ impl Website {
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
                                                                 );
+
+                                                                drop(permit);
 
                                                                 links
                                                             }
@@ -3180,10 +3195,9 @@ impl Website {
 
                                         log::info!("fetch {}", &link);
                                         self.links_visited.insert(link.clone());
-                                        let shared = shared.clone();
 
-
-                                        if let Ok(_) = semaphore.acquire().await {
+                                        if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                                            let shared = shared.clone();
                                             set.spawn_on(async move {
                                                 let link_result = match on_link_find_callback {
                                                     Some(cb) => cb(link, None),
@@ -3270,6 +3284,7 @@ impl Website {
                                                 }
 
                                                 channel_send_page(&shared.2, page, &shared.3);
+                                                drop(permit);
 
                                                 links
                                             },
