@@ -124,38 +124,6 @@ lazy_static! {
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
-/// Semaphore low priority tasks to run.
-#[cfg(not(feature = "cowboy"))]
-async fn run_task<F, Fut>(
-    semaphore: Arc<Semaphore>,
-    task: F,
-) -> hashbrown::HashSet<CaseInsensitiveString>
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = hashbrown::HashSet<CaseInsensitiveString>> + Send + 'static,
-{
-    match semaphore.acquire_owned().await {
-        Ok(_permit) => task().await,
-        _ => {
-            task().await;
-            Default::default()
-        }
-    }
-}
-
-/// Semaphore low priority tasks to run
-#[cfg(feature = "cowboy")]
-async fn run_task<F, Fut>(
-    _semaphore: Arc<Semaphore>,
-    task: F,
-) -> hashbrown::HashSet<CaseInsensitiveString>
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = hashbrown::HashSet<CaseInsensitiveString>> + Send + 'static,
-{
-    task().await
-}
-
 const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
 
 /// the active status of the crawl.
@@ -785,7 +753,7 @@ impl Website {
         use reqwest::header::HeaderMap;
 
         let policy = self.setup_redirect_policy();
-        let mut headers = HeaderMap::new();
+        let mut headers: HeaderMap = HeaderMap::new();
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
@@ -2229,10 +2197,9 @@ impl Website {
                                     self.links_visited.insert(link.clone());
 
                                     let shared = shared.clone();
-                                    let semaphore = semaphore.clone();
 
-                                    set.spawn_on(
-                                        run_task(semaphore, move || async move {
+                                    if let Ok(_) = semaphore.acquire().await {
+                                        set.spawn_on(async move {
                                             let link_result = match on_link_find_callback {
                                                 Some(cb) => cb(link, None),
                                                 _ => (link, None),
@@ -2290,9 +2257,9 @@ impl Website {
                                             channel_send_page(&shared.2, page, &shared.4);
 
                                             links
-                                        }),
-                                        &chandle,
-                                    );
+                                        },
+                                        &chandle);
+                                    }
 
                                     if let Some(q) = &mut q {
                                         while let Ok(link) = q.try_recv() {
@@ -2322,6 +2289,10 @@ impl Website {
                                     }
                                 }
                                 else => break,
+                            }
+
+                            if links.is_empty() && set.is_empty() {
+                                break;
                             }
                         }
 
@@ -2455,72 +2426,40 @@ impl Website {
 
                                             let shared = shared.clone();
 
-                                            set.spawn_on(
-                                                run_task(
-                                                    semaphore.clone(),
-                                                    move || async move {
-                                                        let link_result = match on_link_find_callback {
-                                                            Some(cb) => cb(link, None),
-                                                            _ => (link, None),
-                                                        };
-                                                        let target_url = link_result.0.as_ref();
-                                                        let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
-                                                    ).await {
-                                                            Ok(new_page) => {
-                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
-                                                                let mut page = Page::new(
-                                                                    &target_url,
-                                                                    &shared.0,
-                                                                    &new_page,
-                                                                    &shared.5.wait_for,
-                                                                    &shared.5.screenshot,
-                                                                    false,
-                                                                    &shared.5.openai_config,
-                                                                    &shared.5.execution_scripts,
-                                                                    &shared.5.automation_scripts,
-                                                                    &shared.5.viewport,
-                                                                    &shared.5.request_timeout
-                                                                )
-                                                                .await;
+                                            if let Ok(_) = semaphore.acquire().await {
+                                                set.spawn_on(async move {
+                                                    let link_result = match on_link_find_callback {
+                                                        Some(cb) => cb(link, None),
+                                                        _ => (link, None),
+                                                    };
+                                                    let target_url = link_result.0.as_ref();
+                                                    let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
+                                                ).await {
+                                                        Ok(new_page) => {
+                                                             crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
+                                                            let mut page = Page::new(
+                                                                &target_url,
+                                                                &shared.0,
+                                                                &new_page,
+                                                                &shared.5.wait_for,
+                                                                &shared.5.screenshot,
+                                                                false,
+                                                                &shared.5.openai_config,
+                                                                &shared.5.execution_scripts,
+                                                                &shared.5.automation_scripts,
+                                                                &shared.5.viewport,
+                                                                &shared.5.request_timeout
+                                                            )
+                                                            .await;
 
-                                                                let mut retry_count = shared.5.retry;
+                                                            let mut retry_count = shared.5.retry;
 
-                                                                while page.should_retry && retry_count > 0 {
-                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                        let next_page = backoff::future::retry(
-                                                                            ExponentialBackoff::default(),
-                                                                            || async {
-                                                                                let p = Page::new(
-                                                                                    &target_url,
-                                                                                    &shared.0,
-                                                                                    &new_page,
-                                                                                    &shared.5.wait_for,
-                                                                                    &shared.5.screenshot,
-                                                                                    false,
-                                                                                    &shared.5.openai_config,
-                                                                                    &shared.5.execution_scripts,
-                                                                                    &shared.5.automation_scripts,
-                                                                                    &shared.5.viewport,
-                                                                                    &shared.5.request_timeout
-                                                                                )
-                                                                                .await;
-                                                                                Ok::<
-                                                                                    Page,
-                                                                                    backoff::Error<std::io::Error>,
-                                                                                >(
-                                                                                    p
-                                                                                )
-                                                                            },
-                                                                        );
-                                                                        if let Ok(next_page) = next_page.await {
-                                                                            page.clone_from(&next_page);
-                                                                        };
-                                                                    } else {
-                                                                        if let Some(timeout) = page.get_timeout() {
-                                                                            tokio::time::sleep(timeout).await;
-                                                                        }
-                                                                        page.clone_from(
-                                                                            &Page::new(
+                                                            while page.should_retry && retry_count > 0 {
+                                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                                    let next_page = backoff::future::retry(
+                                                                        ExponentialBackoff::default(),
+                                                                        || async {
+                                                                            let p = Page::new(
                                                                                 &target_url,
                                                                                 &shared.0,
                                                                                 &new_page,
@@ -2531,81 +2470,107 @@ impl Website {
                                                                                 &shared.5.execution_scripts,
                                                                                 &shared.5.automation_scripts,
                                                                                 &shared.5.viewport,
-                                                                                &shared.5.request_timeout,
+                                                                                &shared.5.request_timeout
                                                                             )
-                                                                            .await,
-                                                                        );
+                                                                            .await;
+                                                                            Ok::<
+                                                                                Page,
+                                                                                backoff::Error<std::io::Error>,
+                                                                            >(
+                                                                                p
+                                                                            )
+                                                                        },
+                                                                    );
+                                                                    if let Ok(next_page) = next_page.await {
+                                                                        page.clone_from(&next_page);
+                                                                    };
+                                                                } else {
+                                                                    if let Some(timeout) = page.get_timeout() {
+                                                                        tokio::time::sleep(timeout).await;
                                                                     }
-                                                                    retry_count -= 1;
-                                                                }
-
-                                                                if add_external {
-                                                                    page.set_external(
-                                                                        shared
-                                                                            .5
-                                                                            .external_domains_caseless
-                                                                            .clone(),
+                                                                    page.clone_from(
+                                                                        &Page::new(
+                                                                            &target_url,
+                                                                            &shared.0,
+                                                                            &new_page,
+                                                                            &shared.5.wait_for,
+                                                                            &shared.5.screenshot,
+                                                                            false,
+                                                                            &shared.5.openai_config,
+                                                                            &shared.5.execution_scripts,
+                                                                            &shared.5.automation_scripts,
+                                                                            &shared.5.viewport,
+                                                                            &shared.5.request_timeout,
+                                                                        )
+                                                                        .await,
                                                                     );
                                                                 }
-
-                                                                let links = if full_resources {
-                                                                    page.links_full(&shared.1).await
-                                                                } else {
-                                                                    page.links(&shared.1).await
-                                                                };
-
-                                                                if return_page_links {
-                                                                    page.page_links = if links.is_empty() {
-                                                                        None
-                                                                    } else {
-                                                                        Some(Box::new(links.clone()))
-                                                                    };
-                                                                }
-
-                                                                channel_send_page(
-                                                                    &shared.2, page, &shared.3,
-                                                                );
-
-                                                                links
+                                                                retry_count -= 1;
                                                             }
-                                                            _ => Default::default(),
-                                                        };
 
-                                                        next
-                                                    },
-                                                ),
-                                                &chandle,
-                                            );
+                                                            if add_external {
+                                                                page.set_external(
+                                                                    shared
+                                                                        .5
+                                                                        .external_domains_caseless
+                                                                        .clone(),
+                                                                );
+                                                            }
 
-                                            match q.as_mut() {
-                                                Some(q) => {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed = self.is_allowed(&s);
+                                                            let links = if full_resources {
+                                                                page.links_full(&shared.1).await
+                                                            } else {
+                                                                page.links(&shared.1).await
+                                                            };
 
-                                                        if allowed.eq(
-                                                            &ProcessLinkStatus::BudgetExceeded,
-                                                        ) {
-                                                            break;
-                                                        }
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::Blocked)
-                                                        {
-                                                            continue;
-                                                        }
+                                                            if return_page_links {
+                                                                page.page_links = if links.is_empty() {
+                                                                    None
+                                                                } else {
+                                                                    Some(Box::new(links.clone()))
+                                                                };
+                                                            }
 
-                                                        self.links_visited
-                                                            .extend_with_new_links(
-                                                                &mut links, s,
+                                                            channel_send_page(
+                                                                &shared.2, page, &shared.3,
                                                             );
+
+                                                            links
+                                                        }
+                                                        _ => Default::default(),
+                                                    };
+
+                                                    next
+                                                },
+                                                &chandle);
+                                            }
+
+                                            if let Some(q) = q.as_mut() {
+                                                while let Ok(link) = q.try_recv() {
+                                                    let s = link.into();
+                                                    let allowed = self.is_allowed(&s);
+
+                                                    if allowed.eq(
+                                                        &ProcessLinkStatus::BudgetExceeded,
+                                                    ) {
+                                                        break;
                                                     }
+                                                    if allowed
+                                                        .eq(&ProcessLinkStatus::Blocked)
+                                                    {
+                                                        continue;
+                                                    }
+
+                                                    self.links_visited
+                                                        .extend_with_new_links(
+                                                            &mut links, s,
+                                                        );
                                                 }
-                                                _ => (),
                                             }
                                         }
                                         result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
                                             match result {
-                                                Ok(res) =>                                                 match res {
+                                                Ok(res) => match res {
                                                     Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
                                                     _ => ()
                                                 },
@@ -2616,7 +2581,10 @@ impl Website {
                                             }
                                         }
                                         else => break,
+                                    }
 
+                                    if links.is_empty() && set.is_empty() {
+                                        break;
                                     }
                                 }
 
@@ -2759,55 +2727,83 @@ impl Website {
                                                 log::info!("fetch {}", &link);
                                                 self.links_visited.insert(link.clone());
 
-                                                let shared = shared.clone();
+                                                if let Ok(_) = semaphore.acquire().await {
+                                                    let shared = shared.clone();
 
-                                                set.spawn_on(
-                                                run_task(semaphore.clone(), move || async move {
-                                                    match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8
-                                                ).await {
-                                                        Ok(new_page) => {
-                                                             crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
+                                                    set.spawn_on(async move {
+                                                        let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8).await {
+                                                            Ok(new_page) => {
+                                                                crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
 
-                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                                &new_page,
-                                                                shared.6.chrome_intercept.enabled,
-                                                                &shared.6.auth_challenge_response,
-                                                                shared.6.chrome_intercept.block_visuals,
-                                                                &shared.7,
-                                                            )
-                                                            .await;
+                                                                let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                                                                    &new_page,
+                                                                    shared.6.chrome_intercept.enabled,
+                                                                    &shared.6.auth_challenge_response,
+                                                                    shared.6.chrome_intercept.block_visuals,
+                                                                    &shared.7,
+                                                                )
+                                                                .await;
 
-                                                            let link_result =
-                                                                match on_link_find_callback {
-                                                                    Some(cb) => cb(link, None),
-                                                                    _ => (link, None),
-                                                                };
+                                                                let link_result =
+                                                                    match on_link_find_callback {
+                                                                        Some(cb) => cb(link, None),
+                                                                        _ => (link, None),
+                                                                    };
 
-                                                            let target_url = link_result.0.as_ref();
+                                                                let target_url = link_result.0.as_ref();
 
-                                                            let mut page = Page::new(
-                                                                &target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
-                                                                false,
-                                                                &shared.6.openai_config,
-                                                                &shared.6.execution_scripts,
-                                                                &shared.6.automation_scripts,
-                                                                &shared.6.viewport,
-                                                                &shared.6.request_timeout
-                                                            )
-                                                            .await;
+                                                                let mut page = Page::new(
+                                                                    &target_url,
+                                                                    &shared.0,
+                                                                    &new_page,
+                                                                    &shared.6.wait_for,
+                                                                    &shared.6.screenshot,
+                                                                    false,
+                                                                    &shared.6.openai_config,
+                                                                    &shared.6.execution_scripts,
+                                                                    &shared.6.automation_scripts,
+                                                                    &shared.6.viewport,
+                                                                    &shared.6.request_timeout
+                                                                )
+                                                                .await;
 
-                                                            let mut retry_count = shared.6.retry;
+                                                                let mut retry_count = shared.6.retry;
 
-                                                            while page.should_retry && retry_count > 0 {
-                                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                    let next_page = backoff::future::retry(
-                                                                        ExponentialBackoff::default(),
-                                                                        || async {
-                                                                            let p =    Page::new(
+                                                                while page.should_retry && retry_count > 0 {
+                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                                        let next_page = backoff::future::retry(
+                                                                            ExponentialBackoff::default(),
+                                                                            || async {
+                                                                                let p =    Page::new(
+                                                                                    &target_url,
+                                                                                    &shared.0,
+                                                                                    &new_page,
+                                                                                    &shared.6.wait_for,
+                                                                                    &shared.6.screenshot,
+                                                                                    false,
+                                                                                    &shared.6.openai_config,
+                                                                                    &shared.6.execution_scripts,
+                                                                                    &shared.6.automation_scripts,
+                                                                                    &shared.6.viewport,
+                                                                                    &shared.6.request_timeout
+                                                                                ).await;
+                                                                                Ok::<
+                                                                                    Page,
+                                                                                    backoff::Error<std::io::Error>,
+                                                                                >(
+                                                                                    p
+                                                                                )
+                                                                            },
+                                                                        );
+                                                                        if let Ok(next_page) = next_page.await {
+                                                                            page.clone_from(&next_page);
+                                                                        };
+                                                                    } else {
+                                                                        if let Some(timeout) = page.get_timeout() {
+                                                                            tokio::time::sleep(timeout).await;
+                                                                        }
+                                                                        page.clone_from(
+                                                                            &Page::new(
                                                                                 &target_url,
                                                                                 &shared.0,
                                                                                 &new_page,
@@ -2818,80 +2814,53 @@ impl Website {
                                                                                 &shared.6.execution_scripts,
                                                                                 &shared.6.automation_scripts,
                                                                                 &shared.6.viewport,
-                                                                                &shared.6.request_timeout
-                                                                            ).await;
-                                                                            Ok::<
-                                                                                Page,
-                                                                                backoff::Error<std::io::Error>,
-                                                                            >(
-                                                                                p
+                                                                                &shared.6.request_timeout,
+
                                                                             )
-                                                                        },
-                                                                    );
-                                                                    if let Ok(next_page) = next_page.await {
-                                                                        page.clone_from(&next_page);
-                                                                    };
-                                                                } else {
-                                                                    if let Some(timeout) = page.get_timeout() {
-                                                                        tokio::time::sleep(timeout).await;
+                                                                            .await,
+                                                                        );
                                                                     }
-                                                                    page.clone_from(
-                                                                        &Page::new(
-                                                                            &target_url,
-                                                                            &shared.0,
-                                                                            &new_page,
-                                                                            &shared.6.wait_for,
-                                                                            &shared.6.screenshot,
-                                                                            false,
-                                                                            &shared.6.openai_config,
-                                                                            &shared.6.execution_scripts,
-                                                                            &shared.6.automation_scripts,
-                                                                            &shared.6.viewport,
-                                                                            &shared.6.request_timeout,
-
-                                                                        )
-                                                                        .await,
-                                                                    );
+                                                                    retry_count -= 1;
                                                                 }
-                                                                retry_count -= 1;
-                                                            }
 
-                                                            match intercept_handle {
-                                                                Some(h) => {
-                                                                    let _ = h.await;
+                                                                match intercept_handle {
+                                                                    Some(h) => {
+                                                                        let _ = h.await;
+                                                                    }
+                                                                    _ => ()
                                                                 }
-                                                                _ => ()
-                                                            }
 
-                                                            if add_external {
-                                                                page.set_external(shared.3.clone());
-                                                            }
+                                                                if add_external {
+                                                                    page.set_external(shared.3.clone());
+                                                                }
 
-                                                            let links = if full_resources {
-                                                                page.links_full(&shared.1).await
-                                                            } else {
-                                                                page.links(&shared.1).await
-                                                            };
-
-                                                            if return_page_links {
-                                                                page.page_links = if links.is_empty() {
-                                                                    None
+                                                                let links = if full_resources {
+                                                                    page.links_full(&shared.1).await
                                                                 } else {
-                                                                    Some(Box::new(links.clone()))
+                                                                    page.links(&shared.1).await
                                                                 };
+
+                                                                if return_page_links {
+                                                                    page.page_links = if links.is_empty() {
+                                                                        None
+                                                                    } else {
+                                                                        Some(Box::new(links.clone()))
+                                                                    };
+                                                                }
+
+                                                                channel_send_page(
+                                                                    &shared.2, page, &shared.4,
+                                                                );
+
+                                                                links
                                                             }
+                                                            _ => Default::default(),
+                                                        };
 
-                                                            channel_send_page(
-                                                                &shared.2, page, &shared.4,
-                                                            );
-
-                                                            links
-                                                        }
-                                                        _ => Default::default(),
-                                                    }
-                                                    }),
-                                                &chandle,
-                                            );
+                                                        results
+                                                    },
+                                                    &chandle);
+                                                }
 
                                                 match q.as_mut() {
                                                     Some(q) => {
@@ -2932,6 +2901,10 @@ impl Website {
                                                 }
                                             }
                                             else => break,
+                                        };
+
+                                        if links.is_empty() && set.is_empty() {
+                                            break;
                                         }
                                     }
 
@@ -3209,8 +3182,9 @@ impl Website {
                                         self.links_visited.insert(link.clone());
                                         let shared = shared.clone();
 
-                                        set.spawn_on(
-                                            run_task(semaphore.clone(), move || async move {
+
+                                        if let Ok(_) = semaphore.acquire().await {
+                                            set.spawn_on(async move {
                                                 let link_result = match on_link_find_callback {
                                                     Some(cb) => cb(link, None),
                                                     _ => (link, None),
@@ -3298,30 +3272,27 @@ impl Website {
                                                 channel_send_page(&shared.2, page, &shared.3);
 
                                                 links
-                                            }),
-                                            &chandle,
-                                        );
+                                            },
+                                            &chandle);
+                                        }
 
-                                        match q.as_mut() {
-                                            Some(q) => {
-                                                while let Ok(link) = q.try_recv() {
-                                                    let s = link.into();
-                                                    let allowed = self.is_allowed(&s);
+                                        if let Some(q) = q.as_mut() {
+                                            while let Ok(link) = q.try_recv() {
+                                                let s = link.into();
+                                                let allowed = self.is_allowed(&s);
 
-                                                    if allowed
-                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                    {
-                                                        break;
-                                                    }
-                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                        continue;
-                                                    }
-
-                                                    self.links_visited
-                                                        .extend_with_new_links(&mut links, s);
+                                                if allowed
+                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
+                                                {
+                                                    break;
                                                 }
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                    continue;
+                                                }
+
+                                                self.links_visited
+                                                    .extend_with_new_links(&mut links, s);
                                             }
-                                            _ => (),
                                         }
                                     }
                                     result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
