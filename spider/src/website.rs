@@ -236,9 +236,6 @@ pub struct Website {
     client: Option<Client>,
 }
 
-/// The batch timeout
-const BATCH_TIMEOUT: Duration = Duration::from_millis(200);
-
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
@@ -861,9 +858,8 @@ impl Website {
         let client = match &self.configuration.proxies {
             Some(proxies) => {
                 for proxie in proxies.iter() {
-                    match reqwest::Proxy::all(proxie) {
-                        Ok(proxy) => client = client.proxy(proxy),
-                        _ => (),
+                    if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                        client = client.proxy(proxy);
                     }
                 }
                 client
@@ -2185,15 +2181,12 @@ impl Website {
 
                         tokio::pin!(stream);
 
-                        let mut batch_timeout = BATCH_TIMEOUT;
-
                         loop {
                             tokio::select! {
                                 Some(link) = stream.next() => {
                                     if !self.handle_process(handle, &mut interval, set.shutdown()).await {
                                         break;
                                     }
-
                                     let allowed = self.is_allowed(&link);
 
                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
@@ -2208,7 +2201,6 @@ impl Website {
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
-
                                         set.spawn_on(async move {
                                             let link_result = match on_link_find_callback {
                                                 Some(cb) => cb(link, None),
@@ -2287,23 +2279,17 @@ impl Website {
                                         }
                                     }
                                 },
-                                result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
+
+                                Some(result) = set.join_next() => {
                                     match result {
-                                        Ok(res) => match res {
-                                            Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
-                                            _ => ()
-                                        },
+                                        Ok(res) => self.links_visited.extend_links(&mut links, res),
                                         Err(_) => {
-                                            batch_timeout += batch_timeout;
                                             break
                                         }
                                     }
                                 }
-                                else => break,
-                            }
 
-                            if links.is_empty() && set.is_empty() {
-                                break;
+                                else => break,
                             }
                         }
 
@@ -2340,12 +2326,6 @@ impl Website {
                 .await
                 {
                     Ok(new_page) => {
-                        crate::features::chrome::setup_chrome_events(
-                            &new_page,
-                            &self.configuration,
-                        )
-                        .await;
-
                         let semaphore = self.setup_semaphore();
 
                         let mut q = match &self.channel_queue {
@@ -2407,7 +2387,6 @@ impl Website {
                                 )
                                 .throttle(*throttle);
                                 tokio::pin!(stream);
-                                let mut batch_timeout = BATCH_TIMEOUT;
 
                                 loop {
                                     tokio::select! {
@@ -2444,8 +2423,7 @@ impl Website {
                                                         _ => (link, None),
                                                     };
                                                     let target_url = link_result.0.as_ref();
-                                                    let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6
-                                                ).await {
+                                                    let next = match attempt_navigation("about:blank", &shared.4, &shared.5.request_timeout, &shared.6).await {
                                                         Ok(new_page) => {
                                                              crate::features::chrome::setup_chrome_events(&new_page, &shared.5).await;
                                                             let mut page = Page::new(
@@ -2581,14 +2559,10 @@ impl Website {
                                                 }
                                             }
                                         }
-                                        result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
+                                        Some(result) = set.join_next() => {
                                             match result {
-                                                Ok(res) => match res {
-                                                    Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
-                                                    _ => ()
-                                                },
+                                                Ok(res) => self.links_visited.extend_links(&mut links, res),
                                                 Err(_) => {
-                                                    batch_timeout += batch_timeout;
                                                     break
                                                 }
                                             }
@@ -2710,7 +2684,6 @@ impl Website {
                                         )
                                         .throttle(*throttle);
                                     tokio::pin!(stream);
-                                    let mut batch_timeout = BATCH_TIMEOUT;
 
                                     loop {
                                         tokio::select! {
@@ -2903,14 +2876,10 @@ impl Website {
                                                     _ => (),
                                                 }
                                             }
-                                            result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
+                                            Some(result) = set.join_next() => {
                                                 match result {
-                                                    Ok(res) => match res {
-                                                        Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
-                                                        _ => ()
-                                                    },
+                                                    Ok(res) => self.links_visited.extend_links(&mut links, res),
                                                     Err(_) => {
-                                                        batch_timeout += batch_timeout;
                                                         break
                                                     }
                                                 }
@@ -3076,10 +3045,9 @@ impl Website {
                     }
 
                     while let Some(res) = set.join_next().await {
-                        match res {
-                            Ok(msg) => self.links_visited.extend_links(&mut links, msg),
-                            _ => (),
-                        };
+                        if let Ok(msg) = res {
+                            self.links_visited.extend_links(&mut links, msg);
+                        }
                     }
 
                     if links.is_empty() {
@@ -3168,7 +3136,6 @@ impl Website {
                             )
                             .throttle(*throttle);
                             tokio::pin!(stream);
-                            let mut batch_timeout = BATCH_TIMEOUT;
 
                             loop {
                                 tokio::select! {
@@ -3310,14 +3277,10 @@ impl Website {
                                             }
                                         }
                                     }
-                                    result = tokio::time::timeout(batch_timeout, set.join_next()), if !set.is_empty() => {
+                                    Some(result) = set.join_next() => {
                                         match result {
-                                            Ok(res) => match res {
-                                                Some(Ok(msg)) => self.links_visited.extend_links(&mut links, msg),
-                                                _ => ()
-                                            },
+                                            Ok(res) => self.links_visited.extend_links(&mut links, res),
                                             Err(_) => {
-                                                batch_timeout += batch_timeout;
                                                 break
                                             }
                                         }
@@ -3785,11 +3748,10 @@ impl Website {
                                                                                 )
                                                                                 .await;
 
-                                                                                match intercept_handle {
-                                                                                    Some(h) => {
-                                                                                        let _ = h.await;
-                                                                                    }
-                                                                                    _ => ()
+                                                                                if let Some(h) =
+                                                                                    intercept_handle
+                                                                                {
+                                                                                    let _ = h.await;
                                                                                 }
 
                                                                                 match tx
