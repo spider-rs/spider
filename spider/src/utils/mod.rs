@@ -2919,3 +2919,14 @@ where
 {
     set.spawn_on(future, &handle)
 }
+
+/// Emit a log info event.
+#[cfg(feature = "tracing")]
+pub fn emit_log(link: &str) {
+    tracing::info!("fetch {}", &link);
+}
+/// Emit a log info event.
+#[cfg(not(feature = "tracing"))]
+pub fn emit_log(link: &str) {
+    log::info!("fetch {}", &link);
+}

@@ -6,8 +6,8 @@ use crate::configuration::{
 use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
+use crate::utils::{emit_log, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes};
 use crate::utils::{interner::ListBucket, log};
-use crate::utils::{setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -2224,7 +2224,8 @@ impl Website {
                                         continue;
                                     }
 
-                                    log::info!("fetch {}", &link);
+                                    emit_log(&link.inner());
+
                                     self.links_visited.insert(link.clone());
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
@@ -2447,7 +2448,8 @@ impl Website {
                                                     continue;
                                                 }
 
-                                                log::info!("fetch {}", &link);
+                                                emit_log(&link.inner());
+
                                                 self.links_visited.insert(link.clone());
 
                                                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
@@ -2711,7 +2713,7 @@ impl Website {
                                     continue;
                                 }
 
-                                log::info!("fetch {}", &link);
+                                emit_log(&link.inner());
 
                                 self.links_visited.insert(link.clone());
 
@@ -2896,7 +2898,7 @@ impl Website {
                                             continue;
                                         }
 
-                                        log::info!("fetch {}", &link);
+                                        emit_log(&link.inner());
                                         self.links_visited.insert(link.clone());
 
                                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
@@ -3023,6 +3025,10 @@ impl Website {
                                         }
                                     }
                                     else => break,
+                                }
+
+                                if links.is_empty() && set.is_empty() {
+                                    break;
                                 }
                             }
 
