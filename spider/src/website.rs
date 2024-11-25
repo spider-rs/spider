@@ -7,7 +7,7 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::{interner::ListBucket, log};
-use crate::utils::{setup_website_selectors, spawn_set, AllowedDomainTypes};
+use crate::utils::{setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -1105,7 +1105,7 @@ impl Website {
         let target_id = string_concat!(self.crawl_id, self.url.inner());
         let c_lock = CONTROLLER.clone();
 
-        let join_handle = tokio::spawn(async move {
+        let join_handle = spawn_task("control_handler", async move {
             let mut l = c_lock.read().await.1.to_owned();
 
             while l.changed().await.is_ok() {
@@ -2031,7 +2031,7 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        tokio::spawn(async move {
+        spawn_task("crawl", async move {
             w.crawl().await;
         });
 
@@ -2055,7 +2055,7 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        tokio::spawn(async move {
+        spawn_task("crawl_raw", async move {
             w.crawl_raw().await;
         });
 
@@ -2079,7 +2079,7 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        tokio::spawn(async move {
+        spawn_task("crawl_smart", async move {
             w.crawl_smart().await;
         });
 
@@ -2103,7 +2103,7 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        tokio::spawn(async move {
+        spawn_task("crawl_sitemap", async move {
             w.crawl_sitemap().await;
         });
 
@@ -3096,7 +3096,7 @@ impl Website {
 
                         let shared = shared.clone();
 
-                        let handles = tokio::spawn(async move {
+                        let handles = spawn_task("page_fetch", async move {
                             let mut pages = Vec::new();
 
                             while let Some(page) = rx.recv().await {
@@ -3155,7 +3155,7 @@ impl Website {
                                                             let client = client.clone();
                                                             let tx = tx.clone();
 
-                                                            tokio::spawn(async move {
+                                                            spawn_task("page_fetch", async move {
                                                                 let mut page = Page::new_page(
                                                                     &link.inner(),
                                                                     &client,
@@ -3343,7 +3343,7 @@ impl Website {
 
                                 let shared_1 = shared.clone();
 
-                                let handles = tokio::spawn(async move {
+                                let handles = spawn_task("page_fetch", async move {
                                     let mut pages = Vec::new();
 
                                     while let Some(page) = rx.recv().await {
@@ -3412,8 +3412,10 @@ impl Website {
 
                                                                     let shared = shared.clone();
 
-                                                                    tokio::spawn(async move {
-                                                                        match attempt_navigation(
+                                                                    spawn_task(
+                                                                        "page_fetch",
+                                                                        async move {
+                                                                            match attempt_navigation(
                                                                             "about:blank",
                                                                             &shared.2,
                                                                             &shared
@@ -3471,7 +3473,8 @@ impl Website {
                                                                             }
                                                                             _ => (),
                                                                         }
-                                                                    });
+                                                                        },
+                                                                    );
                                                                 }
                                                                 Location::None
                                                                 | Location::ParseErr(_) => (),

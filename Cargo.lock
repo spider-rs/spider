@@ -1585,9 +1585,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a9bfc1af68b1726ea47d3d5109de126281def866b33970e10fbab11b5dafab3"
+checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -2166,7 +2166,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.1",
+ "hashbrown 0.15.2",
 ]
 
 [[package]]
@@ -3999,7 +3999,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4019,7 +4019,7 @@ dependencies = [
  "fast_html5ever",
  "fastrand",
  "flexbuffers",
- "hashbrown 0.15.1",
+ "hashbrown 0.15.2",
  "http 1.1.0",
  "http-cache",
  "http-cache-reqwest",
@@ -4061,7 +4061,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "clap",
  "env_logger",
@@ -4120,7 +4120,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4142,7 +4142,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.13.27"
+version = "2.13.28"
 dependencies = [
  "env_logger",
  "lazy_static",

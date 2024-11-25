@@ -2863,7 +2863,7 @@ pub fn get_last_segment(path: &str) -> &str {
 
 #[cfg(feature = "tracing")]
 /// Spawns a new asynchronous task.
-pub fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
+pub(crate) fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
@@ -2876,7 +2876,7 @@ where
 
 #[cfg(not(feature = "tracing"))]
 /// Spawns a new asynchronous task.
-pub fn spawn_task<F>(_task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
+pub(crate) fn spawn_task<F>(_task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
@@ -2886,7 +2886,7 @@ where
 
 #[cfg(feature = "tracing")]
 /// Spawn a joinset.
-pub fn spawn_set<F, T>(
+pub(crate) fn spawn_set<F, T>(
     task_name: &str,
     set: &mut tokio::task::JoinSet<T>,
     future: F,
@@ -2905,7 +2905,7 @@ where
 
 #[cfg(not(feature = "tracing"))]
 /// Spawn a joinset.
-pub fn spawn_set<F, T>(
+pub(crate) fn spawn_set<F, T>(
     _task_name: &str,
     set: &mut tokio::task::JoinSet<T>,
     future: F,
