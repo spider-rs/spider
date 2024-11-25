@@ -31,7 +31,7 @@ use crate::handler::viewport::Viewport;
 use crate::page::Page;
 
 /// Standard timeout in MS
-pub const REQUEST_TIMEOUT: u64 = 30_000;
+pub const REQUEST_TIMEOUT: u64 = 60_000;
 
 pub mod browser;
 pub mod commandfuture;
@@ -94,11 +94,11 @@ impl Handler {
         config: HandlerConfig,
     ) -> Self {
         let discover = SetDiscoverTargetsParams::new(true);
-        let _ = conn.submit_command(
-            discover.identifier(),
-            None,
-            serde_json::to_value(discover).unwrap(),
-        );
+        let discover_id = discover.identifier();
+
+        if let Ok(params) = serde_json::to_value(discover) {
+            let _ = conn.submit_command(discover_id, None, params);
+        }
 
         let browser_contexts = config
             .context_ids
@@ -303,46 +303,40 @@ impl Handler {
     fn submit_fetch_targets(&mut self, tx: OneshotSender<Result<Vec<TargetInfo>>>, now: Instant) {
         let msg = GetTargetsParams { filter: None };
         let method = msg.identifier();
-        let call_id = self
-            .conn
-            .submit_command(method.clone(), None, serde_json::to_value(msg).unwrap())
-            .unwrap();
 
-        self.pending_commands
-            .insert(call_id, (PendingRequest::GetTargets(tx), method, now));
+        if let Ok(params) = serde_json::to_value(msg) {
+            if let Ok(call_id) = self.conn.submit_command(method.clone(), None, params) {
+                self.pending_commands
+                    .insert(call_id, (PendingRequest::GetTargets(tx), method, now));
+            }
+        }
     }
 
     /// Send the Request over to the server and store its identifier to handle
     /// the response once received.
     fn submit_navigation(&mut self, id: NavigationId, req: CdpRequest, now: Instant) {
-        let call_id = self
-            .conn
-            .submit_command(
-                req.method.clone(),
-                req.session_id.map(Into::into),
-                req.params,
-            )
-            .unwrap();
-
-        self.pending_commands
-            .insert(call_id, (PendingRequest::Navigate(id), req.method, now));
+        if let Ok(call_id) = self.conn.submit_command(
+            req.method.clone(),
+            req.session_id.map(Into::into),
+            req.params,
+        ) {
+            self.pending_commands
+                .insert(call_id, (PendingRequest::Navigate(id), req.method, now));
+        }
     }
 
     fn submit_close(&mut self, tx: OneshotSender<Result<CloseReturns>>, now: Instant) {
         let close_msg = CloseParams::default();
         let method = close_msg.identifier();
 
-        let call_id = self
-            .conn
-            .submit_command(
-                method.clone(),
-                None,
-                serde_json::to_value(close_msg).unwrap(),
-            )
-            .unwrap();
-
-        self.pending_commands
-            .insert(call_id, (PendingRequest::CloseBrowser(tx), method, now));
+        if let Ok(call_id) = self.conn.submit_command(
+            method.clone(),
+            None,
+            serde_json::to_value(close_msg).unwrap(),
+        ) {
+            self.pending_commands
+                .insert(call_id, (PendingRequest::CloseBrowser(tx), method, now));
+        }
     }
 
     /// Process a message received by the target's page via channel
@@ -379,26 +373,19 @@ impl Handler {
     /// ready and idle), the `Target` sends its newly created `Page` as response
     /// to the initiator (`tx`) of the `CreateTargetParams` request.
     fn create_page(&mut self, params: CreateTargetParams, tx: OneshotSender<Result<Page>>) {
-        match url::Url::parse(&params.url) {
-            Ok(_) => {
-                let method = params.identifier();
-                match serde_json::to_value(params) {
-                    Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
-                        Ok(call_id) => {
-                            self.pending_commands.insert(
-                                call_id,
-                                (PendingRequest::CreateTarget(tx), method, Instant::now()),
-                            );
-                        }
-                        Err(err) => {
-                            let _ = tx.send(Err(err.into())).ok();
-                        }
-                    },
-                    Err(err) => {
-                        let _ = tx.send(Err(err.into())).ok();
-                    }
+        let method = params.identifier();
+        match serde_json::to_value(params) {
+            Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
+                Ok(call_id) => {
+                    self.pending_commands.insert(
+                        call_id,
+                        (PendingRequest::CreateTarget(tx), method, Instant::now()),
+                    );
                 }
-            }
+                Err(err) => {
+                    let _ = tx.send(Err(err.into())).ok();
+                }
+            },
             Err(err) => {
                 let _ = tx.send(Err(err.into())).ok();
             }
@@ -462,6 +449,8 @@ impl Handler {
                 request_intercept: self.config.request_intercept,
                 cache_enabled: self.config.cache_enabled,
                 ignore_visuals: self.config.ignore_visuals,
+                ignore_stylesheets: self.config.ignore_stylesheets,
+                ignore_javascript: self.config.ignore_javascript,
                 extra_headers: self.config.extra_headers.clone(),
                 only_html: self.config.only_html && self.config.created_first_target,
             },

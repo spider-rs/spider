@@ -269,11 +269,7 @@ pub struct Website {
 impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
-        let url = if url.starts_with(' ') || url.ends_with(' ') {
-            url.trim()
-        } else {
-            url
-        };
+        let url = url.trim();
         let url: Box<CaseInsensitiveString> = if url.starts_with("http") {
             CaseInsensitiveString::new(&url).into()
         } else {
@@ -1497,6 +1493,7 @@ impl Website {
             &browser,
             &config.request_timeout,
             &context_id,
+            &config.viewport,
         )
         .await
         {
@@ -2346,7 +2343,6 @@ impl Website {
     #[cfg_attr(feature = "tracing", tracing::instrument)]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         use crate::features::chrome::attempt_navigation;
-
         self.start();
         match self.setup_selectors() {
             Some(mut selectors) => match self.setup_browser().await {
@@ -2356,6 +2352,7 @@ impl Website {
                         &browser,
                         &self.configuration.request_timeout,
                         &context_id,
+                        &self.configuration.viewport,
                     )
                     .await
                     {
@@ -2457,7 +2454,7 @@ impl Website {
                                                     let shared = shared.clone();
 
                                                     spawn_set("page_fetch", &mut set, async move {
-                                                        let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8).await {
+                                                        let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                             Ok(new_page) => {
                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
 
@@ -3463,6 +3460,7 @@ impl Website {
                                                                                 .3
                                                                                 .request_timeout,
                                                                             &shared.5,
+                                                                            &shared.3.viewport,
                                                                         )
                                                                         .await
                                                                         {

@@ -109,6 +109,9 @@ impl Target {
             network_manager.set_extra_headers(headers.clone());
         }
 
+        network_manager.ignore_visuals = config.ignore_visuals;
+        network_manager.block_javascript = config.ignore_javascript;
+        network_manager.block_stylesheets = config.ignore_stylesheets;
         network_manager.only_html = config.only_html;
 
         Self {
@@ -610,6 +613,8 @@ pub struct TargetConfig {
     pub request_intercept: bool,
     pub cache_enabled: bool,
     pub ignore_visuals: bool,
+    pub ignore_javascript: bool,
+    pub ignore_stylesheets: bool,
     pub only_html: bool,
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
 }
@@ -622,7 +627,9 @@ impl Default for TargetConfig {
             viewport: Default::default(),
             request_intercept: false,
             cache_enabled: true,
+            ignore_javascript: false,
             ignore_visuals: false,
+            ignore_stylesheets: false,
             only_html: false,
             extra_headers: Default::default(),
         }

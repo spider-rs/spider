@@ -1679,6 +1679,7 @@ impl Page {
                             &browser,
                             &configuration.request_timeout,
                             &context_id,
+                            &configuration.viewport,
                         )
                         .await
                         {

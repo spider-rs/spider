@@ -1,6 +1,7 @@
-//! `cargo run --example chrome_remote --features chrome`
+//! `cargo run --example chrome_remote --features="chrome chrome_intercept"`
 
 extern crate spider;
+use crate::spider::tokio::io::AsyncWriteExt;
 use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::tokio;
 use spider::website::Website;
@@ -8,18 +9,23 @@ use std::io::Result;
 
 async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
-        .with_limit(100)
+        .with_limit(500)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
+        .with_fingerprint(true)
+        // .with_proxies(Some(vec!["http://localhost:8888".into()]))
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
         .unwrap();
 
     let mut rx2 = website.subscribe(16).unwrap();
+    let mut stdout = tokio::io::stdout();
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
-            println!("{:?}", page.get_url());
+            let _ = stdout
+                .write_all(format!("- {}\n", page.get_url()).as_bytes())
+                .await;
         }
     });
 
@@ -31,7 +37,8 @@ async fn crawl_website(url: &str) -> Result<()> {
     let links = website.get_links();
 
     println!(
-        "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+        "Time elapsed in website.crawl({}) is: {:?} for total pages: {:?}",
+        website.get_url(),
         duration,
         links.len()
     );
@@ -41,6 +48,8 @@ async fn crawl_website(url: &str) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    console_subscriber::init();
+
     let _ = tokio::join!(
         crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),

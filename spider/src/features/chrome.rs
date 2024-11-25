@@ -89,7 +89,7 @@ pub fn get_browser_config(
     };
 
     // request interception is required for all browser.new_page() creations. We also have to use "about:blank" as the base page to setup the listeners and navigate afterwards or the request will hang.
-    let builder = if cfg!(feature = "chrome_intercept") && intercept {
+    let builder = if intercept {
         builder.enable_request_intercept()
     } else {
         builder
@@ -427,16 +427,27 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
     feature = "tracing",
     tracing::instrument(level = "info", skip(browser))
 )]
-pub async fn attempt_navigation(
+pub(crate) async fn attempt_navigation(
     url: &str,
     browser: &Browser,
     request_timeout: &Option<Box<core::time::Duration>>,
     browser_context_id: &Option<BrowserContextId>,
+    viewport: &Option<crate::features::chrome_common::Viewport>,
 ) -> Result<Page, CdpError> {
     let mut cdp_params = CreateTargetParams::new(url);
+    cdp_params.background = Some(browser_context_id.is_some());
     cdp_params.browser_context_id.clone_from(browser_context_id);
     cdp_params.url = url.into();
     cdp_params.for_tab = Some(false);
+
+    if let Some(vp) = viewport {
+        if vp.width >= 25 {
+            cdp_params.width = Some(vp.width.into());
+        }
+        if vp.height >= 25 {
+            cdp_params.height = Some(vp.height.into());
+        }
+    }
 
     let page_result = tokio::time::timeout(
         match request_timeout {

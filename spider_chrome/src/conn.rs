@@ -138,8 +138,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
                         Ok(msg)
                     }
                     Err(err) => {
-                        tracing::debug!(target: "chromiumoxide::conn::raw_ws::parse_errors", msg = text, "Failed to parse raw WS message");
-                        tracing::error!("Failed to deserialize WS response {}", err);
+                        tracing::error!(target: "chromiumoxide::conn::raw_ws::parse_errors", msg = text, "Failed to parse raw WS message {err}");
                         Err(err.into())
                     }
                 };

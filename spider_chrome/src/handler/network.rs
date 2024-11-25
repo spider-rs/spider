@@ -75,7 +75,7 @@ lazy_static::lazy_static! {
     /// Ignore the resources for visual content types.
     pub static ref IGNORE_NETWORKING_RESOURCE_MAP: phf::Set<&'static str> = phf::phf_set! {
         "Prefetch",
-        "Ping"
+        "Ping",
     };
 }
 
@@ -96,11 +96,11 @@ pub struct NetworkManager {
     offline: bool,
     request_timeout: Duration,
     /// Ignore visuals (no pings, prefetching, and etc).
-    ignore_visuals: bool,
+    pub ignore_visuals: bool,
     /// Block CSS stylesheets.
-    block_stylesheets: bool,
+    pub block_stylesheets: bool,
     /// Block javascript.
-    block_javascript: bool,
+    pub block_javascript: bool,
     /// Only html from loading.
     pub only_html: bool,
 }
@@ -121,7 +121,7 @@ impl NetworkManager {
             protocol_request_interception_enabled: false,
             offline: false,
             request_timeout,
-            ignore_visuals: true,
+            ignore_visuals: false,
             block_javascript: false,
             block_stylesheets: false,
             only_html: false,
@@ -199,11 +199,12 @@ impl NetworkManager {
 
     fn update_protocol_request_interception(&mut self) {
         let enabled = self.user_request_interception_enabled || self.credentials.is_some();
+
         if enabled == self.protocol_request_interception_enabled {
             return;
         }
         self.update_protocol_cache_disabled();
-        self.protocol_request_interception_enabled = enabled;
+
         if enabled {
             self.push_cdp_request(
                 fetch::EnableParams::builder()
@@ -230,15 +231,22 @@ impl NetworkManager {
                     let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
                         .contains(&event.resource_type.as_ref())
                         || self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref())
-                                || self.block_stylesheets
-                                    && ResourceType::Stylesheet == event.resource_type)
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref()))
+                        || self.block_stylesheets
+                            && ResourceType::Stylesheet == event.resource_type
                         || self.block_javascript
                             && ResourceType::Script == event.resource_type
-                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
-
-                    // perform the http request here and insert the body.
-                    // if self.only_html && !skip_networking {}
+                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
+                        || (!self.block_javascript
+                            && event
+                                .request
+                                .url
+                                .starts_with("https://www.google-analytics.com")
+                            || event
+                                .request
+                                .url
+                                .starts_with("https://www.googletagmanager.com")
+                            || event.request.url.starts_with("https://px.ads.linkedin.com"));
 
                     if skip_networking {
                         let fullfill_params =
@@ -251,6 +259,8 @@ impl NetworkManager {
                         self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
                     }
                 }
+            } else {
+                self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
             }
         }
     }

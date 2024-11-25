@@ -216,29 +216,31 @@ impl FrameManager {
         let enable = page::EnableParams::default();
         let get_tree = page::GetFrameTreeParams::default();
         let set_lifecycle = page::SetLifecycleEventsEnabledParams::new(true);
-
         let enable_runtime = runtime::EnableParams::default();
-        CommandChain::new(
-            vec![
-                (
-                    enable.identifier(),
-                    serde_json::to_value(enable).unwrap_or_default(),
-                ),
-                (
-                    get_tree.identifier(),
-                    serde_json::to_value(get_tree).unwrap_or_default(),
-                ),
-                (
-                    set_lifecycle.identifier(),
-                    serde_json::to_value(set_lifecycle).unwrap_or_default(),
-                ),
-                (
-                    enable_runtime.identifier(),
-                    serde_json::to_value(enable_runtime).unwrap_or_default(),
-                ),
-            ],
-            timeout,
-        )
+        let mut commands = Vec::with_capacity(4);
+
+        let enable_id = enable.identifier();
+        let get_tree_id = get_tree.identifier();
+        let set_lifecycle_id = set_lifecycle.identifier();
+        let enable_runtime_id = enable_runtime.identifier();
+
+        if let Ok(value) = serde_json::to_value(enable) {
+            commands.push((enable_id, value));
+        }
+
+        if let Ok(value) = serde_json::to_value(get_tree) {
+            commands.push((get_tree_id, value));
+        }
+
+        if let Ok(value) = serde_json::to_value(set_lifecycle) {
+            commands.push((set_lifecycle_id, value));
+        }
+
+        if let Ok(value) = serde_json::to_value(enable_runtime) {
+            commands.push((enable_runtime_id, value));
+        }
+
+        CommandChain::new(commands, timeout)
     }
 
     pub fn main_frame(&self) -> Option<&Frame> {
@@ -392,25 +394,26 @@ impl FrameManager {
     pub fn on_frame_navigated(&mut self, frame: &CdpFrame) {
         if frame.parent_id.is_some() {
             if let Some((id, mut f)) = self.frames.remove_entry(&frame.id) {
-                for child in &f.child_frames {
-                    self.remove_frames_recursively(child);
+                for child in f.child_frames.drain() {
+                    self.remove_frames_recursively(&child);
                 }
-                // this is necessary since we can't borrow mut and then remove recursively
-                f.child_frames.clear();
                 f.navigated(frame);
                 self.frames.insert(id, f);
             }
         } else {
             let mut f = if let Some(main) = self.main_frame.take() {
                 // update main frame
-                let mut main_frame = self.frames.remove(&main).expect("Main frame is tracked.");
-                for child in &main_frame.child_frames {
-                    self.remove_frames_recursively(child);
+                if let Some(mut main_frame) = self.frames.remove(&main) {
+                    for child in &main_frame.child_frames {
+                        self.remove_frames_recursively(child);
+                    }
+                    // this is necessary since we can't borrow mut and then remove recursively
+                    main_frame.child_frames.clear();
+                    main_frame.id = frame.id.clone();
+                    main_frame
+                } else {
+                    Frame::new(frame.id.clone())
                 }
-                // this is necessary since we can't borrow mut and then remove recursively
-                main_frame.child_frames.clear();
-                main_frame.id = frame.id.clone();
-                main_frame
             } else {
                 // initial main frame navigation
                 Frame::new(frame.id.clone())
@@ -538,7 +541,9 @@ impl FrameManager {
         if self.isolated_worlds.contains(world_name) {
             return None;
         }
+
         self.isolated_worlds.insert(world_name.to_string());
+
         let cmd = AddScriptToEvaluateOnNewDocumentParams::builder()
             .source(format!("//# sourceURL={EVALUATION_SCRIPT_URL}"))
             .world_name(world_name)

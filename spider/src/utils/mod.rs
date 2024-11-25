@@ -2800,6 +2800,7 @@ pub(crate) fn setup_website_selectors(
     use crate::page::{get_page_selectors, get_page_selectors_base};
     let subdomains = allowed.subdomains;
     let tld = allowed.tld;
+
     match domain_parsed {
         Some(u) => get_page_selectors_base(&u, subdomains, tld),
         _ => get_page_selectors(url, subdomains, tld),
