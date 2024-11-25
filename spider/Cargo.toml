@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.33"
+version = "2.13.34"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -69,6 +69,7 @@ backoff = { version = "0.4", features = ["tokio"] }
 serde_regex = { version = "1", optional = true }
 statrs = { version = "0.17", optional = true }
 aho-corasick = { version = "1", optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -163,7 +164,7 @@ reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_hickory_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 tokio_io_std = ["tokio/io-std"]
-tracing = ["tokio/tracing"]
+tracing = ["tokio/tracing", "dep:tracing"]
 string_interner_buffer_backend = []
 string_interner_string_backend = []
 string_interner_bucket_backend = []

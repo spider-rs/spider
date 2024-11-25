@@ -423,6 +423,10 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
 }
 
 /// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
+#[cfg_attr(
+    feature = "tracing",
+    tracing::instrument(level = "info", skip(browser))
+)]
 pub async fn attempt_navigation(
     url: &str,
     browser: &Browser,

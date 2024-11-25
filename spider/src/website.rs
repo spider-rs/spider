@@ -2149,6 +2149,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -2322,6 +2323,10 @@ impl Website {
 
                                 else => break,
                             }
+
+                            if links.is_empty() && set.is_empty() {
+                                break;
+                            }
                         }
 
                         if links.is_empty() && set.is_empty() {
@@ -2337,7 +2342,8 @@ impl Website {
     }
 
     /// Start to crawl website concurrently.
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         use crate::features::chrome::attempt_navigation;
 
@@ -2653,6 +2659,7 @@ impl Website {
 
     /// Start to crawl website concurrently.
     #[cfg(feature = "decentralized")]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.url.inner()) {
             Ok(_) => {
@@ -2792,6 +2799,7 @@ impl Website {
 
     /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed. The glob feature does not work with this at the moment.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -3041,8 +3049,9 @@ impl Website {
         }
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
+    #[cfg(not(feature = "sitemap"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     pub async fn sitemap_crawl(
         &mut self,
         _client: &Client,
@@ -3051,8 +3060,8 @@ impl Website {
     ) {
     }
 
-    #[cfg(not(feature = "sitemap"))]
     /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    #[cfg(not(feature = "sitemap"))]
     async fn sitemap_crawl_chain(
         &mut self,
         _client: &Client,
@@ -3063,6 +3072,7 @@ impl Website {
 
     /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(feature = "sitemap")]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     pub async fn sitemap_crawl_raw(
         &mut self,
         client: &Client,
@@ -3301,6 +3311,7 @@ impl Website {
         feature = "chrome",
         not(feature = "decentralized")
     ))]
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     pub async fn sitemap_crawl_chrome(
         &mut self,
         client: &Client,
@@ -3628,16 +3639,12 @@ impl Website {
 
     /// Guard the channel from closing until all subscription events complete.
     fn subscription_guard(&self) {
-        match &self.channel {
-            Some(channel) => {
-                if !channel.1.is_empty() {
-                    match &self.channel_guard {
-                        Some(guard_counter) => guard_counter.lock(),
-                        _ => (),
-                    }
+        if let Some(channel) = &self.channel {
+            if !channel.1.is_empty() {
+                if let Some(ref guard_counter) = self.channel_guard {
+                    guard_counter.lock()
                 }
             }
-            _ => (),
         }
     }
 
