@@ -476,43 +476,37 @@ pub async fn setup_auth_challenge_response(
     auth_challenge_response: &Option<crate::configuration::AuthChallengeResponse>,
 ) {
     if chrome_intercept {
-        match auth_challenge_response {
-            Some(ref auth_challenge_response) => {
-                match page
-                        .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
-                        .await
-                        {
-                            Ok(mut rp) => {
-                                let intercept_page = page.clone();
-                                let auth_challenge_response = auth_challenge_response.clone();
+        if let Some(ref auth_challenge_response) = auth_challenge_response {
+            if let Ok(mut rp) = page
+                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                .await
+            {
+                let intercept_page = page.clone();
+                let auth_challenge_response = auth_challenge_response.clone();
 
-                                // we may need return for polling
-                                tokio::task::spawn(async move {
-                                    while let Some(event) = rp.next().await {
-                                        let u = &event.request.url;
-                                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+                // we may need return for polling
+                tokio::task::spawn(async move {
+                    while let Some(event) = rp.next().await {
+                        let u = &event.request.url;
+                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
 
-                                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
-                                        .request_id(event.request_id.clone())
-                                        .auth_challenge_response(acr)
-                                        .build() {
-                                            Ok(c) => {
-                                                if let Err(e) = intercept_page.execute(c).await
-                                                {
-                                                    log("Failed to fullfill auth challege request: ", e.to_string());
-                                                }
-                                            }
-                                            _ => {
-                                                log("Failed to get auth challege request handle ", &u);
-                                            }
-                                        }
-                                    }
-                                });
+                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                        .request_id(event.request_id.clone())
+                        .auth_challenge_response(acr)
+                        .build() {
+                            Ok(c) => {
+                                if let Err(e) = intercept_page.execute(c).await
+                                {
+                                    log("Failed to fullfill auth challege request: ", e.to_string());
+                                }
                             }
-                            _ => (),
+                            _ => {
+                                log("Failed to get auth challege request handle ", &u);
+                            }
                         }
+                    }
+                });
             }
-            _ => (),
         }
     }
 }
