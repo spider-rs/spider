@@ -1524,10 +1524,10 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<A> {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
+        use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
         use lol_html::{doc_comments, element};
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut map = HashSet::new();
         let mut inner_map: HashSet<A> = map.clone();
@@ -1673,7 +1673,7 @@ impl Page {
                     let context_id = context_id.clone();
                     let parent_host = parent_host.clone();
 
-                    tokio::task::spawn(async move {
+                    spawn_task("page_render_fetch", async move {
                         if let Ok(new_page) = crate::features::chrome::attempt_navigation(
                             "about:blank",
                             &browser,

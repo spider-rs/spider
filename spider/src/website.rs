@@ -7,7 +7,7 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::{interner::ListBucket, log};
-use crate::utils::{setup_website_selectors, AllowedDomainTypes};
+use crate::utils::{setup_website_selectors, spawn_set, AllowedDomainTypes};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -2201,7 +2201,8 @@ impl Website {
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
-                                        set.spawn_on(async move {
+
+                                        spawn_set("page_fetch", &mut set, async move {
                                             let link_result = match on_link_find_callback {
                                                 Some(cb) => cb(link, None),
                                                 _ => (link, None),
@@ -2414,10 +2415,10 @@ impl Website {
                                             log::info!("fetch {}", &link);
                                             self.links_visited.insert(link.clone());
 
-
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
-                                                set.spawn_on(async move {
+
+                                                spawn_set("page_fetch", &mut set, async move {
                                                     let link_result = match on_link_find_callback {
                                                         Some(cb) => cb(link, None),
                                                         _ => (link, None),
@@ -2716,7 +2717,7 @@ impl Website {
                                                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                     let shared = shared.clone();
 
-                                                    set.spawn_on(async move {
+                                                    spawn_set("page_fetch", &mut set, async move {
                                                         let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8).await {
                                                             Ok(new_page) => {
                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
@@ -2850,31 +2851,29 @@ impl Website {
                                                     &chandle);
                                                 }
 
-                                                match q.as_mut() {
-                                                    Some(q) => {
-                                                        while let Ok(link) = q.try_recv() {
-                                                            let s = link.into();
-                                                            let allowed = self.is_allowed(&s);
+                                                if let Some(q) = q.as_mut() {
+                                                    while let Ok(link) = q.try_recv() {
+                                                        let s = link.into();
+                                                        let allowed = self.is_allowed(&s);
 
-                                                            if allowed.eq(
-                                                            &ProcessLinkStatus::BudgetExceeded,
-                                                        ) {
-                                                            break;
-                                                        }
-                                                            if allowed
-                                                                .eq(&ProcessLinkStatus::Blocked)
-                                                            {
-                                                                continue;
-                                                            }
-
-                                                            self.links_visited
-                                                                .extend_with_new_links(
-                                                                    &mut links, s,
-                                                                );
-                                                        }
+                                                        if allowed.eq(
+                                                        &ProcessLinkStatus::BudgetExceeded,
+                                                    ) {
+                                                        break;
                                                     }
-                                                    _ => (),
+                                                        if allowed
+                                                            .eq(&ProcessLinkStatus::Blocked)
+                                                        {
+                                                            continue;
+                                                        }
+
+                                                        self.links_visited
+                                                            .extend_with_new_links(
+                                                                &mut links, s,
+                                                            );
+                                                    }
                                                 }
+
                                             }
                                             Some(result) = set.join_next() => {
                                                 match result {
@@ -2987,7 +2986,9 @@ impl Website {
                                         let client = client.clone();
                                         tokio::task::yield_now().await;
 
-                                        set.spawn_on(
+                                        spawn_set(
+                                            "page_fetch",
+                                            &mut set,
                                             async move {
                                                 let link_results = match on_link_find_callback {
                                                     Some(cb) => cb(link, None),
@@ -3165,7 +3166,8 @@ impl Website {
 
                                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                             let shared = shared.clone();
-                                            set.spawn_on(async move {
+
+                                            spawn_set("page_fetch", &mut set, async move {
                                                 let link_result = match on_link_find_callback {
                                                     Some(cb) => cb(link, None),
                                                     _ => (link, None),

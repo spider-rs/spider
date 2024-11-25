@@ -13,8 +13,8 @@ use bytes::{BufMut, BytesMut};
 use case_insensitive_string::CaseInsensitiveString;
 use lol_html::send::HtmlRewriter;
 use lol_html::OutputSink;
-
 use phf::phf_set;
+use std::future::Future;
 use url::Url;
 
 #[cfg(feature = "chrome")]
@@ -2859,4 +2859,62 @@ pub fn get_last_segment(path: &str) -> &str {
     } else {
         path
     }
+}
+
+#[cfg(feature = "tracing")]
+/// Spawns a new asynchronous task.
+pub fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::task::Builder::new()
+        .name(task_name)
+        .spawn(future)
+        .expect("failed to spawn task")
+}
+
+#[cfg(not(feature = "tracing"))]
+/// Spawns a new asynchronous task.
+pub fn spawn_task<F>(_task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::task::spawn(future)
+}
+
+#[cfg(feature = "tracing")]
+/// Spawn a joinset.
+pub fn spawn_set<F, T>(
+    task_name: &str,
+    set: &mut tokio::task::JoinSet<T>,
+    future: F,
+    handle: &tokio::runtime::Handle,
+) -> tokio::task::AbortHandle
+where
+    F: Future<Output = T>,
+    F: Send + 'static,
+    T: Send + 'static,
+{
+    set.build_task()
+        .name(task_name)
+        .spawn_on(future, &handle)
+        .expect("set should spawn")
+}
+
+#[cfg(not(feature = "tracing"))]
+/// Spawn a joinset.
+pub fn spawn_set<F, T>(
+    _task_name: &str,
+    set: &mut tokio::task::JoinSet<T>,
+    future: F,
+    handle: &tokio::runtime::Handle,
+) -> tokio::task::AbortHandle
+where
+    F: Future<Output = T>,
+    F: Send + 'static,
+    T: Send + 'static,
+{
+    set.spawn_on(future, &handle)
 }
