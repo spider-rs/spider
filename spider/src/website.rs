@@ -1883,34 +1883,23 @@ impl Website {
 
             let mut page = Page::new(&link.inner(), &client).await;
 
-            match page.final_redirect_destination {
-                Some(ref domain) => {
-                    let domain: Box<CaseInsensitiveString> =
-                        CaseInsensitiveString::new(&domain).into();
-                    let prior_domain = self.domain_parsed.take();
-                    self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
-                        _ => None,
-                    };
-                    self.url = domain;
-                    match self.setup_selectors() {
-                        Some(s) => {
-                            base.0 = s.0;
-                            base.1 = s.1;
-                            match prior_domain {
-                                Some(prior_domain) => match prior_domain.host_str() {
-                                    Some(dname) => {
-                                        base.2 = dname.into();
-                                    }
-                                    _ => (),
-                                },
-                                _ => (),
-                            }
+            if let Some(ref domain) = page.final_redirect_destination {
+                let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
+                let prior_domain = self.domain_parsed.take();
+                self.domain_parsed = match url::Url::parse(&domain.inner()) {
+                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                    _ => None,
+                };
+                self.url = domain;
+                if let Some(s) = self.setup_selectors() {
+                    base.0 = s.0;
+                    base.1 = s.1;
+                    if let Some(pd) = prior_domain {
+                        if let Some(domain_name) = pd.host_str() {
+                            base.2 = domain_name.into();
                         }
-                        _ => (),
                     }
                 }
-                _ => (),
             }
 
             let u = page.get_url().into();
@@ -2204,7 +2193,7 @@ impl Website {
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                     let chandle = Handle::current();
 
-                    loop {
+                    'outer: loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
                         )
@@ -2219,7 +2208,7 @@ impl Website {
                                         emit_log_shutdown(&link.inner());
                                         set.shutdown().await
                                     }).await {
-                                        break;
+                                        break 'outer;
                                     }
                                     let allowed = self.is_allowed(&link);
 
@@ -2332,7 +2321,7 @@ impl Website {
                             }
 
                             if links.is_empty() && set.is_empty() {
-                                break;
+                                break 'outer;
                             }
                         }
 
@@ -2424,7 +2413,7 @@ impl Website {
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
 
-                                loop {
+                                'outer: loop {
                                     let stream =
                                         tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                             links.drain().collect(),
@@ -2446,7 +2435,7 @@ impl Website {
                                                     )
                                                     .await
                                                 {
-                                                    break;
+                                                    break 'outer;
                                                 }
 
                                                 let allowed = self.is_allowed(&link);
@@ -2634,12 +2623,12 @@ impl Website {
                                         };
 
                                         if links.is_empty() && set.is_empty() {
-                                            break;
+                                            break 'outer;
                                         }
                                     }
 
                                     if links.is_empty() && set.is_empty() {
-                                        break;
+                                        break 'outer;
                                     }
                                 }
 
@@ -2699,7 +2688,7 @@ impl Website {
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
                 let chandle = Handle::current();
 
-                loop {
+                'outer: loop {
                     let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                         links.drain().collect(),
                     )
@@ -2716,7 +2705,7 @@ impl Website {
                                     })
                                     .await
                                 {
-                                    break;
+                                    break 'outer;
                                 }
 
                                 let allowed = self.is_allowed(&link);
@@ -2883,7 +2872,7 @@ impl Website {
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
 
-                        loop {
+                        'outer: loop {
                             let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                 links.drain().collect(),
                             )
@@ -2904,7 +2893,7 @@ impl Website {
                                             )
                                             .await
                                         {
-                                            break;
+                                            break 'outer;
                                         }
 
                                         let allowed = self.is_allowed(&link);
@@ -3046,7 +3035,7 @@ impl Website {
                                 }
 
                                 if links.is_empty() && set.is_empty() {
-                                    break;
+                                    break 'outer;
                                 }
                             }
 
@@ -3144,14 +3133,14 @@ impl Website {
 
                 let retry = self.configuration.retry;
 
-                loop {
+                'outer: loop {
                     let stream =
                         tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
                     tokio::pin!(stream);
 
                     while let Some(sitemap_url) = stream.next().await {
                         if !self.handle_process(handle, &mut interval, async {}).await {
-                            break;
+                            break 'outer;
                         }
                         let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
 
@@ -3391,7 +3380,7 @@ impl Website {
                             _ => Default::default(),
                         };
 
-                        loop {
+                        'outer: loop {
                             let stream = tokio_stream::iter::<Vec<Box<CompactString>>>(
                                 sitemaps.drain(..).collect(),
                             );
@@ -3399,7 +3388,7 @@ impl Website {
 
                             while let Some(sitemap_url) = stream.next().await {
                                 if !self.handle_process(handle, &mut interval, async {}).await {
-                                    break;
+                                    break 'outer;
                                 }
                                 let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
 
@@ -4318,18 +4307,13 @@ fn channel_send_page(
     page: Page,
     channel_guard: &Option<ChannelGuard>,
 ) {
-    match channel {
-        Some(c) => {
-            match c.0.send(page) {
-                Ok(_) => match channel_guard {
-                    Some(guard) => ChannelGuard::inc_guard(&guard.0 .1),
-                    _ => (),
-                },
-                _ => (),
-            };
+    if let Some(c) = channel {
+        if let Ok(_) = c.0.send(page) {
+            if let Some(guard) = channel_guard {
+                ChannelGuard::inc_guard(&guard.0 .1)
+            }
         }
-        _ => (),
-    };
+    }
 }
 
 /// Guard a channel from closing until all concurrent operations are done.
