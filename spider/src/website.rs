@@ -1330,7 +1330,7 @@ impl Website {
                 retry_count -= 1;
             }
 
-            log::info!("fetch {}", &url);
+            emit_log(&url);
 
             self.links_visited.insert(match self.on_link_find_callback {
                 Some(cb) => {
@@ -1433,6 +1433,8 @@ impl Website {
                 }
             }
 
+            emit_log(&self.url.inner());
+
             self.links_visited.insert(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.clone(), None);
@@ -1524,11 +1526,8 @@ impl Website {
 
             page.clone_from(&next_page);
 
-            match intercept_handle {
-                Some(h) => {
-                    let _ = h.await;
-                }
-                _ => (),
+            if let Some(h) = intercept_handle {
+                let _ = h.await;
             }
         }
     }
@@ -1618,6 +1617,8 @@ impl Website {
                     AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
                 );
             }
+
+            emit_log(&self.url.inner());
 
             self.links_visited.insert(match self.on_link_find_callback {
                 Some(cb) => {
