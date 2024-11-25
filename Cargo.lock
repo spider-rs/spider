@@ -1247,9 +1247,9 @@ dependencies = [
 
 [[package]]
 name = "fast_html2md"
-version = "0.0.38"
+version = "0.0.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7648cc15a9a05c0f04941ce170cc0c47b15a73d6e64b8ffe93b18fe28b949457"
+checksum = "716db2346f010983ccba7e22cbccc25df54d24ee1dcebe303667ac8b048b8024"
 dependencies = [
  "auto_encoder",
  "html5ever",
@@ -3999,7 +3999,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4061,7 +4061,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "clap",
  "env_logger",
@@ -4120,7 +4120,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4142,7 +4142,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.13.30"
+version = "2.13.31"
 dependencies = [
  "env_logger",
  "lazy_static",
