@@ -2930,3 +2930,14 @@ pub fn emit_log(link: &str) {
 pub fn emit_log(link: &str) {
     log::info!("fetch {}", &link);
 }
+
+/// Emit a log info event.
+#[cfg(feature = "tracing")]
+pub fn emit_log_shutdown(link: &str) {
+    tracing::info!("shutdown {}", &link);
+}
+/// Emit a log info event.
+#[cfg(not(feature = "tracing"))]
+pub fn emit_log_shutdown(link: &str) {
+    log::info!("shutdown {}", &link);
+}

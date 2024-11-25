@@ -6,7 +6,9 @@ use crate::configuration::{
 use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
-use crate::utils::{emit_log, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes};
+use crate::utils::{
+    emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
+};
 use crate::utils::{interner::ListBucket, log};
 use crate::CaseInsensitiveString;
 use crate::Client;
@@ -2213,7 +2215,10 @@ impl Website {
                         loop {
                             tokio::select! {
                                 Some(link) = stream.next() => {
-                                    if !self.handle_process(handle, &mut interval, set.shutdown()).await {
+                                    if !self.handle_process(handle, &mut interval, async {
+                                        emit_log_shutdown(&link.inner());
+                                        set.shutdown().await
+                                    }).await {
                                         break;
                                     }
                                     let allowed = self.is_allowed(&link);
@@ -2313,7 +2318,10 @@ impl Website {
 
                                 Some(result) = set.join_next() => {
                                     match result {
-                                        Ok(res) => self.links_visited.extend_links(&mut links, res),
+                                        Ok(res) => {
+                                            // 1 solution. if the final redirect url is already in links visited do not extend the links!
+                                            self.links_visited.extend_links(&mut links, res)
+                                        },
                                         Err(_) => {
                                             break
                                         }
@@ -2431,7 +2439,10 @@ impl Website {
                                                     .handle_process(
                                                         handle,
                                                         &mut interval,
-                                                        set.shutdown(),
+                                                        async {
+                                                            emit_log_shutdown(&link.inner());
+                                                            set.shutdown().await
+                                                        },
                                                     )
                                                     .await
                                                 {
@@ -2699,7 +2710,10 @@ impl Website {
                         match stream.next().await {
                             Some(link) => {
                                 if !self
-                                    .handle_process(handle, &mut interval, set.shutdown())
+                                    .handle_process(handle, &mut interval, async {
+                                        emit_log_shutdown(&link.inner());
+                                        set.shutdown().await
+                                    })
                                     .await
                                 {
                                     break;
@@ -2883,7 +2897,10 @@ impl Website {
                                             .handle_process(
                                                 handle,
                                                 &mut interval,
-                                                set.shutdown(),
+                                                async {
+                                                    emit_log_shutdown(&link.inner());
+                                                    set.shutdown().await
+                                                },
                                             )
                                             .await
                                         {
