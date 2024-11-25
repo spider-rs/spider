@@ -2012,7 +2012,7 @@ pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CAR
 #[cfg(all(
     feature = "headers",
     not(feature = "decentralized"),
-    not(feature = "cache"),
+    not(feature = "cache_request"),
 ))]
 #[tokio::test]
 async fn test_headers() {
@@ -2047,7 +2047,7 @@ async fn test_headers() {
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "chrome"),
-    not(feature = "cache")
+    not(feature = "cache_request")
 ))]
 #[tokio::test]
 async fn parse_links() {
@@ -2072,7 +2072,7 @@ async fn parse_links() {
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "chrome"),
-    not(feature = "cache")
+    not(feature = "cache_request")
 ))]
 #[tokio::test]
 async fn test_status_code() {

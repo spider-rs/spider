@@ -29,22 +29,52 @@ use tokio::{
 use tokio_stream::StreamExt;
 use url::Url;
 
-#[cfg(feature = "cache")]
+#[cfg(feature = "cache_request")]
 use http_cache_reqwest::{Cache, CacheMode, HttpCache, HttpCacheOptions};
 
-#[cfg(all(feature = "cache", not(feature = "cache_mem")))]
+// Use CACacheManager when cache_request and cache are set
+#[cfg(all(
+    feature = "cache_request",
+    feature = "cache",
+    not(feature = "cache_mem")
+))]
 use http_cache_reqwest::CACacheManager;
-
-#[cfg(all(feature = "cache", feature = "cache_mem"))]
-use http_cache_reqwest::MokaManager;
-
-#[cfg(all(feature = "cache", feature = "cache_mem"))]
-type CacheManager = MokaManager;
-
-#[cfg(all(feature = "cache", not(feature = "cache_mem")))]
+#[cfg(all(
+    feature = "cache_request",
+    feature = "cache",
+    not(feature = "cache_mem")
+))]
 type CacheManager = CACacheManager;
 
-#[cfg(feature = "cache")]
+// Use MokaManager when cache_request and cache_mem are set
+#[cfg(all(
+    feature = "cache_request",
+    feature = "cache_mem",
+    not(feature = "cache")
+))]
+use http_cache_reqwest::MokaManager;
+#[cfg(all(
+    feature = "cache_request",
+    feature = "cache_mem",
+    not(feature = "cache")
+))]
+type CacheManager = MokaManager;
+
+// Default to CACacheManager if only cache_request is set, without cache or cache_mem
+#[cfg(all(
+    feature = "cache_request",
+    not(feature = "cache"),
+    not(feature = "cache_mem")
+))]
+use http_cache_reqwest::CACacheManager as DefaultCacheManager;
+#[cfg(all(
+    feature = "cache_request",
+    not(feature = "cache"),
+    not(feature = "cache_mem")
+))]
+type CacheManager = DefaultCacheManager;
+
+#[cfg(feature = "cache_request")]
 lazy_static! {
     /// Cache manager for request.
     pub static ref CACACHE_MANAGER: CacheManager = CacheManager::default();
@@ -755,7 +785,7 @@ impl Website {
     }
 
     /// Build the HTTP client.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
         use reqwest::header::HeaderMap;
 
@@ -813,7 +843,7 @@ impl Website {
     }
 
     /// Build the HTTP client with caching enabled.
-    #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
+    #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
         use reqwest::header::HeaderMap;
         use reqwest_middleware::ClientBuilder;
@@ -919,7 +949,7 @@ impl Website {
     }
 
     /// Configure http client.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache")))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn
@@ -927,14 +957,14 @@ impl Website {
     }
 
     /// Configure http client.
-    #[cfg(all(not(feature = "decentralized"), feature = "cache"))]
+    #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
     pub fn configure_http_client(&mut self) -> Client {
         let client = self.configure_http_client_builder();
         client.build()
     }
 
     /// Configure http client for decentralization.
-    #[cfg(all(feature = "decentralized", not(feature = "cache")))]
+    #[cfg(all(feature = "decentralized", not(feature = "cache_request")))]
     pub fn configure_http_client(&mut self) -> Client {
         use reqwest::header::HeaderMap;
         use reqwest::header::HeaderValue;
@@ -1012,7 +1042,7 @@ impl Website {
     }
 
     /// Configure http client for decentralization.
-    #[cfg(all(feature = "decentralized", feature = "cache"))]
+    #[cfg(all(feature = "decentralized", feature = "cache_request"))]
     pub fn configure_http_client(&mut self) -> Client {
         use reqwest::header::HeaderMap;
         use reqwest::header::HeaderValue;
@@ -4764,7 +4794,7 @@ async fn test_crawl_shutdown() {
 }
 
 #[tokio::test]
-#[cfg(all(feature = "cache", not(feature = "decentralized")))]
+#[cfg(all(feature = "cache_request", not(feature = "decentralized")))]
 async fn test_cache() {
     let domain = "https://choosealicense.com/";
     let mut website: Website = Website::new(&domain);

@@ -111,7 +111,7 @@ pub struct Configuration {
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
     /// Cache the page following HTTP caching rules.
-    #[cfg(any(feature = "cache", feature = "chrome"))]
+    #[cfg(any(feature = "cache_request", feature = "chrome"))]
     pub cache: bool,
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
@@ -699,14 +699,14 @@ impl Configuration {
         self
     }
 
-    #[cfg(feature = "cache")]
+    #[cfg(feature = "cache_request")]
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.cache = cache;
         self
     }
 
-    #[cfg(not(feature = "cache"))]
+    #[cfg(not(feature = "cache_request"))]
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
         self

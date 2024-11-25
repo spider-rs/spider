@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.31"
+version = "2.13.32"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -130,10 +130,11 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-cache = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
-cache_mem = ["cache", "http-cache-reqwest/manager-moka"]
+cache_request = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
+cache = ["cache_request", "http-cache-reqwest/manager-cacache"]
+cache_mem = ["cache_request", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]
-cache_chrome_hybrid = ["cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
+cache_chrome_hybrid = ["cache_request", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
 chrome = ["dep:spider_chrome", "dep:base64"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]

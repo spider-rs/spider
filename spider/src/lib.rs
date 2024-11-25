@@ -139,11 +139,11 @@ pub extern crate async_openai;
 pub extern crate auto_encoder;
 #[cfg(feature = "flexbuffers")]
 pub extern crate flexbuffers;
-#[cfg(feature = "cache")]
+#[cfg(feature = "cache_request")]
 pub extern crate http_cache_reqwest;
 #[cfg(feature = "cache_openai")]
 pub extern crate moka;
-#[cfg(feature = "cache")]
+#[cfg(feature = "cache_request")]
 pub extern crate reqwest_middleware;
 #[cfg(feature = "serde")]
 pub extern crate serde;
@@ -197,16 +197,16 @@ pub mod black_list {
 }
 
 /// The asynchronous Client to make requests with.
-#[cfg(not(feature = "cache"))]
+#[cfg(not(feature = "cache_request"))]
 pub type Client = reqwest::Client;
-#[cfg(not(feature = "cache"))]
+#[cfg(not(feature = "cache_request"))]
 /// The asynchronous Client Builder.
 pub type ClientBuilder = reqwest::ClientBuilder;
 
 /// The asynchronous Client to make requests with HTTP Cache.
-#[cfg(feature = "cache")]
+#[cfg(feature = "cache_request")]
 pub type Client = reqwest_middleware::ClientWithMiddleware;
-#[cfg(feature = "cache")]
+#[cfg(feature = "cache_request")]
 /// The asynchronous Client Builder.
 pub type ClientBuilder = reqwest_middleware::ClientBuilder;
 
