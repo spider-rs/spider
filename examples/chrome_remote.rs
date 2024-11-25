@@ -1,4 +1,4 @@
-//! `cargo run --example chrome --features chrome`
+//! `cargo run --example chrome_remote --features chrome`
 
 extern crate spider;
 use spider::features::chrome_common::RequestInterceptConfiguration;
@@ -11,6 +11,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_limit(100)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
+        .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
         .unwrap();
 

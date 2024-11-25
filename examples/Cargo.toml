@@ -123,6 +123,11 @@ path = "chrome.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
+name = "chrome_remote"
+path = "chrome_remote.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
 name = "chrome_viewport"
 path = "chrome_viewport.rs"
 required-features = ["spider/sync", "spider/chrome"]

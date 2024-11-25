@@ -44,9 +44,17 @@ Crawl links at a given cron time [Cron](./cron.rs).
 
 - `cargo run --example cron`
 
+Crawl links with chrome headless rendering [Chrome](./chrome.rs).
+
+- `cargo run --example chrome --features chrome`
+
 Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 
 - `cargo run --example chrome --features chrome_headed`
+
+Crawl links with chrome headless rendering remote connections [Chrome](./chrome.rs).
+
+- `cargo run --example chrome_remote --features chrome`
 
 Crawl links with view port configuration [Chrome Viewport](./chrome_viewport.rs).
 
@@ -69,7 +77,6 @@ Use advanced configuration re-use. [Advanced Configuration](./advanced_configura
 - `cargo run --example cache_chrome_hybrid --features="spider/sync spider/chrome spider/cache_chrome_hybrid"`
 
 Use chrome hybrid caching. [Chrome Cache Hybrid](./cache_chrome_hybrid.rs).
-
 
 - `cargo run --example advanced_configuration`
 
