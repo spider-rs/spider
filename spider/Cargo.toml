@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.22"
+version = "2.13.25"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -162,6 +162,7 @@ reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
 reqwest_hickory_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 tokio_io_std = ["tokio/io-std"]
+tracing = ["tokio/tracing"]
 string_interner_buffer_backend = []
 string_interner_string_backend = []
 string_interner_bucket_backend = []
