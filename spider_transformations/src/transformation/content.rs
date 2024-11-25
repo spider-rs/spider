@@ -258,7 +258,15 @@ pub fn transform_markdown(html: &str, commonmark: bool) -> String {
 
 /// transform the content to text raw shortcut
 pub fn transform_text(html: &str) -> String {
-    super::text_extract::extract_text(&html)
+    super::text_extract::extract_text(&html, &Default::default())
+}
+
+/// transform the content to text raw shortcut and custom ignore
+pub fn transform_text_ignore(
+    html: &str,
+    custom_ignore: &Option<std::collections::HashSet<String>>,
+) -> String {
+    super::text_extract::extract_text(&html, &custom_ignore)
 }
 
 /// get the HTML content for the page.
@@ -367,32 +375,22 @@ pub fn transform_content(
         base_html
     };
 
+    let mut tag_factory = None;
+
+    if let Some(ignore) = ignore_tags {
+        let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
+        for ignore_tag_name in ignore {
+            tag_factor.insert(ignore_tag_name.into());
+        }
+        tag_factory.replace(tag_factor);
+    }
+
     match c.return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
         ReturnFormat::CommonMark => {
-            let mut tag_factory = None;
-
-            if let Some(ignore) = ignore_tags {
-                let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
-                for ignore_tag_name in ignore {
-                    tag_factor.insert(ignore_tag_name.into());
-                }
-                tag_factory.replace(tag_factor);
-            }
-
             html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, true, &url_parsed)
         }
         ReturnFormat::Markdown => {
-            let mut tag_factory = None;
-
-            if let Some(ignore) = ignore_tags {
-                let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
-                for ignore_tag_name in ignore {
-                    tag_factor.insert(ignore_tag_name.into());
-                }
-                tag_factory.replace(tag_factor);
-            }
-
             html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, &url_parsed)
         }
         ReturnFormat::Html2Text => {
@@ -402,7 +400,7 @@ pub fn transform_content(
                 base_html
             }
         }
-        ReturnFormat::Text => super::text_extract::extract_text(&base_html),
+        ReturnFormat::Text => super::text_extract::extract_text(&base_html, &tag_factory),
         ReturnFormat::XML => {
             if let Ok(xml) = convert_html_to_xml(
                 &base_html.trim(),
