@@ -1,4 +1,5 @@
-use lol_html::{element, rewrite_str, text, RewriteStrSettings};
+use html2md::extended::sifter::WhitespaceSifter;
+use lol_html::{element, html_content::TextType, rewrite_str, text, RewriteStrSettings};
 
 /// extract the text from HTML document.
 pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String>>) -> String {
@@ -23,15 +24,21 @@ pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String
     }
 
     element_content_handlers.push(text!(
-        "*:not(script):not(head):not(style):not(svg):not(noscript):not(nav):not(footer)",
+        "*:not(script):not(style):not(svg):not(noscript):not(nav):not(footer)",
         |text| {
-            let el_text = text.as_str().trim_start();
-            if !el_text.is_empty() {
-                if !extracted_text.ends_with(' ') && !extracted_text.is_empty() {
-                    extracted_text.push(' ');
+            if let TextType::RCData | TextType::Data = text.text_type() {
+                let el_text = text.as_str().trim_start();
+                if !el_text.is_empty() {
+                    if !extracted_text.ends_with(' ') && !extracted_text.is_empty() {
+                        extracted_text.push(' ');
+                    }
+                    extracted_text.push_str(el_text);
                 }
-                extracted_text.push_str(el_text);
+                if text.text_type() == TextType::RCData {
+                    extracted_text.push('\n');
+                }
             }
+
             Ok(())
         }
     ));
@@ -44,5 +51,5 @@ pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String
         },
     );
 
-    extracted_text
+    extracted_text.sift()
 }

@@ -170,6 +170,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_transformations_exclude_selector_text() {
+        let markup = template().into_string();
+        let url = "https://spider.cloud";
+
+        let mut conf = content::TransformConfig::default();
+        let mut page_response = PageResponse::default();
+
+        page_response.content = Some(Bytes::from(markup).into());
+        let page = build(url, page_response);
+
+        conf.return_format = ReturnFormat::Text;
+
+        let mut select_config = SelectorConfiguration::default();
+
+        select_config.exclude_selector = Some("pre".into());
+
+        let content = content::transform_content(&page, &conf, &None, &Some(select_config), &None);
+
+        assert!(
+            content.contains(&"Transform Test\nFun is fun Spider Cloud"),
+            "The tranform to markdown is invalid"
+        );
+    }
+
     #[ignore]
     #[tokio::test]
     async fn test_transformations_pdf_handling() {
