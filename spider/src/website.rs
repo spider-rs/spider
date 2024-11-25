@@ -2146,7 +2146,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -2341,7 +2341,7 @@ impl Website {
 
     /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         use crate::features::chrome::attempt_navigation;
         self.start();
@@ -2658,7 +2658,7 @@ impl Website {
 
     /// Start to crawl website concurrently.
     #[cfg(feature = "decentralized")]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.url.inner()) {
             Ok(_) => {
@@ -2798,7 +2798,7 @@ impl Website {
 
     /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed. The glob feature does not work with this at the moment.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_selectors() {
@@ -3054,7 +3054,7 @@ impl Website {
 
     /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(not(feature = "sitemap"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn sitemap_crawl(
         &mut self,
         _client: &Client,
@@ -3075,7 +3075,7 @@ impl Website {
 
     /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(feature = "sitemap")]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn sitemap_crawl_raw(
         &mut self,
         client: &Client,
@@ -3314,7 +3314,7 @@ impl Website {
         feature = "chrome",
         not(feature = "decentralized")
     ))]
-    #[cfg_attr(feature = "tracing", tracing::instrument)]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn sitemap_crawl_chrome(
         &mut self,
         client: &Client,
