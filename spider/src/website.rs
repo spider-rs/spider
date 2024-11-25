@@ -2525,12 +2525,12 @@ impl Website {
                                                                 &shared.2, page, &shared.3,
                                                             );
 
-                                                            drop(permit);
-
                                                             links
                                                         }
                                                         _ => Default::default(),
                                                     };
+
+                                                    drop(permit);
 
                                                     next
                                                 },
@@ -2810,11 +2810,8 @@ impl Website {
                                                                     retry_count -= 1;
                                                                 }
 
-                                                                match intercept_handle {
-                                                                    Some(h) => {
-                                                                        let _ = h.await;
-                                                                    }
-                                                                    _ => ()
+                                                                if let Some(h) = intercept_handle {
+                                                                    let _ = h.await;
                                                                 }
 
                                                                 if add_external {
@@ -2839,12 +2836,12 @@ impl Website {
                                                                     &shared.2, page, &shared.4,
                                                                 );
 
-                                                                drop(permit);
-
                                                                 links
                                                             }
                                                             _ => Default::default(),
                                                         };
+
+                                                        drop(permit);
 
                                                         results
                                                     },
