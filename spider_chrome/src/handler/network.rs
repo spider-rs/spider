@@ -203,6 +203,7 @@ impl NetworkManager {
             return;
         }
         self.update_protocol_cache_disabled();
+        self.protocol_request_interception_enabled = enabled;
         if enabled {
             self.push_cdp_request(
                 fetch::EnableParams::builder()
