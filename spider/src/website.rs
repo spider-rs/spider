@@ -455,20 +455,67 @@ impl Website {
         }
     }
 
-    /// Validate if url exceeds crawl budget and should not be handled.
-    pub(crate) fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        if self.configuration.inner_budget.is_some() || self.configuration.depth_distance > 0 {
-            match Url::parse(link.inner()) {
-                Ok(r) => {
-                    let has_depth_control = self.configuration.depth_distance > 0;
+    /// Detect if the inner budget is exceeded
+    pub(crate) fn is_over_inner_depth_budget(&mut self, link: &CaseInsensitiveString) -> bool {
+        match Url::parse(link.inner()) {
+            Ok(r) => match r.path_segments() {
+                Some(segments) => {
+                    let mut over = false;
+                    let mut depth: usize = 0;
 
-                    if self.configuration.inner_budget.is_none() {
-                        match r.path_segments() {
+                    for _ in segments {
+                        depth = depth.saturating_add(1);
+                        if depth >= self.configuration.depth_distance {
+                            over = true;
+                            break;
+                        }
+                    }
+
+                    over
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Detect if the inner budget is exceeded
+    pub(crate) fn is_over_inner_budget(&mut self, link: &CaseInsensitiveString) -> bool {
+        match self.configuration.inner_budget.as_mut() {
+            Some(budget) => {
+                let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
+                    match budget.get_mut(&*WILD_CARD_PATH) {
+                        Some(budget) => {
+                            if budget.abs_diff(0) == 1 {
+                                true
+                            } else if budget == &0 {
+                                true
+                            } else {
+                                *budget -= 1;
+                                false
+                            }
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                };
+
+                // set this up prior to crawl to avoid checks per link.
+                // If only the wild card budget is set we can safely skip all checks.
+                let skip_paths = self.configuration.wild_card_budgeting && budget.len() == 1;
+                let has_depth_control = self.configuration.depth_distance > 0;
+
+                // check if paths pass
+                if !skip_paths && !exceeded_wild_budget {
+                    match Url::parse(link.inner()) {
+                        Ok(r) => match r.path_segments() {
                             Some(segments) => {
+                                let mut joint_segment = CaseInsensitiveString::default();
                                 let mut over = false;
                                 let mut depth: usize = 0;
 
-                                for _ in segments {
+                                for seg in segments {
                                     if has_depth_control {
                                         depth = depth.saturating_add(1);
                                         if depth >= self.configuration.depth_distance {
@@ -476,90 +523,48 @@ impl Website {
                                             break;
                                         }
                                     }
+
+                                    joint_segment.push_str(seg);
+
+                                    if budget.contains_key(&joint_segment) {
+                                        match budget.get_mut(&joint_segment) {
+                                            Some(budget) => {
+                                                if budget.abs_diff(0) == 0 || *budget == 0 {
+                                                    over = true;
+                                                    break;
+                                                } else {
+                                                    *budget -= 1;
+                                                    continue;
+                                                }
+                                            }
+                                            _ => (),
+                                        };
+                                    }
                                 }
 
                                 over
                             }
                             _ => false,
-                        }
-                    } else {
-                        match self.configuration.inner_budget.as_mut() {
-                            Some(budget) => {
-                                let exceeded_wild_budget = if self.configuration.wild_card_budgeting
-                                {
-                                    match budget.get_mut(&*WILD_CARD_PATH) {
-                                        Some(budget) => {
-                                            if budget.abs_diff(0) == 1 {
-                                                true
-                                            } else if budget == &0 {
-                                                true
-                                            } else {
-                                                *budget -= 1;
-                                                false
-                                            }
-                                        }
-                                        _ => false,
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                // set this up prior to crawl to avoid checks per link.
-                                // If only the wild card budget is set we can safely skip all checks.
-                                let skip_paths =
-                                    self.configuration.wild_card_budgeting && budget.len() == 1;
-
-                                // check if paths pass
-                                if !skip_paths && !exceeded_wild_budget {
-                                    match r.path_segments() {
-                                        Some(segments) => {
-                                            let mut joint_segment =
-                                                CaseInsensitiveString::default();
-                                            let mut over = false;
-                                            let mut depth: usize = 0;
-
-                                            for seg in segments {
-                                                if has_depth_control {
-                                                    depth = depth.saturating_add(1);
-                                                    if depth >= self.configuration.depth_distance {
-                                                        over = true;
-                                                        break;
-                                                    }
-                                                }
-
-                                                joint_segment.push_str(seg);
-
-                                                if budget.contains_key(&joint_segment) {
-                                                    match budget.get_mut(&joint_segment) {
-                                                        Some(budget) => {
-                                                            if budget.abs_diff(0) == 0
-                                                                || *budget == 0
-                                                            {
-                                                                over = true;
-                                                                break;
-                                                            } else {
-                                                                *budget -= 1;
-                                                                continue;
-                                                            }
-                                                        }
-                                                        _ => (),
-                                                    };
-                                                }
-                                            }
-
-                                            over
-                                        }
-                                        _ => false,
-                                    }
-                                } else {
-                                    exceeded_wild_budget
-                                }
-                            }
-                            _ => false,
-                        }
+                        },
+                        _ => false,
                     }
+                } else {
+                    exceeded_wild_budget
                 }
-                _ => false,
+            }
+            _ => false,
+        }
+    }
+
+    /// Validate if url exceeds crawl budget and should not be handled.
+    pub(crate) fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
+        let has_depth_control = self.configuration.depth_distance > 0;
+
+        if self.configuration.inner_budget.is_some() || has_depth_control {
+            if self.configuration.inner_budget.is_none() && has_depth_control {
+                self.is_over_inner_depth_budget(&link)
+            } else {
+                self.is_over_inner_budget(&link)
             }
         } else {
             false
@@ -688,12 +693,10 @@ impl Website {
                         .await;
                 }
 
-                match robot_file_parser.get_crawl_delay(&self.configuration.user_agent) {
-                    Some(delay) => {
-                        // 60 seconds should be the longest to respect for efficiency.
-                        self.configuration.delay = delay.as_millis().min(60000) as u64;
-                    }
-                    _ => (),
+                if let Some(delay) =
+                    robot_file_parser.get_crawl_delay(&self.configuration.user_agent)
+                {
+                    self.configuration.delay = delay.as_millis().min(60000) as u64;
                 }
             }
         }
@@ -805,8 +808,7 @@ impl Website {
             .user_agent(user_agent)
             .redirect(policy)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
-            .tcp_keepalive(Duration::from_millis(500))
-            .pool_idle_timeout(None);
+            .tcp_keepalive(Duration::from_millis(500));
 
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
@@ -829,9 +831,8 @@ impl Website {
         let client = match &self.configuration.proxies {
             Some(proxies) => {
                 for proxie in proxies.iter() {
-                    match reqwest::Proxy::all(proxie) {
-                        Ok(proxy) => client = client.proxy(proxy),
-                        _ => (),
+                    if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                        client = client.proxy(proxy);
                     }
                 }
                 client
@@ -864,8 +865,7 @@ impl Website {
             .user_agent(user_agent)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .redirect(policy)
-            .tcp_keepalive(Duration::from_millis(500))
-            .pool_idle_timeout(None);
+            .tcp_keepalive(Duration::from_millis(500));
 
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
@@ -979,8 +979,7 @@ impl Website {
                 _ => &get_ua(self.only_chrome_agent()),
             })
             .redirect(policy)
-            .tcp_keepalive(Duration::from_millis(500))
-            .pool_idle_timeout(None);
+            .tcp_keepalive(Duration::from_millis(500));
 
         let referer = if self.configuration.tld && self.configuration.subdomains {
             2
@@ -1021,11 +1020,8 @@ impl Website {
         }
 
         for worker in WORKERS.iter() {
-            match reqwest::Proxy::all(worker) {
-                Ok(worker) => {
-                    client = client.proxy(worker);
-                }
-                _ => (),
+            if let Ok(worker) = reqwest::Proxy::all(worker) {
+                client = client.proxy(worker);
             }
         }
 
@@ -1058,8 +1054,7 @@ impl Website {
                 _ => &get_ua(self.only_chrome_agent()),
             })
             .redirect(policy)
-            .tcp_keepalive(Duration::from_millis(500))
-            .pool_idle_timeout(None);
+            .tcp_keepalive(Duration::from_millis(500));
 
         let referer = if self.configuration.tld && self.configuration.subdomains {
             2
@@ -1100,11 +1095,8 @@ impl Website {
         }
 
         for worker in WORKERS.iter() {
-            match reqwest::Proxy::all(worker) {
-                Ok(worker) => {
-                    client = client.proxy(worker);
-                }
-                _ => (),
+            if let Ok(worker) = reqwest::Proxy::all(worker) {
+                client = client.proxy(worker);
             }
         }
 
