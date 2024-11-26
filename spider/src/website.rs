@@ -2636,12 +2636,21 @@ impl Website {
                                 .await;
                             }
                         }
-                        Err(err) => log("", err.to_string()),
+                        Err(err) => {
+                            crate::features::chrome::close_browser(
+                                browser_handle,
+                                &browser,
+                                &mut context_id,
+                            )
+                            .await;
+
+                            log::error!("{}", err)
+                        }
                     }
                 }
-                _ => log("", "Chrome failed to start."),
+                _ => log::info!("Chrome failed to start."),
             },
-            _ => log("", INVALID_URL),
+            _ => log::info!("{}", INVALID_URL),
         }
     }
 

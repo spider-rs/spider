@@ -500,7 +500,7 @@ pub async fn setup_auth_challenge_response(
                 let auth_challenge_response = auth_challenge_response.clone();
 
                 // we may need return for polling
-                tokio::task::spawn(async move {
+                crate::utils::spawn_task("auth_interception", async move {
                     while let Some(event) = rp.next().await {
                         let u = &event.request.url;
                         let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
