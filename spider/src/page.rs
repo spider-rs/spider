@@ -2,6 +2,7 @@ use crate::compact_str::CompactString;
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
+use crate::utils::abs::convert_abs_path;
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
@@ -14,6 +15,7 @@ use lol_html::Settings;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
+
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
 
@@ -89,7 +91,7 @@ lazy_static! {
 
 lazy_static! {
     /// include only list of resources
-    static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
+    pub(crate) static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
         let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(28);
 
         m.extend([
@@ -274,21 +276,6 @@ pub fn domain_name(domain: &Url) -> &str {
     match domain.host_str() {
         Some(host) => host,
         _ => "",
-    }
-}
-
-/// Convert to absolute path
-#[inline]
-pub fn convert_abs_path(base: &Url, href: &str) -> Url {
-    match base.join(&href) {
-        Ok(mut joined) => {
-            joined.set_fragment(None);
-            joined
-        }
-        Err(e) => {
-            log("URL Parse Error: ", e.to_string());
-            base.clone()
-        }
     }
 }
 

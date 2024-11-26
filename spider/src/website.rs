@@ -7,8 +7,10 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::{
-    emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
+    abs::convert_abs_path, emit_log, emit_log_shutdown, setup_website_selectors, spawn_set,
+    spawn_task, AllowedDomainTypes,
 };
+
 use crate::utils::{interner::ListBucket, log};
 use crate::CaseInsensitiveString;
 use crate::Client;
@@ -287,7 +289,7 @@ impl Website {
             status: CrawlStatus::Start,
             shutdown: false,
             domain_parsed: match url::Url::parse(url.inner()) {
-                Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
                 _ => None,
             },
             url,
@@ -308,7 +310,7 @@ impl Website {
             CaseInsensitiveString::new(&string_concat!("https://", url)).into()
         };
         self.domain_parsed = match url::Url::parse(domain.inner()) {
-            Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+            Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
             _ => None,
         };
         self.url = domain;
@@ -648,7 +650,7 @@ impl Website {
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
             match url::Url::parse(domain.unwrap_or_default()) {
-                Ok(u) => Some(crate::page::convert_abs_path(&u, "/")),
+                Ok(u) => Some(convert_abs_path(&u, "/")),
                 _ => None,
             }
         } else {
@@ -1413,7 +1415,7 @@ impl Website {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let prior_domain = self.domain_parsed.take();
                 self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                    Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
                     _ => None,
                 };
                 self.url = domain;
@@ -1887,7 +1889,7 @@ impl Website {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let prior_domain = self.domain_parsed.take();
                 self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                    Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+                    Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
                     _ => None,
                 };
                 self.url = domain;
@@ -2308,7 +2310,7 @@ impl Website {
                                 Some(result) = set.join_next() => {
                                     match result {
                                         Ok(res) => {
-                                            // 1 solution. if the final redirect url is already in links visited do not extend the links!
+                                            // todo: add final url catching domains to make sure we do not add extra pages.
                                             self.links_visited.extend_links(&mut links, res)
                                         },
                                         Err(_) => {

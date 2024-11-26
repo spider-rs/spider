@@ -1,3 +1,5 @@
+/// Absolute path domain handling.
+pub mod abs;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// String interner.
@@ -2833,7 +2835,7 @@ pub(crate) fn modify_selectors(
     allowed: AllowedDomainTypes,
 ) {
     *domain_parsed = match url::Url::parse(domain) {
-        Ok(u) => Some(Box::new(crate::page::convert_abs_path(&u, "/"))),
+        Ok(u) => Some(Box::new(crate::utils::abs::convert_abs_path(&u, "/"))),
         _ => None,
     };
     *url = Box::new(domain.into());
