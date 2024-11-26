@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.62"
+version = "2.13.63"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -78,7 +78,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 tokio = { version = "1", default-features = false, features = [
     "macros",
     "time",
-    "parking_lot", 
     "rt-multi-thread"
 ] }
 fastrand = { version = "2", optional = true }

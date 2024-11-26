@@ -3,7 +3,6 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::{convert_abs_path, convert_abs_url_base};
-use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
 use crate::Client;
