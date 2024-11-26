@@ -373,19 +373,26 @@ impl Handler {
     /// ready and idle), the `Target` sends its newly created `Page` as response
     /// to the initiator (`tx`) of the `CreateTargetParams` request.
     fn create_page(&mut self, params: CreateTargetParams, tx: OneshotSender<Result<Page>>) {
-        let method = params.identifier();
-        match serde_json::to_value(params) {
-            Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
-                Ok(call_id) => {
-                    self.pending_commands.insert(
-                        call_id,
-                        (PendingRequest::CreateTarget(tx), method, Instant::now()),
-                    );
+        match url::Url::parse(&params.url) {
+            Ok(_) => {
+                let method = params.identifier();
+                match serde_json::to_value(params) {
+                    Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
+                        Ok(call_id) => {
+                            self.pending_commands.insert(
+                                call_id,
+                                (PendingRequest::CreateTarget(tx), method, Instant::now()),
+                            );
+                        }
+                        Err(err) => {
+                            let _ = tx.send(Err(err.into())).ok();
+                        }
+                    },
+                    Err(err) => {
+                        let _ = tx.send(Err(err.into())).ok();
+                    }
                 }
-                Err(err) => {
-                    let _ = tx.send(Err(err.into())).ok();
-                }
-            },
+            }
             Err(err) => {
                 let _ = tx.send(Err(err.into())).ok();
             }
