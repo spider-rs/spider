@@ -2215,7 +2215,7 @@ impl Website {
                                     let allowed = self.is_allowed(&link);
 
                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                        break;
+                                        break 'outer;
                                     }
                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                         continue;
@@ -2297,7 +2297,7 @@ impl Website {
                                             let allowed = self.is_allowed(&s);
 
                                             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                break;
+                                                break 'outer;
                                             }
                                             if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
@@ -2445,7 +2445,7 @@ impl Website {
                                                 if allowed
                                                     .eq(&ProcessLinkStatus::BudgetExceeded)
                                                 {
-                                                    break;
+                                                    break 'outer;
                                                 }
                                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
@@ -2713,7 +2713,7 @@ impl Website {
                                 let allowed = self.is_allowed(&link);
 
                                 if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                    break;
+                                    break 'outer;
                                 }
                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                     continue;
@@ -2767,7 +2767,7 @@ impl Website {
                                                     if allowed
                                                         .eq(&ProcessLinkStatus::BudgetExceeded)
                                                     {
-                                                        break;
+                                                        break 'outer;
                                                     }
                                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                         continue;
@@ -2901,7 +2901,7 @@ impl Website {
                                         let allowed = self.is_allowed(&link);
 
                                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            break;
+                                            break 'outer;
                                         }
                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
@@ -3014,7 +3014,7 @@ impl Website {
                                                 if allowed
                                                     .eq(&ProcessLinkStatus::BudgetExceeded)
                                                 {
-                                                    break;
+                                                    break 'outer;
                                                 }
                                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
@@ -3293,7 +3293,7 @@ impl Website {
                                         let allowed = self.is_allowed(&s);
 
                                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            break;
+                                            break 'outer;
                                         }
                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
@@ -3449,8 +3449,8 @@ impl Website {
                                                                         self.is_allowed(&link);
 
                                                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                                            break;
-                                                                        }
+                                                                        break 'outer;
+                                                                    }
                                                                     if allowed.eq(
                                                                         &ProcessLinkStatus::Blocked,
                                                                     ) {
