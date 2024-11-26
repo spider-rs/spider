@@ -701,7 +701,7 @@ impl Page {
             }
             Ok(res) => setup_default_response(&res),
             Err(_) => {
-                log("- error parsing html text {}", url);
+                log::info!("error fetching {}", url);
                 let mut page_response = PageResponse::default();
                 if let Ok(status_code) = StatusCode::from_u16(599) {
                     page_response.status_code = status_code;

@@ -1605,7 +1605,7 @@ async fn fetch_page_html_raw_base(
         }
         Ok(res) => setup_default_response(&res),
         Err(_) => {
-            log("- error parsing html text {}", target_url);
+            log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
             if let Ok(status_code) = StatusCode::from_u16(599) {
                 page_response.status_code = status_code;
@@ -1796,7 +1796,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             ..Default::default()
         },
         Err(_) => {
-            log("- error parsing html text {}", &target_url);
+            log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
             if let Ok(status_code) = StatusCode::from_u16(599) {
                 page_response.status_code = status_code;
@@ -1848,8 +1848,8 @@ pub async fn fetch_page_html(
             {
                 Ok(page) => page,
                 _ => {
-                    log(
-                        "- error parsing html text defaulting to raw http request {}",
+                    log::info!(
+                        "- error fetching chrome page defaulting to raw http request {}",
                         &target_url,
                     );
 
@@ -1955,7 +1955,7 @@ pub async fn fetch_page_html(
                             ..Default::default()
                         },
                         Err(_) => {
-                            log("- error parsing html text {}", &target_url);
+                            log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
                             if let Ok(status_code) = StatusCode::from_u16(599) {
                                 page_response.status_code = status_code;
@@ -2099,7 +2099,7 @@ pub async fn fetch_page_html_chrome(
                             ..Default::default()
                         },
                         Err(_) => {
-                            log("- error parsing html text {}", &target_url);
+                            log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
                             if let Ok(status_code) = StatusCode::from_u16(599) {
                                 page_response.status_code = status_code;
