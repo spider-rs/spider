@@ -1787,14 +1787,25 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 ..Default::default()
             }
         }
-        Ok(res) => PageResponse {
-            #[cfg(feature = "headers")]
-            headers: Some(res.headers().clone()),
-            #[cfg(feature = "cookies")]
-            cookies: get_cookies(&res),
-            status_code: res.status(),
-            ..Default::default()
-        },
+        Ok(res) => {
+            let u = res.url().as_str();
+
+            let rd = if target_url != u {
+                Some(u.into())
+            } else {
+                None
+            };
+
+            PageResponse {
+                #[cfg(feature = "headers")]
+                headers: Some(res.headers().clone()),
+                #[cfg(feature = "cookies")]
+                cookies: get_cookies(&res),
+                status_code: res.status(),
+                final_url: rd,
+                ..Default::default()
+            }
+        }
         Err(_) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
