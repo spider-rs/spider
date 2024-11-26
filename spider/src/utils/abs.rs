@@ -20,15 +20,28 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
     }
 
     if !href.starts_with("/") {
-        // Check if href begins with a known protocol
-        if href.len() >= 5 && PROTOCOLS.contains(&href[0..5])
-            || (href.len() >= 6 && PROTOCOLS.contains(&href[0..6]))
-            || (href.len() >= 7 && PROTOCOLS.contains(&href[0..7]))
-            || (href.len() >= 8 && PROTOCOLS.contains(&href[0..8]))
-        {
-            if let Ok(mut next_url) = Url::parse(href) {
-                next_url.set_fragment(None);
-                return next_url;
+        let length = href.len();
+
+        let protocol_slice = if length >= 8 {
+            &href[0..8]
+        } else if length >= 7 {
+            &href[0..7]
+        } else if length >= 6 {
+            &href[0..6]
+        } else if length >= 5 {
+            &href[0..5]
+        } else {
+            ""
+        };
+
+        if let Some(protocol_end) = protocol_slice.find("://") {
+            let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
+
+            if PROTOCOLS.contains(protocol_slice) {
+                if let Ok(mut next_url) = Url::parse(href) {
+                    next_url.set_fragment(None);
+                    return next_url;
+                }
             }
         }
 
@@ -43,9 +56,12 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
                 if !ONLY_RESOURCES.contains::<case_insensitive_string::CaseInsensitiveString>(
                     &href[next_position..].into(),
                 ) {
-                    let full_url = format!("http://{}", href);
+                    let full_url = format!("{}://{}", base.scheme(), href);
 
-                    return Url::parse(&full_url).unwrap_or_else(|_| base.clone());
+                    if let Ok(mut next_url) = Url::parse(&full_url) {
+                        next_url.set_fragment(None);
+                        return next_url;
+                    }
                 }
             }
         }
@@ -57,7 +73,6 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
         path.clear();
     }
 
-    // Use base.join for other relative paths
     match base_domain.join(href) {
         Ok(mut joined) => {
             joined.set_fragment(None);
@@ -156,7 +171,7 @@ mod tests {
         let result = convert_abs_path(&base, href);
         assert_eq!(
             result.as_str(),
-            "http://example.org/another-path",
+            "https://example.org/another-path",
             "Should treat as a domain"
         );
     }
@@ -192,7 +207,7 @@ mod tests {
         let result = convert_abs_path(&base, href);
         assert_eq!(
             result.as_str(),
-            "http://example.com/other-path",
+            "https://example.com/other-path",
             "Should treat domain-like href as full URL"
         );
     }
