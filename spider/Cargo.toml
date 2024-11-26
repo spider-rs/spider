@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.54"
+version = "2.13.56"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -114,7 +114,7 @@ features = [
 ]
 
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "smart"]
+default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend"]
 regex = []
 glob = [ "dep:itertools"]
 ua_generator = ["dep:ua_generator"]

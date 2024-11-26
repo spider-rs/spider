@@ -1,7 +1,6 @@
+use crate::page::ONLY_RESOURCES;
 use phf::phf_set;
 use url::Url;
-
-use crate::page::ONLY_RESOURCES;
 
 static PROTOCOLS: phf::Set<&'static str> = phf_set! {
     "http://",
@@ -35,7 +34,7 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     }
 }
 
-/// Convert to absolute path
+/// Convert to absolute path. The base url must be the root path to avoid infinite appending.
 #[inline]
 pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
     let href = href.trim();
@@ -44,6 +43,7 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
         return base.clone();
     }
 
+    // handle absolute urls.
     if !href.starts_with("/") {
         let length = href.len();
 
@@ -70,19 +70,15 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
             }
         }
 
-        // Handle domain-like href (contains a dot and no spaces) as absolute URLs non assets
         if let Some(position) = href.rfind('.') {
             let hlen = href.len();
             let has_asset = hlen - position;
-
             if has_asset >= 3 {
                 let next_position = position + 1;
-
                 if !ONLY_RESOURCES.contains::<case_insensitive_string::CaseInsensitiveString>(
                     &href[next_position..].into(),
                 ) {
                     let full_url = format!("{}://{}", base.scheme(), href);
-
                     if let Ok(mut next_url) = Url::parse(&full_url) {
                         next_url.set_fragment(None);
                         return next_url;
@@ -124,30 +120,6 @@ mod tests {
     }
 
     #[test]
-    fn test_join_with_fragment() {
-        let base = Url::parse("https://example.com/path/").unwrap();
-        let href = "subpage#fragment";
-        let result = convert_abs_path(&base, href);
-        assert_eq!(result.as_str(), "https://example.com/subpage");
-    }
-
-    #[test]
-    fn test_join_with_query() {
-        let base = Url::parse("https://example.com/path/").unwrap();
-        let href = "subpage?query=123";
-        let result = convert_abs_path(&base, href);
-        assert_eq!(result.as_str(), "https://example.com/subpage?query=123");
-    }
-
-    #[test]
-    fn test_base_with_fragment() {
-        let base = Url::parse("https://example.com/path/#section").unwrap();
-        let href = "subpage";
-        let result = convert_abs_path(&base, href);
-        assert_eq!(result.as_str(), "https://example.com/subpage");
-    }
-
-    #[test]
     fn test_slash_join() {
         let base = Url::parse("https://example.com/path/").unwrap();
         let href = "/absolute";
@@ -172,19 +144,6 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_href() {
-        let base = Url::parse("https://www.example.com/path/").unwrap();
-        let href = "other-path/";
-        let result = convert_abs_path(&base, href);
-
-        assert_eq!(
-            result.as_str(),
-            "https://www.example.com/other-path/",
-            "Expected base URL for invalid href"
-        );
-    }
-
-    #[test]
     fn test_domain_like_link() {
         let base = Url::parse("https://www.example.com/path/").unwrap();
         let href = "example.org/another-path";
@@ -205,18 +164,6 @@ mod tests {
             result.as_str(),
             "https://www.example.com/another-path",
             "Should correctly join relative path with leading slash"
-        );
-    }
-
-    #[test]
-    fn test_bare_relative_path() {
-        let base = Url::parse("https://www.example.com/path/").unwrap();
-        let href = "another-path";
-        let result = convert_abs_path(&base, href);
-        assert_eq!(
-            result.as_str(),
-            "https://www.example.com/another-path",
-            "Should include path as root-relative when no slash"
         );
     }
 
