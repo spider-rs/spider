@@ -564,7 +564,11 @@ pub async fn perform_chrome_http_request(
                         _ => (),
                     }
                 }
-                _ => (),
+                _ => {
+                    if let Ok(scode) = StatusCode::from_u16(599) {
+                        status_code = scode;
+                    }
+                },
             };
         }
         Err(e) => return Err(e),
