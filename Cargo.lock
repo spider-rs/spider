@@ -337,7 +337,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.1",
  "http-body-util",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "matchit",
  "memchr",
  "mime",
@@ -532,9 +532,9 @@ dependencies = [
 
 [[package]]
 name = "cacache"
-version = "13.0.0"
+version = "13.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a61ff12b19d89c752c213316b87fdb4a587f073d219b893cc56974b8c9f39bf7"
+checksum = "5c5063741c7b2e260bbede781cf4679632dd90e2718e99f7715e46824b65670b"
 dependencies = [
  "digest",
  "either",
@@ -559,9 +559,9 @@ dependencies = [
 
 [[package]]
 name = "case_insensitive_string"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b877cdcbbc56bf1dccbc428f7e745c98bc3d9a8af507065365c2ad71073d8fe"
+checksum = "8f41bfb55ec5f474b3235362cc9f952956457eb25c07dbad5d53621257405280"
 dependencies = [
  "compact_str",
  "serde",
@@ -774,7 +774,7 @@ checksum = "6050c3a16ddab2e412160b31f2c871015704239bca62f72f6e5f0be631d3f644"
 dependencies = [
  "castaway",
  "cfg-if",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "rustversion",
  "ryu",
  "serde",
@@ -1067,7 +1067,7 @@ checksum = "5b3df4f93e5fbbe73ec01ec8d3f68bba73107993a5b1e7519273c32db9b0d5be"
 dependencies = [
  "cssparser-macros",
  "dtoa-short",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "phf 0.11.2",
  "smallvec",
 ]
@@ -1894,7 +1894,7 @@ checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
 dependencies = [
  "bytes",
  "fnv",
- "itoa 1.0.13",
+ "itoa 1.0.14",
 ]
 
 [[package]]
@@ -1905,7 +1905,7 @@ checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
 dependencies = [
  "bytes",
  "fnv",
- "itoa 1.0.13",
+ "itoa 1.0.14",
 ]
 
 [[package]]
@@ -2031,7 +2031,7 @@ dependencies = [
  "http-body 0.4.6",
  "httparse",
  "httpdate",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -2054,7 +2054,7 @@ dependencies = [
  "http-body 1.0.1",
  "httparse",
  "httpdate",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "pin-project-lite",
  "smallvec",
  "tokio",
@@ -2401,6 +2401,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2408,9 +2417,9 @@ checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 
 [[package]]
 name = "itoa"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "540654e97a3f4470a492cd30ff187bc95d89557a903a2bbf112e2fae98104ef2"
+checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "jobserver"
@@ -2444,9 +2453,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.164"
+version = "0.2.165"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
+checksum = "fcb4d3d38eab6c5239a362fa8bae48c03baf980a6e7079f063942d563ef3533e"
 
 [[package]]
 name = "libm"
@@ -2636,7 +2645,7 @@ version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df518b75016b4289cdddffa1b01f2122f4a49802c93191f3133f6dc2472ebcaa"
 dependencies = [
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "maud_macros",
 ]
 
@@ -3368,7 +3377,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.89",
@@ -4121,7 +4130,7 @@ version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "memchr",
  "ryu",
  "serde",
@@ -4153,7 +4162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
 dependencies = [
  "form_urlencoded",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "ryu",
  "serde",
 ]
@@ -4295,7 +4304,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4358,7 +4367,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4393,7 +4402,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "clap",
  "env_logger",
@@ -4418,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4440,7 +4449,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4452,7 +4461,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.13.53"
+version = "2.13.54"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4814,7 +4823,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dfd88e563464686c916c7e46e623e520ddc6d79fa6641390f2e3fa86e83e885"
 dependencies = [
  "deranged",
- "itoa 1.0.13",
+ "itoa 1.0.14",
  "num-conv",
  "powerfmt",
  "serde",
@@ -5129,9 +5138,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-core"
-version = "0.1.32"
+version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
+checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
 dependencies = [
  "once_cell",
  "valuable",

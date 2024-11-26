@@ -2,7 +2,7 @@ use crate::compact_str::CompactString;
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
-use crate::utils::abs::convert_abs_path;
+use crate::utils::abs::{convert_abs_path, convert_abs_url_base};
 use crate::utils::log;
 use crate::utils::PageResponse;
 use crate::CaseInsensitiveString;
@@ -208,7 +208,7 @@ pub struct Page {
 
 /// Validate link and push into the map
 pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
-    base: &Option<Url>,
+    base: &Option<&Url>,
     href: &str,
     map: &mut HashSet<A>,
     base_domain: &CompactString,
@@ -330,11 +330,14 @@ pub fn parent_host_match(
 
 /// html selector for valid web pages for domain.
 pub fn get_page_selectors_base(u: &Url, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
-    let host_name =
-        CompactString::from(match convert_abs_path(&u, Default::default()).host_str() {
-            Some(host) => host.to_ascii_lowercase(),
-            _ => Default::default(),
-        });
+    let u = convert_abs_url_base(&u);
+
+    let b = match u.host_str() {
+        Some(host) => host.to_ascii_lowercase(),
+        _ => Default::default(),
+    };
+
+    let host_name = CompactString::from(b);
     let scheme = u.scheme();
 
     Some(if tld || subdomains {
@@ -543,11 +546,6 @@ impl Page {
                     res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
                 );
 
-                let base = match Url::parse(url) {
-                    Ok(u) => Some(u),
-                    _ => None,
-                };
-
                 if url != res.url().as_str() {
                     let domain = res.url().as_str();
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
@@ -561,6 +559,8 @@ impl Page {
                         AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
                     );
                 };
+
+                let base = domain_parsed.as_deref();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -1171,7 +1171,7 @@ impl Page {
                             match e.unescape() {
                                 Ok(v) => {
                                     push_link(
-                                        &self.base,
+                                        &self.base.as_ref(),
                                         &v,
                                         map,
                                         &selectors.0,
@@ -1234,7 +1234,7 @@ impl Page {
                     element_content_handlers: vec![lol_html::element!("a", |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
-                                &self.base,
+                                &self.base.as_ref(),
                                 &href,
                                 &mut map,
                                 &selectors.0,
@@ -1316,7 +1316,7 @@ impl Page {
                         lol_html::element!("a", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
-                                    &self.base,
+                                    &self.base.as_ref(),
                                     &href,
                                     &mut map,
                                     &selectors.0,
@@ -1384,7 +1384,7 @@ impl Page {
                                 // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
                                     push_link(
-                                        &self.base,
+                                        &self.base.as_ref(),
                                         &href,
                                         &mut map_ssg,
                                         &selectors.0,
@@ -1581,7 +1581,7 @@ impl Page {
                         element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
-                                    &base,
+                                    &base.as_ref(),
                                     &href,
                                     &mut inner_map,
                                     &selectors.0,
@@ -1718,7 +1718,7 @@ impl Page {
 
                             if let Ok(resource) = page_resource {
                                 if let Err(_) = tx.send(resource) {
-                                    crate::utils::log("the receiver dropped", "");
+                                    log::info!("the receiver dropped - {target_url}");
                                 }
                             }
                         }
@@ -1787,7 +1787,7 @@ impl Page {
                         };
                         if let Some(href) = el.get_attribute(attribute) {
                             push_link(
-                                &base,
+                                &base.as_ref(),
                                 &href,
                                 &mut map,
                                 &selectors.0,

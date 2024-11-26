@@ -6,9 +6,9 @@ use crate::configuration::{
 use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
+use crate::utils::abs::parse_absolute_url;
 use crate::utils::{
-    abs::convert_abs_path, emit_log, emit_log_shutdown, setup_website_selectors, spawn_set,
-    spawn_task, AllowedDomainTypes,
+    emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
 };
 
 use crate::utils::{interner::ListBucket, log};
@@ -279,6 +279,9 @@ impl Website {
         } else {
             CaseInsensitiveString::new(&string_concat!("https://", url)).into()
         };
+
+        let domain_parsed = parse_absolute_url(&url);
+
         Self {
             configuration: Configuration::new().into(),
             links_visited: Box::new(ListBucket::new()),
@@ -288,10 +291,7 @@ impl Website {
             channel: None,
             status: CrawlStatus::Start,
             shutdown: false,
-            domain_parsed: match url::Url::parse(url.inner()) {
-                Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
-                _ => None,
-            },
+            domain_parsed,
             url,
             ..Default::default()
         }
@@ -309,10 +309,7 @@ impl Website {
         } else {
             CaseInsensitiveString::new(&string_concat!("https://", url)).into()
         };
-        self.domain_parsed = match url::Url::parse(domain.inner()) {
-            Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
-            _ => None,
-        };
+        self.domain_parsed = parse_absolute_url(&domain);
         self.url = domain;
         self
     }
@@ -655,11 +652,23 @@ impl Website {
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
             match url::Url::parse(domain.unwrap_or_default()) {
-                Ok(u) => Some(convert_abs_path(&u, "/")),
+                Ok(mut u) => {
+                    if let Ok(mut path) = u.path_segments_mut() {
+                        path.clear();
+                    }
+                    Some(u)
+                }
                 _ => None,
             }
         } else {
-            self.domain_parsed.as_deref().cloned()
+            if let Some(mut d) = self.domain_parsed.as_deref().cloned() {
+                if let Ok(mut path) = d.path_segments_mut() {
+                    path.clear();
+                }
+                Some(d)
+            } else {
+                None
+            }
         }
     }
 
@@ -1001,22 +1010,19 @@ impl Website {
             _ => (),
         };
 
-        match self.get_absolute_path(None) {
-            Some(domain_url) => {
-                let domain_url = domain_url.as_str();
-                let domain_host = if domain_url.ends_with("/") {
-                    &domain_url[0..domain_url.len() - 1]
-                } else {
-                    domain_url
-                };
-                match HeaderValue::from_str(domain_host) {
-                    Ok(value) => {
-                        headers.insert(reqwest::header::HOST, value);
-                    }
-                    _ => (),
+        if let Some(domain_url) = self.get_absolute_path(None) {
+            let domain_url = domain_url.as_str();
+            let domain_host = if domain_url.ends_with("/") {
+                &domain_url[0..domain_url.len() - 1]
+            } else {
+                domain_url
+            };
+            match HeaderValue::from_str(domain_host) {
+                Ok(value) => {
+                    headers.insert(reqwest::header::HOST, value);
                 }
+                _ => (),
             }
-            _ => (),
         }
 
         for worker in WORKERS.iter() {
@@ -1406,10 +1412,7 @@ impl Website {
             if let Some(ref domain) = page.final_redirect_destination {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let prior_domain = self.domain_parsed.take();
-                self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                    Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
-                    _ => None,
-                };
+                self.domain_parsed = parse_absolute_url(&domain);
                 self.url = domain;
                 match self.setup_selectors() {
                     Some(s) => {
@@ -1880,10 +1883,7 @@ impl Website {
             if let Some(ref domain) = page.final_redirect_destination {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let prior_domain = self.domain_parsed.take();
-                self.domain_parsed = match url::Url::parse(&domain.inner()) {
-                    Ok(u) => Some(Box::new(convert_abs_path(&u, "/"))),
-                    _ => None,
-                };
+                self.domain_parsed = parse_absolute_url(&domain);
                 self.url = domain;
                 if let Some(s) = self.setup_selectors() {
                     base.0 = s.0;

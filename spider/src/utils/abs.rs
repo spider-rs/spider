@@ -10,6 +10,31 @@ static PROTOCOLS: phf::Set<&'static str> = phf_set! {
     "ws://"
 };
 
+/// convert abs path url
+pub(crate) fn convert_abs_url(u: &mut Url) {
+    if let Ok(mut path) = u.path_segments_mut() {
+        path.clear();
+    }
+}
+
+/// convert abs path without url returning a new url
+pub(crate) fn convert_abs_url_base(u: &Url) -> Url {
+    let mut u = u.clone();
+    convert_abs_url(&mut u);
+    u
+}
+
+/// Parse the absolute url
+pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
+    match url::Url::parse(url) {
+        Ok(mut u) => {
+            convert_abs_url(&mut u);
+            Some(Box::new(u))
+        }
+        _ => None,
+    }
+}
+
 /// Convert to absolute path
 #[inline]
 pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
@@ -67,18 +92,13 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
         }
     }
 
-    let mut base_domain = base.clone();
-
-    if let Ok(mut path) = base_domain.path_segments_mut() {
-        path.clear();
-    }
-
-    match base_domain.join(href) {
+    // we can swap the domains if they do not match incase of crawler redirect anti-bot
+    match base.join(href) {
         Ok(mut joined) => {
             joined.set_fragment(None);
             joined
         }
-        Err(_) => base_domain.clone(),
+        Err(_) => base.clone(),
     }
 }
 

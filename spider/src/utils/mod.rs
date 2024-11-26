@@ -10,6 +10,7 @@ pub mod trie;
 use std::str::FromStr;
 
 use crate::RelativeSelectors;
+use abs::parse_absolute_url;
 use auto_encoder::is_binary_file;
 use bytes::{BufMut, BytesMut};
 use case_insensitive_string::CaseInsensitiveString;
@@ -2834,10 +2835,7 @@ pub(crate) fn modify_selectors(
     base: &mut RelativeSelectors,
     allowed: AllowedDomainTypes,
 ) {
-    *domain_parsed = match url::Url::parse(domain) {
-        Ok(u) => Some(Box::new(crate::utils::abs::convert_abs_path(&u, "/"))),
-        _ => None,
-    };
+    *domain_parsed = parse_absolute_url(domain);
     *url = Box::new(domain.into());
     if let Some(s) = setup_website_selectors(domain_parsed, url.inner(), allowed) {
         base.0 = s.0;
