@@ -2,11 +2,29 @@ use crate::page::ONLY_RESOURCES;
 use phf::phf_set;
 use url::Url;
 
+/// Acceptable protocols for data transfering TCP.
 static PROTOCOLS: phf::Set<&'static str> = phf_set! {
     "http://",
     "https://",
     "ftp://",
     "ws://"
+};
+
+/// Ignore protocols for web crawling.
+static IGNORED_PROTOCOLS: phf::Set<&'static str> = phf_set! {
+    "file:",
+    "sms:",
+    "javascript:",
+    "data:",
+    "whatsapp:",
+    "geo:",
+    "skype:",
+    "ssh:",
+    "zoommtg:",
+    "market:",
+    "intent:",
+    "mailto:",
+    "tel:",
 };
 
 /// convert abs path url
@@ -59,13 +77,24 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
             ""
         };
 
-        if let Some(protocol_end) = protocol_slice.find("://") {
-            let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
+        // ignore protocols that are not crawlable
+        if let Some(protocol_end) = href.find(':') {
+            // Extract the potential protocol up to and including the ':'
+            let protocol_slice_section = &href[..protocol_end + 1];
 
-            if PROTOCOLS.contains(protocol_slice) {
-                if let Ok(mut next_url) = Url::parse(href) {
-                    next_url.set_fragment(None);
-                    return next_url;
+            // Ignore protocols that are in the IGNORED_PROTOCOLS set
+            if IGNORED_PROTOCOLS.contains(protocol_slice_section) {
+                return base.clone();
+            }
+
+            if protocol_slice.len() >= protocol_end + 3 {
+                let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
+
+                if PROTOCOLS.contains(protocol_slice) {
+                    if let Ok(mut next_url) = Url::parse(href) {
+                        next_url.set_fragment(None);
+                        return next_url;
+                    }
                 }
             }
         }
@@ -175,6 +204,19 @@ mod tests {
         assert_eq!(
             result.as_str(),
             "https://example.com/other-path",
+            "Should treat domain-like href as full URL"
+        );
+    }
+
+    #[test]
+    fn test_no_invalid_protocols() {
+        let base = Url::parse("https://www.example.com").unwrap();
+        let href = "mailto:info@laminarpharma.com";
+        let result = convert_abs_path(&base, href);
+
+        assert_eq!(
+            result.as_str(),
+            "https://www.example.com/",
             "Should treat domain-like href as full URL"
         );
     }
