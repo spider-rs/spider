@@ -604,7 +604,13 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
-    tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config));
+    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+        tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config))
+    })
+    .await
+    {
+        log::error!("failed to setup event handlers within 60 seconds.");
+    }
 }
 
 /// static chrome arguments to start

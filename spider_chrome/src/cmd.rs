@@ -90,7 +90,7 @@ impl Method for CommandMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CommandChain {
     /// The commands to process: (method identifier, params)
     cmds: VecDeque<(MethodId, serde_json::Value)>,

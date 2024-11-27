@@ -25,7 +25,6 @@ use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{
-    runtime::Handle,
     sync::{broadcast, Semaphore},
     task::JoinSet,
     time::Interval,
@@ -2185,7 +2184,6 @@ impl Website {
                     ));
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                    let chandle = Handle::current();
 
                     'outer: loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2279,8 +2277,7 @@ impl Website {
                                             drop(permit);
 
                                             links
-                                        },
-                                        &chandle);
+                                        });
                                     }
 
                                     if let Some(q) = &mut q {
@@ -2388,8 +2385,6 @@ impl Website {
 
                                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
                                     JoinSet::new();
-                                let chandle = Handle::current();
-
                                 let shared = Arc::new((
                                     client.to_owned(),
                                     selectors,
@@ -2545,7 +2540,11 @@ impl Website {
                                                                 }
 
                                                                 if let Some(h) = intercept_handle {
-                                                                    let _ = h.await;
+                                                                    let abort_handle = h.abort_handle();
+                                                                    if let Err(elasped) = tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await {
+                                                                        log::warn!("Handler timeout exceeded {elasped}");
+                                                                        abort_handle.abort();
+                                                                    }
                                                                 }
 
                                                                 if add_external {
@@ -2584,8 +2583,7 @@ impl Website {
                                                         drop(permit);
 
                                                         results
-                                                    },
-                                                    &chandle);
+                                                    });
                                                 }
 
                                                 if let Some(q) = q.as_mut() {
@@ -2629,7 +2627,7 @@ impl Website {
                                     }
 
                                     if links.is_empty() && set.is_empty() {
-                                        break 'outer;
+                                        break;
                                     }
                                 }
 
@@ -2696,7 +2694,6 @@ impl Website {
                     .await;
 
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                let chandle = Handle::current();
 
                 'outer: loop {
                     let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2736,35 +2733,29 @@ impl Website {
                                         let client = client.clone();
                                         tokio::task::yield_now().await;
 
-                                        spawn_set(
-                                            "page_fetch",
-                                            &mut set,
-                                            async move {
-                                                let link_results = match on_link_find_callback {
-                                                    Some(cb) => cb(link, None),
-                                                    _ => (link, None),
-                                                };
-                                                let link_results = link_results.0.as_ref();
-                                                let page = Page::new_links_only(
-                                                    &if http_worker
-                                                        && link_results.starts_with("https")
-                                                    {
-                                                        link_results
-                                                            .replacen("https", "http", 1)
-                                                            .to_string()
-                                                    } else {
-                                                        link_results.to_string()
-                                                    },
-                                                    &client,
-                                                )
-                                                .await;
+                                        spawn_set("page_fetch", &mut set, async move {
+                                            let link_results = match on_link_find_callback {
+                                                Some(cb) => cb(link, None),
+                                                _ => (link, None),
+                                            };
+                                            let link_results = link_results.0.as_ref();
+                                            let page = Page::new_links_only(
+                                                &if http_worker && link_results.starts_with("https")
+                                                {
+                                                    link_results
+                                                        .replacen("https", "http", 1)
+                                                        .to_string()
+                                                } else {
+                                                    link_results.to_string()
+                                                },
+                                                &client,
+                                            )
+                                            .await;
 
-                                                drop(permit);
+                                            drop(permit);
 
-                                                page.links
-                                            },
-                                            &chandle,
-                                        );
+                                            page.links
+                                        });
 
                                         match q.as_mut() {
                                             Some(q) => {
@@ -2866,8 +2857,6 @@ impl Website {
                         self.configuration.configure_allowlist();
 
                         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                        let chandle = Handle::current();
-
                         let semaphore = self.setup_semaphore();
 
                         let shared = Arc::new((
@@ -3017,8 +3006,7 @@ impl Website {
                                                 drop(permit);
 
                                                 links
-                                            },
-                                            &chandle);
+                                            });
                                         }
 
                                         if let Some(q) = q.as_mut() {
@@ -3292,7 +3280,7 @@ impl Website {
 
                         if let Ok(mut handle) = handles.await {
                             for page in handle.iter_mut() {
-                                let prev_domain = page.base;
+                                let prev_domain = page.base.take();
                                 page.base = self.domain_parsed.as_deref().cloned();
                                 let links = page.links(&selectors).await;
                                 page.base = prev_domain;
@@ -3526,23 +3514,19 @@ impl Website {
                                                                                 )
                                                                                 .await;
 
-                                                                                if let Some(h) =
-                                                                                    intercept_handle
-                                                                                {
-                                                                                    let _ = h.await;
+                                                                                if let Some(intercept_handle) = intercept_handle {
+                                                                                    let abort_handle = intercept_handle.abort_handle();
+
+                                                                                    if let Err(elasped) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+                                                                                        intercept_handle.await
+                                                                                    }).await {
+                                                                                        log::warn!("Handler timeout exceeded {elasped}");
+                                                                                        abort_handle.abort();
+                                                                                    }
                                                                                 }
 
-                                                                                match tx
-                                                                                    .reserve()
-                                                                                    .await
-                                                                                {
-                                                                                    Ok(permit) => {
-                                                                                        permit
-                                                                                            .send(
-                                                                                            page,
-                                                                                        );
-                                                                                    }
-                                                                                    _ => (),
+                                                                                if let Ok(permit) = tx.reserve().await {
+                                                                                    permit.send(page);
                                                                                 }
                                                                             }
                                                                             _ => (),
@@ -3584,7 +3568,7 @@ impl Website {
 
                                 if let Ok(mut handle) = handles.await {
                                     for page in handle.iter_mut() {
-                                        let prev_domain = page.base;
+                                        let prev_domain = page.base.take();
                                         page.base = self.domain_parsed.as_deref().cloned();
                                         self.extra_links.extend(page.links(&selectors).await);
                                         page.base = prev_domain;

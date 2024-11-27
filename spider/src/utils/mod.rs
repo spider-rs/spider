@@ -1003,6 +1003,9 @@ pub async fn cache_chrome_response(
 ) {
 }
 
+/// Max page timeout for events.
+const MAX_PAGE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(60);
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -1020,6 +1023,8 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use std::ops::Div;
+
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let page_navigation = async {
@@ -1057,8 +1062,8 @@ pub async fn fetch_page_html_chrome_base(
 
     let request_timeout = tokio::time::timeout(
         match request_timeout {
-            Some(timeout) => **timeout,
-            _ => tokio::time::Duration::from_secs(60),
+            Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
+            _ => MAX_PAGE_TIMEOUT,
         },
         page_navigation,
     )
@@ -1090,7 +1095,14 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         if chrome_http_req_res.waf_check {
-            perform_smart_mouse_movement(&page, &viewport).await;
+            if let Err(elasped) = tokio::time::timeout(
+                tokio::time::Duration::from_secs(4),
+                perform_smart_mouse_movement(&page, &viewport),
+            )
+            .await
+            {
+                log::warn!("mouse movement timeout exceeded {elasped}");
+            }
         }
 
         page_wait(&page, &wait_for).await;
@@ -1107,18 +1119,24 @@ pub async fn fetch_page_html_chrome_base(
                 source.to_string()
             };
 
-            tokio::join!(
-                crate::features::chrome_common::eval_execution_scripts(
-                    &page,
-                    &target_url,
-                    &execution_scripts
-                ),
-                crate::features::chrome_common::eval_automation_scripts(
-                    &page,
-                    &target_url,
-                    &automation_scripts
-                )
-            );
+            if let Err(elasped) = tokio::time::timeout(MAX_PAGE_TIMEOUT, async {
+                tokio::join!(
+                    crate::features::chrome_common::eval_execution_scripts(
+                        &page,
+                        &target_url,
+                        &execution_scripts
+                    ),
+                    crate::features::chrome_common::eval_automation_scripts(
+                        &page,
+                        &target_url,
+                        &automation_scripts
+                    )
+                );
+            })
+            .await
+            {
+                log::warn!("mouse movement timeout exceeded {elasped}");
+            }
         }
 
         let res =
@@ -1133,7 +1151,11 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         if cfg!(feature = "real_browser") {
-            let _ = cf_handle(&mut res, &page).await;
+            let _ = tokio::time::timeout(
+                tokio::time::Duration::from_secs(10),
+                cf_handle(&mut res, &page),
+            )
+            .await;
         };
 
         let ok = res.len() > 0;
@@ -1172,7 +1194,11 @@ pub async fn fetch_page_html_chrome_base(
         page_response.status_code = chrome_http_req_res.status_code;
         page_response.waf_check = chrome_http_req_res.waf_check;
         if !page_set {
-            cache_chrome_response(&source, &page_response, chrome_http_req_res).await;
+            let _ = tokio::time::timeout(
+                tokio::time::Duration::from_secs(10),
+                cache_chrome_response(&source, &page_response, chrome_http_req_res),
+            )
+            .await;
         }
 
         page_response
@@ -1197,8 +1223,11 @@ pub async fn fetch_page_html_chrome_base(
     // }
 
     if cfg!(not(feature = "chrome_store_page")) {
-        page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
-            .await?;
+        let _ = tokio::time::timeout(
+            MAX_PAGE_TIMEOUT.div(2),
+            page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
+        )
+        .await;
     }
 
     Ok(page_response)
@@ -2906,7 +2935,6 @@ pub(crate) fn spawn_set<F, T>(
     task_name: &str,
     set: &mut tokio::task::JoinSet<T>,
     future: F,
-    handle: &tokio::runtime::Handle,
 ) -> tokio::task::AbortHandle
 where
     F: Future<Output = T>,
@@ -2915,7 +2943,7 @@ where
 {
     set.build_task()
         .name(task_name)
-        .spawn_on(future, &handle)
+        .spawn(future)
         .expect("set should spawn")
 }
 
@@ -2925,14 +2953,13 @@ pub(crate) fn spawn_set<F, T>(
     _task_name: &str,
     set: &mut tokio::task::JoinSet<T>,
     future: F,
-    handle: &tokio::runtime::Handle,
 ) -> tokio::task::AbortHandle
 where
     F: Future<Output = T>,
     F: Send + 'static,
     T: Send + 'static,
 {
-    set.spawn_on(future, &handle)
+    set.spawn(future)
 }
 
 /// Emit a log info event.

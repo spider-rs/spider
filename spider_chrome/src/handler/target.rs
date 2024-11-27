@@ -83,7 +83,7 @@ pub struct Target {
     /// The handle of the browser page of this target
     page: Option<PageHandle>,
     /// Drives this target towards initialization
-    init_state: TargetInit,
+    pub(crate) init_state: TargetInit,
     /// Currently queued events to report to the `Handler`
     queued_events: VecDeque<TargetEvent>,
     /// All registered event subscriptions
@@ -334,6 +334,7 @@ impl Target {
             // can only poll pages
             return None;
         }
+
         match &mut self.init_state {
             TargetInit::AttachToTarget => {
                 self.init_state = TargetInit::InitializingFrame(FrameManager::init_commands(
@@ -426,7 +427,12 @@ impl Target {
             }
             TargetInit::Closing => return None,
         };
+
         loop {
+            if self.init_state == TargetInit::Closing {
+                break None;
+            }
+
             if let Some(frame) = self.frame_manager.main_frame() {
                 if frame.is_loaded() {
                     while let Some(tx) = self.wait_for_frame_navigation.pop() {
@@ -442,6 +448,10 @@ impl Target {
 
             if let Some(handle) = self.page.as_mut() {
                 while let Poll::Ready(Some(msg)) = Pin::new(&mut handle.rx).poll_next(cx) {
+                    if self.init_state == TargetInit::Closing {
+                        break;
+                    }
+
                     match msg {
                         TargetMessage::Command(cmd) => {
                             self.queued_events.push_back(TargetEvent::Command(cmd));
@@ -533,6 +543,9 @@ impl Target {
             }
 
             while let Some(event) = self.network_manager.poll() {
+                if self.init_state == TargetInit::Closing {
+                    break;
+                }
                 match event {
                     NetworkEvent::SendCdpRequest((method, params)) => {
                         // send a message to the browser
@@ -554,6 +567,9 @@ impl Target {
             }
 
             while let Some(event) = self.frame_manager.poll(now) {
+                if self.init_state == TargetInit::Closing {
+                    break;
+                }
                 match event {
                     FrameEvent::NavigationResult(res) => {
                         self.queued_events
@@ -704,7 +720,7 @@ pub(crate) enum TargetEvent {
 }
 
 // TODO this can be moved into the classes?
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TargetInit {
     InitializingFrame(CommandChain),
     InitializingNetwork(CommandChain),
