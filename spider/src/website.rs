@@ -2212,6 +2212,9 @@ impl Website {
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
 
+                    // track budgeting one time.
+                    let mut exceeded_budget = false;
+
                     'outer: loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
@@ -2234,8 +2237,10 @@ impl Website {
                                     let allowed = self.is_allowed(&link);
 
                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                        break 'outer;
+                                        exceeded_budget = true;
+                                        break;
                                     }
+
                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                         continue;
                                     }
@@ -2312,7 +2317,7 @@ impl Website {
                                             let allowed = self.is_allowed(&s);
 
                                             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                break 'outer;
+                                                break;
                                             }
                                             if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
@@ -2326,7 +2331,7 @@ impl Website {
                                     match result {
                                         Ok(res) => {
                                             // todo: add final url catching domains to make sure we do not add extra pages.
-                                            self.links_visited.extend_links(&mut links, res)
+                                            self.links_visited.extend_links(&mut links, res);
                                         },
                                         Err(_) => {
                                             break
@@ -2337,7 +2342,11 @@ impl Website {
                                 else => break,
                             }
 
-                            if links.is_empty() && set.is_empty() {
+                            if links.is_empty() && set.is_empty() || exceeded_budget {
+                                // await for all tasks to complete.
+                                if exceeded_budget {
+                                    set.join_all().await;
+                                }
                                 break 'outer;
                             }
                         }
@@ -2428,6 +2437,7 @@ impl Website {
                                 let on_link_find_callback = self.on_link_find_callback;
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
+                                let mut exceeded_budget = false;
 
                                 'outer: loop {
                                     let stream =
@@ -2461,7 +2471,8 @@ impl Website {
                                                 if allowed
                                                     .eq(&ProcessLinkStatus::BudgetExceeded)
                                                 {
-                                                    break 'outer;
+                                                    exceeded_budget = true;
+                                                    break;
                                                 }
                                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
@@ -2615,9 +2626,8 @@ impl Website {
                                                         let s = link.into();
                                                         let allowed = self.is_allowed(&s);
 
-                                                        if allowed.eq(
-                                                        &ProcessLinkStatus::BudgetExceeded,
-                                                    ) {
+                                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                        exceeded_budget = true;
                                                         break;
                                                     }
                                                         if allowed
@@ -2645,7 +2655,10 @@ impl Website {
                                             else => break,
                                         };
 
-                                        if links.is_empty() && set.is_empty() {
+                                        if links.is_empty() && set.is_empty() || exceeded_budget {
+                                            if exceeded_budget {
+                                                set.join_all().await;
+                                            }
                                             break 'outer;
                                         }
                                     }
@@ -2718,6 +2731,7 @@ impl Website {
                     .await;
 
                 let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                let mut exceeded_budget = false;
 
                 'outer: loop {
                     let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2742,7 +2756,8 @@ impl Website {
                                 let allowed = self.is_allowed(&link);
 
                                 if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                    break 'outer;
+                                    exceeded_budget = true;
+                                    break;
                                 }
                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                     continue;
@@ -2755,7 +2770,6 @@ impl Website {
                                 match SEM.acquire().await {
                                     Ok(permit) => {
                                         let client = client.clone();
-                                        tokio::task::yield_now().await;
 
                                         spawn_set("page_fetch", &mut set, async move {
                                             let link_results = match on_link_find_callback {
@@ -2790,7 +2804,7 @@ impl Website {
                                                     if allowed
                                                         .eq(&ProcessLinkStatus::BudgetExceeded)
                                                     {
-                                                        break 'outer;
+                                                        break;
                                                     }
                                                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                         continue;
@@ -2808,6 +2822,9 @@ impl Website {
                             }
                             _ => break,
                         }
+                        if exceeded_budget {
+                            break;
+                        }
                     }
 
                     while let Some(res) = set.join_next().await {
@@ -2816,7 +2833,7 @@ impl Website {
                         }
                     }
 
-                    if links.is_empty() {
+                    if links.is_empty() || exceeded_budget {
                         break;
                     }
                 }
@@ -2895,6 +2912,7 @@ impl Website {
                         ));
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
+                        let mut exceeded_budget = false;
 
                         'outer: loop {
                             let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2926,7 +2944,8 @@ impl Website {
                                         let allowed = self.is_allowed(&link);
 
                                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            break 'outer;
+                                            exceeded_budget = true;
+                                            break;
                                         }
                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
@@ -2970,11 +2989,7 @@ impl Website {
                                                                 let next_page =  Page::new_page(url, &shared.0).await;
 
                                                                 page.clone_from(&next_page)
-
-
                                                             };
-
-
 
                                                         }).await
                                                     {
@@ -3044,7 +3059,8 @@ impl Website {
                                                 if allowed
                                                     .eq(&ProcessLinkStatus::BudgetExceeded)
                                                 {
-                                                    break 'outer;
+                                                    exceeded_budget = true;
+                                                    break;
                                                 }
                                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                     continue;
@@ -3066,7 +3082,10 @@ impl Website {
                                     else => break,
                                 }
 
-                                if links.is_empty() && set.is_empty() {
+                                if links.is_empty() && set.is_empty() || exceeded_budget {
+                                    if exceeded_budget {
+                                        set.join_all().await;
+                                    }
                                     break 'outer;
                                 }
                             }
@@ -3166,6 +3185,7 @@ impl Website {
                 };
 
                 let retry = self.configuration.retry;
+                let mut exceeded_budget = false;
 
                 'outer: loop {
                     let stream =
@@ -3226,6 +3246,7 @@ impl Website {
                                                             if allowed.eq(
                                                                 &ProcessLinkStatus::BudgetExceeded,
                                                             ) {
+                                                                exceeded_budget = true;
                                                                 break;
                                                             }
                                                             if allowed
@@ -3300,7 +3321,7 @@ impl Website {
                                     Err(err) => log("http parse error: ", err.to_string()),
                                 };
                             }
-                            Err(err) => log("http network error: ", err.to_string()),
+                            Err(err) => log::info!("http network error: {}", err.to_string()),
                         };
 
                         drop(tx);
@@ -3327,7 +3348,8 @@ impl Website {
                                         let allowed = self.is_allowed(&s);
 
                                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            break 'outer;
+                                            exceeded_budget = true;
+                                            break;
                                         }
                                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                                             continue;
@@ -3340,9 +3362,13 @@ impl Website {
                                 _ => (),
                             }
                         }
+
+                        if exceeded_budget {
+                            break;
+                        }
                     }
 
-                    if sitemaps.len() == 0 {
+                    if sitemaps.len() == 0 || exceeded_budget {
                         break;
                     }
                 }
@@ -3417,6 +3443,8 @@ impl Website {
                             _ => Default::default(),
                         };
 
+                        let mut exceeded_budget = false;
+
                         'outer: loop {
                             let stream = tokio_stream::iter::<Vec<Box<CompactString>>>(
                                 sitemaps.drain(..).collect(),
@@ -3484,7 +3512,8 @@ impl Website {
                                                                         self.is_allowed(&link);
 
                                                                     if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                                        break 'outer;
+                                                                        exceeded_budget = true;
+                                                                        break;
                                                                     }
                                                                     if allowed.eq(
                                                                         &ProcessLinkStatus::Blocked,
@@ -3583,12 +3612,22 @@ impl Website {
                                                             err.msg(),
                                                         ),
                                                     };
+
+                                                    if exceeded_budget {
+                                                        break;
+                                                    }
                                                 }
                                             }
-                                            Err(err) => log("http parse error: ", err.to_string()),
+                                            Err(err) => log::info!(
+                                                "http sitemap parse error: {}",
+                                                err.to_string()
+                                            ),
                                         };
                                     }
-                                    Err(err) => log("http network error: ", err.to_string()),
+                                    Err(err) => log::info!(
+                                        "http sitemap network error: {}",
+                                        err.to_string()
+                                    ),
                                 };
 
                                 drop(tx);
@@ -3609,7 +3648,7 @@ impl Website {
                                 }
                             }
 
-                            if sitemaps.len() == 0 {
+                            if sitemaps.len() == 0 || exceeded_budget {
                                 break;
                             }
                         }
