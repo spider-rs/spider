@@ -347,51 +347,42 @@ pub async fn page_wait(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
 ) {
-    match wait_for {
-        Some(wait_for) => {
-            match wait_for.idle_network {
-                Some(ref network_idle) => {
-                    wait_for_event::<
-                        chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished,
-                    >(page, network_idle.timeout)
-                    .await;
-                }
-                _ => (),
+    if let Some(wait_for) = wait_for {
+        let wait_for_idle_network = async {
+            if let Some(ref wait) = wait_for.idle_network {
+                wait_for_event::<
+                chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished,
+            >(page, wait.timeout)
+            .await;
             }
+        };
 
-            match wait_for.selector {
-                Some(ref await_for_selector) => {
-                    wait_for_selector(
-                        page,
-                        await_for_selector.timeout,
-                        &await_for_selector.selector,
-                    )
-                    .await;
-                }
-                _ => (),
+        let wait_for_selector = async {
+            if let Some(ref wait) = wait_for.selector {
+                wait_for_selector(page, wait.timeout, &wait.selector).await;
             }
+        };
 
-            match wait_for.dom {
-                Some(ref await_for_selector) => {
-                    wait_for_dom(
-                        page,
-                        await_for_selector.timeout,
-                        &await_for_selector.selector,
-                    )
-                    .await;
-                }
-                _ => (),
+        let wait_for_dom = async {
+            if let Some(ref wait) = wait_for.dom {
+                wait_for_dom(page, wait.timeout, &wait.selector).await;
             }
+        };
 
-            match wait_for.delay {
-                Some(ref wait_for_delay) => match wait_for_delay.timeout {
-                    Some(timeout) => tokio::time::sleep(timeout).await,
-                    _ => (),
-                },
-                _ => (),
+        let wait_for_delay = async {
+            if let Some(ref wait) = wait_for.delay {
+                if let Some(timeout) = wait.timeout {
+                    tokio::time::sleep(timeout).await
+                }
             }
-        }
-        _ => (),
+        };
+
+        tokio::join!(
+            wait_for_idle_network,
+            wait_for_selector,
+            wait_for_dom,
+            wait_for_delay
+        );
     }
 }
 
