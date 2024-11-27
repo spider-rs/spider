@@ -2712,9 +2712,7 @@ impl Website {
                                 if !self
                                     .handle_process(handle, &mut interval, async {
                                         emit_log_shutdown(&link.inner());
-                                        let permits = set.len();
                                         set.shutdown().await;
-                                        semaphore.add_permits(permits);
                                     })
                                     .await
                                 {

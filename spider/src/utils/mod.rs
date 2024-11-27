@@ -1004,6 +1004,7 @@ pub async fn cache_chrome_response(
 }
 
 /// Max page timeout for events.
+#[cfg(feature = "chrome")]
 const MAX_PAGE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
 #[cfg(feature = "chrome")]
@@ -1105,7 +1106,11 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        page_wait(&page, &wait_for).await;
+        if let Err(elasped) =
+            tokio::time::timeout(MAX_PAGE_TIMEOUT, page_wait(&page, &wait_for)).await
+        {
+            log::warn!("max wait for timeout {elasped}");
+        }
 
         if execution_scripts.is_some() || automation_scripts.is_some() {
             let target_url = if final_url.is_some() {
