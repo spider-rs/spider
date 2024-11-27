@@ -513,14 +513,14 @@ impl PageLinkBuildSettings {
 
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page(url: &str, client: &Client) -> Self {
         let page_resource: PageResponse = crate::utils::fetch_page_html_raw(url, client).await;
         build(url, page_resource)
     }
 
     /// New page with rewriter
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_streaming<
         A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
@@ -715,7 +715,7 @@ impl Page {
     }
 
     /// Instantiate a new page and gather the html repro of standard fetch_page_html only gathering resources to crawl.
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
 
     pub async fn new_page_only_html(url: &str, client: &Client) -> Self {
         let page_resource = crate::utils::fetch_page_html_raw_only_html(url, client).await;
@@ -731,7 +731,7 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
 
     /// Instantiate a new page and gather the html.
     pub async fn new(
@@ -773,7 +773,7 @@ impl Page {
 
     /// Instantiate a new page and gather the links.
     #[cfg(all(feature = "decentralized", not(feature = "headers")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
 
     pub async fn new(url: &str, client: &Client) -> Self {
         Self::new_links_only(url, client).await
@@ -781,7 +781,7 @@ impl Page {
 
     /// Instantiate a new page and gather the headers and links.
     #[cfg(all(feature = "decentralized", feature = "headers"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn new(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
         use bytes::Buf;
@@ -815,7 +815,7 @@ impl Page {
 
     /// Instantiate a new page and gather the links.
     #[cfg(all(feature = "decentralized"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn new_links_only(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
         use bytes::Buf;
@@ -839,7 +839,7 @@ impl Page {
     }
 
     #[cfg(not(all(not(feature = "decentralized"), feature = "chrome")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved.
     /// The feature flag `chrome_store_page` is required.
     pub async fn screenshot(
@@ -855,7 +855,7 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved.
     /// The feature flag `chrome_store_page` is required.
     pub async fn take_screenshot(
@@ -928,7 +928,7 @@ impl Page {
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     /// Take a screenshot of the page. If the output path is set to None the screenshot will not be saved. The feature flag `chrome_store_page` is required.
     pub async fn screenshot(
         &self,
@@ -1143,7 +1143,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation for XML files
     #[cfg(all(not(feature = "decentralized")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
         A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
@@ -1298,7 +1298,7 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_base_ssg<
         A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
@@ -1517,7 +1517,7 @@ impl Page {
         feature = "smart"
     ))]
     #[inline(always)]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_smart<
         A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
@@ -1769,7 +1769,7 @@ impl Page {
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, skip(self)))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn links_stream_full_resource<
         A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
     >(
