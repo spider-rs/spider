@@ -83,6 +83,9 @@ lazy_static! {
     pub static ref CACACHE_MANAGER: CacheManager = CacheManager::default();
 }
 
+/// The max backoff duration in seconds.
+const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
+
 /// calculate the base limits
 pub fn calc_limits(multiplier: usize) -> usize {
     let logical = num_cpus::get();
@@ -1298,16 +1301,23 @@ impl Website {
             let mut retry_count = self.configuration.retry;
 
             while page.should_retry && retry_count > 0 {
+                retry_count -= 1;
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                    let next_page =
-                        backoff::future::retry(ExponentialBackoff::default(), || async {
-                            Ok::<Page, backoff::Error<std::io::Error>>(
-                                Page::new_page(url, client).await,
-                            )
-                        });
-                    if let Ok(next_page) = next_page.await {
-                        page.clone_from(&next_page);
-                    };
+                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        let next_page =
+                            backoff::future::retry(ExponentialBackoff::default(), || async {
+                                Ok::<Page, backoff::Error<std::io::Error>>(
+                                    Page::new_page(url, client).await,
+                                )
+                            });
+                        if let Ok(next_page) = next_page.await {
+                            page.clone_from(&next_page);
+                        };
+                    })
+                    .await
+                    {
+                        log::info!("backoff gateway timeout exceeded {elasped}");
+                    }
                 } else {
                     if let Some(timeout) = page.get_timeout() {
                         tokio::time::sleep(timeout).await;
@@ -1328,7 +1338,6 @@ impl Website {
                         .await,
                     );
                 }
-                retry_count -= 1;
             }
 
             emit_log(&url);
@@ -1405,7 +1414,13 @@ impl Website {
             .await;
 
             if let Some(h) = intercept_handle {
-                let _ = h.await;
+                let abort_handle = h.abort_handle();
+                if let Err(elasped) =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                {
+                    log::warn!("Handler timeout exceeded {elasped}");
+                    abort_handle.abort();
+                }
             }
 
             if let Some(ref domain) = page.final_redirect_destination {
@@ -1525,7 +1540,13 @@ impl Website {
             page.clone_from(&next_page);
 
             if let Some(h) = intercept_handle {
-                let _ = h.await;
+                let abort_handle = h.abort_handle();
+                if let Err(elasped) =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                {
+                    log::warn!("Handler timeout exceeded {elasped}");
+                    abort_handle.abort();
+                }
             }
         }
     }
@@ -1544,6 +1565,8 @@ impl Website {
         browser: &Arc<chromiumoxide::Browser>,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<CaseInsensitiveString> {
+        use backoff::exponential::ExponentialBackoff;
+
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -1555,10 +1578,15 @@ impl Website {
             let mut retry_count = self.configuration.retry;
 
             while page.should_retry && retry_count > 0 {
+                retry_count -= 1;
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                    let next_page =
-                        backoff::future::retry(ExponentialBackoff::default(), || async {
+                    let backoff: ExponentialBackoff<backoff::SystemClock> =
+                        ExponentialBackoff::default();
+
+                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        let next_page = backoff::future::retry(backoff, || async {
                             let mut page = page.clone();
+
                             let p = if retry_count.is_power_of_two() {
                                 Website::render_chrome_page(
                                     &self.configuration,
@@ -1576,9 +1604,14 @@ impl Website {
 
                             Ok::<Page, backoff::Error<std::io::Error>>(p)
                         });
-                    if let Ok(next_page) = next_page.await {
-                        page.clone_from(&next_page);
-                    };
+                        if let Ok(next_page) = next_page.await {
+                            page.clone_from(&next_page);
+                        };
+                    })
+                    .await
+                    {
+                        log::warn!("backoff timeout {elasped}");
+                    }
                 } else {
                     if let Some(timeout) = page.get_timeout() {
                         tokio::time::sleep(timeout).await;
@@ -1597,7 +1630,6 @@ impl Website {
                         page.clone_from(&Page::new_page(url, &client).await);
                     }
                 }
-                retry_count -= 1;
             }
 
             let page_links: HashSet<CaseInsensitiveString> = page
@@ -2243,28 +2275,38 @@ impl Website {
                                             let mut retry_count = shared.5;
 
                                             while page.should_retry && retry_count > 0 {
+                                                retry_count -= 1;
                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                    let next_page = backoff::future::retry(
-                                                        ExponentialBackoff::default(),
-                                                        || async {
-                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-                                                            let mut domain_parsed = None;
-                                                            let p = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
 
-                                                            Ok::<(Page, HashSet<CaseInsensitiveString>), backoff::Error<std::io::Error>>((p, links))
-                                                        },
-                                                    );
-                                                    if let Ok(next_page) = next_page.await {
-                                                        page.clone_from(&next_page.0);
-                                                        links.extend(next_page.1);
-                                                    };
+                                                    if let Err(elasped) =
+                                                    tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                        let next_page = backoff::future::retry(
+                                                            ExponentialBackoff::default(),
+                                                            || async {
+                                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                                let mut domain_parsed = None;
+                                                                let p = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
+
+                                                                Ok::<(Page, HashSet<CaseInsensitiveString>), backoff::Error<reqwest::Error>>((p, links))
+                                                            },
+                                                        );
+                                                        if let Ok(next_page) = next_page.await {
+                                                            page.clone_from(&next_page.0);
+                                                            links.extend(next_page.1);
+                                                        };
+
+                                                    }).await
+                                                {
+                                                    log::warn!("Handler timeout exceeded {elasped}");
+                                                }
+
+
                                                 } else {
                                                     if let Some(timeout) = page.get_timeout() {
                                                         tokio::time::sleep(timeout).await;
                                                     }
                                                     page.clone_from(&Page::new_page_streaming(target_url, &client, only_html, &mut relative_selectors.clone(), external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await);
                                                 }
-                                                retry_count -= 1;
                                             }
 
                                             if return_page_links {
@@ -2490,34 +2532,41 @@ impl Website {
                                                                 let mut retry_count = shared.6.retry;
 
                                                                 while page.should_retry && retry_count > 0 {
+                                                                    retry_count -= 1;
                                                                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                        let next_page = backoff::future::retry(
-                                                                            ExponentialBackoff::default(),
-                                                                            || async {
-                                                                                let p =    Page::new(
-                                                                                    &target_url,
-                                                                                    &shared.0,
-                                                                                    &new_page,
-                                                                                    &shared.6.wait_for,
-                                                                                    &shared.6.screenshot,
-                                                                                    false,
-                                                                                    &shared.6.openai_config,
-                                                                                    &shared.6.execution_scripts,
-                                                                                    &shared.6.automation_scripts,
-                                                                                    &shared.6.viewport,
-                                                                                    &shared.6.request_timeout
-                                                                                ).await;
-                                                                                Ok::<
-                                                                                    Page,
-                                                                                    backoff::Error<std::io::Error>,
-                                                                                >(
-                                                                                    p
-                                                                                )
-                                                                            },
-                                                                        );
-                                                                        if let Ok(next_page) = next_page.await {
-                                                                            page.clone_from(&next_page);
-                                                                        };
+                                                                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                                            let next_page = backoff::future::retry(
+                                                                                ExponentialBackoff::default(),
+                                                                                || async {
+                                                                                    let p = Page::new(
+                                                                                        &target_url,
+                                                                                        &shared.0,
+                                                                                        &new_page,
+                                                                                        &shared.6.wait_for,
+                                                                                        &shared.6.screenshot,
+                                                                                        false,
+                                                                                        &shared.6.openai_config,
+                                                                                        &shared.6.execution_scripts,
+                                                                                        &shared.6.automation_scripts,
+                                                                                        &shared.6.viewport,
+                                                                                        &shared.6.request_timeout
+                                                                                    ).await;
+                                                                                    Ok::<
+                                                                                        Page,
+                                                                                        backoff::Error<std::io::Error>,
+                                                                                    >(
+                                                                                        p
+                                                                                    )
+                                                                                },
+                                                                            );
+                                                                            if let Ok(next_page) = next_page.await {
+                                                                                page.clone_from(&next_page);
+                                                                            };
+                                                                        }).await {
+                                                                            log::info!("backoff gateway timeout exceeded {elasped}");
+                                                                        }
+
+
                                                                     } else {
                                                                         if let Some(timeout) = page.get_timeout() {
                                                                             tokio::time::sleep(timeout).await;
@@ -2540,7 +2589,6 @@ impl Website {
                                                                             .await,
                                                                         );
                                                                     }
-                                                                    retry_count -= 1;
                                                                 }
 
                                                                 if let Some(h) = intercept_handle {
@@ -2931,33 +2979,43 @@ impl Website {
                                                 let mut retry_count = shared.5.retry;
 
                                                 while page.should_retry && retry_count > 0 {
+                                                    retry_count -= 1;
                                                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                        let next_page = backoff::future::retry(
-                                                            ExponentialBackoff::default(),
-                                                            || async {
-                                                                let mut page = page.clone();
-                                                                let p = if retry_count.is_power_of_two() {
-                                                                    Website::render_chrome_page(
-                                                                        &shared.5, &shared.0, &shared.4,
-                                                                        &shared.6, &mut page, url,
-                                                                    )
-                                                                    .await;
-                                                                    page
-                                                                } else {
-                                                                    Page::new_page(url, &shared.0).await
-                                                                };
 
-                                                                Ok::<
-                                                                    Page,
-                                                                    backoff::Error<std::io::Error>,
-                                                                >(
-                                                                    p
-                                                                )
-                                                            },
-                                                        );
-                                                        if let Ok(next_page) = next_page.await {
-                                                            page.clone_from(&next_page);
-                                                        };
+                                                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                            let next_page = backoff::future::retry(
+                                                                ExponentialBackoff::default(),
+                                                                || async {
+                                                                    let mut page = page.clone();
+                                                                    let p = if retry_count.is_power_of_two() {
+                                                                        Website::render_chrome_page(
+                                                                            &shared.5, &shared.0, &shared.4,
+                                                                            &shared.6, &mut page, url,
+                                                                        )
+                                                                        .await;
+                                                                        page
+                                                                    } else {
+                                                                        Page::new_page(url, &shared.0).await
+                                                                    };
+
+                                                                    Ok::<
+                                                                        Page,
+                                                                        backoff::Error<std::io::Error>,
+                                                                    >(
+                                                                        p
+                                                                    )
+                                                                },
+                                                            );
+                                                            if let Ok(next_page) = next_page.await {
+                                                                page.clone_from(&next_page);
+                                                            };
+
+                                                        }).await
+                                                    {
+                                                        log::info!("backoff gateway timeout exceeded {elasped}");
+                                                    }
+
+
                                                     } else {
                                                         if let Some(timeout) = page.get_timeout() {
                                                             tokio::time::sleep(timeout).await;
@@ -2975,8 +3033,6 @@ impl Website {
                                                             );
                                                         }
                                                     }
-
-                                                    retry_count -= 1;
                                                 }
 
                                                 if add_external {

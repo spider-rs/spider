@@ -423,7 +423,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
 }
 
 /// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
-#[cfg_attr(feature = "tracing", tracing::instrument(level = "info", skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
 pub(crate) async fn attempt_navigation(
     url: &str,
     browser: &Browser,
@@ -604,12 +604,12 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
-    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
         tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config))
     })
     .await
     {
-        log::error!("failed to setup event handlers within 60 seconds.");
+        log::error!("failed to setup event handlers within 10 seconds.");
     }
 }
 
