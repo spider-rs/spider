@@ -280,7 +280,7 @@ impl Website {
             CaseInsensitiveString::new(&string_concat!("https://", url)).into()
         };
 
-        let domain_parsed = parse_absolute_url(&url);
+        let domain_parsed: Option<Box<Url>> = parse_absolute_url(&url);
 
         Self {
             configuration: Configuration::new().into(),
@@ -2400,6 +2400,7 @@ impl Website {
                                     self.configuration.clone(),
                                     self.url.inner().to_string(),
                                     context_id.clone(),
+                                    self.domain_parsed.clone(),
                                 ));
 
                                 let add_external = shared.3.len() > 0;
@@ -2551,11 +2552,17 @@ impl Website {
                                                                     page.set_external(shared.3.clone());
                                                                 }
 
+                                                                let prev_domain = page.base;
+
+                                                                page.base = shared.9.as_deref().cloned();
+
                                                                 let links = if full_resources {
                                                                     page.links_full(&shared.1).await
                                                                 } else {
                                                                     page.links(&shared.1).await
                                                                 };
+
+                                                                page.base = prev_domain;
 
                                                                 if return_page_links {
                                                                     page.page_links = if links.is_empty() {
@@ -2871,6 +2878,7 @@ impl Website {
                             browser,
                             self.configuration.clone(),
                             context_id.clone(),
+                            self.domain_parsed.clone(),
                         ));
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
@@ -2984,12 +2992,18 @@ impl Website {
                                                     );
                                                 }
 
+                                                let prev_domain = page.base;
+
+                                                page.base = shared.7.as_deref().cloned();
+
                                                 let links = page
                                                     .smart_links(
                                                         &shared.1, &shared.4, &shared.5,
                                                         &shared.6,
                                                     )
                                                     .await;
+
+                                                    page.base = prev_domain;
 
                                                 if return_page_links {
                                                     page.page_links = if links.is_empty() {
@@ -3103,6 +3117,8 @@ impl Website {
                 };
 
                 let domain = self.url.inner().as_str();
+                self.domain_parsed = parse_absolute_url(&domain);
+
                 let mut interval = tokio::time::interval(Duration::from_millis(15));
                 let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
                     Some(sitemap_path) => {
@@ -3145,7 +3161,7 @@ impl Website {
                         if !self.handle_process(handle, &mut interval, async {}).await {
                             break 'outer;
                         }
-                        let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(32);
+                        let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(100);
 
                         let shared = shared.clone();
 
@@ -3236,11 +3252,10 @@ impl Website {
                                                                     retry_count -= 1;
                                                                 }
 
-                                                                match tx.reserve().await {
-                                                                    Ok(permit) => {
-                                                                        permit.send(page);
-                                                                    }
-                                                                    _ => (),
+                                                                if let Ok(permit) =
+                                                                    tx.reserve().await
+                                                                {
+                                                                    permit.send(page);
                                                                 }
                                                             });
                                                         }
@@ -3277,7 +3292,10 @@ impl Website {
 
                         if let Ok(mut handle) = handles.await {
                             for page in handle.iter_mut() {
+                                let prev_domain = page.base;
+                                page.base = self.domain_parsed.as_deref().cloned();
                                 let links = page.links(&selectors).await;
+                                page.base = prev_domain;
                                 self.extra_links.extend(links)
                             }
                             if scrape {
@@ -3340,6 +3358,7 @@ impl Website {
                 match self.setup_browser().await {
                     Some((browser, browser_handle, mut context_id)) => {
                         let domain = self.url.inner().as_str();
+                        self.domain_parsed = parse_absolute_url(&domain);
                         let mut interval = tokio::time::interval(Duration::from_millis(15));
                         let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
                             Some(sitemap_path) => {
@@ -3565,7 +3584,10 @@ impl Website {
 
                                 if let Ok(mut handle) = handles.await {
                                     for page in handle.iter_mut() {
-                                        self.extra_links.extend(page.links(&selectors).await)
+                                        let prev_domain = page.base;
+                                        page.base = self.domain_parsed.as_deref().cloned();
+                                        self.extra_links.extend(page.links(&selectors).await);
+                                        page.base = prev_domain;
                                     }
                                     if scrape {
                                         match self.pages.as_mut() {

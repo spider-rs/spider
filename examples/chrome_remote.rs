@@ -48,8 +48,6 @@ async fn crawl_website(url: &str) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    console_subscriber::init();
-
     let _ = tokio::join!(
         crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),

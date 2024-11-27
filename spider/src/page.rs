@@ -126,7 +126,7 @@ pub struct Page {
     /// The bytes of the resource.
     html: Option<Box<Bytes>>,
     /// Base absolute url for page.
-    base: Option<Url>,
+    pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
     url: String,
     #[cfg(feature = "headers")]
@@ -856,7 +856,7 @@ impl Page {
     ) -> Vec<u8> {
         match &page.chrome_page {
             Some(chrome_page) => {
-                let format =
+                let format: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat =
                     chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::from(
                         format,
                     );

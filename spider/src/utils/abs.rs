@@ -57,7 +57,7 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
 pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
     let href = href.trim();
 
-    if href.is_empty() {
+    if href.is_empty() || href == "#" {
         return base.clone();
     }
 
@@ -87,6 +87,7 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
                 return base.clone();
             }
 
+            // valid protocol to take absolute
             if protocol_slice.len() >= protocol_end + 3 {
                 let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
 
