@@ -95,6 +95,7 @@ pub struct NetworkManager {
     protocol_request_interception_enabled: bool,
     offline: bool,
     request_timeout: Duration,
+    // made_request: bool,
     /// Ignore visuals (no pings, prefetching, and etc).
     pub ignore_visuals: bool,
     /// Block CSS stylesheets.
@@ -300,9 +301,9 @@ impl NetworkManager {
             }
         }
 
-        if self.only_html {
-            self.made_request = true;
-        }
+        // if self.only_html {
+        //     self.made_request = true;
+        // }
     }
 
     /// Perform a page intercept for chrome

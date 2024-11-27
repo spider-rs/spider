@@ -516,6 +516,7 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page(url: &str, client: &Client) -> Self {
         let page_resource: PageResponse = crate::utils::fetch_page_html_raw(url, client).await;
+
         build(url, page_resource)
     }
 
@@ -700,7 +701,7 @@ impl Page {
 
                 response.0
             }
-            Ok(res) => setup_default_response(&res),
+            Ok(res) => setup_default_response(url, &res),
             Err(_) => {
                 log::info!("error fetching {}", url);
                 let mut page_response = PageResponse::default();
@@ -716,7 +717,6 @@ impl Page {
 
     /// Instantiate a new page and gather the html repro of standard fetch_page_html only gathering resources to crawl.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-
     pub async fn new_page_only_html(url: &str, client: &Client) -> Self {
         let page_resource = crate::utils::fetch_page_html_raw_only_html(url, client).await;
         build(url, page_resource)
@@ -732,7 +732,6 @@ impl Page {
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-
     /// Instantiate a new page and gather the html.
     pub async fn new(
         url: &str,
@@ -773,8 +772,7 @@ impl Page {
 
     /// Instantiate a new page and gather the links.
     #[cfg(all(feature = "decentralized", not(feature = "headers")))]
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
-
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new(url: &str, client: &Client) -> Self {
         Self::new_links_only(url, client).await
     }

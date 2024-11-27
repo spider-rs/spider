@@ -214,9 +214,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b17e44510f88a904cb3102a020d7ea11929dcddadfaff756e71112cb2cb7bd0"
+checksum = "0d226540b4ecf884b0fb4370008631ccbd9605cf82f98bb504ec8f2cee0810e8"
 dependencies = [
  "async-convert",
  "backoff",
@@ -2071,7 +2071,7 @@ dependencies = [
  "http 1.1.0",
  "hyper 1.5.1",
  "hyper-util",
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
@@ -2453,9 +2453,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.165"
+version = "0.2.166"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb4d3d38eab6c5239a362fa8bae48c03baf980a6e7079f063942d563ef3533e"
+checksum = "c2ccc108bbc0b1331bd061864e7cd823c0cab660bbe6970e66e2c0614decde36"
 
 [[package]]
 name = "libm"
@@ -3394,9 +3394,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.60"
+version = "2.1.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "add4147324c04b450a4eeb919da7e3a86363621b351a39c5a386564720d4e465"
+checksum = "eb04c56838080ab54f8d04dc0fe38c8815e1238122d8d77638dccb3d438e2888"
 dependencies = [
  "psl-types",
 ]
@@ -3440,9 +3440,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
-version = "0.36.2"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+checksum = "f22f29bdff3987b4d8632ef95fd6424ec7e4e0a57e2f4fc63e489e75357f6a03"
 dependencies = [
  "memchr",
  "serde",
@@ -3460,7 +3460,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.0.0",
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "socket2",
  "thiserror 2.0.3",
  "tokio",
@@ -3478,7 +3478,7 @@ dependencies = [
  "rand 0.8.5",
  "ring",
  "rustc-hash 2.0.0",
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.3",
@@ -3744,7 +3744,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "rustls-native-certs",
  "rustls-pemfile",
  "rustls-pki-types",
@@ -3902,9 +3902,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.18"
+version = "0.23.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9cc1d47e243d655ace55ed38201c19ae02c148ae56412ab8750e8f0166ab7f"
+checksum = "934b404430bb06b3fae2cba809eb45a1ab1aecd64491213d7c3301b88393f8d1"
 dependencies = [
  "log",
  "once_cell",
@@ -4304,7 +4304,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4312,7 +4312,6 @@ dependencies = [
  "async-trait",
  "async_job",
  "auto_encoder",
- "backoff",
  "base64 0.22.1",
  "bytes",
  "case_insensitive_string",
@@ -4367,7 +4366,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "adblock",
  "async-tungstenite",
@@ -4402,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "clap",
  "env_logger",
@@ -4427,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4449,7 +4448,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4461,7 +4460,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.13.72"
+version = "2.13.74"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4939,7 +4938,7 @@ version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
 dependencies = [
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "rustls-pki-types",
  "tokio",
 ]
@@ -5127,9 +5126,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
+checksum = "395ae124c09f9e6918a2310af6038fba074bcf474ac352496d5910dd59a2226d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5319,7 +5318,7 @@ dependencies = [
  "flate2",
  "log",
  "once_cell",
- "rustls 0.23.18",
+ "rustls 0.23.19",
  "rustls-pki-types",
  "serde",
  "serde_json",

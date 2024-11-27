@@ -17,7 +17,6 @@ use crate::Client;
 use crate::RelativeSelectors;
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
-use backoff::ExponentialBackoff;
 use hashbrown::{HashMap, HashSet};
 use reqwest::redirect::Policy;
 use reqwest::StatusCode;
@@ -1299,29 +1298,41 @@ impl Website {
             .await;
 
             let mut retry_count = self.configuration.retry;
+            let domains_caseless = &self.configuration.external_domains_caseless;
 
             while page.should_retry && retry_count > 0 {
                 retry_count -= 1;
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                    let mut domain_parsed_clone = self.domain_parsed.clone();
+
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        let next_page =
-                            backoff::future::retry(ExponentialBackoff::default(), || async {
-                                Ok::<Page, backoff::Error<std::io::Error>>(
-                                    Page::new_page(url, client).await,
-                                )
-                            });
-                        if let Ok(next_page) = next_page.await {
-                            page.clone_from(&next_page);
-                        };
+                        page.clone_from(
+                            &Page::new_page_streaming(
+                                url,
+                                client,
+                                false,
+                                base,
+                                &domains_caseless,
+                                &page_links_settings,
+                                &mut links,
+                                Some(&mut links_ssg),
+                                &mut domain_parsed,
+                                &mut domain_parsed_clone,
+                            )
+                            .await,
+                        );
                     })
                     .await
                     {
                         log::info!("backoff gateway timeout exceeded {elasped}");
                     }
+
+                    self.domain_parsed = domain_parsed_clone;
                 } else {
-                    if let Some(timeout) = page.get_timeout() {
-                        tokio::time::sleep(timeout).await;
-                    }
                     page.clone_from(
                         &Page::new_page_streaming(
                             url,
@@ -1428,21 +1439,19 @@ impl Website {
                 let prior_domain = self.domain_parsed.take();
                 self.domain_parsed = parse_absolute_url(&domain);
                 self.url = domain;
-                match self.setup_selectors() {
-                    Some(s) => {
-                        base.0 = s.0;
-                        base.1 = s.1;
-                        match prior_domain {
-                            Some(prior_domain) => match prior_domain.host_str() {
-                                Some(dname) => {
-                                    base.2 = dname.into();
-                                }
-                                _ => (),
-                            },
+
+                if let Some(s) = self.setup_selectors() {
+                    base.0 = s.0;
+                    base.1 = s.1;
+                    match prior_domain {
+                        Some(prior_domain) => match prior_domain.host_str() {
+                            Some(dname) => {
+                                base.2 = dname.into();
+                            }
                             _ => (),
-                        }
+                        },
+                        _ => (),
                     }
-                    _ => (),
                 }
             }
 
@@ -1565,8 +1574,6 @@ impl Website {
         browser: &Arc<chromiumoxide::Browser>,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
     ) -> HashSet<CaseInsensitiveString> {
-        use backoff::exponential::ExponentialBackoff;
-
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -1579,32 +1586,23 @@ impl Website {
 
             while page.should_retry && retry_count > 0 {
                 retry_count -= 1;
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                    let backoff: ExponentialBackoff<backoff::SystemClock> =
-                        ExponentialBackoff::default();
-
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        let next_page = backoff::future::retry(backoff, || async {
-                            let mut page = page.clone();
-
-                            let p = if retry_count.is_power_of_two() {
-                                Website::render_chrome_page(
-                                    &self.configuration,
-                                    client,
-                                    browser,
-                                    context_id,
-                                    &mut page,
-                                    url,
-                                )
-                                .await;
-                                page
-                            } else {
-                                Page::new_page(url, &client).await
-                            };
-
-                            Ok::<Page, backoff::Error<std::io::Error>>(p)
-                        });
-                        if let Ok(next_page) = next_page.await {
+                        if retry_count.is_power_of_two() {
+                            Website::render_chrome_page(
+                                &self.configuration,
+                                client,
+                                browser,
+                                context_id,
+                                &mut page,
+                                url,
+                            )
+                            .await;
+                        } else {
+                            let next_page = Page::new_page(url, &client).await;
                             page.clone_from(&next_page);
                         };
                     })
@@ -1613,9 +1611,6 @@ impl Website {
                         log::warn!("backoff timeout {elasped}");
                     }
                 } else {
-                    if let Some(timeout) = page.get_timeout() {
-                        tokio::time::sleep(timeout).await;
-                    }
                     if retry_count.is_power_of_two() {
                         Website::render_chrome_page(
                             &self.configuration,
@@ -2268,43 +2263,30 @@ impl Website {
 
                                             let mut domain_parsed = None;
 
-                                            let page_stream = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors, external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed);
-
-                                            let mut page =  page_stream.await;
+                                            let mut page = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors, external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
 
                                             let mut retry_count = shared.5;
 
                                             while page.should_retry && retry_count > 0 {
                                                 retry_count -= 1;
+
+                                                if let Some(timeout) = page.get_timeout() {
+                                                    tokio::time::sleep(timeout).await;
+                                                }
+
                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                        let mut domain_parsed = None;
+                                                        let next_page = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
 
-                                                    if let Err(elasped) =
-                                                    tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                        let next_page = backoff::future::retry(
-                                                            ExponentialBackoff::default(),
-                                                            || async {
-                                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-                                                                let mut domain_parsed = None;
-                                                                let p = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
-
-                                                                Ok::<(Page, HashSet<CaseInsensitiveString>), backoff::Error<reqwest::Error>>((p, links))
-                                                            },
-                                                        );
-                                                        if let Ok(next_page) = next_page.await {
-                                                            page.clone_from(&next_page.0);
-                                                            links.extend(next_page.1);
-                                                        };
+                                                        page.clone_from(&next_page);
 
                                                     }).await
                                                 {
                                                     log::warn!("Handler timeout exceeded {elasped}");
                                                 }
 
-
                                                 } else {
-                                                    if let Some(timeout) = page.get_timeout() {
-                                                        tokio::time::sleep(timeout).await;
-                                                    }
                                                     page.clone_from(&Page::new_page_streaming(target_url, &client, only_html, &mut relative_selectors.clone(), external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await);
                                                 }
                                             }
@@ -2533,44 +2515,34 @@ impl Website {
 
                                                                 while page.should_retry && retry_count > 0 {
                                                                     retry_count -= 1;
+                                                                    if let Some(timeout) = page.get_timeout() {
+                                                                        tokio::time::sleep(timeout).await;
+                                                                    }
+
                                                                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                                         if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                            let next_page = backoff::future::retry(
-                                                                                ExponentialBackoff::default(),
-                                                                                || async {
-                                                                                    let p = Page::new(
-                                                                                        &target_url,
-                                                                                        &shared.0,
-                                                                                        &new_page,
-                                                                                        &shared.6.wait_for,
-                                                                                        &shared.6.screenshot,
-                                                                                        false,
-                                                                                        &shared.6.openai_config,
-                                                                                        &shared.6.execution_scripts,
-                                                                                        &shared.6.automation_scripts,
-                                                                                        &shared.6.viewport,
-                                                                                        &shared.6.request_timeout
-                                                                                    ).await;
-                                                                                    Ok::<
-                                                                                        Page,
-                                                                                        backoff::Error<std::io::Error>,
-                                                                                    >(
-                                                                                        p
-                                                                                    )
-                                                                                },
-                                                                            );
-                                                                            if let Ok(next_page) = next_page.await {
-                                                                                page.clone_from(&next_page);
-                                                                            };
+                                                                            let p = Page::new(
+                                                                                &target_url,
+                                                                                &shared.0,
+                                                                                &new_page,
+                                                                                &shared.6.wait_for,
+                                                                                &shared.6.screenshot,
+                                                                                false,
+                                                                                &shared.6.openai_config,
+                                                                                &shared.6.execution_scripts,
+                                                                                &shared.6.automation_scripts,
+                                                                                &shared.6.viewport,
+                                                                                &shared.6.request_timeout
+                                                                            ).await;
+                                                                            page.clone_from(&p);
+
                                                                         }).await {
                                                                             log::info!("backoff gateway timeout exceeded {elasped}");
                                                                         }
 
 
                                                                     } else {
-                                                                        if let Some(timeout) = page.get_timeout() {
-                                                                            tokio::time::sleep(timeout).await;
-                                                                        }
+
                                                                         page.clone_from(
                                                                             &Page::new(
                                                                                 &target_url,
@@ -2980,35 +2952,29 @@ impl Website {
 
                                                 while page.should_retry && retry_count > 0 {
                                                     retry_count -= 1;
+
+                                                    if let Some(timeout) = page.get_timeout() {
+                                                        tokio::time::sleep(timeout).await;
+                                                    }
+
                                                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
 
                                                         if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                            let next_page = backoff::future::retry(
-                                                                ExponentialBackoff::default(),
-                                                                || async {
-                                                                    let mut page = page.clone();
-                                                                    let p = if retry_count.is_power_of_two() {
-                                                                        Website::render_chrome_page(
-                                                                            &shared.5, &shared.0, &shared.4,
-                                                                            &shared.6, &mut page, url,
-                                                                        )
-                                                                        .await;
-                                                                        page
-                                                                    } else {
-                                                                        Page::new_page(url, &shared.0).await
-                                                                    };
+                                                            if retry_count.is_power_of_two() {
+                                                                Website::render_chrome_page(
+                                                                    &shared.5, &shared.0, &shared.4,
+                                                                    &shared.6, &mut page, url,
+                                                                )
+                                                                .await;
+                                                            } else {
+                                                                let next_page =  Page::new_page(url, &shared.0).await;
 
-                                                                    Ok::<
-                                                                        Page,
-                                                                        backoff::Error<std::io::Error>,
-                                                                    >(
-                                                                        p
-                                                                    )
-                                                                },
-                                                            );
-                                                            if let Ok(next_page) = next_page.await {
-                                                                page.clone_from(&next_page);
+                                                                page.clone_from(&next_page)
+
+
                                                             };
+
+
 
                                                         }).await
                                                     {
@@ -3017,9 +2983,7 @@ impl Website {
 
 
                                                     } else {
-                                                        if let Some(timeout) = page.get_timeout() {
-                                                            tokio::time::sleep(timeout).await;
-                                                        }
+
                                                         if retry_count.is_power_of_two() {
                                                             Website::render_chrome_page(
                                                                 &shared.5, &shared.0, &shared.4,
