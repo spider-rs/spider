@@ -1,6 +1,6 @@
 [package]
 name = "spider_worker"
-version = "2.13.67"
+version = "2.13.68"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
