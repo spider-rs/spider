@@ -2359,7 +2359,7 @@ impl Website {
                     self.subscription_guard();
                 }
             }
-            _ => log("", INVALID_URL),
+            _ => log::info!("{} - {}", self.url, INVALID_URL),
         }
     }
 
@@ -2699,7 +2699,7 @@ impl Website {
                 }
                 _ => log::info!("Chrome failed to start."),
             },
-            _ => log::info!("{}", INVALID_URL),
+            _ => log::info!("{} - {}", self.url, INVALID_URL),
         }
     }
 
@@ -3120,7 +3120,7 @@ impl Website {
                 }
                 _ => log("", "Chrome failed to start."),
             },
-            _ => log("", INVALID_URL),
+            _ => log::info!("{} - {}", self.url, INVALID_URL),
         }
     }
 
