@@ -180,11 +180,10 @@ pub fn aho_clean_markdown(html: &str) -> String {
     // handle the error on replace all
     // if the content is small just use an aho replacement
     if html.len() <= 40 {
-        let base_clean = match AHO.try_replace_all(&html, &*AHO_REPLACEMENTS) {
+        match AHO.try_replace_all(&html, &*AHO_REPLACEMENTS) {
             Ok(r) => r,
             _ => html.into(),
-        };
-        base_clean
+        }
     } else {
         // regex smooth clean multiple
         let cleaned_html = CLEAN_MARKDOWN_REGEX.replace_all(&html, |caps: &regex::Captures| {
@@ -253,12 +252,12 @@ pub(crate) fn build_static_vector(config: &TransformConfig) -> Vec<&'static str>
 
 /// transform the content to markdown shortcut
 pub fn transform_markdown(html: &str, commonmark: bool) -> String {
-    html2md::rewrite_html_custom_with_url(&html, &None, commonmark, &None)
+    html2md::rewrite_html_custom_with_url(html, &None, commonmark, &None)
 }
 
 /// transform the content to text raw shortcut
 pub fn transform_text(html: &str) -> String {
-    super::text_extract::extract_text(&html, &Default::default())
+    super::text_extract::extract_text(html, &Default::default())
 }
 
 /// transform the content to text raw shortcut and custom ignore
@@ -266,7 +265,7 @@ pub fn transform_text_ignore(
     html: &str,
     custom_ignore: &Option<std::collections::HashSet<String>>,
 ) -> String {
-    super::text_extract::extract_text(&html, &custom_ignore)
+    super::text_extract::extract_text(html, custom_ignore)
 }
 
 /// get the HTML content for the page.
@@ -284,13 +283,13 @@ fn get_html_with_selector(
     selector_config: &Option<SelectorConfiguration>,
 ) -> String {
     use spider::packages::scraper::{Html, Selector};
-    let html = get_html(&res, &encoding);
+    let html = get_html(res, encoding);
 
     if let Some(selector_config) = selector_config.as_ref() {
         let mut fragment = Html::parse_fragment(&html);
 
         if let Some(selector) = selector_config.root_selector.as_ref() {
-            if let Ok(parsed_selector) = Selector::parse(&selector) {
+            if let Ok(parsed_selector) = Selector::parse(selector) {
                 if let Some(root_node) = fragment.select(&parsed_selector).next() {
                     if selector_config.exclude_selector.is_some() {
                         fragment.clone_from(&Html::parse_fragment(&root_node.html()));
@@ -303,7 +302,7 @@ fn get_html_with_selector(
         }
 
         if let Some(exclude_selector) = selector_config.exclude_selector.as_ref() {
-            if let Ok(exclude_sel) = Selector::parse(&exclude_selector) {
+            if let Ok(exclude_sel) = Selector::parse(exclude_selector) {
                 let mut elements_to_remove = vec![];
 
                 for elem in fragment.root_element().select(&exclude_sel) {
@@ -388,33 +387,28 @@ pub fn transform_content(
     match c.return_format {
         ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
         ReturnFormat::CommonMark => {
-            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, true, &url_parsed)
+            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, true, url_parsed)
         }
         ReturnFormat::Markdown => {
-            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, &url_parsed)
+            html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, url_parsed)
         }
         ReturnFormat::Html2Text => {
             if !base_html.is_empty() {
-                crate::html2text::from_read(&base_html.as_bytes()[..], base_html.len())
+                crate::html2text::from_read(base_html.as_bytes(), base_html.len())
             } else {
                 base_html
             }
         }
         ReturnFormat::Text => super::text_extract::extract_text(&base_html, &tag_factory),
-        ReturnFormat::XML => {
-            if let Ok(xml) = convert_html_to_xml(
-                &base_html.trim(),
-                &match url_parsed {
-                    Some(u) => u.to_string(),
-                    _ => EXAMPLE_URL.to_string(),
-                },
-                &encoding,
-            ) {
-                xml
-            } else {
-                Default::default()
-            }
-        }
+        ReturnFormat::XML => convert_html_to_xml(
+            base_html.trim(),
+            &match url_parsed {
+                Some(u) => u.to_string(),
+                _ => EXAMPLE_URL.to_string(),
+            },
+            encoding,
+        )
+        .unwrap_or_default(),
     }
 }
 

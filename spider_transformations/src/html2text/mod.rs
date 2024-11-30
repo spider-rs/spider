@@ -867,18 +867,9 @@ where
 
                     match process_node(context, h)? {
                         TreeMapResult::Finished(result) => {
-                            match pending_stack.last_mut() {
-                                Some(pending) => {
-                                    pending.postfn.as_ref().map(|ref f| f(context, &result));
-                                }
-                                _ => (),
-                            }
-
-                            match pending_stack.last_mut() {
-                                Some(pending) => {
-                                    pending.children.push(result);
-                                }
-                                _ => (),
+                            if let Some(pending) = pending_stack.last_mut() {
+                                pending.postfn.as_ref().map(|ref f| f(context, &result));
+                                pending.children.push(result);
                             }
                         }
                         TreeMapResult::PendingChildren {
@@ -1656,7 +1647,7 @@ fn render_table_tree<T: Write, D: TextDecorator>(
                     (
                         width.saturating_sub(col_sizes[colno].min_width),
                         width,
-                        usize::max_value() - colno,
+                        usize::MAX - colno,
                     )
                 }) {
                     Some(d) => d,
@@ -1732,7 +1723,7 @@ fn render_table_row_vert<T: Write, D: TextDecorator>(
     TreeMapResult::PendingChildren {
         children: row.into_cells(true),
         cons: Box::new(|builders, children| {
-            let children: Vec<_> = children.into_iter().filter_map(|item| item).collect();
+            let children: Vec<_> = children.into_iter().flatten().collect();
 
             builders.append_vert_row(children)?;
             Ok(Some(None))

@@ -272,16 +272,15 @@ impl TreeSink for RcDom {
             _ => {
                 lazy_static! {
                     static ref Q: QualName = {
-                        let qual = QualName::new(
+                        QualName::new(
                             Some(markup5ever::Prefix::from("")),
                             markup5ever::Namespace::from(""),
                             markup5ever::LocalName::from(""),
-                        );
-                        qual
+                        )
                     };
                 }
 
-                Q.expanded().clone()
+                Q.expanded()
             }
         };
     }

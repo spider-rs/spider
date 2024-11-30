@@ -553,7 +553,7 @@ impl RobotFileParser {
         } else {
             // search for given user agent matches
             // the first match counts
-            let url_str = extract_path(&url);
+            let url_str = extract_path(url);
 
             if self.entry_allowed(&useragent, url_str) {
                 true

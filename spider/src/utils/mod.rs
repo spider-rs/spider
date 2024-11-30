@@ -1580,7 +1580,7 @@ where
                     data_len += bytes_len;
 
                     if !rewrite_error {
-                        if let Err(_) = rewriter.write(&res_bytes) {
+                        if rewriter.write(&res_bytes).is_err() {
                             rewrite_error = true;
                         }
                     }

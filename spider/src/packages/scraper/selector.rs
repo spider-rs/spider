@@ -26,7 +26,7 @@ impl Selector {
             .iter()
             .filter_map(|s| {
                 let mut ss = String::new();
-                if let Ok(_) = s.to_css(&mut ss) {
+                if s.to_css(&mut ss).is_ok() {
                     Some(ss)
                 } else {
                     None

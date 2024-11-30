@@ -11,7 +11,7 @@ use crate::utils::{
     emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
 };
 
-use crate::utils::{interner::ListBucket, log};
+use crate::utils::interner::ListBucket;
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -2075,15 +2075,12 @@ impl Website {
             w.crawl().await;
         });
 
-        match self.pages.as_mut() {
-            Some(p) => {
-                while let Ok(res) = rx2.recv().await {
-                    self.links_visited.insert(res.get_url().into());
-                    p.push(res);
-                }
+        if let Some(p) = self.pages.as_mut() {
+            while let Ok(res) = rx2.recv().await {
+                self.links_visited.insert(res.get_url().into());
+                p.push(res);
             }
-            _ => (),
-        };
+        }
     }
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
@@ -2099,15 +2096,12 @@ impl Website {
             w.crawl_raw().await;
         });
 
-        match self.pages.as_mut() {
-            Some(p) => {
-                while let Ok(res) = rx2.recv().await {
-                    self.links_visited.insert(res.get_url().into());
-                    p.push(res);
-                }
+        if let Some(p) = self.pages.as_mut() {
+            while let Ok(res) = rx2.recv().await {
+                self.links_visited.insert(res.get_url().into());
+                p.push(res);
             }
-            _ => (),
-        };
+        }
     }
 
     /// Start to scrape website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
@@ -2123,15 +2117,12 @@ impl Website {
             w.crawl_smart().await;
         });
 
-        match self.pages.as_mut() {
-            Some(p) => {
-                while let Ok(res) = rx2.recv().await {
-                    self.links_visited.insert(res.get_url().into());
-                    p.push(res);
-                }
+        if let Some(p) = self.pages.as_mut() {
+            while let Ok(res) = rx2.recv().await {
+                self.links_visited.insert(res.get_url().into());
+                p.push(res);
             }
-            _ => (),
-        };
+        }
     }
 
     /// Start to scrape website sitemap with async concurrency. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `sitemap` flag enabled.
@@ -2147,15 +2138,12 @@ impl Website {
             w.crawl_sitemap().await;
         });
 
-        match self.pages.as_mut() {
-            Some(p) => {
-                while let Ok(res) = rx2.recv().await {
-                    self.links_visited.insert(res.get_url().into());
-                    p.push(res);
-                }
+        if let Some(p) = self.pages.as_mut() {
+            while let Ok(res) = rx2.recv().await {
+                self.links_visited.insert(res.get_url().into());
+                p.push(res);
             }
-            _ => (),
-        };
+        }
     }
 
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
@@ -3118,7 +3106,7 @@ impl Website {
                         .await;
                     }
                 }
-                _ => log("", "Chrome failed to start."),
+                _ => log::info!("Chrome failed to start."),
             },
             _ => log::info!("{} - {}", self.url, INVALID_URL),
         }
@@ -3327,12 +3315,12 @@ impl Website {
                                                     }
                                                 }
                                                 SiteMapEntity::Err(err) => {
-                                                    log("incorrect sitemap error: ", err.msg())
+                                                    log::info!("incorrect sitemap error: {:?}", err.msg())
                                                 }
                                             };
                                         }
                                     }
-                                    Err(err) => log("http parse error: ", err.to_string()),
+                                    Err(err) => log::info!("http parse error: {:?}", err.to_string()),
                                 };
                             }
                             Err(err) => log::info!("http network error: {}", err.to_string()),
@@ -3621,8 +3609,8 @@ impl Website {
                                                                 | Location::ParseErr(_) => (),
                                                             }
                                                         }
-                                                        SiteMapEntity::Err(err) => log(
-                                                            "incorrect sitemap error: ",
+                                                        SiteMapEntity::Err(err) => log::info!(
+                                                            "incorrect sitemap error: {:?}",
                                                             err.msg(),
                                                         ),
                                                     };
@@ -4385,6 +4373,22 @@ impl Website {
             .run()
             .await
     }
+
+    #[cfg(not(feature = "control"))]
+    /// Get the attached crawl id.
+    pub fn get_crawl_id(&self) -> Option<&Box<String>> {
+        None
+    }
+
+    #[cfg(feature = "control")]
+    /// Get the attached crawl id.
+    pub fn get_crawl_id(&self) -> Option<&Box<String>> {
+        if self.crawl_id.is_empty() {
+            None
+        } else {
+            Some(&self.crawl_id)
+        }
+    }
 }
 
 /// Channel broadcast send the Page to receivers.
@@ -4486,7 +4490,13 @@ impl Job for Website {
 
 impl std::fmt::Display for Website {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "`{}`", self)
+        write!(
+            f,
+            "Website:\n  URL: {}\n ID: {:?}\n Configuration: {:?}",
+            self.get_url(),
+            self.get_crawl_id(),
+            self.configuration
+        )
     }
 }
 

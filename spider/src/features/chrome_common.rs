@@ -110,13 +110,6 @@ pub enum CaptureScreenshotFormat {
     Webp,
 }
 
-impl CaptureScreenshotFormat {
-    /// convert the format to a lowercase string
-    pub fn to_string(&self) -> String {
-        self.as_ref().to_lowercase()
-    }
-}
-
 #[cfg(feature = "chrome")]
 impl From<CaptureScreenshotFormat>
     for chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat

@@ -21,14 +21,14 @@ pub fn convert_html_to_xml(
 
         Ok(get_html_encoded(
             &Some(bytes),
-            &match encoding {
+            match encoding {
                 Some(encoding) => encoding,
                 _ => "UTF-8",
             },
         ))
     } else {
         Ok(auto_encode_bytes(
-            &base_convert_xml(html, url, &Default::default())?.as_slice(),
+            base_convert_xml(html, url, &Default::default())?.as_slice(),
         ))
     }
 }
@@ -110,7 +110,7 @@ fn serialize_xml<W: Write>(handle: &Handle, writer: &mut W) -> io::Result<()> {
             write!(writer, "{}", escape_xml(&contents.borrow()))?;
         }
         NodeData::Comment { ref contents } => {
-            write!(writer, "<!--{}-->", escape_xml(&contents.to_string()))?;
+            write!(writer, "<!--{}-->", escape_xml(contents.as_ref()))?;
         }
         NodeData::Doctype { ref name, .. } => {
             write!(writer, "<!DOCTYPE {}>", name)?;
@@ -125,7 +125,7 @@ fn qual_name_to_string(name: &QualName) -> String {
     if name.ns == ns!(html) {
         name.local.to_string()
     } else {
-        format!("{}:{}", name.ns.to_string(), name.local)
+        format!("{}:{}", name.ns, name.local)
     }
 }
 

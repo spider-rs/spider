@@ -1,5 +1,5 @@
 #![warn(missing_docs)]
-
+#![allow(clippy::perf)]
 //! Website crawling library that rapidly crawls all pages to
 //! gather links via isolated contexts.
 //!

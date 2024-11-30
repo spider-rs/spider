@@ -316,11 +316,7 @@ pub fn parent_host_match(
             if base_domain.is_empty() {
                 exact_match
             } else {
-                let valid = exact_match
-                    || is_subdomain(host, &parent_host)
-                    || is_subdomain(host, &sub_matcher);
-
-                valid
+                exact_match || is_subdomain(host, &parent_host) || is_subdomain(host, &sub_matcher)
             }
         }
         _ => false,
@@ -1203,11 +1199,9 @@ impl Page {
                 Ok(e) => match e {
                     Event::Start(e) => {
                         let (_, local) = reader.resolve_element(e.name());
-                        match local.as_ref() {
-                            b"link" => {
-                                is_link_tag = true;
-                            }
-                            _ => (),
+
+                        if local.as_ref() == b"link" {
+                            is_link_tag = true;
                         }
                     }
                     Event::Text(e) => {
@@ -1233,11 +1227,9 @@ impl Page {
                     }
                     Event::End(ref e) => {
                         let (_, local) = reader.resolve_element(e.name());
-                        match local.as_ref() {
-                            b"link" => {
-                                is_link_tag = false;
-                            }
-                            _ => (),
+
+                        if local.as_ref() == b"link" {
+                            is_link_tag = false;
                         }
                     }
                     Event::Eof => {
