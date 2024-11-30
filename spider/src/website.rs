@@ -2222,24 +2222,17 @@ impl Website {
                     }
 
                     'outer: loop {
-                        let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                        let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
-                        )
-                        .throttle(*throttle);
-
-                        tokio::pin!(stream);
+                        );
 
                         loop {
                             if !concurrency {
-                                if let Some(res) = set.join_next().await {
-                                    if let Ok(res) = res {
-                                        self.links_visited.extend_links(&mut links, res);
-                                    }
-                                }
+                                tokio::time::sleep(*throttle).await;
                             }
                             tokio::select! {
                                 biased;
-                                Some(link) = stream.next() => {
+                                Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
                                     if !self.handle_process(handle, &mut interval, async {
                                         emit_log_shutdown(&link.inner());
                                         let permits = set.len();
@@ -2452,25 +2445,18 @@ impl Website {
                                 }
 
                                 'outer: loop {
-                                    let stream =
+                                    let mut stream =
                                         tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                             links.drain().collect(),
-                                        )
-                                        .throttle(*throttle);
-                                    tokio::pin!(stream);
+                                        );
 
                                     loop {
                                         if !concurrency {
-                                            if let Some(res) = set.join_next().await {
-                                                if let Ok(res) = res {
-                                                    self.links_visited
-                                                        .extend_links(&mut links, res);
-                                                }
-                                            }
+                                            tokio::time::sleep(*throttle).await;
                                         }
                                         tokio::select! {
                                             biased;
-                                            Some(link) = stream.next() => {
+                                            Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
                                                 if !self
                                                     .handle_process(
                                                         handle,
@@ -2941,23 +2927,17 @@ impl Website {
                         }
 
                         'outer: loop {
-                            let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                            let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                 links.drain().collect(),
-                            )
-                            .throttle(*throttle);
-                            tokio::pin!(stream);
+                            );
 
                             loop {
                                 if !concurrency {
-                                    if let Some(res) = set.join_next().await {
-                                        if let Ok(res) = res {
-                                            self.links_visited.extend_links(&mut links, res);
-                                        }
-                                    }
+                                    tokio::time::sleep(*throttle).await;
                                 }
                                 tokio::select! {
                                     biased;
-                                    Some(link) = stream.next() => {
+                                    Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
                                         if !self
                                             .handle_process(
                                                 handle,
