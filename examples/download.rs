@@ -22,7 +22,7 @@ async fn main() {
 
     env_logger::init_from_env(env);
 
-    let website_name = "https://rsseau.fr";
+    let website_name = "https://rsseau.fr/en";
 
     let mut website: Website = Website::new(website_name);
 

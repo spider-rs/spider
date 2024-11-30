@@ -8,7 +8,7 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let mut website = Website::new("https://rsseau.fr")
+    let mut website = Website::new("https://rsseau.fr/en")
         .with_depth(3)
         .build()
         .unwrap();

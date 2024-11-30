@@ -16,7 +16,7 @@ async fn main() {
 
     env_logger::init_from_env(env);
 
-    let mut website: Website = Website::new("https://rsseau.fr");
+    let mut website: Website = Website::new("https://rsseau.fr/en");
 
     website.crawl().await;
 }

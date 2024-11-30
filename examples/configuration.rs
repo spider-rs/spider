@@ -8,7 +8,7 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let mut website = Website::new("https://rsseau.fr")
+    let mut website = Website::new("https://rsseau.fr/en")
         .with_user_agent(Some("SpiderBot"))
         .with_blacklist_url(Some(Vec::from(["https://rsseau.fr/resume".into()])))
         .with_subdomains(true)

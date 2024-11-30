@@ -12,7 +12,7 @@ async fn main() {
     configuration.with_limit(250);
 
     let website_list = vec![
-        "https://rsseau.fr",
+        "https://rsseau.fr/en",
         "https://choosealicense.com",
         "https://a11ywatch.com",
         "https://spider.cloud",

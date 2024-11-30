@@ -14,7 +14,7 @@ static GLOBAL_URL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr")
+    let mut website: Website = Website::new("https://rsseau.fr/en")
         .with_caching(true)
         .build()
         .unwrap();

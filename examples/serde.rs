@@ -8,7 +8,7 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr");
+    let mut website: Website = Website::new("https://rsseau.fr/en");
 
     website.crawl().await;
 

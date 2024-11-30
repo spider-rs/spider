@@ -7,7 +7,7 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr");
+    let mut website: Website = Website::new("https://rsseau.fr/en");
     website
         .configuration
         .blacklist_url

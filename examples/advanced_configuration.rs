@@ -6,7 +6,7 @@ use std::{io::Error, time::Instant};
 
 const CAPACITY: usize = 5;
 const CRAWL_LIST: [&str; CAPACITY] = [
-    "https://rsseau.fr",
+    "https://rsseau.fr/en",
     "https://choosealicense.com",
     "https://jeffmendez.com",
     "https://spider-rs.github.io/spider-nodejs/",

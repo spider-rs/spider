@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr");
+    let mut website: Website = Website::new("https://rsseau.fr/en");
     let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
         website.subscribe(0).unwrap();
     let mut stdout = tokio::io::stdout();
