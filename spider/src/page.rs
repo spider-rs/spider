@@ -10,7 +10,7 @@ use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
 use bytes::Bytes;
 use hashbrown::HashSet;
-use lol_html::Settings;
+use lol_html::{AsciiCompatibleEncoding, Settings};
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
@@ -511,6 +511,31 @@ impl PageLinkBuildSettings {
     }
 }
 
+/// Get the content type from the responses
+pub(crate) fn get_charset_from_content_type(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<AsciiCompatibleEncoding> {
+    use auto_encoder::encoding_rs;
+
+    if let Some(content_type) = headers.get(reqwest::header::CONTENT_TYPE) {
+        if let Ok(content_type_str) = content_type.to_str() {
+            let parts: Vec<&str> = content_type_str.split(';').collect();
+            for part in parts {
+                let part = part.trim().to_lowercase();
+                if part.starts_with("charset=") {
+                    if let Some(encoding) = encoding_rs::Encoding::for_label(part[8..].as_bytes()) {
+                        if let Some(ascii_encoding) = AsciiCompatibleEncoding::new(encoding) {
+                            return Some(ascii_encoding);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -540,9 +565,15 @@ impl Page {
             handle_response_bytes_writer, modify_selectors, setup_default_response,
             AllowedDomainTypes,
         };
-        let page_response = match client.get(url).send().await {
+        let page_response: PageResponse = match client.get(url).send().await {
             Ok(res) if res.status().is_success() => {
                 let cell = tokio::sync::OnceCell::new();
+
+                let (encoding, adjust_charset_on_meta_tag) =
+                    match get_charset_from_content_type(&res.headers()) {
+                        Some(h) => (h, false),
+                        _ => (AsciiCompatibleEncoding::utf_8(), true),
+                    };
 
                 let mut collected_bytes = bytes::BytesMut::with_capacity(
                     res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
@@ -632,7 +663,8 @@ impl Page {
 
                 let settings = lol_html::send::Settings {
                     element_content_handlers,
-                    adjust_charset_on_meta_tag: true,
+                    adjust_charset_on_meta_tag,
+                    encoding,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
@@ -689,7 +721,7 @@ impl Page {
                                                 base_input_domain,
                                                 sub_matcher,
                                                 &external_domains_caseless,
-                                                false,
+                                                r_settings.full_resources,
                                             );
                                         }
                                     }

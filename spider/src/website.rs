@@ -1271,10 +1271,11 @@ impl Website {
             .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
+            let url = self.url.inner();
+
             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
             let mut links_ssg = links.clone();
 
-            let url = self.url.inner();
             let mut page_links_settings =
                 PageLinkBuildSettings::new(true, self.configuration.full_resources);
 
