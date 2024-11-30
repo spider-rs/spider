@@ -613,11 +613,9 @@ impl WebAutomation {
 pub fn set_dynamic_scroll(timeout: u32) -> String {
     let timeout = timeout.min(60000);
     let s = string_concat!(
-        r###"
-        document.addEventListener('DOMContentLoaded',e=>{let t=null,o=null,n="###,
+        r###"document.addEventListener('DOMContentLoaded',e=>{let t=null,o=null,n="###,
         timeout.to_string(),
-        r###",a=Date.now(),i=Date.now(),r=()=>{window.scrollTo(0,document.body.scrollHeight)},l=()=>{o&&o.disconnect(),console.log('Stopped checking for new content.')},c=(e,n)=>{e.forEach(e=>{if(e.isIntersecting){i=Date.now();const n=Date.now();if(n-a>=t||n-i>=1e4)return void l();r(),t=document.querySelector('body > *:last-child'),o.observe(t)}})},s=()=>{t&&(o=new IntersectionObserver(c),o.observe(t))},d=()=>{['load','error','abort'].forEach(e=>{window.addEventListener(e,()=>{const e=document.querySelector('body > *:last-child');e!==t&&(i=Date.now(),t=e,o.observe(t))})})},u=()=>{r(),t=document.querySelector('body > *:last-child'),s(),d()};u(),setTimeout(l,n)});
-    "###
+        r###",a=Date.now(),i=Date.now(),r=()=>{window.scrollTo(0,document.body.scrollHeight)},l=()=>{o&&o.disconnect(),console.log('Stopped checking for new content.')},c=(e,n)=>{e.forEach(e=>{if(e.isIntersecting){i=Date.now();const n=Date.now();if(n-a>=t||n-i>=1e4)return void l();r(),t=document.querySelector('body > *:last-child'),o.observe(t)}})},s=()=>{t&&(o=new IntersectionObserver(c),o.observe(t))},d=()=>{['load','error','abort'].forEach(e=>{window.addEventListener(e,()=>{const e=document.querySelector('body > *:last-child');e!==t&&(i=Date.now(),t=e,o.observe(t))})})},u=()=>{r(),t=document.querySelector('body > *:last-child'),s(),d()};u(),setTimeout(l,n)});"###
     );
 
     s
@@ -654,8 +652,8 @@ impl RequestInterceptConfiguration {
     pub fn new(enabled: bool) -> RequestInterceptConfiguration {
         RequestInterceptConfiguration {
             enabled,
+            block_javascript: false,
             block_visuals: true,
-            block_javascript: true,
             block_stylesheets: true,
             ..Default::default()
         }
