@@ -2214,6 +2214,11 @@ impl Website {
 
                     // track budgeting one time.
                     let mut exceeded_budget = false;
+                    let concurrency = throttle.is_zero();
+
+                    if !concurrency && !links.is_empty() {
+                        tokio::time::sleep(*throttle).await;
+                    }
 
                     'outer: loop {
                         let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2224,7 +2229,15 @@ impl Website {
                         tokio::pin!(stream);
 
                         loop {
+                            if !concurrency {
+                                if let Some(res) = set.join_next().await {
+                                    if let Ok(res) = res {
+                                        self.links_visited.extend_links(&mut links, res);
+                                    }
+                                }
+                            }
                             tokio::select! {
+                                biased;
                                 Some(link) = stream.next() => {
                                     if !self.handle_process(handle, &mut interval, async {
                                         emit_log_shutdown(&link.inner());
@@ -2326,19 +2339,12 @@ impl Website {
                                         }
                                     }
                                 },
-
-                                Some(result) = set.join_next() => {
-                                    match result {
-                                        Ok(res) => {
-                                            // todo: add final url catching domains to make sure we do not add extra pages.
-                                            self.links_visited.extend_links(&mut links, res);
-                                        },
-                                        Err(_) => {
-                                            break
-                                        }
+                                Some(result) = set.join_next(), if !set.is_empty() => {
+                                    if let Ok(res) = result {
+                                        // todo: add final url catching domains to make sure we do not add extra pages.
+                                        self.links_visited.extend_links(&mut links, res);
                                     }
                                 }
-
                                 else => break,
                             }
 
@@ -2438,6 +2444,11 @@ impl Website {
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
                                 let mut exceeded_budget = false;
+                                let concurrency = throttle.is_zero();
+
+                                if !concurrency && !links.is_empty() {
+                                    tokio::time::sleep(*throttle).await;
+                                }
 
                                 'outer: loop {
                                     let stream =
@@ -2448,7 +2459,16 @@ impl Website {
                                     tokio::pin!(stream);
 
                                     loop {
+                                        if !concurrency {
+                                            if let Some(res) = set.join_next().await {
+                                                if let Ok(res) = res {
+                                                    self.links_visited
+                                                        .extend_links(&mut links, res);
+                                                }
+                                            }
+                                        }
                                         tokio::select! {
+                                            biased;
                                             Some(link) = stream.next() => {
                                                 if !self
                                                     .handle_process(
@@ -2644,7 +2664,7 @@ impl Website {
                                                 }
 
                                             }
-                                            Some(result) = set.join_next() => {
+                                            Some(result) = set.join_next(), if !set.is_empty() => {
                                                 match result {
                                                     Ok(res) => self.links_visited.extend_links(&mut links, res),
                                                     Err(_) => {
@@ -2913,6 +2933,11 @@ impl Website {
 
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
                         let mut exceeded_budget = false;
+                        let concurrency = throttle.is_zero();
+
+                        if !concurrency && !links.is_empty() {
+                            tokio::time::sleep(*throttle).await;
+                        }
 
                         'outer: loop {
                             let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
@@ -2922,7 +2947,15 @@ impl Website {
                             tokio::pin!(stream);
 
                             loop {
+                                if !concurrency {
+                                    if let Some(res) = set.join_next().await {
+                                        if let Ok(res) = res {
+                                            self.links_visited.extend_links(&mut links, res);
+                                        }
+                                    }
+                                }
                                 tokio::select! {
+                                    biased;
                                     Some(link) = stream.next() => {
                                         if !self
                                             .handle_process(
@@ -3071,7 +3104,7 @@ impl Website {
                                             }
                                         }
                                     }
-                                    Some(result) = set.join_next() => {
+                                    Some(result) = set.join_next(), if !set.is_empty() => {
                                         match result {
                                             Ok(res) => self.links_visited.extend_links(&mut links, res),
                                             Err(_) => {
