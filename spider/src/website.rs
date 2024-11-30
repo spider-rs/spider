@@ -423,8 +423,8 @@ impl Website {
         let whitelist = self.configuration.get_whitelist_compiled();
         let blacklist = self.configuration.get_blacklist_compiled();
 
-        let blocked_whitelist = !whitelist.is_empty() && !contains(&whitelist, link);
-        let blocked_blacklist = !blacklist.is_empty() && contains(&blacklist, link);
+        let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link);
+        let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link);
 
         if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(link) {
             ProcessLinkStatus::Blocked
@@ -482,18 +482,15 @@ impl Website {
         match self.configuration.inner_budget.as_mut() {
             Some(budget) => {
                 let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
-                    match budget.get_mut(&*WILD_CARD_PATH) {
-                        Some(budget) => {
-                            if budget.abs_diff(0) == 1 {
-                                true
-                            } else if budget == &0 {
-                                true
-                            } else {
-                                *budget -= 1;
-                                false
-                            }
+                    if let Some(budget) = budget.get_mut(&*WILD_CARD_PATH) {
+                        if budget.abs_diff(0) == 1 {
+                            true
+                        } else {
+                            *budget -= 1;
+                            false
                         }
-                        _ => false,
+                    } else {
+                        false
                     }
                 } else {
                     false
@@ -525,18 +522,15 @@ impl Website {
                                     joint_segment.push_str(seg);
 
                                     if budget.contains_key(&joint_segment) {
-                                        match budget.get_mut(&joint_segment) {
-                                            Some(budget) => {
-                                                if budget.abs_diff(0) == 0 || *budget == 0 {
-                                                    over = true;
-                                                    break;
-                                                } else {
-                                                    *budget -= 1;
-                                                    continue;
-                                                }
+                                        if let Some(budget) = budget.get_mut(&joint_segment) {
+                                            if budget.abs_diff(0) == 0 || *budget == 0 {
+                                                over = true;
+                                                break;
+                                            } else {
+                                                *budget -= 1;
+                                                continue;
                                             }
-                                            _ => (),
-                                        };
+                                        }
                                     }
                                 }
 
@@ -560,9 +554,9 @@ impl Website {
 
         if self.configuration.inner_budget.is_some() || has_depth_control {
             if self.configuration.inner_budget.is_none() && has_depth_control {
-                self.is_over_inner_depth_budget(&link)
+                self.is_over_inner_depth_budget(link)
             } else {
-                self.is_over_inner_budget(&link)
+                self.is_over_inner_budget(link)
             }
         } else {
             false
@@ -661,15 +655,13 @@ impl Website {
                 }
                 _ => None,
             }
-        } else {
-            if let Some(mut d) = self.domain_parsed.as_deref().cloned() {
-                if let Ok(mut path) = d.path_segments_mut() {
-                    path.clear();
-                }
-                Some(d)
-            } else {
-                None
+        } else if let Some(mut d) = self.domain_parsed.as_deref().cloned() {
+            if let Ok(mut path) = d.path_segments_mut() {
+                path.clear();
             }
+            Some(d)
+        } else {
+            None
         }
     }
 
@@ -807,7 +799,7 @@ impl Website {
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
-            _ => &get_ua(self.only_chrome_agent()),
+            _ => get_ua(self.only_chrome_agent()),
         };
 
         if cfg!(feature = "real_browser") {
@@ -928,7 +920,7 @@ impl Website {
         client: reqwest::ClientBuilder,
     ) -> reqwest::ClientBuilder {
         let client = client.cookie_store(true);
-        let client = if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
+        if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
             match self.domain_parsed.clone() {
                 Some(p) => {
                     let cookie_store = reqwest::cookie::Jar::default();
@@ -939,8 +931,7 @@ impl Website {
             }
         } else {
             client
-        };
-        client
+        }
     }
 
     /// Build the client with cookie configurations. This does nothing with [cookies] flag enabled.
@@ -1186,7 +1177,7 @@ impl Website {
     /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<RelativeSelectors> {
         setup_website_selectors(
-            &self.get_url_parsed(),
+            self.get_url_parsed(),
             self.get_url().inner(),
             AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
         )
@@ -1275,7 +1266,11 @@ impl Website {
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
             let mut links_ssg = links.clone();
-
+            let mut links_pages = if self.configuration.return_page_links {
+                Some(links.clone())
+            } else {
+                None
+            };
             let mut page_links_settings =
                 PageLinkBuildSettings::new(true, self.configuration.full_resources);
 
@@ -1295,6 +1290,7 @@ impl Website {
                 Some(&mut links_ssg),
                 &mut domain_parsed,
                 &mut self.domain_parsed,
+                &mut links_pages,
             )
             .await;
 
@@ -1317,12 +1313,13 @@ impl Website {
                                 client,
                                 false,
                                 base,
-                                &domains_caseless,
+                                domains_caseless,
                                 &page_links_settings,
                                 &mut links,
                                 Some(&mut links_ssg),
                                 &mut domain_parsed,
                                 &mut domain_parsed_clone,
+                                &mut links_pages,
                             )
                             .await,
                         );
@@ -1346,13 +1343,14 @@ impl Website {
                             Some(&mut links_ssg),
                             &mut domain_parsed,
                             &mut self.domain_parsed,
+                            &mut links_pages,
                         )
                         .await,
                     );
                 }
             }
 
-            emit_log(&url);
+            emit_log(url);
 
             self.links_visited.insert(match self.on_link_find_callback {
                 Some(cb) => {
@@ -1366,23 +1364,23 @@ impl Website {
                 self.status = CrawlStatus::Empty;
             }
 
+            if self.configuration.return_page_links {
+                page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                if let Some(page_links) = page.page_links.as_mut() {
+                    page_links.extend(links_ssg.clone());
+                }
+            }
+
             links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
-            }
-            if self.configuration.return_page_links {
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
             }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -2176,10 +2174,7 @@ impl Website {
 
                     self.configuration.configure_allowlist();
 
-                    let mut q = match &self.channel_queue {
-                        Some(q) => Some(q.0.subscribe()),
-                        _ => None,
-                    };
+                    let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                     let semaphore = self.setup_semaphore();
 
@@ -2222,7 +2217,7 @@ impl Website {
                                 biased;
                                 Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
                                     if !self.handle_process(handle, &mut interval, async {
-                                        emit_log_shutdown(&link.inner());
+                                        emit_log_shutdown(link.inner());
                                         let permits = set.len();
                                         set.shutdown().await;
                                         semaphore.add_permits(permits);
@@ -2240,7 +2235,7 @@ impl Website {
                                         continue;
                                     }
 
-                                    emit_log(&link.inner());
+                                    emit_log(link.inner());
 
                                     self.links_visited.insert(link.clone());
 
@@ -2254,6 +2249,11 @@ impl Website {
                                             };
 
                                             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut links_pages = if return_page_links {
+                                                Some(links.clone())
+                                            } else {
+                                                None
+                                            };
                                             let mut relative_selectors = shared.1.clone();
                                             let mut r_settings = shared.7;
                                             r_settings.ssg_build = true;
@@ -2263,7 +2263,17 @@ impl Website {
 
                                             let mut domain_parsed = None;
 
-                                            let mut page = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors, external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
+                                            let mut page = Page::new_page_streaming(
+                                                target_url,
+                                                client, only_html,
+                                                &mut relative_selectors,
+                                                external_domains_caseless,
+                                                &r_settings,
+                                                &mut links,
+                                                None,
+                                                &None,
+                                                &mut domain_parsed,
+                                                &mut links_pages).await;
 
                                             let mut retry_count = shared.5;
 
@@ -2277,7 +2287,17 @@ impl Website {
                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                         let mut domain_parsed = None;
-                                                        let next_page = Page::new_page_streaming(target_url, client, only_html, &mut relative_selectors.clone(), &external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await;
+                                                        let next_page = Page::new_page_streaming(
+                                                            target_url,
+                                                            client, only_html,
+                                                            &mut relative_selectors.clone(),
+                                                            external_domains_caseless,
+                                                            &r_settings,
+                                                            &mut links,
+                                                            None,
+                                                            &None,
+                                                            &mut domain_parsed,
+                                                            &mut links_pages).await;
 
                                                         page.clone_from(&next_page);
 
@@ -2287,16 +2307,23 @@ impl Website {
                                                 }
 
                                                 } else {
-                                                    page.clone_from(&Page::new_page_streaming(target_url, &client, only_html, &mut relative_selectors.clone(), external_domains_caseless, &r_settings, &mut links, None, &None,  &mut domain_parsed).await);
+                                                    page.clone_from(&Page::new_page_streaming(
+                                                        target_url,
+                                                        client,
+                                                        only_html,
+                                                        &mut relative_selectors.clone(),
+                                                        external_domains_caseless,
+                                                        &r_settings,
+                                                        &mut links,
+                                                        None,
+                                                        &None,
+                                                        &mut domain_parsed,
+                                                        &mut links_pages).await);
                                                 }
                                             }
 
                                             if return_page_links {
-                                                page.page_links = if links.is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(Box::new(links.clone()))
-                                                };
+                                                page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
                                             }
 
                                             channel_send_page(&shared.2, page, &shared.4);
@@ -3315,12 +3342,17 @@ impl Website {
                                                     }
                                                 }
                                                 SiteMapEntity::Err(err) => {
-                                                    log::info!("incorrect sitemap error: {:?}", err.msg())
+                                                    log::info!(
+                                                        "incorrect sitemap error: {:?}",
+                                                        err.msg()
+                                                    )
                                                 }
                                             };
                                         }
                                     }
-                                    Err(err) => log::info!("http parse error: {:?}", err.to_string()),
+                                    Err(err) => {
+                                        log::info!("http parse error: {:?}", err.to_string())
+                                    }
                                 };
                             }
                             Err(err) => log::info!("http network error: {}", err.to_string()),
@@ -4152,21 +4184,17 @@ impl Website {
             self.configuration.wild_card_budgeting = wild_card_budget;
         }
         if self.configuration.depth > 0 && self.domain_parsed.is_some() {
-            match &self.domain_parsed {
-                Some(domain) => match domain.path_segments() {
-                    Some(segments) => {
-                        let segments_cnt = segments.count();
+            if let Some(ref domain) = self.domain_parsed {
+                if let Some(segments) = domain.path_segments() {
+                    let segments_cnt = segments.count();
 
-                        if segments_cnt > self.configuration.depth {
-                            self.configuration.depth_distance = self.configuration.depth
-                                + self.configuration.depth.abs_diff(segments_cnt);
-                        } else {
-                            self.configuration.depth_distance = self.configuration.depth;
-                        }
+                    if segments_cnt > self.configuration.depth {
+                        self.configuration.depth_distance = self.configuration.depth
+                            + self.configuration.depth.abs_diff(segments_cnt);
+                    } else {
+                        self.configuration.depth_distance = self.configuration.depth;
                     }
-                    _ => (),
-                },
-                _ => (),
+                }
             }
         }
     }
@@ -4237,7 +4265,7 @@ impl Website {
         let channel = self.channel.get_or_insert_with(|| {
             let (tx, rx) = broadcast::channel(
                 (if capacity == 0 {
-                    DEFAULT_PERMITS.clone()
+                    *DEFAULT_PERMITS
                 } else {
                     capacity
                 })
@@ -4401,7 +4429,7 @@ fn channel_send_page(
     channel_guard: &Option<ChannelGuard>,
 ) {
     if let Some(c) = channel {
-        if let Ok(_) = c.0.send(page) {
+        if c.0.send(page).is_ok() {
             if let Some(guard) = channel_guard {
                 ChannelGuard::inc_guard(&guard.0 .1)
             }

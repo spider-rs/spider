@@ -21,6 +21,12 @@ impl<V: std::fmt::Debug> TrieNode<V> {
     }
 }
 
+impl<V: std::fmt::Debug> Default for TrieNode<V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Trie value.
@@ -29,6 +35,12 @@ pub struct Trie<V: Debug> {
     pub root: TrieNode<V>,
     /// Contains a match all segment to default to.
     pub match_all: bool,
+}
+
+impl<V: Debug> Default for Trie<V> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<V: Debug> Trie<V> {

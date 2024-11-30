@@ -832,20 +832,14 @@ pub fn convert_headers(
     let mut header_map = reqwest::header::HeaderMap::new();
 
     for (index, items) in headers.iter().enumerate() {
-        match reqwest::header::HeaderValue::from_str(&items.1) {
-            Ok(head) => {
-                use std::str::FromStr;
-                match reqwest::header::HeaderName::from_str(&items.0) {
-                    Ok(key) => {
-                        header_map.insert(key, head);
-                    }
-                    _ => (),
-                }
+        if let Ok(head) = reqwest::header::HeaderValue::from_str(items.1) {
+            use std::str::FromStr;
+            if let Ok(key) = reqwest::header::HeaderName::from_str(items.0) {
+                header_map.insert(key, head);
             }
-            _ => (),
         }
         // mal headers
-        if index > 2000 {
+        if index > 1000 {
             break;
         }
     }
@@ -1624,7 +1618,7 @@ pub(crate) fn setup_default_response(target_url: &str, res: &Response) -> PageRe
         #[cfg(feature = "headers")]
         headers: Some(res.headers().clone()),
         #[cfg(feature = "cookies")]
-        cookies: get_cookies(&res),
+        cookies: get_cookies(res),
         status_code: res.status(),
         final_url: rd,
         ..Default::default()
@@ -2854,7 +2848,7 @@ pub(crate) fn setup_website_selectors(
     let tld = allowed.tld;
 
     match domain_parsed {
-        Some(u) => get_page_selectors_base(&u, subdomains, tld),
+        Some(u) => get_page_selectors_base(u, subdomains, tld),
         _ => get_page_selectors(url, subdomains, tld),
     }
 }

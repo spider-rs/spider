@@ -48,7 +48,7 @@ async fn forward(
         _ => (false, false),
     };
 
-    let mut page = build(&"", Default::default());
+    let mut page = build("", Default::default());
 
     let extracted = match spider::page::get_page_selectors(&url_path, subdomains, tld) {
         Some(mut selectors) => {
@@ -67,15 +67,14 @@ async fn forward(
                     None,
                     &None,
                     &mut None,
+                    &mut None,
                 )
                 .await,
             );
 
             let mut s = flexbuffers::FlexbufferSerializer::new();
 
-            match links.serialize(&mut s) {
-                _ => (),
-            };
+            let _ = links.serialize(&mut s);
 
             s.take_buffer()
         }

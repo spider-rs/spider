@@ -230,24 +230,14 @@ impl NetworkManager {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
                     let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
-                        .contains(&event.resource_type.as_ref())
+                        .contains(event.resource_type.as_ref())
                         || self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref()))
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
                         || self.block_stylesheets
                             && ResourceType::Stylesheet == event.resource_type
                         || self.block_javascript
                             && ResourceType::Script == event.resource_type
-                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str())
-                        || (!self.block_javascript
-                            && event
-                                .request
-                                .url
-                                .starts_with("https://www.google-analytics.com")
-                            || event
-                                .request
-                                .url
-                                .starts_with("https://www.googletagmanager.com")
-                            || event.request.url.starts_with("https://px.ads.linkedin.com"));
+                            && !JS_FRAMEWORK_ALLOW.contains(event.request.url.as_str());
 
                     if skip_networking {
                         let fullfill_params =

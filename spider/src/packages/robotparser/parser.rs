@@ -135,11 +135,10 @@ impl RuleLine {
 
     #[cfg(not(feature = "regex"))]
     fn applies_to(&self, pathname: &str) -> bool {
-        if self.path == "*" {
-            true
-        } else if self.path == "/" && pathname == "/" {
-            true
-        } else if self.path.ends_with("/") && pathname.starts_with(&self.path) {
+        if self.path == "*"
+            || self.path == "/" && pathname == "/"
+            || self.path.ends_with("/") && pathname.starts_with(&self.path)
+        {
             true
         } else {
             self.path
@@ -317,11 +316,8 @@ impl RobotFileParser {
     /// Sets the time the robots.txt file was last fetched to the
     /// current time.
     pub fn modified(&mut self) {
-        match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(time) => {
-                self.last_checked = time.as_secs() as i64;
-            }
-            _ => (),
+        if let Ok(time) = SystemTime::now().duration_since(UNIX_EPOCH) {
+            self.last_checked = time.as_secs() as i64;
         }
     }
 

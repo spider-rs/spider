@@ -191,7 +191,7 @@ pub mod black_list {
 pub mod black_list {
     use crate::compact_str::CompactString;
     /// check if link exist in blacklists.
-    pub fn contains(blacklist_url: &Vec<CompactString>, link: &CompactString) -> bool {
+    pub fn contains(blacklist_url: &[CompactString], link: &CompactString) -> bool {
         blacklist_url.contains(link)
     }
 }

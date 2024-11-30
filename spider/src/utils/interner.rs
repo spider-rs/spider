@@ -98,6 +98,11 @@ where
         self.links_visited.len()
     }
 
+    /// The bucket is empty.
+    pub fn is_empty(&self) -> bool {
+        self.links_visited.is_empty()
+    }
+
     /// Drain the bucket.
     pub fn drain(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolUsize> {
         self.links_visited.drain()

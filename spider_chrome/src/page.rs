@@ -123,7 +123,7 @@ fn get_plugin_filenames() -> Vec<String> {
         .collect();
 
     for _ in 0..2 {
-        plugins.push(generate_random_plugin_filename().into());
+        plugins.push(generate_random_plugin_filename());
     }
 
     plugins.shuffle(&mut thread_rng());

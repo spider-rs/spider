@@ -19,7 +19,7 @@ pub fn setup_default_headers(
 
     if !headers.contains_key(REFERER) {
         if let Ok(ref_value) =
-            HeaderValue::from_str(&crate::features::spoof_referrer::spoof_referrer())
+            HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
         {
             if !ref_value.is_empty() {
                 headers.insert(REFERER, ref_value);
@@ -28,17 +28,14 @@ pub fn setup_default_headers(
     }
 
     if !headers.contains_key(HOST) && configuration.preserve_host_header {
-        match url {
-            Some(u) => {
-                if let Some(host) = u.host_str() {
-                    if let Ok(ref_value) = HeaderValue::from_str(&host) {
-                        if !ref_value.is_empty() {
-                            headers.insert(HOST, ref_value);
-                        }
+        if let Some(u) = url {
+            if let Some(host) = u.host_str() {
+                if let Ok(ref_value) = HeaderValue::from_str(host) {
+                    if !ref_value.is_empty() {
+                        headers.insert(HOST, ref_value);
                     }
                 }
             }
-            _ => (),
         }
     }
 

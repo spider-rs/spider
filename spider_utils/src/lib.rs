@@ -55,8 +55,8 @@ where
 
         while let Some(selector) = stream.next().await {
             for s in selector.1 {
-                for element in fragment.select(&s) {
-                    process_selector::<K>(element, &selector.0, &mut map);
+                for element in fragment.select(s) {
+                    process_selector::<K>(element, selector.0, &mut map);
                 }
             }
         }
@@ -65,9 +65,8 @@ where
     if !selectors.xpath.is_empty() {
         if let Ok(package) = parser::parse(html) {
             let document = package.as_document();
-            let mut stream = selectors.xpath.iter();
 
-            while let Some(selector) = stream.next() {
+            for selector in selectors.xpath.iter() {
                 for s in selector.1 {
                     if let Ok(value) = evaluate_xpath(&document, s) {
                         let text = value.into_string();
@@ -102,12 +101,11 @@ where
 
     if !selectors.css.is_empty() {
         let fragment = Html::parse_fragment(html);
-        let mut stream = selectors.css.iter();
 
-        while let Some(selector) = stream.next() {
+        for selector in selectors.css.iter() {
             for s in selector.1 {
-                for element in fragment.select(&s) {
-                    process_selector::<K>(element, &selector.0, &mut map);
+                for element in fragment.select(s) {
+                    process_selector::<K>(element, selector.0, &mut map);
                 }
             }
         }
@@ -116,9 +114,8 @@ where
     if !selectors.xpath.is_empty() {
         if let Ok(package) = parser::parse(html) {
             let document = package.as_document();
-            let mut stream = selectors.xpath.iter();
 
-            while let Some(selector) = stream.next() {
+            for selector in selectors.xpath.iter() {
                 for s in selector.1 {
                     if let Ok(value) = evaluate_xpath(&document, s) {
                         let text = value.into_string();

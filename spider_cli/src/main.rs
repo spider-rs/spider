@@ -58,35 +58,20 @@ async fn main() {
                 .collect::<HashMap<&str, u32>>()
         }));
 
-    match cli.agent {
-        Some(agent) => {
-            website.with_user_agent(Some(&agent));
-        }
-        _ => (),
+    if let Some(ref agent) = cli.agent {
+        website.with_user_agent(Some(agent));
     }
-    match cli.delay {
-        Some(delay) => {
-            website.with_delay(delay);
-        }
-        _ => (),
+    if let Some(delay) = cli.delay {
+        website.with_delay(delay);
     }
-    match cli.limit {
-        Some(limit) => {
-            website.with_limit(limit);
-        }
-        _ => (),
+    if let Some(limit) = cli.limit {
+        website.with_limit(limit);
     }
-    match cli.depth {
-        Some(depth) => {
-            website.with_depth(depth);
-        }
-        _ => (),
+    if let Some(depth) = cli.depth {
+        website.with_depth(depth);
     }
-    match cli.external_domains {
-        Some(domains) => {
-            website.with_external_domains(Some(domains.into_iter()));
-        }
-        _ => (),
+    if let Some(domains) = cli.external_domains {
+        website.with_external_domains(Some(domains.into_iter()));
     }
 
     match website
@@ -113,9 +98,7 @@ async fn main() {
 
                     if output_links {
                         while let Ok(res) = rx2.recv().await {
-                            match stdout.write_all(string_concat!(res.get_url(), "\n").as_bytes()).await {
-                                _ => ()
-                            }
+                            let _ = stdout.write_all(string_concat!(res.get_url(), "\n").as_bytes()).await;
                         }
                     }
                 }
@@ -127,9 +110,7 @@ async fn main() {
                     let tmp_path = Path::new(&tmp_dir);
 
                     if !Path::new(&tmp_path).exists() {
-                        match tokio::fs::create_dir_all(tmp_path).await {
-                            _ => (),
-                        };
+                        let _ = tokio::fs::create_dir_all(tmp_path).await;
                     }
 
                     let download_path = PathBuf::from(tmp_path);
@@ -139,10 +120,8 @@ async fn main() {
                     });
 
                     while let Ok(res) = rx2.recv().await {
-                        match res.get_url_parsed() {
-                            Some(parsed_url) => {
-                                log("Storing", parsed_url);
-
+                        if let Some(parsed_url) = res.get_url_parsed() {
+                            log("Storing", parsed_url);
                                 let url_path = parsed_url.path();
 
                                 let split_paths: Vec<&str> = url_path.split('/').collect();
@@ -155,9 +134,7 @@ async fn main() {
                                         download_path.push(p);
 
                                         if !Path::new(&download_path).exists() {
-                                            match tokio::fs::create_dir_all(&download_path).await {
-                                                _ => (),
-                                            };
+                                            let _ = tokio::fs::create_dir_all(&download_path).await;
                                         }
                                     } else {
                                         match tokio::fs::OpenOptions::new()
@@ -173,13 +150,8 @@ async fn main() {
                                             )
                                         })).await {
                                             Ok(mut file) => {
-                                                match res.get_bytes() {
-                                                    Some(b) => {
-                                                        match file.write_all(b).await {
-                                                            _ => ()
-                                                        }
-                                                    }
-                                                    _ => (),
+                                                if let Some(b) = res.get_bytes() {
+                                                    let _ = file.write_all(b).await;
                                                 }
                                             }
                                             _ => {
@@ -188,10 +160,7 @@ async fn main() {
                                         }
                                     }
                                 }
-                            }
-                            _ => ()
                         }
-
                     }
                 }
                 Some(Commands::SCRAPE {
@@ -219,7 +188,7 @@ async fn main() {
                                 Default::default()
                             },
                             "links": match selectors {
-                                Some(ref s) => res.links(&s).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
+                                Some(ref s) => res.links(s).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
                                 _ => Default::default()
                             }
                         });

@@ -217,12 +217,17 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     sub_matcher: &CompactString,
     external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
     full_resources: bool,
+    links_pages: &mut Option<HashSet<A>>,
 ) {
     if let Some(b) = base {
-        let mut abs = convert_abs_path(&b, href);
+        let mut abs = convert_abs_path(b, href);
         let scheme = abs.scheme();
 
         if scheme == "https" || scheme == "http" {
+            if let Some(link_map) = links_pages {
+                link_map.insert(A::from(abs.as_str().to_string()));
+            }
+
             let host_name = abs.host_str();
             let mut can_process = parent_host_match(
                 host_name,
@@ -272,10 +277,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 
 /// get the clean domain name
 pub fn domain_name(domain: &Url) -> &str {
-    match domain.host_str() {
-        Some(host) => host,
-        _ => "",
-    }
+    domain.host_str().unwrap_or_default()
 }
 
 /// extract the valid domains from a url.
@@ -290,7 +292,7 @@ fn extract_root_domain(domain: &str) -> &str {
             domain
         }
     } else if parts.len() == 2 {
-        &parts[0]
+        parts[0]
     } else {
         domain
     }
@@ -316,7 +318,7 @@ pub fn parent_host_match(
             if base_domain.is_empty() {
                 exact_match
             } else {
-                exact_match || is_subdomain(host, &parent_host) || is_subdomain(host, &sub_matcher)
+                exact_match || is_subdomain(host, parent_host) || is_subdomain(host, sub_matcher)
             }
         }
         _ => false,
@@ -325,7 +327,7 @@ pub fn parent_host_match(
 
 /// html selector for valid web pages for domain.
 pub fn get_page_selectors_base(u: &Url, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
-    let u = convert_abs_url_base(&u);
+    let u = convert_abs_url_base(u);
 
     let b = match u.host_str() {
         Some(host) => host.to_ascii_lowercase(),
@@ -371,13 +373,9 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<Rela
 pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
-            if content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
-            content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
-            content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n") {
-                false
-            } else {
-                true
-            }
+            !(content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
+                     content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
+                      content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n"))
         }
         _ => false,
     }
@@ -419,11 +417,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
                 Ok(_) => None,
                 Err(er) => {
                     if er.is_status() || er.is_connect() || er.is_timeout() {
-                        if er.to_string().contains("ENOTFOUND") {
-                            should_retry = false;
-                        } else {
-                            should_retry = true;
-                        }
+                        should_retry = !er.to_string().contains("ENOTFOUND");
                     }
                     Some(er.to_string())
                 }
@@ -518,8 +512,8 @@ pub(crate) fn get_charset_from_content_type(
             let parts: Vec<&str> = content_type_str.split(';').collect();
             for part in parts {
                 let part = part.trim().to_lowercase();
-                if part.starts_with("charset=") {
-                    if let Some(encoding) = encoding_rs::Encoding::for_label(part[8..].as_bytes()) {
+                if let Some(stripped) = part.strip_prefix("charset=") {
+                    if let Some(encoding) = encoding_rs::Encoding::for_label(stripped.as_bytes()) {
                         if let Some(ascii_encoding) = AsciiCompatibleEncoding::new(encoding) {
                             return Some(ascii_encoding);
                         }
@@ -549,13 +543,14 @@ impl Page {
         url: &str,
         client: &Client,
         only_html: bool,
-        mut selectors: &mut RelativeSelectors,
+        selectors: &mut RelativeSelectors,
         external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
         r_settings: &PageLinkBuildSettings,
-        mut map: &mut hashbrown::HashSet<A>,
+        map: &mut hashbrown::HashSet<A>,
         ssg_map: Option<&mut hashbrown::HashSet<A>>,
         prior_domain: &Option<Box<Url>>,
-        mut domain_parsed: &mut Option<Box<Url>>,
+        domain_parsed: &mut Option<Box<Url>>,
+        links_pages: &mut Option<hashbrown::HashSet<A>>,
     ) -> Self {
         use crate::utils::{
             handle_response_bytes_writer, modify_selectors, setup_default_response,
@@ -566,7 +561,7 @@ impl Page {
                 let cell = tokio::sync::OnceCell::new();
 
                 let (encoding, adjust_charset_on_meta_tag) =
-                    match get_charset_from_content_type(&res.headers()) {
+                    match get_charset_from_content_type(res.headers()) {
                         Some(h) => (h, false),
                         _ => (AsciiCompatibleEncoding::utf_8(), true),
                     };
@@ -580,11 +575,11 @@ impl Page {
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
 
                     modify_selectors(
-                        &prior_domain,
+                        prior_domain,
                         domain,
-                        &mut domain_parsed,
+                        domain_parsed,
                         &mut url,
-                        &mut selectors,
+                        selectors,
                         AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
                     );
                 };
@@ -601,16 +596,15 @@ impl Page {
 
                 let base_links_settings = if r_settings.full_resources {
                     lol_html::element!("a[href],script[src],link[href]", |el| {
-                        let attribute = if el.tag_name() == "script" {
-                            "src"
-                        } else {
-                            "href"
-                        };
+                        let tag_name = el.tag_name();
+
+                        let attribute = if tag_name == "script" { "src" } else { "href" };
+
                         if let Some(href) = el.get_attribute(attribute) {
                             push_link(
                                 &base,
                                 &href,
-                                &mut map,
+                                map,
                                 &selectors.0,
                                 parent_host,
                                 parent_host_scheme,
@@ -618,6 +612,7 @@ impl Page {
                                 sub_matcher,
                                 &external_domains_caseless,
                                 r_settings.full_resources,
+                                links_pages,
                             );
                         }
                         Ok(())
@@ -628,7 +623,7 @@ impl Page {
                             push_link(
                                 &base,
                                 &href,
-                                &mut map,
+                                map,
                                 &selectors.0,
                                 parent_host,
                                 parent_host_scheme,
@@ -636,6 +631,7 @@ impl Page {
                                 sub_matcher,
                                 &external_domains_caseless,
                                 r_settings.full_resources,
+                                links_pages,
                             );
                         }
                         Ok(())
@@ -664,8 +660,7 @@ impl Page {
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
+                let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let mut response = handle_response_bytes_writer(
                     res,
@@ -685,20 +680,20 @@ impl Page {
                 response
                     .0
                     .content
-                    .replace(Box::new(collected_bytes.freeze().into()));
+                    .replace(Box::new(collected_bytes.freeze()));
 
                 if r_settings.ssg_build {
-                    if let Some(mut ssg_map) = ssg_map {
+                    if let Some(ssg_map) = ssg_map {
                         if let Some(source) = cell.get() {
-                            if let Some(ref url_base) = base {
-                                let build_ssg_path = convert_abs_path(&url_base, &source);
+                            if let Some(url_base) = base {
+                                let build_ssg_path = convert_abs_path(url_base, source);
                                 let build_page =
-                                    Page::new_page(build_ssg_path.as_str(), &client).await;
+                                    Page::new_page(build_ssg_path.as_str(), client).await;
 
                                 for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
                                 {
                                     if let Some(matched) = cap.get(1) {
-                                        let href = auto_encode_bytes(&matched.as_bytes())
+                                        let href = auto_encode_bytes(matched.as_bytes())
                                             .replace(r#"\u002F"#, "/");
 
                                         let last_segment = crate::utils::get_last_segment(&href);
@@ -710,7 +705,7 @@ impl Page {
                                             push_link(
                                                 &base,
                                                 &href,
-                                                &mut ssg_map,
+                                                ssg_map,
                                                 &selectors.0,
                                                 parent_host,
                                                 parent_host_scheme,
@@ -718,6 +713,7 @@ impl Page {
                                                 sub_matcher,
                                                 &external_domains_caseless,
                                                 r_settings.full_resources,
+                                                &mut None,
                                             );
                                         }
                                     }
@@ -1071,10 +1067,7 @@ impl Page {
 
     /// Set the html directly of the page
     pub fn set_html_bytes(&mut self, html: Option<Bytes>) {
-        self.html = match html {
-            Some(html) => Some(Box::new(html)),
-            _ => None,
-        };
+        self.html = html.map(Box::new);
     }
 
     /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
@@ -1121,24 +1114,15 @@ impl Page {
 
     /// Html getter for bytes on the page.
     pub fn get_bytes(&self) -> Option<&Bytes> {
-        match self.html.as_ref() {
-            Some(html) => Some(html),
-            _ => None,
-        }
+        self.html.as_deref()
     }
 
     /// Html getter for bytes on the page as string.
     pub fn get_html(&self) -> String {
-        match self.html.as_ref() {
-            Some(html) => {
-                if html.is_empty() {
-                    Default::default()
-                } else {
-                    auto_encoder::auto_encode_bytes(html)
-                }
-            }
-            _ => Default::default(),
-        }
+        self.html
+            .as_ref()
+            .map(|v| auto_encoder::auto_encode_bytes(v))
+            .unwrap_or_default()
     }
 
     /// Html getter for page to u8.
@@ -1206,22 +1190,20 @@ impl Page {
                     }
                     Event::Text(e) => {
                         if is_link_tag {
-                            match e.unescape() {
-                                Ok(v) => {
-                                    push_link(
-                                        &self.base.as_ref(),
-                                        &v,
-                                        map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                        &self.external_domains_caseless,
-                                        false,
-                                    );
-                                }
-                                _ => (),
+                            if let Ok(v) = e.unescape() {
+                                push_link(
+                                    &self.base.as_ref(),
+                                    &v,
+                                    map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &self.external_domains_caseless,
+                                    false,
+                                    &mut None,
+                                );
                             }
                         }
                     }
@@ -1280,6 +1262,7 @@ impl Page {
                                 sub_matcher,
                                 &self.external_domains_caseless,
                                 false,
+                                &mut None,
                             );
                         }
                         Ok(())
@@ -1291,7 +1274,7 @@ impl Page {
                 let mut wrote_error = false;
 
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
                 let chunk_size = 8192;
@@ -1301,7 +1284,7 @@ impl Page {
 
                 while let Some(chunk) = stream.next().await {
                     if let Ok(chunk) = chunk {
-                        if let Err(_) = rewriter.write(chunk) {
+                        if rewriter.write(chunk).is_err() {
                             wrote_error = true;
                             break;
                         }
@@ -1363,6 +1346,7 @@ impl Page {
                                     sub_matcher,
                                     &self.external_domains_caseless,
                                     false,
+                                    &mut None,
                                 );
                             }
                             Ok(())
@@ -1385,7 +1369,7 @@ impl Page {
                 };
 
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
                 let chunk_size = 8192;
@@ -1396,7 +1380,7 @@ impl Page {
 
                 while let Some(chunk) = stream.next().await {
                     if let Ok(chunk) = chunk {
-                        if let Err(_) = rewriter.write(chunk) {
+                        if rewriter.write(chunk).is_err() {
                             wrote_error = true;
                             break;
                         }
@@ -1409,12 +1393,12 @@ impl Page {
 
                 if let Some(build_ssg_path) = cell.get() {
                     if !build_ssg_path.is_empty() {
-                        let build_page = Page::new_page(&build_ssg_path, &client).await;
+                        let build_page = Page::new_page(build_ssg_path, client).await;
 
                         for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
                             if let Some(matched) = cap.get(1) {
-                                let href = auto_encode_bytes(&matched.as_bytes())
-                                    .replace(r#"\u002F"#, "/");
+                                let href =
+                                    auto_encode_bytes(matched.as_bytes()).replace(r#"\u002F"#, "/");
 
                                 let last_segment = crate::utils::get_last_segment(&href);
 
@@ -1431,6 +1415,7 @@ impl Page {
                                         sub_matcher,
                                         &self.external_domains_caseless,
                                         false,
+                                        &mut None,
                                     );
                                 }
                             }
@@ -1836,6 +1821,7 @@ impl Page {
                                 sub_matcher,
                                 &external_domains_caseless,
                                 true,
+                                &mut None,
                             );
                         }
                         Ok(())
@@ -1849,8 +1835,7 @@ impl Page {
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
+                let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
                 let chunk_size = 8192;
@@ -1861,7 +1846,7 @@ impl Page {
 
                 while let Some(chunk) = stream.next().await {
                     if let Ok(chunk) = chunk {
-                        if let Err(_) = rewriter.write(chunk) {
+                        if rewriter.write(chunk).is_err() {
                             wrote_error = true;
                             break;
                         }
@@ -1927,7 +1912,7 @@ impl Page {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.links_stream_full_resource::<CaseInsensitiveString>(&selectors)
+                self.links_stream_full_resource::<CaseInsensitiveString>(selectors)
                     .await
             }
         }
@@ -1971,10 +1956,7 @@ impl Page {
     #[inline]
     #[cfg(not(feature = "decentralized"))]
     fn abs_path(&self, href: &str) -> Option<Url> {
-        match &self.base {
-            Some(b) => Some(convert_abs_path(&b, href)),
-            _ => None,
-        }
+        self.base.as_ref().map(|b| convert_abs_path(b, href))
     }
 
     /// Convert a URL to its absolute path without any fragments or params. [unused in the worker atm by default all is returned]

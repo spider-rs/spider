@@ -854,17 +854,13 @@ where
                 let next_node = next_node.to_process.next();
                 // Get the next child node to process
                 if let Some(h) = next_node {
-                    match pending_stack.last_mut() {
-                        Some(pending) => {
-                            pending
-                                .prefn
-                                .as_ref()
-                                .map(|ref f| f(context, &h))
-                                .transpose()?;
-                        }
-                        _ => (),
+                    if let Some(pending) = pending_stack.last_mut() {
+                        pending
+                            .prefn
+                            .as_ref()
+                            .map(|ref f| f(context, &h))
+                            .transpose()?;
                     }
-
                     match process_node(context, h)? {
                         TreeMapResult::Finished(result) => {
                             if let Some(pending) = pending_stack.last_mut() {
@@ -1544,7 +1540,7 @@ fn do_render_node<'b, T: Write, D: TextDecorator>(
         Sup(children) => {
             // Special case for digit-only superscripts - use superscript
             // characters.
-            fn sup_digits(children: &Vec<RenderNode>) -> Option<String> {
+            fn sup_digits(children: &[RenderNode]) -> Option<String> {
                 if children.len() != 1 {
                     return None;
                 }
@@ -2134,10 +2130,9 @@ where
     R: io::Read,
     D: TextDecorator,
 {
-    match config::with_decorator(decorator).string_from_read(input, width) {
-        Ok(r) => r,
-        _ => Default::default(),
-    }
+    config::with_decorator(decorator)
+        .string_from_read(input, width)
+        .unwrap_or_default()
 }
 
 /// Reads HTML from `input`, and returns a `String` with text wrapped to
@@ -2146,10 +2141,9 @@ pub fn from_read<R>(input: R, width: usize) -> String
 where
     R: io::Read,
 {
-    match config::plain().string_from_read(input, width) {
-        Ok(v) => v,
-        _ => Default::default(),
-    }
+    config::plain()
+        .string_from_read(input, width)
+        .unwrap_or_default()
 }
 
 /// Reads HTML from `input`, and returns text wrapped to `width` columns.
@@ -2159,10 +2153,9 @@ pub fn from_read_rich<R>(input: R, width: usize) -> Vec<TaggedLine<Vec<RichAnnot
 where
     R: io::Read,
 {
-    match config::rich().lines_from_read(input, width) {
-        Ok(v) => v,
-        _ => Default::default(),
-    }
+    config::rich()
+        .lines_from_read(input, width)
+        .unwrap_or_default()
 }
 
 fn calc_ol_prefix_size<D: TextDecorator>(start: i64, num_items: usize, decorator: &D) -> usize {

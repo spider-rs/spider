@@ -30,7 +30,7 @@ impl<D: TextDecorator> Deref for TextRenderer<D> {
     fn deref(&self) -> &Self::Target {
         match self.subrender.last() {
             Some(l) => l,
-            _ => &self,
+            _ => self,
         }
     }
 }
@@ -57,11 +57,8 @@ impl<D: TextDecorator> TextRenderer<D> {
     /// Add link to global link collection
     pub fn start_link(&mut self, target: &str) -> crate::html2text::Result<()> {
         self.links.push(target.to_string());
-        match self.subrender.last_mut() {
-            Some(mt) => {
-                mt.start_link(target)?;
-            }
-            _ => (),
+        if let Some(mt) = self.subrender.last_mut() {
+            mt.start_link(target)?;
         }
         Ok(())
     }
@@ -182,16 +179,13 @@ impl<T: Debug + Eq + PartialEq + Clone + Default> TaggedLine<T> {
         use self::TaggedLineElement::Str;
 
         if !self.v.is_empty() {
-            match self.v.last_mut() {
-                Some(mt) => {
-                    if let Str(ref mut ts_prev) = mt {
-                        if ts_prev.tag == ts.tag {
-                            ts_prev.s.push_str(&ts.s);
-                            return;
-                        }
+            if let Some(mt) = self.v.last_mut() {
+                if let Str(ref mut ts_prev) = mt {
+                    if ts_prev.tag == ts.tag {
+                        ts_prev.s.push_str(&ts.s);
+                        return;
                     }
                 }
-                _ => (),
             }
         }
         self.v.push(Str(ts));
@@ -220,16 +214,13 @@ impl<T: Debug + Eq + PartialEq + Clone + Default> TaggedLine<T> {
         use self::TaggedLineElement::Str;
 
         if !self.v.is_empty() {
-            match self.v.last_mut() {
-                Some(mt) => {
-                    if let Str(ref mut ts_prev) = mt {
-                        if ts_prev.tag == *tag {
-                            ts_prev.s.push(c);
-                            return;
-                        }
+            if let Some(mt) = self.v.last_mut() {
+                if let Str(ref mut ts_prev) = mt {
+                    if ts_prev.tag == *tag {
+                        ts_prev.s.push(c);
+                        return;
                     }
                 }
-                _ => (),
             }
         }
         let mut s = String::new();
@@ -1213,11 +1204,8 @@ impl<D: TextDecorator> Renderer for SubRenderer<D> {
         };
 
         if self.pre_depth == 0 {
-            match self.wrapping.as_mut() {
-                Some(w) => {
-                    w.add_text(filtered_text, &self.ann_stack)?;
-                }
-                _ => (),
+            if let Some(w) = self.wrapping.as_mut() {
+                w.add_text(filtered_text, &self.ann_stack)?;
             }
         } else {
             let mut tag_first = self.ann_stack.clone();
@@ -1226,11 +1214,8 @@ impl<D: TextDecorator> Renderer for SubRenderer<D> {
             tag_first.push(self.decorator.decorate_preformat_first());
             tag_cont.push(self.decorator.decorate_preformat_cont());
 
-            match self.wrapping.as_mut() {
-                Some(w) => {
-                    w.add_preformatted_text(filtered_text, &tag_first, &tag_cont)?;
-                }
-                _ => (),
+            if let Some(w) = self.wrapping.as_mut() {
+                w.add_preformatted_text(filtered_text, &tag_first, &tag_cont)?;
             }
         }
         Ok(())
@@ -1509,13 +1494,10 @@ impl<D: TextDecorator> Renderer for SubRenderer<D> {
         Ok(())
     }
     fn end_strikeout(&mut self) -> crate::html2text::Result<()> {
-        match self.text_filter_stack.pop() {
-            Some(_) => {
-                let s = self.decorator.decorate_strikeout_end();
-                self.add_inline_text(&s)?;
-                self.ann_stack.pop();
-            }
-            _ => (),
+        if self.text_filter_stack.pop().is_some() {
+            let s = self.decorator.decorate_strikeout_end();
+            self.add_inline_text(&s)?;
+            self.ann_stack.pop();
         }
         Ok(())
     }
@@ -1559,11 +1541,8 @@ impl<D: TextDecorator> Renderer for SubRenderer<D> {
         use self::TaggedLineElement::FragmentStart;
 
         self.ensure_wrapping_exists();
-        match self.wrapping.as_mut() {
-            Some(w) => {
-                w.add_element(FragmentStart(fragname.to_string()));
-            }
-            _ => (),
+        if let Some(w) = self.wrapping.as_mut() {
+            w.add_element(FragmentStart(fragname.to_string()));
         }
     }
 
@@ -1618,6 +1597,12 @@ impl PlainDecorator {
         PlainDecorator {
             nlinks: Rc::new(Cell::new(0)),
         }
+    }
+}
+
+impl Default for PlainDecorator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1711,6 +1696,12 @@ impl TrivialDecorator {
     #[cfg_attr(feature = "clippy", allow(new_without_default_derive))]
     pub fn new() -> TrivialDecorator {
         TrivialDecorator {}
+    }
+}
+
+impl Default for TrivialDecorator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1827,6 +1818,12 @@ impl RichDecorator {
     /// Create a new `RichDecorator`.
     pub fn new() -> RichDecorator {
         RichDecorator {}
+    }
+}
+
+impl Default for RichDecorator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

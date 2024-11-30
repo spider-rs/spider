@@ -180,13 +180,13 @@ pub fn aho_clean_markdown(html: &str) -> String {
     // handle the error on replace all
     // if the content is small just use an aho replacement
     if html.len() <= 40 {
-        match AHO.try_replace_all(&html, &*AHO_REPLACEMENTS) {
+        match AHO.try_replace_all(html, &*AHO_REPLACEMENTS) {
             Ok(r) => r,
             _ => html.into(),
         }
     } else {
         // regex smooth clean multiple
-        let cleaned_html = CLEAN_MARKDOWN_REGEX.replace_all(&html, |caps: &regex::Captures| {
+        let cleaned_html = CLEAN_MARKDOWN_REGEX.replace_all(html, |caps: &regex::Captures| {
             let matched = match caps.get(0) {
                 Some(m) => m.as_str(),
                 _ => Default::default(),
@@ -218,8 +218,7 @@ pub fn clean_html_elements(html: &str, tags: Vec<&str>) -> String {
                         Ok(())
                     })
                 })
-                .collect::<Vec<_>>()
-                .into(),
+                .collect::<Vec<_>>(),
             ..RewriteStrSettings::default()
         },
     ) {
