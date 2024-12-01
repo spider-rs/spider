@@ -1,8 +1,26 @@
 use crate::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::hash::Hash;
+
+#[cfg(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+))]
 use std::marker::PhantomData;
+
+#[cfg(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+))]
 use string_interner::symbol::SymbolUsize;
+
+#[cfg(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+))]
 use string_interner::StringInterner;
 
 #[cfg(all(
@@ -26,37 +44,60 @@ type Backend = string_interner::backend::StringBackend<SymbolUsize>;
 ))]
 type Backend = string_interner::backend::BufferBackend<SymbolUsize>;
 
-#[cfg(all(
-    not(feature = "string_interner_bucket_backend"),
-    not(feature = "string_interner_string_backend"),
-    not(feature = "string_interner_buffer_backend")
-))]
-type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
-
-#[cfg(all(
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(
     feature = "string_interner_bucket_backend",
     feature = "string_interner_string_backend",
-    feature = "string_interner_buffer_backend"
+    feature = "string_interner_buffer_backend",
 ))]
-type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
-
 /// The links visited bucket store.
-#[derive(Debug, Clone)]
 pub struct ListBucket<K = CaseInsensitiveString>
 where
-    K: Eq + Hash + AsRef<str>,
+    K: Eq + Hash + Clone + AsRef<str>,
 {
-    /// The links visited.
     pub(crate) links_visited: HashSet<SymbolUsize>,
-    /// The string interner.
     pub(crate) interner: StringInterner<Backend>,
-    /// Phantom data to link the generic type.
     _marker: PhantomData<K>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(not(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+)))]
+/// The links visited bucket store.
+pub struct ListBucket<K = CaseInsensitiveString>
+where
+    K: Eq + Hash + Clone + AsRef<str>,
+{
+    pub(crate) links_visited: HashSet<K>,
+}
+
+#[cfg(not(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+)))]
 impl<K> Default for ListBucket<K>
 where
-    K: Eq + Hash + AsRef<str>,
+    K: Eq + Hash + Clone + AsRef<str>,
+{
+    fn default() -> Self {
+        Self {
+            links_visited: HashSet::new(),
+        }
+    }
+}
+
+#[cfg(any(
+    feature = "string_interner_bucket_backend",
+    feature = "string_interner_string_backend",
+    feature = "string_interner_buffer_backend",
+))]
+impl<K> Default for ListBucket<K>
+where
+    K: Eq + Hash + Clone + AsRef<str>,
 {
     fn default() -> Self {
         Self {
@@ -69,7 +110,7 @@ where
 
 impl<K> ListBucket<K>
 where
-    K: Eq + Hash + AsRef<str>,
+    K: Eq + Hash + Clone + AsRef<str>,
 {
     /// New list bucket.
     pub fn new() -> Self {
@@ -79,17 +120,49 @@ where
     /// Add a new link to the bucket.
     #[inline(always)]
     pub fn insert(&mut self, link: K) {
-        let symbol = self.interner.get_or_intern(link.as_ref());
-        self.links_visited.insert(symbol);
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            self.links_visited
+                .insert(self.interner.get_or_intern(link.as_ref()));
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            self.links_visited.insert(link);
+        }
     }
 
     /// Does the bucket contain the link.
     #[inline(always)]
     pub fn contains(&self, link: &K) -> bool {
-        if let Some(symbol) = self.interner.get(link.as_ref()) {
-            self.links_visited.contains(&symbol)
-        } else {
-            false
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            if let Some(symbol) = self.interner.get(link.as_ref()) {
+                self.links_visited.contains(&symbol)
+            } else {
+                false
+            }
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            self.links_visited.contains(link)
         }
     }
 
@@ -104,7 +177,22 @@ where
     }
 
     /// Drain the bucket.
+    #[cfg(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    ))]
     pub fn drain(&mut self) -> hashbrown::hash_set::Drain<'_, SymbolUsize> {
+        self.links_visited.drain()
+    }
+
+    #[cfg(not(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    )))]
+    /// Drain the bucket.
+    pub fn drain(&mut self) -> hashbrown::hash_set::Drain<'_, K> {
         self.links_visited.drain()
     }
 
@@ -118,11 +206,27 @@ where
     where
         K: Hash + Clone + From<String>,
     {
-        self.links_visited
-            .iter()
-            .filter_map(|symbol| self.interner.resolve(*symbol))
-            .map(|s| K::from(s.to_owned()))
-            .collect()
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            self.links_visited
+                .iter()
+                .filter_map(|symbol| self.interner.resolve(*symbol))
+                .map(|s| K::from(s.to_string()))
+                .collect()
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            self.links_visited.clone()
+        }
     }
 
     /// Extend with current links.
@@ -131,11 +235,27 @@ where
     where
         K: Clone,
     {
-        for link in msg {
-            let symbol = self.interner.get_or_intern(link.as_ref());
-            if !self.links_visited.contains(&symbol) {
-                links.insert(link);
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            for link in msg {
+                let symbol = self.interner.get_or_intern(link.as_ref());
+                if !self.links_visited.contains(&symbol) {
+                    links.insert(link);
+                }
             }
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            links.extend(msg.difference(&self.links_visited).cloned());
         }
     }
 
@@ -145,12 +265,30 @@ where
     where
         K: Clone,
     {
-        if let Some(symbol) = self.interner.get(s.as_ref()) {
-            if !self.links_visited.contains(&symbol) {
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            if let Some(symbol) = self.interner.get(s.as_ref()) {
+                if !self.links_visited.contains(&symbol) {
+                    links.insert(s);
+                }
+            } else {
                 links.insert(s);
             }
-        } else {
-            links.insert(s);
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            if !self.links_visited.contains(&s) {
+                links.insert(s);
+            }
         }
     }
 }

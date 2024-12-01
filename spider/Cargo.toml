@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.91"
+version = "2.13.93"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -62,7 +62,7 @@ phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
-string-interner = { version = "0.18", default-features = false, features = ["std", "inline-more", "backends"] }
+string-interner = { version = "0.18", default-features = false, features = ["std", "inline-more", "backends"], optional = true }
 httpdate = { version = "1", optional = true }
 rand = { version = "0.8", optional = true }
 serde_regex = { version = "1", optional = true }
@@ -163,9 +163,9 @@ reqwest_hickory_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 tokio_io_std = ["tokio/io-std"]
 tracing = ["tokio/tracing", "dep:tracing"]
-string_interner_buffer_backend = []
-string_interner_string_backend = []
-string_interner_bucket_backend = []
+string_interner_buffer_backend = ["dep:string-interner"]
+string_interner_string_backend = ["dep:string-interner"]
+string_interner_bucket_backend = ["dep:string-interner"]
 
 # Allows full concurrency.
 cowboy = []

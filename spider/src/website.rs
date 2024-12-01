@@ -579,9 +579,24 @@ impl Website {
     }
 
     /// Drain the links visited.
+    #[cfg(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    ))]
     pub fn drain_links(
         &mut self,
     ) -> hashbrown::hash_set::Drain<'_, string_interner::symbol::SymbolUsize> {
+        self.links_visited.drain()
+    }
+
+    #[cfg(not(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    )))]
+    /// Drain the links visited.
+    pub fn drain_links(&mut self) -> hashbrown::hash_set::Drain<'_, CaseInsensitiveString> {
         self.links_visited.drain()
     }
 
