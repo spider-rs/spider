@@ -223,11 +223,11 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         let mut abs = convert_abs_path(b, href);
         let scheme = abs.scheme();
 
-        if scheme == "https" || scheme == "http" {
-            if let Some(link_map) = links_pages {
-                link_map.insert(A::from(abs.as_str().to_string()));
-            }
+        if let Some(link_map) = links_pages {
+            link_map.insert(A::from(abs.as_str().to_string()));
+        }
 
+        if scheme == "https" || scheme == "http" {
             let host_name = abs.host_str();
             let mut can_process = parent_host_match(
                 host_name,
@@ -570,21 +570,38 @@ impl Page {
                     res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
                 );
 
-                if url != res.url().as_str() {
-                    let domain = res.url().as_str();
-                    let mut url = Box::new(CaseInsensitiveString::new(&url));
+                let target_url = res.url().as_str();
 
-                    modify_selectors(
-                        prior_domain,
-                        domain,
-                        domain_parsed,
-                        &mut url,
-                        selectors,
-                        AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
-                    );
+                // handle redirects
+                if url != target_url {
+                    let mut url = Box::new(CaseInsensitiveString::new(&url));
+                    let end_target_slash = target_url.ends_with("/");
+                    let main_slash = url.ends_with("/");
+
+                    let exact_match = end_target_slash
+                        && !main_slash
+                        && target_url[..target_url.len() - 1] == *url
+                        || !end_target_slash && main_slash && url[..url.len() - 1] == *target_url;
+
+                    if !exact_match {
+                        modify_selectors(
+                            prior_domain,
+                            target_url,
+                            domain_parsed,
+                            &mut url,
+                            selectors,
+                            AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+                        );
+                    }
                 };
 
-                let base = domain_parsed.as_deref();
+                // always use a base url.
+                let base = if domain_parsed.is_none() {
+                    prior_domain
+                } else {
+                    domain_parsed
+                }
+                .as_deref();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes

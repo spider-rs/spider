@@ -6,7 +6,7 @@ use crate::configuration::{
 use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
-use crate::utils::abs::parse_absolute_url;
+use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::{
     emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
 };
@@ -1288,11 +1288,18 @@ impl Website {
                 &page_links_settings,
                 &mut links,
                 Some(&mut links_ssg),
-                &mut domain_parsed,
+                &mut domain_parsed, // original domain
                 &mut self.domain_parsed,
                 &mut links_pages,
             )
             .await;
+
+            if self.domain_parsed.is_none() {
+                if let Some(mut domain_parsed) = domain_parsed.take() {
+                    convert_abs_url(&mut domain_parsed);
+                    self.domain_parsed.replace(domain_parsed);
+                }
+            }
 
             let mut retry_count = self.configuration.retry;
             let domains_caseless = &self.configuration.external_domains_caseless;
@@ -1366,9 +1373,6 @@ impl Website {
 
             if self.configuration.return_page_links {
                 page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
-                if let Some(page_links) = page.page_links.as_mut() {
-                    page_links.extend(links_ssg.clone());
-                }
             }
 
             links.extend(links_ssg);
