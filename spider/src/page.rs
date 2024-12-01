@@ -158,7 +158,7 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
-    /// The links found on the page.
+    /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry
     pub should_retry: bool,
@@ -996,13 +996,10 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     /// Close the chrome page used. Useful when storing the page with subscription usage. The feature flag `chrome_store_page` is required.
     pub async fn close_page(&mut self) {
-        match self.chrome_page.as_mut() {
-            Some(page) => {
-                let _ = page
-                    .execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
-                    .await;
-            }
-            _ => (),
+        if let Some(page) = self.chrome_page.as_mut() {
+            let _ = page
+                .execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+                .await;
         }
     }
 
@@ -1155,9 +1152,9 @@ impl Page {
     #[cfg(all(not(feature = "decentralized")))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         xml: &str,
         map: &mut HashSet<A>,
@@ -1177,6 +1174,11 @@ impl Page {
         let sub_matcher = &selectors.0;
 
         let mut is_link_tag = false;
+        let mut links_pages = if self.page_links.is_some() {
+            Some(map.clone())
+        } else {
+            None
+        };
 
         loop {
             match reader.read_event_into_async(&mut buf).await {
@@ -1202,7 +1204,7 @@ impl Page {
                                     sub_matcher,
                                     &self.external_domains_caseless,
                                     false,
-                                    &mut None,
+                                    &mut links_pages,
                                 );
                             }
                         }
@@ -1223,19 +1225,32 @@ impl Page {
             }
             buf.clear();
         }
+
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(
+                lp.into_iter()
+                    .map(|item| CaseInsensitiveString::from(item.to_string())),
+            );
+        }
     }
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_base<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         html: &str,
     ) -> HashSet<A> {
-        let mut map = HashSet::new();
+        let mut map: HashSet<A> = HashSet::new();
+        let mut links_pages = if self.page_links.is_some() {
+            Some(map.clone())
+        } else {
+            None
+        };
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
@@ -1262,7 +1277,7 @@ impl Page {
                                 sub_matcher,
                                 &self.external_domains_caseless,
                                 false,
-                                &mut None,
+                                &mut links_pages,
                             );
                         }
                         Ok(())
@@ -1297,6 +1312,14 @@ impl Page {
             }
         }
 
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(
+                lp.into_iter()
+                    .map(|item| CaseInsensitiveString::from(item.to_string())),
+            );
+        }
+
         map
     }
 
@@ -1305,18 +1328,22 @@ impl Page {
     #[cfg(all(not(feature = "decentralized")))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_base_ssg<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         html: &str,
         client: &Client,
     ) -> HashSet<A> {
         use auto_encoder::auto_encode_bytes;
 
-        let mut map = HashSet::new();
-        let mut map_ssg = HashSet::new();
-
+        let mut map: HashSet<A> = HashSet::new();
+        let mut map_ssg: HashSet<A> = HashSet::new();
+        let mut links_pages = if self.page_links.is_some() {
+            Some(map.clone())
+        } else {
+            None
+        };
         if !html.is_empty() {
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
@@ -1346,7 +1373,7 @@ impl Page {
                                     sub_matcher,
                                     &self.external_domains_caseless,
                                     false,
-                                    &mut None,
+                                    &mut links_pages,
                                 );
                             }
                             Ok(())
@@ -1425,6 +1452,14 @@ impl Page {
             }
         }
 
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(
+                lp.into_iter()
+                    .map(|item| CaseInsensitiveString::from(item.to_string())),
+            );
+        }
+
         map.extend(map_ssg);
 
         map
@@ -1469,9 +1504,9 @@ impl Page {
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_stream_ssg<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         client: &Client,
     ) -> HashSet<A> {
@@ -1487,7 +1522,7 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_ssg(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         client: &Client,
     ) -> HashSet<CaseInsensitiveString> {
@@ -1504,9 +1539,9 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
@@ -1526,9 +1561,9 @@ impl Page {
     #[inline(always)]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_smart<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1541,6 +1576,11 @@ impl Page {
 
         let mut map = HashSet::new();
         let mut inner_map: HashSet<A> = map.clone();
+        let mut links_pages = if self.page_links.is_some() {
+            Some(map.clone())
+        } else {
+            None
+        };
 
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
@@ -1614,6 +1654,7 @@ impl Page {
                                     sub_matcher,
                                     &external_domains_caseless,
                                     false,
+                                    &mut links_pages,
                                 );
                             }
 
@@ -1758,7 +1799,6 @@ impl Page {
                                     },
                                 )
                                 .await;
-
                             map.extend(extended_map)
                         }
                         Err(e) => {
@@ -1767,7 +1807,20 @@ impl Page {
                     };
                 }
             }
+
             map.extend(inner_map);
+        }
+
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(
+                lp.into_iter()
+                    .map(|item| CaseInsensitiveString::from(item.to_string())),
+            );
+            page_links.extend(
+                map.iter()
+                    .map(|item| CaseInsensitiveString::from(item.to_string())),
+            );
         }
 
         map
@@ -1778,12 +1831,17 @@ impl Page {
     #[cfg(all(not(feature = "decentralized")))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn links_stream_full_resource<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
+        let mut links_pages = if self.page_links.is_some() {
+            Some(map.clone())
+        } else {
+            None
+        };
 
         if !self.is_empty() {
             let html = Box::new(self.get_html());
@@ -1821,7 +1879,7 @@ impl Page {
                                 sub_matcher,
                                 &external_domains_caseless,
                                 true,
-                                &mut None,
+                                &mut links_pages,
                             );
                         }
                         Ok(())
@@ -1865,9 +1923,9 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
@@ -1881,9 +1939,9 @@ impl Page {
     #[cfg(feature = "decentralized")]
     /// Find the links as a stream using string resource validation
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
-        &self,
+        &mut self,
         _: &RelativeSelectors,
     ) -> HashSet<A> {
         Default::default()
@@ -1892,7 +1950,7 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
-    pub async fn links(&self, selectors: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
+    pub async fn links(&mut self, selectors: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
             true => self.links_stream::<CaseInsensitiveString>(selectors).await,
@@ -1903,7 +1961,7 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized")))]
     pub async fn links_full(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
@@ -1922,7 +1980,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[inline(always)]
     pub async fn smart_links(
-        &self,
+        &mut self,
         selectors: &RelativeSelectors,
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
@@ -1993,27 +2051,27 @@ pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
     }
 }
 
-/// Rewrite a string without encoding it.
-#[cfg(all(
-    not(feature = "decentralized"),
-    not(feature = "full_resources"),
-    feature = "smart"
-))]
-pub(crate) fn rewrite_str_as_bytes<'h, 's>(
-    html: &str,
-    settings: impl Into<lol_html::Settings<'h, 's>>,
-) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
-    let mut output = vec![];
+// /// Rewrite a string without encoding it.
+// #[cfg(all(
+//     not(feature = "decentralized"),
+//     not(feature = "full_resources"),
+//     feature = "smart"
+// ))]
+// pub(crate) fn rewrite_str_as_bytes<'h, 's>(
+//     html: &str,
+//     settings: impl Into<lol_html::Settings<'h, 's>>,
+// ) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
+//     let mut output = vec![];
 
-    let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |c: &[u8]| {
-        output.extend_from_slice(c);
-    });
+//     let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |c: &[u8]| {
+//         output.extend_from_slice(c);
+//     });
 
-    rewriter.write(html.as_bytes())?;
-    rewriter.end()?;
+//     rewriter.write(html.as_bytes())?;
+//     rewriter.end()?;
 
-    Ok(output)
-}
+//     Ok(output)
+// }
 
 #[cfg(test)]
 pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
@@ -2066,7 +2124,7 @@ async fn parse_links() {
         .unwrap();
 
     let link_result = "https://choosealicense.com/";
-    let page = Page::new(link_result, &client).await;
+    let mut page = Page::new(link_result, &client).await;
     let selector = get_page_selectors(link_result, false, false);
     let links = page.links(&selector.unwrap()).await;
 

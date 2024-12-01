@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.13.84"
+version = "2.13.88"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -62,7 +62,7 @@ phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
-string-interner = { version = "0.17", default-features = false, features = ["std", "inline-more", "backends"] }
+string-interner = { version = "0.18", default-features = false, features = ["std", "inline-more", "backends"] }
 httpdate = { version = "1", optional = true }
 rand = { version = "0.8", optional = true }
 serde_regex = { version = "1", optional = true }
@@ -123,7 +123,7 @@ time = []
 adblock = ["spider_chrome/adblock"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
-serde = ["dep:serde", "hashbrown/serde", "string-interner/serde-1", "dep:serde_regex", "smallvec/serde"]
+serde = ["dep:serde", "hashbrown/serde", "string-interner/serde", "dep:serde_regex", "smallvec/serde"]
 fs = ["tokio/fs"]
 full_resources = []
 socks = ["reqwest/socks"]

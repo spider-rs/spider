@@ -179,7 +179,7 @@ async fn main() {
                         website.crawl().await;
                     });
 
-                    while let Ok(res) = rx2.recv().await {
+                    while let Ok(mut res) = rx2.recv().await {
                         let page_json = json!({
                             "url": res.get_url(),
                             "html": if output_html {

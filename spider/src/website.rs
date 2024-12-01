@@ -1442,14 +1442,11 @@ impl Website {
                 if let Some(s) = self.setup_selectors() {
                     base.0 = s.0;
                     base.1 = s.1;
-                    match prior_domain {
-                        Some(prior_domain) => match prior_domain.host_str() {
-                            Some(dname) => {
-                                base.2 = dname.into();
-                            }
-                            _ => (),
-                        },
-                        _ => (),
+
+                    if let Some(pdname) = prior_domain {
+                        if let Some(dname) = pdname.host_str() {
+                            base.2 = dname.into();
+                        }
                     }
                 }
             }
@@ -1480,13 +1477,6 @@ impl Website {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
-            }
-            if self.configuration.return_page_links {
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
             }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -1730,15 +1720,13 @@ impl Website {
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
             }
-            let links = HashSet::from(page.links.clone());
 
+            // todo: pass full links to the worker to return.
             if self.configuration.return_page_links {
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
+                page.page_links = Some(page.links.clone().into());
             }
+
+            let links = HashSet::from(page.links.clone());
 
             channel_send_page(&self.channel, page, &self.channel_guard);
 
@@ -1793,11 +1781,7 @@ impl Website {
             self.links_visited.insert(link_result.0);
 
             if self.configuration.return_page_links {
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
+                page.page_links = Some(Default::default());
             }
 
             channel_send_page(&self.channel, page.clone(), &self.channel_guard);
@@ -1851,23 +1835,17 @@ impl Website {
             self.links_visited.insert(link_result.0);
 
             if self.configuration.return_page_links {
-                let links = HashSet::from(page.links(&base).await);
-
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
+                page.page_links = Some(Default::default());
+                let next_links = HashSet::from(page.links(&base).await);
 
                 channel_send_page(&self.channel, page.clone(), &self.channel_guard);
 
-                links.extend(links);
+                links.extend(next_links);
             } else {
                 channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+                let next_links = HashSet::from(page.links(&base).await);
 
-                let links = HashSet::from(page.links(&base).await);
-
-                links.extend(links);
+                links.extend(next_links);
             }
         }
 
@@ -1930,20 +1908,15 @@ impl Website {
             self.links_visited.insert(link_result.0);
 
             if !page.is_empty() {
+                if self.configuration.return_page_links {
+                    page.page_links = Some(Default::default());
+                }
                 let page_links = HashSet::from(page.links(&base).await);
 
                 links.extend(page_links);
             } else {
                 self.status = CrawlStatus::Empty;
             };
-
-            if self.configuration.return_page_links {
-                page.page_links = if links.is_empty() {
-                    None
-                } else {
-                    Some(Box::new(links.clone()))
-                };
-            }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
         }
@@ -2339,6 +2312,7 @@ impl Website {
                                             let allowed = self.is_allowed(&s);
 
                                             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                exceeded_budget = true;
                                                 break;
                                             }
                                             if allowed.eq(&ProcessLinkStatus::Blocked) {
@@ -2417,10 +2391,8 @@ impl Website {
                             } else {
                                 let semaphore = self.setup_semaphore();
 
-                                let mut q = match &self.channel_queue {
-                                    Some(q) => Some(q.0.subscribe()),
-                                    _ => None,
-                                };
+                                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
                                 let mut links: HashSet<CaseInsensitiveString> =
                                     self.drain_extra_links().collect();
 
@@ -2551,7 +2523,6 @@ impl Website {
                                                                     if let Some(timeout) = page.get_timeout() {
                                                                         tokio::time::sleep(timeout).await;
                                                                     }
-
                                                                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                                         if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                                             let p = Page::new(
@@ -2570,12 +2541,9 @@ impl Website {
                                                                             page.clone_from(&p);
 
                                                                         }).await {
-                                                                            log::info!("backoff gateway timeout exceeded {elasped}");
+                                                                            log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
                                                                         }
-
-
                                                                     } else {
-
                                                                         page.clone_from(
                                                                             &Page::new(
                                                                                 &target_url,
@@ -2589,7 +2557,6 @@ impl Website {
                                                                                 &shared.6.automation_scripts,
                                                                                 &shared.6.viewport,
                                                                                 &shared.6.request_timeout,
-
                                                                             )
                                                                             .await,
                                                                         );
@@ -2612,6 +2579,10 @@ impl Website {
 
                                                                 page.base = shared.9.as_deref().cloned();
 
+                                                                if return_page_links {
+                                                                    page.page_links = Some(Default::default());
+                                                                }
+
                                                                 let links = if full_resources {
                                                                     page.links_full(&shared.1).await
                                                                 } else {
@@ -2619,14 +2590,6 @@ impl Website {
                                                                 };
 
                                                                 page.base = prev_domain;
-
-                                                                if return_page_links {
-                                                                    page.page_links = if links.is_empty() {
-                                                                        None
-                                                                    } else {
-                                                                        Some(Box::new(links.clone()))
-                                                                    };
-                                                                }
 
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
@@ -2730,10 +2693,8 @@ impl Website {
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         match url::Url::parse(&self.url.inner()) {
             Ok(_) => {
-                let mut q = match &self.channel_queue {
-                    Some(q) => Some(q.0.subscribe()),
-                    _ => None,
-                };
+                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
                 self.configuration.configure_allowlist();
                 let domain = self.url.inner().as_str();
                 let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
@@ -2789,57 +2750,48 @@ impl Website {
 
                                 self.links_visited.insert(link.clone());
 
-                                match SEM.acquire().await {
-                                    Ok(permit) => {
-                                        let client = client.clone();
+                                if let Ok(permit) = SEM.acquire().await {
+                                    let client = client.clone();
 
-                                        spawn_set("page_fetch", &mut set, async move {
-                                            let link_results = match on_link_find_callback {
-                                                Some(cb) => cb(link, None),
-                                                _ => (link, None),
-                                            };
-                                            let link_results = link_results.0.as_ref();
-                                            let page = Page::new_links_only(
-                                                &if http_worker && link_results.starts_with("https")
-                                                {
-                                                    link_results
-                                                        .replacen("https", "http", 1)
-                                                        .to_string()
-                                                } else {
-                                                    link_results.to_string()
-                                                },
-                                                &client,
-                                            )
-                                            .await;
+                                    spawn_set("page_fetch", &mut set, async move {
+                                        let link_results = match on_link_find_callback {
+                                            Some(cb) => cb(link, None),
+                                            _ => (link, None),
+                                        };
+                                        let link_results = link_results.0.as_ref();
+                                        let page = Page::new_links_only(
+                                            &if http_worker && link_results.starts_with("https") {
+                                                link_results
+                                                    .replacen("https", "http", 1)
+                                                    .to_string()
+                                            } else {
+                                                link_results.to_string()
+                                            },
+                                            &client,
+                                        )
+                                        .await;
 
-                                            drop(permit);
+                                        drop(permit);
 
-                                            page.links
-                                        });
+                                        page.links
+                                    });
 
-                                        match q.as_mut() {
-                                            Some(q) => {
-                                                while let Ok(link) = q.try_recv() {
-                                                    let s = link.into();
-                                                    let allowed = self.is_allowed(&s);
+                                    if let Some(q) = q.as_mut() {
+                                        while let Ok(link) = q.try_recv() {
+                                            let s = link.into();
+                                            let allowed = self.is_allowed(&s);
 
-                                                    if allowed
-                                                        .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                    {
-                                                        break;
-                                                    }
-                                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                        continue;
-                                                    }
-
-                                                    self.links_visited
-                                                        .extend_with_new_links(&mut links, s);
-                                                }
+                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                                exceeded_budget = true;
+                                                break;
                                             }
-                                            _ => (),
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                continue;
+                                            }
+
+                                            self.links_visited.extend_with_new_links(&mut links, s);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                             _ => break,
@@ -2896,10 +2848,8 @@ impl Website {
                         )
                         .await;
                     } else {
-                        let mut q = match &self.channel_queue {
-                            Some(q) => Some(q.0.subscribe()),
-                            _ => None,
-                        };
+                        let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
                         let mut links: HashSet<CaseInsensitiveString> =
                             self.drain_extra_links().collect();
 
@@ -3025,7 +2975,6 @@ impl Website {
                                                         log::info!("backoff gateway timeout exceeded {elasped}");
                                                     }
 
-
                                                     } else {
 
                                                         if retry_count.is_power_of_two() {
@@ -3056,6 +3005,10 @@ impl Website {
 
                                                 page.base = shared.7.as_deref().cloned();
 
+                                                if return_page_links {
+                                                    page.page_links = Some(Default::default());
+                                                }
+
                                                 let links = page
                                                     .smart_links(
                                                         &shared.1, &shared.4, &shared.5,
@@ -3064,14 +3017,6 @@ impl Website {
                                                     .await;
 
                                                     page.base = prev_domain;
-
-                                                if return_page_links {
-                                                    page.page_links = if links.is_empty() {
-                                                        None
-                                                    } else {
-                                                        Some(Box::new(links.clone()))
-                                                    };
-                                                }
 
                                                 channel_send_page(&shared.2, page, &shared.3);
                                                 drop(permit);
@@ -3174,10 +3119,7 @@ impl Website {
 
         match self.setup_selectors() {
             Some(selectors) => {
-                let mut q = match &self.channel_queue {
-                    Some(q) => Some(q.0.subscribe()),
-                    _ => None,
-                };
+                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                 let domain = self.url.inner().as_str();
                 self.domain_parsed = parse_absolute_url(&domain);
@@ -3361,18 +3303,20 @@ impl Website {
                         drop(tx);
 
                         if let Ok(mut handle) = handles.await {
-                            for page in handle.iter_mut() {
+                            for mut page in handle.iter_mut() {
                                 let prev_domain = page.base.take();
                                 page.base = self.domain_parsed.as_deref().cloned();
+                                if self.configuration.return_page_links {
+                                    page.page_links = Some(Default::default());
+                                }
                                 let links = page.links(&selectors).await;
                                 page.base = prev_domain;
                                 self.extra_links.extend(links)
                             }
                             if scrape {
-                                match self.pages.as_mut() {
-                                    Some(p) => p.extend(handle),
-                                    _ => (),
-                                };
+                                if let Some(p) = self.pages.as_mut() {
+                                    p.extend(handle);
+                                }
                             }
 
                             match q.as_mut() {
