@@ -223,11 +223,11 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         let mut abs = convert_abs_path(b, href);
         let scheme = abs.scheme();
 
-        if scheme == "https" || scheme == "http" {
-            if let Some(link_map) = links_pages {
-                link_map.insert(A::from(abs.as_str().to_string()));
-            }
+        if let Some(link_map) = links_pages {
+            link_map.insert(A::from(abs.as_str().to_string()));
+        }
 
+        if scheme == "https" || scheme == "http" {
             let host_name = abs.host_str();
             let mut can_process = parent_host_match(
                 host_name,
@@ -570,7 +570,8 @@ impl Page {
                     res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
                 );
 
-                if url != res.url().as_str() {
+                // this allows us to get subdomains and tlds when being used.
+                if url != res.url().as_str() && (r_settings.subdomains || r_settings.tld) {
                     let domain = res.url().as_str();
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
 
@@ -584,7 +585,13 @@ impl Page {
                     );
                 };
 
-                let base = domain_parsed.as_deref();
+                // always use a base url.
+                let base = if domain_parsed.is_none() {
+                    prior_domain
+                } else {
+                    domain_parsed
+                }
+                .as_deref();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
