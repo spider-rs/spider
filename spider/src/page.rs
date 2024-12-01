@@ -526,6 +526,29 @@ pub(crate) fn get_charset_from_content_type(
     None
 }
 
+/// Check if urls are the same without the trailing slashes.
+fn exact_url_match(url: &str, target_url: &str) -> bool {
+    let end_target_slash = target_url.ends_with('/');
+    let main_slash = url.ends_with('/');
+
+    if end_target_slash && !main_slash {
+        strip_trailing_slash(target_url) == url
+    } else if !end_target_slash && main_slash {
+        url == strip_trailing_slash(target_url)
+    } else {
+        url == target_url
+    }
+}
+
+/// Strip end matching
+fn strip_trailing_slash(s: &str) -> &str {
+    if s.ends_with('/') {
+        s.trim_end_matches('/')
+    } else {
+        s
+    }
+}
+
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -573,26 +596,16 @@ impl Page {
                 let target_url = res.url().as_str();
 
                 // handle redirects
-                if url != target_url {
+                if url != target_url && !exact_url_match(&url, &target_url) {
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
-                    let end_target_slash = target_url.ends_with("/");
-                    let main_slash = url.ends_with("/");
-
-                    let exact_match = end_target_slash
-                        && !main_slash
-                        && target_url[..target_url.len() - 1] == *url
-                        || !end_target_slash && main_slash && url[..url.len() - 1] == *target_url;
-
-                    if !exact_match {
-                        modify_selectors(
-                            prior_domain,
-                            target_url,
-                            domain_parsed,
-                            &mut url,
-                            selectors,
-                            AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
-                        );
-                    }
+                    modify_selectors(
+                        prior_domain,
+                        target_url,
+                        domain_parsed,
+                        &mut url,
+                        selectors,
+                        AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+                    );
                 };
 
                 // always use a base url.
