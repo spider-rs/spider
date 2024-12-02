@@ -506,7 +506,9 @@ pub async fn transform_content_send(
                 base_html
             }
         }
-        ReturnFormat::Text => super::text_extract::extract_text(&base_html, &tag_factory),
+        ReturnFormat::Text => {
+            super::text_extract::extract_text_streaming(&base_html, &tag_factory).await
+        }
         ReturnFormat::XML => convert_html_to_xml(
             base_html.trim(),
             &match url_parsed {
