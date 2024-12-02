@@ -1,5 +1,5 @@
 use html2md::extended::sifter::WhitespaceSifter;
-use lol_html::{element, html_content::TextType, rewrite_str, text, RewriteStrSettings};
+use lol_html::{element, html_content::TextType, text, RewriteStrSettings};
 
 /// extract the text from HTML document.
 pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String>>) -> String {
@@ -43,7 +43,7 @@ pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String
         }
     ));
 
-    let _ = rewrite_str(
+    let _ = rewrite_str_empty(
         html,
         RewriteStrSettings {
             element_content_handlers,
@@ -52,4 +52,14 @@ pub fn extract_text(html: &str, custom: &Option<std::collections::HashSet<String
     );
 
     extracted_text.sift()
+}
+
+pub fn rewrite_str_empty<'h, 's, H: lol_html::HandlerTypes>(
+    html: &str,
+    settings: impl Into<lol_html::Settings<'h, 's, H>>,
+) -> Result<(), lol_html::errors::RewritingError> {
+    let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |_c: &[u8]| {});
+    rewriter.write(html.as_bytes())?;
+    rewriter.end()?;
+    Ok(())
 }

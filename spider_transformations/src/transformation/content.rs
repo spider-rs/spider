@@ -254,6 +254,11 @@ pub fn transform_markdown(html: &str, commonmark: bool) -> String {
     html2md::rewrite_html_custom_with_url(html, &None, commonmark, &None)
 }
 
+/// transform the content to markdown shortcut send
+pub async fn transform_markdown_send(html: &str, commonmark: bool) -> String {
+    html2md::rewrite_html_custom_with_url_streaming(html, &None, commonmark, &None).await
+}
+
 /// transform the content to text raw shortcut
 pub fn transform_text(html: &str) -> String {
     super::text_extract::extract_text(html, &Default::default())
@@ -390,6 +395,109 @@ pub fn transform_content(
         }
         ReturnFormat::Markdown => {
             html2md::rewrite_html_custom_with_url(&base_html, &tag_factory, false, url_parsed)
+        }
+        ReturnFormat::Html2Text => {
+            if !base_html.is_empty() {
+                crate::html2text::from_read(base_html.as_bytes(), base_html.len())
+            } else {
+                base_html
+            }
+        }
+        ReturnFormat::Text => super::text_extract::extract_text(&base_html, &tag_factory),
+        ReturnFormat::XML => convert_html_to_xml(
+            base_html.trim(),
+            &match url_parsed {
+                Some(u) => u.to_string(),
+                _ => EXAMPLE_URL.to_string(),
+            },
+            encoding,
+        )
+        .unwrap_or_default(),
+    }
+}
+
+/// Transform format the content send.
+pub async fn transform_content_send(
+    res: &Page,
+    c: &TransformConfig,
+    encoding: &Option<String>,
+    selector_config: &Option<SelectorConfiguration>,
+    ignore_tags: &Option<Vec<String>>,
+) -> String {
+    let base_html = get_html_with_selector(res, encoding, selector_config);
+
+    // prevent transforming binary files or re-encoding it
+    if is_binary_file(res.get_html_bytes_u8()) {
+        return base_html;
+    }
+
+    let url_parsed = res.get_url_parsed();
+
+    let base_html = {
+        let mut ignore_list = build_static_vector(c);
+
+        if let Some(ignore) = ignore_tags {
+            ignore_list.extend(ignore.iter().map(|s| s.as_str()));
+        }
+
+        if ignore_list.is_empty() {
+            base_html
+        } else {
+            clean_html_elements(&base_html, ignore_list)
+        }
+    };
+
+    // process readability
+    let base_html = if c.readability {
+        match llm_readability::extractor::extract(
+            &mut base_html.as_bytes(),
+            match url_parsed {
+                Some(u) => u,
+                _ => &EXAMPLE_URL,
+            },
+        ) {
+            Ok(product) => product.content,
+            _ => base_html,
+        }
+    } else {
+        base_html
+    };
+
+    let base_html = if c.clean_html {
+        clean_html(&base_html)
+    } else {
+        base_html
+    };
+
+    let mut tag_factory = None;
+
+    if let Some(ignore) = ignore_tags {
+        let mut tag_factor = std::collections::HashSet::with_capacity(ignore.len());
+        for ignore_tag_name in ignore {
+            tag_factor.insert(ignore_tag_name.into());
+        }
+        tag_factory.replace(tag_factor);
+    }
+
+    match c.return_format {
+        ReturnFormat::Raw | ReturnFormat::Bytes => base_html,
+        ReturnFormat::CommonMark => {
+            html2md::rewrite_html_custom_with_url_streaming(
+                &base_html,
+                &tag_factory,
+                true,
+                url_parsed,
+            )
+            .await
+        }
+        ReturnFormat::Markdown => {
+            html2md::rewrite_html_custom_with_url_streaming(
+                &base_html,
+                &tag_factory,
+                false,
+                url_parsed,
+            )
+            .await
         }
         ReturnFormat::Html2Text => {
             if !base_html.is_empty() {

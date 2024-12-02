@@ -1,6 +1,6 @@
 [package]
 name = "spider_transformations"
-version = "2.13.93"
+version = "2.13.95"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -24,7 +24,7 @@ tendril = "0.4"
 llm_readability = "0"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
-fast_html2md = "0"
+fast_html2md = {version = "0", features = ["tokio"]}
 phf = "0.11"
 phf_codegen = "0.11"
 lol_html = { version = "2" }
