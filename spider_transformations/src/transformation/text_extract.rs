@@ -87,7 +87,7 @@ pub async fn extract_text_streaming_with_size(
     }
 
     let mut extracted_text = String::new();
-    let txx1 = txx.clone();
+    let mut last_sent_position = 0;
 
     element_content_handlers.push(text!(
         "*:not(script):not(style):not(svg):not(noscript):not(nav):not(footer)",
@@ -105,7 +105,20 @@ pub async fn extract_text_streaming_with_size(
                     extracted_text.push('\n');
                 }
 
-                let _ = txx1.send(extracted_text.clone());
+                let new_slice = &extracted_text[last_sent_position..];
+
+                if !new_slice.is_empty() {
+                    let _ = txx.send(new_slice.to_string());
+                    last_sent_position = extracted_text.len();
+                }
+
+                // clear the text tracker
+                if extracted_text.len() > 1024 {
+                    if !extracted_text.ends_with(' ') {
+                        extracted_text.clear();
+                        last_sent_position = 0;
+                    }
+                }
             }
 
             Ok(())
@@ -137,8 +150,6 @@ pub async fn extract_text_streaming_with_size(
     if !wrote_error {
         let _ = rewriter.end();
     }
-
-    drop(txx);
 
     let mut rewrited_bytes: String = String::new();
 
