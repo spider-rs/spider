@@ -9,7 +9,7 @@ use std::io::Result;
 
 async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
-        .with_limit(500)
+        .with_limit(1)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
         .with_fingerprint(true)

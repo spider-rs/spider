@@ -111,6 +111,8 @@ impl Target {
 
         network_manager.ignore_visuals = config.ignore_visuals;
         network_manager.block_javascript = config.ignore_javascript;
+        network_manager.block_analytics = config.ignore_analytics;
+
         network_manager.block_stylesheets = config.ignore_stylesheets;
         network_manager.only_html = config.only_html;
 
@@ -630,6 +632,7 @@ pub struct TargetConfig {
     pub cache_enabled: bool,
     pub ignore_visuals: bool,
     pub ignore_javascript: bool,
+    pub ignore_analytics: bool,
     pub ignore_stylesheets: bool,
     pub only_html: bool,
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
@@ -646,6 +649,7 @@ impl Default for TargetConfig {
             ignore_javascript: false,
             ignore_visuals: false,
             ignore_stylesheets: false,
+            ignore_analytics: true,
             only_html: false,
             extra_headers: Default::default(),
         }

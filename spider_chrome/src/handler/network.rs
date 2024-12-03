@@ -29,6 +29,8 @@ lazy_static::lazy_static! {
             "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
             "d3.js",
+            "app.js",
+            "main.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
@@ -77,6 +79,77 @@ lazy_static::lazy_static! {
         "Prefetch",
         "Ping",
     };
+    /// Ignore list of scripts.
+    static ref URL_IGNORE_TRIE: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "https://www.google-analytics.com",
+            "https://www.googletagmanager.com",
+            "https://px.ads.linkedin.com",
+            "https://connect.facebook.net",
+            "https://analytics.twitter.com",
+            "https://ads.twitter.com",
+            "sc.omtrdc.net",
+            "doubleclick.net",
+            "hotjar.com",
+            "datadome.com"
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+}
+
+// Trie node for ignore.
+#[derive(Default)]
+struct TrieNode {
+    children: HashMap<char, TrieNode>,
+    is_end_of_word: bool,
+}
+
+/// Basic Ignore trie.
+struct Trie {
+    root: TrieNode,
+}
+
+impl Trie {
+    /// Setup a new trie.
+    fn new() -> Self {
+        Trie {
+            root: TrieNode::default(),
+        }
+    }
+
+    // Insert a word into the Trie.
+    fn insert(&mut self, word: &str) {
+        let mut node = &mut self.root;
+        for ch in word.chars() {
+            node = node.children.entry(ch).or_insert_with(TrieNode::default);
+        }
+        node.is_end_of_word = true;
+    }
+
+    // Check if the Trie contains any prefix of the given string.
+    fn contains_prefix(&self, text: &str) -> bool {
+        let mut node = &self.root;
+        for ch in text.chars() {
+            if let Some(next_node) = node.children.get(&ch) {
+                node = next_node;
+                if node.is_end_of_word {
+                    return true;
+                }
+            } else {
+                break;
+            }
+        }
+        false
+    }
+}
+
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script(url: &str) -> bool {
+    URL_IGNORE_TRIE.contains_prefix(url)
 }
 
 #[derive(Debug)]
@@ -100,8 +173,10 @@ pub struct NetworkManager {
     pub ignore_visuals: bool,
     /// Block CSS stylesheets.
     pub block_stylesheets: bool,
-    /// Block javascript.
+    /// Block javascript that is not critical to rendering.
     pub block_javascript: bool,
+    /// Block analytics from rendering
+    pub block_analytics: bool,
     /// Only html from loading.
     pub only_html: bool,
 }
@@ -125,6 +200,7 @@ impl NetworkManager {
             ignore_visuals: false,
             block_javascript: false,
             block_stylesheets: false,
+            block_analytics: true,
             only_html: false,
         }
     }
@@ -229,6 +305,8 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
+                    let javascript_resource = ResourceType::Script == event.resource_type;
+
                     let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
                         .contains(event.resource_type.as_ref())
                         || self.ignore_visuals
@@ -236,8 +314,15 @@ impl NetworkManager {
                         || self.block_stylesheets
                             && ResourceType::Stylesheet == event.resource_type
                         || self.block_javascript
-                            && ResourceType::Script == event.resource_type
+                            && javascript_resource
                             && !JS_FRAMEWORK_ALLOW.contains(event.request.url.as_str());
+
+                    let skip_networking =
+                        if !skip_networking && javascript_resource && self.block_analytics {
+                            ignore_script(event.request.url.as_str())
+                        } else {
+                            skip_networking
+                        };
 
                     if skip_networking {
                         let fullfill_params =
@@ -276,6 +361,13 @@ impl NetworkManager {
                         || self.block_javascript
                             && ResourceType::Script == event.resource_type
                             && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
+
+                    let skip_networking =
+                        if !skip_networking && javascript_resource && self.block_analytics {
+                            ignore_script(event.request.url.as_str())
+                        } else {
+                            skip_networking
+                        };
 
                     if self.detect_ad(event) || skip_networking {
                         let fullfill_params =

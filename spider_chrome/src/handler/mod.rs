@@ -458,6 +458,7 @@ impl Handler {
                 ignore_visuals: self.config.ignore_visuals,
                 ignore_stylesheets: self.config.ignore_stylesheets,
                 ignore_javascript: self.config.ignore_javascript,
+                ignore_analytics: self.config.ignore_analytics,
                 extra_headers: self.config.extra_headers.clone(),
                 only_html: self.config.only_html && self.config.created_first_target,
             },
@@ -693,8 +694,10 @@ pub struct HandlerConfig {
     pub ignore_visuals: bool,
     /// Whether to ignore stylesheets.
     pub ignore_stylesheets: bool,
-    /// Whether to ignore stylesheets.
+    /// Whether to ignore Javascript only allowing critical framework or lib based rendering.
     pub ignore_javascript: bool,
+    /// Whether to ignore analytics.
+    pub ignore_analytics: bool,
     /// Whether to ignore ads.
     pub ignore_ads: bool,
     /// Extra headers.
@@ -718,6 +721,7 @@ impl Default for HandlerConfig {
             ignore_stylesheets: false,
             ignore_ads: false,
             ignore_javascript: false,
+            ignore_analytics: true,
             only_html: false,
             extra_headers: Default::default(),
             created_first_target: false,

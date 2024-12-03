@@ -204,6 +204,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_visuals: config.chrome_intercept.block_visuals,
         ignore_ads: config.chrome_intercept.block_ads,
         ignore_javascript: config.chrome_intercept.block_javascript,
+        ignore_analytics: config.chrome_intercept.block_analytics,
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
         extra_headers: match config.headers {
             Some(ref headers) => {
@@ -277,6 +278,7 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_javascript = config.chrome_intercept.block_javascript;
                 browser_config.ignore_ads = config.chrome_intercept.block_ads;
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
+                browser_config.ignore_analytics  = config.chrome_intercept.block_analytics;
                 browser_config.extra_headers = match config.headers {
                     Some(ref headers) => {
                         let hm =

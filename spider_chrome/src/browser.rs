@@ -207,6 +207,7 @@ impl Browser {
             ignore_visuals: config.ignore_visuals,
             ignore_stylesheets: config.ignore_stylesheets,
             ignore_javascript: config.ignore_javascript,
+            ignore_analytics: config.ignore_analytics,
             ignore_ads: config.ignore_ads,
             extra_headers: config.extra_headers.clone(),
             only_html: config.only_html,
@@ -683,8 +684,10 @@ pub struct BrowserConfig {
     pub ignore_visuals: bool,
     /// Whether to ignore stylesheets when request interception is enabled.
     pub ignore_stylesheets: bool,
-    /// Whether to ignore javascript when request interception is enabled.
+    /// Whether to ignore javascript when request interception is enabled. This will allow framework JS like react to go through.
     pub ignore_javascript: bool,
+    /// Whether to ignore analytics when request interception is enabled.
+    pub ignore_analytics: bool,
     /// Whether to ignore ads when request interception is enabled.
     pub ignore_ads: bool,
     /// Extra headers.
@@ -717,6 +720,7 @@ pub struct BrowserConfigBuilder {
     ignore_ads: bool,
     ignore_javascript: bool,
     ignore_stylesheets: bool,
+    ignore_analytics: bool,
     only_html: bool,
     extra_headers: Option<HashMap<String, String>>,
 }
@@ -755,6 +759,7 @@ impl Default for BrowserConfigBuilder {
             ignore_visuals: false,
             ignore_ads: false,
             ignore_javascript: false,
+            ignore_analytics: false,
             ignore_stylesheets: false,
             only_html: false,
             extra_headers: Default::default(),
@@ -945,6 +950,7 @@ impl BrowserConfigBuilder {
             ignore_visuals: self.ignore_visuals,
             ignore_ads: self.ignore_ads,
             ignore_javascript: self.ignore_javascript,
+            ignore_analytics: self.ignore_analytics,
             ignore_stylesheets: self.ignore_stylesheets,
             extra_headers: self.extra_headers,
             only_html: self.only_html,

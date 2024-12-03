@@ -634,8 +634,10 @@ pub struct RequestInterceptConfiguration {
     pub block_visuals: bool,
     /// Block stylesheets.
     pub block_stylesheets: bool,
-    /// Block javascript.
+    /// Block javascript only allowing critcal framework or lib based javascript to render..
     pub block_javascript: bool,
+    /// Block analytics.
+    pub block_analytics: bool,
     /// Block ads. Requires the `adblock` feature flag.
     pub block_ads: bool,
 }
@@ -647,6 +649,7 @@ impl RequestInterceptConfiguration {
             enabled,
             block_javascript: false,
             block_visuals: true,
+            block_analytics: true,
             block_stylesheets: true,
             ..Default::default()
         }
@@ -654,6 +657,7 @@ impl RequestInterceptConfiguration {
     /// Block all request besides html and the important stuff.
     pub fn block_all(&mut self) -> &Self {
         self.block_javascript = true;
+        self.block_analytics = true;
         self.block_stylesheets = true;
         self.block_visuals = true;
         self.block_ads = true;
