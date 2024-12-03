@@ -57,21 +57,19 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
 pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
     let href = href.trim();
 
-    if href.is_empty() || href == "#" {
+    if href.is_empty() || href == "#" || href == "javascript:void(0);" {
         return base.clone();
     }
 
     // handle absolute urls.
     if !href.starts_with("/") {
-        let length = href.len();
-
-        let protocol_slice = if length >= 8 && href.is_char_boundary(8) {
+        let protocol_slice = if href.is_char_boundary(8) {
             &href[0..8]
-        } else if length >= 7 && href.is_char_boundary(7) {
+        } else if href.is_char_boundary(7) {
             &href[0..7]
-        } else if length >= 6 && href.is_char_boundary(6) {
+        } else if href.is_char_boundary(6) {
             &href[0..6]
-        } else if length >= 5 && href.is_char_boundary(5) {
+        } else if href.is_char_boundary(5) {
             &href[0..5]
         } else {
             ""

@@ -221,54 +221,60 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 ) {
     if let Some(b) = base {
         let mut abs = convert_abs_path(b, href);
-        let scheme = abs.scheme();
+        let new_page = abs != **b;
 
         if let Some(link_map) = links_pages {
-            link_map.insert(A::from(abs.as_str().to_string()));
+            link_map.insert(A::from(
+                (if new_page { abs.as_str() } else { href }).to_string(),
+            ));
         }
 
-        if scheme == "https" || scheme == "http" {
-            let host_name = abs.host_str();
-            let mut can_process = parent_host_match(
-                host_name,
-                base_domain,
-                parent_host,
-                base_input_domain,
-                sub_matcher,
-            );
+        if new_page {
+            let scheme = abs.scheme();
+            if scheme == "https" || scheme == "http" {
+                let host_name = abs.host_str();
+                let mut can_process = parent_host_match(
+                    host_name,
+                    base_domain,
+                    parent_host,
+                    base_input_domain,
+                    sub_matcher,
+                );
 
-            if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
-                can_process = external_domains_caseless
-                    .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                    || external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-            }
-
-            if can_process {
-                if abs.scheme() != parent_host_scheme.as_str() {
-                    let _ = abs.set_scheme(parent_host_scheme.as_str());
-                }
-
-                let hchars = abs.path();
-
-                if let Some(position) = hchars.rfind('.') {
-                    let hlen = hchars.len();
-                    let has_asset = hlen - position;
-
-                    if has_asset >= 3 {
-                        let next_position = position + 1;
-
-                        if !full_resources
-                            && !ONLY_RESOURCES
-                                .contains::<CaseInsensitiveString>(&hchars[next_position..].into())
-                        {
-                            can_process = false;
-                        }
-                    }
+                if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
+                    can_process = external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                        || external_domains_caseless
+                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
                 }
 
                 if can_process {
-                    map.insert(abs.as_str().to_string().into());
+                    if abs.scheme() != parent_host_scheme.as_str() {
+                        let _ = abs.set_scheme(parent_host_scheme.as_str());
+                    }
+
+                    let hchars = abs.path();
+
+                    if let Some(position) = hchars.rfind('.') {
+                        let hlen = hchars.len();
+                        let has_asset = hlen - position;
+
+                        if has_asset >= 3 {
+                            let next_position = position + 1;
+
+                            if !full_resources
+                                && !ONLY_RESOURCES.contains::<CaseInsensitiveString>(
+                                    &hchars[next_position..].into(),
+                                )
+                            {
+                                can_process = false;
+                            }
+                        }
+                    }
+
+                    if can_process {
+                        map.insert(abs.as_str().to_string().into());
+                    }
                 }
             }
         }

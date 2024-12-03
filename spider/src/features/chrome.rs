@@ -278,7 +278,7 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_javascript = config.chrome_intercept.block_javascript;
                 browser_config.ignore_ads = config.chrome_intercept.block_ads;
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
-                browser_config.ignore_analytics  = config.chrome_intercept.block_analytics;
+                browser_config.ignore_analytics = config.chrome_intercept.block_analytics;
                 browser_config.extra_headers = match config.headers {
                     Some(ref headers) => {
                         let hm =
