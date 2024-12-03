@@ -31,6 +31,7 @@ lazy_static::lazy_static! {
             "d3.js",
             "app.js",
             "main.js",
+            "index.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
@@ -83,12 +84,16 @@ lazy_static::lazy_static! {
     static ref URL_IGNORE_TRIE: Trie = {
         let mut trie = Trie::new();
         let patterns = [
+            "https://pagead2.googlesyndication.com",
+            "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
             "https://www.googletagmanager.com",
             "https://px.ads.linkedin.com",
             "https://connect.facebook.net",
-            "https://analytics.twitter.com",
             "https://ads.twitter.com",
+            "https://cdn.segment.com",
+            "https://analytics.",
+            "http://analytics.",
             "sc.omtrdc.net",
             "doubleclick.net",
             "hotjar.com",
