@@ -142,26 +142,23 @@ async fn cf_handle(
             wait_for.page_navigations = true;
             page_wait(&page, &Some(wait_for.clone())).await;
 
-            match page.content_bytes().await {
-                Ok(next_content) => {
-                    let next_content = if next_content.ends_with(cf)
-                        || next_content.ends_with(cf2)
-                        || next_content.starts_with(cn) && next_content.ends_with(cnf)
-                    {
-                        wait_for.delay =
-                            WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-                        page_wait(&page, &Some(wait_for)).await;
-                        match page.content_bytes().await {
-                            Ok(nc) => nc,
-                            _ => next_content,
-                        }
-                    } else {
-                        next_content
-                    };
+            if let Ok(next_content) = page.content_bytes().await {
+                let next_content = if next_content.ends_with(cf)
+                    || next_content.ends_with(cf2)
+                    || next_content.starts_with(cn) && next_content.ends_with(cnf)
+                {
+                    wait_for.delay =
+                        WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
+                    page_wait(&page, &Some(wait_for)).await;
+                    match page.content_bytes().await {
+                        Ok(nc) => nc,
+                        _ => next_content,
+                    }
+                } else {
+                    next_content
+                };
 
-                    *b = next_content;
-                }
-                _ => (),
+                *b = next_content;
             }
         })
         .await;
@@ -212,6 +209,8 @@ pub struct PageResponse {
     pub extra_ai_data: Option<Vec<crate::page::AIResults>>,
     /// A WAF was found on the page.
     pub waf_check: bool,
+    /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
+    pub bytes_transferred: Option<f64>,
 }
 
 /// wait for event with timeout
@@ -502,57 +501,45 @@ pub async fn perform_chrome_http_request(
         Ok(page_base) => {
             match page_base {
                 Some(http_request) => {
-                    match http_request.method.as_deref() {
-                        Some(http_method) => {
-                            method = http_method.into();
-                        }
-                        _ => (),
+                    if let Some(http_method) = http_request.method.as_deref() {
+                        method = http_method.into();
                     }
+
                     request_headers.clone_from(&http_request.headers);
 
-                    match http_request.response {
-                        Some(ref response) => {
-                            match response.protocol {
-                                Some(ref p) => {
-                                    protocol.clone_from(p);
-                                }
-                                _ => (),
-                            }
-
-                            match response.headers.inner().as_object() {
-                                Some(res_headers) => {
-                                    for (k, v) in res_headers {
-                                        response_headers.insert(k.to_string(), v.to_string());
-                                    }
-                                }
-                                _ => (),
-                            }
-
-                            if !response.url.starts_with(source) {
-                                waf_check = match response.security_details {
-                                    Some(ref security_details) => {
-                                        if security_details.subject_name
-                                            == "challenges.cloudflare.com"
-                                        {
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    }
-                                    _ => response.url.contains("/cdn-cgi/challenge-platform"),
-                                };
-                                if !waf_check {
-                                    waf_check = match response.protocol {
-                                        Some(ref protocol) => protocol == "blob",
-                                        _ => false,
-                                    }
-                                }
-                            }
-
-                            status_code = StatusCode::from_u16(response.status as u16)
-                                .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                    if let Some(ref response) = http_request.response {
+                        if let Some(ref p) = response.protocol {
+                            protocol.clone_from(p);
                         }
-                        _ => (),
+
+                        if let Some(res_headers) = response.headers.inner().as_object() {
+                            for (k, v) in res_headers {
+                                response_headers.insert(k.to_string(), v.to_string());
+                            }
+                        }
+
+                        if !response.url.starts_with(source) {
+                            waf_check = match response.security_details {
+                                Some(ref security_details) => {
+                                    if security_details.subject_name == "challenges.cloudflare.com"
+                                    {
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                                _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                            };
+                            if !waf_check {
+                                waf_check = match response.protocol {
+                                    Some(ref protocol) => protocol == "blob",
+                                    _ => false,
+                                }
+                            }
+                        }
+
+                        status_code = StatusCode::from_u16(response.status as u16)
+                            .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
                     }
                 }
                 _ => {
@@ -1010,8 +997,24 @@ pub async fn fetch_page_html_chrome_base(
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use std::ops::Div;
-
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
+
+    let listener = page
+        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>()
+        .await;
+
+    // Listen for network events. todo: capture the last values endtime to track period.
+    let bytes_collected_handle = tokio::spawn(async move {
+        let mut total = 0.0;
+
+        if let Ok(mut listener) = listener {
+            while let Some(event) = listener.next().await {
+                total += event.encoded_data_length;
+            }
+        }
+
+        total
+    });
 
     let page_navigation = async {
         if !page_set {
@@ -1061,7 +1064,9 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
-    let page_response = if timeout_error.is_none() && chrome_http_req_res.status_code.is_success() {
+    let mut page_response = if timeout_error.is_none()
+        && chrome_http_req_res.status_code.is_success()
+    {
         // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
         let final_url = if wait_for_navigation {
             let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
@@ -1218,6 +1223,10 @@ pub async fn fetch_page_html_chrome_base(
             page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
         )
         .await;
+        // we want to use a sync impl to get bytes when storing the page.
+        if let Ok(transferred) = bytes_collected_handle.await {
+            page_response.bytes_transferred = Some(transferred);
+        }
     }
 
     Ok(page_response)

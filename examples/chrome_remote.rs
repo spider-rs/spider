@@ -24,7 +24,15 @@ async fn crawl_website(url: &str) -> Result<()> {
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
             let _ = stdout
-                .write_all(format!("- {}\n", page.get_url()).as_bytes())
+                .write_all(
+                    format!(
+                        "- {} -- Bytes transferred {:?} -- HTML Size {:?}\n",
+                        page.get_url(),
+                        page.bytes_transferred.unwrap_or_default(),
+                        page.get_html_bytes_u8().len()
+                    )
+                    .as_bytes(),
+                )
                 .await;
         }
     });

@@ -164,6 +164,8 @@ pub struct Page {
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
+    /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
+    pub bytes_transferred: Option<f64>,
 }
 
 /// Represent a page visited.
@@ -441,6 +443,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         page_links: None,
         should_retry,
         waf_check: res.waf_check,
+        bytes_transferred: res.bytes_transferred,
     }
 }
 

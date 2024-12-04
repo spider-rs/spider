@@ -84,6 +84,11 @@ lazy_static::lazy_static! {
     static ref URL_IGNORE_TRIE: Trie = {
         let mut trie = Trie::new();
         let patterns = [
+            "https://cdn.cookielaw.org/scripttemplates/otSDKStub.js",
+            "https://www.googletagservices.com/tag/",
+            "https://js.hs-analytics.net/analytics/",
+            "https://js.hsadspixel.net",
+            "https://www.google.com/adsense/",
             "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
@@ -91,6 +96,8 @@ lazy_static::lazy_static! {
             "https://static.doubleclick.net",
             "https://px.ads.linkedin.com",
             "https://connect.facebook.net",
+            "https://tags.tiqcdn.com",
+            "https://tr.snapchat.com",
             "https://ads.twitter.com",
             "https://cdn.segment.com",
             "https://analytics.",
@@ -99,7 +106,14 @@ lazy_static::lazy_static! {
             "sc.omtrdc.net",
             "doubleclick.net",
             "hotjar.com",
-            "datadome.com"
+            "datadome.com",
+            // explicit ignore tracking.js files
+            "tracking.js"
+
+            // exp testin
+            // "https://www.recaptcha.net/recaptcha/",
+            // "https://www.google.com/recaptcha/",
+            // "https://www.gstatic.com/recaptcha/",
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -115,7 +129,17 @@ lazy_static::lazy_static! {
             "https://googleads.g.doubleclick.net/pagead/id",
             "https://js.monitor.azure.com/scripts",
             "https://securepubads.g.doubleclick.net",
+            "https://pixel-config.reddit.com/pixels",
+            // amazon product feedback
+            "https://www.amazon.com/af/feedback-link?",
+            "https://tr.snapchat.com/config/",
+            "https://collect.tealiumiq.com/",
+            "https://s.yimg.com/wi",
+            "https://disney.my.sentry.io/api/",
+            "https://www.redditstatic.com/ads",
             ".onetrust.com/consent/",
+            "https://logs.",
+            "/track.php",
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -137,6 +161,13 @@ lazy_static::lazy_static! {
             "https://www.facebook.com/plugins/",   // Facebook embeds (like posts and videos)
             "https://cdn.embedly.com/widgets/",    // Embedly embeds
             "https://player.twitch.tv/",           // Twitch video player embeds
+
+            // insight tracker
+            "https://insight.adsrvr.org/track/",
+
+            // snapchat tracker
+            "https://tr.snapchat.com/",
+
             // ignore font extras
             "https://kit.fontawesome.com/",
             // ignore tailwind cdn
@@ -144,7 +175,9 @@ lazy_static::lazy_static! {
             // ignore extra ads
             "https://googleads.g.doubleclick.net",
             // more google tracing
-            ".safeframe.googlesyndication.com",
+            ".safeframe.googlesyndication.com/safeframe",
+            // repeat consent js
+            "/ccpa/user-consent.min.js",
             // // ignore amazon scripts for media
             // "https://m.media-amazon.com/images",
             // ".ssl-images-amazon.com/images/"
