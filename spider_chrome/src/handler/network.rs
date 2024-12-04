@@ -1,3 +1,7 @@
+use crate::auth::Credentials;
+use crate::cmd::CommandChain;
+use crate::handler::http::HttpRequest;
+use case_insensitive_string::CaseInsensitiveString;
 use chromiumoxide_cdp::cdp::browser_protocol::fetch::{
     self, AuthChallengeResponse, AuthChallengeResponseResponse, ContinueRequestParams,
     ContinueWithAuthParams, DisableParams, EventAuthRequired, EventRequestPaused, RequestPattern,
@@ -12,10 +16,6 @@ use chromiumoxide_cdp::cdp::browser_protocol::{
     network::EnableParams, security::SetIgnoreCertificateErrorsParams,
 };
 use chromiumoxide_types::{Command, Method, MethodId};
-
-use crate::auth::Credentials;
-use crate::cmd::CommandChain;
-use crate::handler::http::HttpRequest;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
@@ -84,16 +84,18 @@ lazy_static::lazy_static! {
     static ref URL_IGNORE_TRIE: Trie = {
         let mut trie = Trie::new();
         let patterns = [
-            "https://pagead2.googlesyndication.com",
+            "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
             "https://www.googletagmanager.com",
+            "https://static.doubleclick.net",
             "https://px.ads.linkedin.com",
             "https://connect.facebook.net",
             "https://ads.twitter.com",
             "https://cdn.segment.com",
             "https://analytics.",
             "http://analytics.",
+            ".googlesyndication.com",
             "sc.omtrdc.net",
             "doubleclick.net",
             "hotjar.com",
@@ -104,6 +106,100 @@ lazy_static::lazy_static! {
         }
         trie
     };
+
+    /// Ignore list of XHR urls.
+    static ref URL_IGNORE_XHR_TRIE: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "https://play.google.com/log?",
+            "https://googleads.g.doubleclick.net/pagead/id",
+            "https://js.monitor.azure.com/scripts",
+            "https://securepubads.g.doubleclick.net",
+            ".onetrust.com/consent/",
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+    /// Ignore list of scripts embedded or font extra.
+    static ref URL_IGNORE_EMBEDED_TRIE: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "https://www.youtube.com/embed/",      // YouTube video embeds
+            "https://www.google.com/maps/embed?",  // Google Maps embeds
+            "https://player.vimeo.com/video/",     // Vimeo video embeds
+            "https://open.spotify.com/embed/",     // Spotify music embeds
+            "https://w.soundcloud.com/player/",    // SoundCloud embeds
+            "https://platform.twitter.com/embed/", // Twitter embedded tweets
+            "https://www.instagram.com/embed.js",  // Instagram embeds
+            "https://www.facebook.com/plugins/",   // Facebook embeds (like posts and videos)
+            "https://cdn.embedly.com/widgets/",    // Embedly embeds
+            "https://player.twitch.tv/",           // Twitch video player embeds
+            // ignore font extras
+            "https://kit.fontawesome.com/",
+            // ignore tailwind cdn
+            "https://cdn.tailwindcss.com",
+            // ignore extra ads
+            "https://googleads.g.doubleclick.net",
+            // more google tracing
+            ".safeframe.googlesyndication.com",
+            // // ignore amazon scripts for media
+            // "https://m.media-amazon.com/images",
+            // ".ssl-images-amazon.com/images/"
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+    /// Ignore list of XHR urls for media.
+    static ref URL_IGNORE_XHR_MEDIA_TRIE: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "https://www.youtube.com/s/player/",
+            "https://www.vimeo.com/player/",
+            "https://soundcloud.com/player/",
+            "https://open.spotify.com/",
+            "https://api.spotify.com/v1/",
+            "https://music.apple.com/"
+
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+    /// Visual assets to ignore for XHR request.
+    pub(crate) static ref IGNORE_XHR_ASSETS: HashSet<CaseInsensitiveString> = {
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(36);
+
+        m.extend([
+            "jpg", "jpeg", "png", "gif", "svg", "webp",       // Image files
+            "mp4", "avi", "mov", "wmv", "flv",               // Video files
+            "mp3", "wav", "ogg",                             // Audio files
+            "woff", "woff2", "ttf", "otf",                   // Font files
+            "swf", "xap",                                    // Flash/Silverlight files
+            "ico", "eot",                                    // Other resource files
+
+            // Including extensions with extra dot
+            ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+            ".mp4", ".avi", ".mov", ".wmv", ".flv",
+            ".mp3", ".wav", ".ogg",
+            ".woff", ".woff2", ".ttf", ".otf",
+            ".swf", ".xap",
+            ".ico", ".eot"
+        ].map(|s| s.into()));
+
+        m
+    };
+
+    /// Case insenstive css matching
+    pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
+
 }
 
 // Trie node for ignore.
@@ -125,7 +221,6 @@ impl Trie {
             root: TrieNode::default(),
         }
     }
-
     // Insert a word into the Trie.
     fn insert(&mut self, word: &str) {
         let mut node = &mut self.root;
@@ -134,7 +229,6 @@ impl Trie {
         }
         node.is_end_of_word = true;
     }
-
     // Check if the Trie contains any prefix of the given string.
     fn contains_prefix(&self, text: &str) -> bool {
         let mut node = &self.root;
@@ -154,7 +248,29 @@ impl Trie {
 
 /// Url matches analytics that we want to ignore or trackers.
 pub(crate) fn ignore_script(url: &str) -> bool {
-    URL_IGNORE_TRIE.contains_prefix(url)
+    let ignore_script = URL_IGNORE_TRIE.contains_prefix(url);
+
+    // check for file ending in analytics.js
+    if !ignore_script {
+        url.ends_with("analytics.js")
+    } else {
+        ignore_script
+    }
+}
+
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script_embedded(url: &str) -> bool {
+    URL_IGNORE_EMBEDED_TRIE.contains_prefix(url)
+}
+
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script_xhr(url: &str) -> bool {
+    URL_IGNORE_XHR_TRIE.contains_prefix(url)
+}
+
+/// Url matches media that we want to ignore.
+pub(crate) fn ignore_script_xhr_media(url: &str) -> bool {
+    URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(url)
 }
 
 #[derive(Debug)]
@@ -299,6 +415,57 @@ impl NetworkManager {
         }
     }
 
+    /// Determine if the request should be skipped.
+    fn skip_xhr(&self, skip_networking: bool, event: &EventRequestPaused) -> bool {
+        // XHR check
+        if !skip_networking && event.resource_type == ResourceType::Xhr {
+            let request_url = event.request.url.as_str();
+
+            // check if part of ignore scripts.
+            let skip_analytics = self.block_analytics && ignore_script_xhr(request_url);
+
+            if skip_analytics {
+                true
+            } else if self.block_stylesheets || self.ignore_visuals {
+                let block_css = self.block_stylesheets;
+                let block_media = self.ignore_visuals && self.only_html;
+
+                let mut block_request = false;
+
+                if let Some(position) = request_url.rfind('.') {
+                    let hlen = request_url.len();
+                    let has_asset = hlen - position;
+
+                    if has_asset >= 3 {
+                        let next_position = position + 1;
+
+                        if block_media
+                            && IGNORE_XHR_ASSETS.contains::<CaseInsensitiveString>(
+                                &request_url[next_position..].into(),
+                            )
+                        {
+                            block_request = true;
+                        } else if block_css {
+                            block_request =
+                                CaseInsensitiveString::from(request_url[next_position..].as_bytes())
+                                    .contains(&**CSS_EXTENSION)
+                        }
+                    }
+                }
+
+                if !block_request {
+                    block_request = ignore_script_xhr_media(request_url);
+                }
+
+                block_request
+            } else {
+                skip_networking
+            }
+        } else {
+            skip_networking
+        }
+    }
+
     #[cfg(not(feature = "adblock"))]
     pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
         if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
@@ -312,6 +479,7 @@ impl NetworkManager {
                 } else {
                     let javascript_resource = ResourceType::Script == event.resource_type;
 
+                    // main initial check
                     let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
                         .contains(event.resource_type.as_ref())
                         || self.ignore_visuals
@@ -322,12 +490,25 @@ impl NetworkManager {
                             && javascript_resource
                             && !JS_FRAMEWORK_ALLOW.contains(event.request.url.as_str());
 
+                    let skip_networking = if !skip_networking
+                        && (self.only_html || self.ignore_visuals)
+                        && (javascript_resource || event.resource_type == ResourceType::Document)
+                    {
+                        ignore_script_embedded(event.request.url.as_str())
+                    } else {
+                        skip_networking
+                    };
+
+                    // analytics check
                     let skip_networking =
                         if !skip_networking && javascript_resource && self.block_analytics {
                             ignore_script(event.request.url.as_str())
                         } else {
                             skip_networking
                         };
+
+                    // XHR check
+                    let skip_networking = self.skip_xhr(skip_networking, &event);
 
                     if skip_networking {
                         let fullfill_params =
@@ -367,12 +548,25 @@ impl NetworkManager {
                             && ResourceType::Script == event.resource_type
                             && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
 
+                    let skip_networking = if !skip_networking
+                        && javascript_resource
+                        && (self.only_html || self.ignore_visuals)
+                    {
+                        ignore_script_embedded(event.request.url.as_str())
+                    } else {
+                        skip_networking
+                    };
+
+                    // analytics check
                     let skip_networking =
                         if !skip_networking && javascript_resource && self.block_analytics {
                             ignore_script(event.request.url.as_str())
                         } else {
                             skip_networking
                         };
+
+                    // XHR check
+                    let skip_networking = self.skip_xhr(skip_networking, &event);
 
                     if self.detect_ad(event) || skip_networking {
                         let fullfill_params =
