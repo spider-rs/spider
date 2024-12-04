@@ -84,33 +84,56 @@ lazy_static::lazy_static! {
     static ref URL_IGNORE_TRIE: Trie = {
         let mut trie = Trie::new();
         let patterns = [
-            "https://cdn.cookielaw.org/scripttemplates/otSDKStub.js",
             "https://www.googletagservices.com/tag/",
             "https://js.hs-analytics.net/analytics/",
             "https://js.hsadspixel.net",
             "https://www.google.com/adsense/",
+            "https://www.googleadservices.com",
+            "https://adservice.google.com",
             "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
             "https://www.googletagmanager.com",
+            "https://iabusprivacy.pmc.com/geo-info.js",
+            "https://cdn.onesignal.com",
+            "https://cdn.cookielaw.org/",
             "https://static.doubleclick.net",
+            "https://cdn.piano.io",
             "https://px.ads.linkedin.com",
             "https://connect.facebook.net",
             "https://tags.tiqcdn.com",
             "https://tr.snapchat.com",
             "https://ads.twitter.com",
             "https://cdn.segment.com",
+            "https://stats.wp.com",
             "https://analytics.",
             "http://analytics.",
+            "https://cdn.cxense.com",
+            "https://cdn.tinypass.com",
+            "https://cd.connatix.com",
+            ".newrelic.com",
             ".googlesyndication.com",
+            ".amazon-adsystem.com",
+            ".onetrust.com",
             "sc.omtrdc.net",
             "doubleclick.net",
             "hotjar.com",
             "datadome.com",
-            // explicit ignore tracking.js files
-            "tracking.js"
-
+            "datadog-logs-us.js",
+            "tinypass.min.js",
+            ".airship.com",
+            ".adlightning.com",
+            // explicit ignore tracking.js and ad files
+            "privacy-notice.js",
+            "tracking.js",
+            "ads.js",
+            "https://ads.",
+            "http://ads.",
+            "https://tracking.",
+            "http://tracking.",
             // exp testin
+            // used for possible location outside
+            "https://geo.privacymanager.io/",
             // "https://www.recaptcha.net/recaptcha/",
             // "https://www.google.com/recaptcha/",
             // "https://www.gstatic.com/recaptcha/",
@@ -137,6 +160,13 @@ lazy_static::lazy_static! {
             "https://s.yimg.com/wi",
             "https://disney.my.sentry.io/api/",
             "https://www.redditstatic.com/ads",
+            "https://buy.tinypass.com/",
+            "https://idx.liadm.com",
+            "https://geo.privacymanager.io/",
+            "https://nimbleplot.com",
+            "googlesyndication.com",
+            ".piano.io/",
+            ".browsiprod.com",
             ".onetrust.com/consent/",
             "https://logs.",
             "/track.php",
@@ -164,20 +194,28 @@ lazy_static::lazy_static! {
 
             // insight tracker
             "https://insight.adsrvr.org/track/",
-
+            "cxense.com/",
             // snapchat tracker
             "https://tr.snapchat.com/",
-
+            "https://buy.tinypass.com",
+            "https://nimbleplot.com/",
             // ignore font extras
             "https://kit.fontawesome.com/",
+            "https://use.typekit.net",
             // ignore tailwind cdn
             "https://cdn.tailwindcss.com",
             // ignore extra ads
             "https://googleads.g.doubleclick.net",
-            // more google tracing
-            ".safeframe.googlesyndication.com/safeframe",
+            "amazon-adsystem.com",
+            "g.doubleclick.net",
+            "googlesyndication.com",
+            "adsafeprotected.com",
+            // more google tracking
+            ".googlesyndication.com/safeframe/",
             // repeat consent js
             "/ccpa/user-consent.min.js",
+            // privacy
+            "privacy-notice.js",
             // // ignore amazon scripts for media
             // "https://m.media-amazon.com/images",
             // ".ssl-images-amazon.com/images/"
@@ -286,6 +324,9 @@ pub(crate) fn ignore_script(url: &str) -> bool {
     // check for file ending in analytics.js
     if !ignore_script {
         url.ends_with("analytics.js")
+            || url.ends_with("ads.js")
+            || url.ends_with("tracking.js")
+            || url.ends_with("track.js")
     } else {
         ignore_script
     }
