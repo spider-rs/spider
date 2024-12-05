@@ -96,12 +96,15 @@ lazy_static::lazy_static! {
             "https://js.hsadspixel.net",
             "https://www.google.com/adsense/",
             "https://www.googleadservices.com",
+            "https://static.cloudflareinsights.com/",
             "https://adservice.google.com",
             "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
             "https://www.googletagmanager.com",
             "https://iabusprivacy.pmc.com/geo-info.js",
+            "https://cookie-cdn.cookiepro.com/consent",
+            "https://consentcdn.cookiebot.com/",
             "https://cdn.onesignal.com",
             "https://cdn.cookielaw.org/",
             "https://static.doubleclick.net",
@@ -118,6 +121,8 @@ lazy_static::lazy_static! {
             "https://cdn.cxense.com",
             "https://cdn.tinypass.com",
             "https://cd.connatix.com",
+            "https://platform-api.sharethis.com/js/sharethis.js",
+            ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
             ".amazon-adsystem.com",
@@ -134,6 +139,7 @@ lazy_static::lazy_static! {
             "privacy-notice.js",
             "tracking.js",
             "ads.js",
+            "insight.min.js",
             "https://ads.",
             "http://ads.",
             "https://tracking.",
@@ -181,6 +187,7 @@ lazy_static::lazy_static! {
             "https://pixel-config.reddit.com/pixels",
             // amazon product feedback
             "https://www.amazon.com/af/feedback-link?",
+            "https://www.google.com/ads/ga-audiences",
             "https://tr.snapchat.com/config/",
             "https://collect.tealiumiq.com/",
             "https://s.yimg.com/wi",
@@ -190,7 +197,11 @@ lazy_static::lazy_static! {
             "https://idx.liadm.com",
             "https://geo.privacymanager.io/",
             "https://nimbleplot.com",
+            ".wixapps.net/api/v1/bulklog",
+            // video embeddings
+            "https://video.squarespace-cdn.com/content/",
             "googlesyndication.com",
+            ".doubleclick.net",
             ".piano.io/",
             ".browsiprod.com",
             ".onetrust.com/consent/",
@@ -217,7 +228,10 @@ lazy_static::lazy_static! {
             "https://www.facebook.com/plugins/",   // Facebook embeds (like posts and videos)
             "https://cdn.embedly.com/widgets/",    // Embedly embeds
             "https://player.twitch.tv/",           // Twitch video player embeds
-
+            "https://maps.googleapis.com/maps/", // Google map embeds
+            "https://www.youtube.com/player_api", // Youtube player.
+            "https://www.googletagmanager.com/ns.html", // Google tag manager.
+            "https://consentcdn.cookiebot.com", // Cookie bot
             // vercel live
             "https://vercel.live/api/",
 
@@ -234,15 +248,17 @@ lazy_static::lazy_static! {
             // ignore tailwind cdn
             "https://cdn.tailwindcss.com",
             // ignore extra ads
-            "https://googleads.g.doubleclick.net",
+            ".sharethis.com",
             "amazon-adsystem.com",
             "g.doubleclick.net",
+            "https://securepubads.g.doubleclick.net",
             "googlesyndication.com",
             "adsafeprotected.com",
             // more google tracking
             ".googlesyndication.com/safeframe/",
             // repeat consent js
             "/ccpa/user-consent.min.js",
+            "/cookiebanner/js/",
             // privacy
             "privacy-notice.js",
             // // ignore amazon scripts for media
@@ -614,21 +630,25 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
+                    let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
                     let skip_networking = event.resource_type == ResourceType::Other
                         || event.resource_type == ResourceType::Manifest;
-                    let current_url = event.request.url.as_str();
 
                     // main initial check
-                    let skip_networking = !skip_networking
-                        && IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
-                        || self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
-                        || self.block_stylesheets
-                            && ResourceType::Stylesheet == event.resource_type
-                        || self.block_javascript
-                            && javascript_resource
-                            && !JS_FRAMEWORK_ALLOW.contains(current_url);
+                    let skip_networking = if !skip_networking {
+                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
+                            || self.ignore_visuals
+                                && (IGNORE_VISUAL_RESOURCE_MAP
+                                    .contains(event.resource_type.as_ref()))
+                            || self.block_stylesheets
+                                && ResourceType::Stylesheet == event.resource_type
+                            || self.block_javascript
+                                && javascript_resource
+                                && !JS_FRAMEWORK_ALLOW.contains(current_url)
+                    } else {
+                        skip_networking
+                    };
 
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
@@ -653,8 +673,7 @@ impl NetworkManager {
                     let skip_networking = if !skip_networking
                         && (javascript_resource
                             || event.resource_type == ResourceType::Xhr
-                            || event.resource_type == ResourceType::Document
-                            || event.resource_type == ResourceType::Other)
+                            || event.resource_type == ResourceType::Document)
                     {
                         match self.intercept_manager {
                             NetworkInterceptManager::TikTok => {
@@ -703,21 +722,25 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
+                    let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
                     let skip_networking = event.resource_type == ResourceType::Other
                         || event.resource_type == ResourceType::Manifest;
-                    let current_url = event.request.url.as_str();
 
                     // main initial check
-                    let skip_networking = !skip_networking
-                        && IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
-                        || self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
-                        || self.block_stylesheets
-                            && ResourceType::Stylesheet == event.resource_type
-                        || self.block_javascript
-                            && javascript_resource
-                            && !JS_FRAMEWORK_ALLOW.contains(current_url);
+                    let skip_networking = if !skip_networking {
+                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
+                            || self.ignore_visuals
+                                && (IGNORE_VISUAL_RESOURCE_MAP
+                                    .contains(event.resource_type.as_ref()))
+                            || self.block_stylesheets
+                                && ResourceType::Stylesheet == event.resource_type
+                            || self.block_javascript
+                                && javascript_resource
+                                && !JS_FRAMEWORK_ALLOW.contains(current_url)
+                    } else {
+                        skip_networking
+                    };
 
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
@@ -742,8 +765,7 @@ impl NetworkManager {
                     let skip_networking = if !skip_networking
                         && (javascript_resource
                             || event.resource_type == ResourceType::Xhr
-                            || event.resource_type == ResourceType::Document
-                            || event.resource_type == ResourceType::Other)
+                            || event.resource_type == ResourceType::Document)
                     {
                         match self.intercept_manager {
                             NetworkInterceptManager::TikTok => {

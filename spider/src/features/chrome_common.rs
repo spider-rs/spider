@@ -4,8 +4,9 @@ use crate::utils::trie::Trie;
 use chromiumoxide::handler::network::NetworkInterceptManager;
 
 /// wrapper for non chrome interception. does nothing.
-#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 #[cfg(not(feature = "chrome"))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NetworkInterceptManager {
     #[default]
     /// Unknown
