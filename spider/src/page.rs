@@ -38,7 +38,7 @@ lazy_static! {
         phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
             "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js"
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true"
         }
     };
 }
@@ -70,14 +70,14 @@ lazy_static! {
 
 #[cfg(any(feature = "chrome_intercept"))]
 lazy_static! {
-    /// allowed js frameworks and libs excluding some and adding additional URLs
+    /// allowed js frameworks and libs excluding some and adding additional URLs.
     pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
         phf::phf_set! {
             // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js",
             "react.development.js", "react-dom.development.js", "react.production.min.js",
             "react-dom.production.min.js", "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js",
-            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
+            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", ".js?meteor_js_resource=true",
             "d3.js", "layui.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
