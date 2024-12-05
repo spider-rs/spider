@@ -217,6 +217,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             }
             _ => None,
         },
+        intercept_manager: config.chrome_intercept.intercept_manager,
         only_html: config.only_html && !config.full_resources,
         ..HandlerConfig::default()
     }
@@ -291,6 +292,7 @@ pub async fn setup_browser_configuration(
                     }
                     _ => None,
                 };
+                browser_config.intercept_manager = config.chrome_intercept.intercept_manager;
                 browser_config.only_html = config.only_html && !config.full_resources;
 
                 match Browser::launch(browser_config).await {

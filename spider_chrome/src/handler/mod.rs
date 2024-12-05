@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
+use network::NetworkInterceptManager;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,7 @@ use crate::page::Page;
 /// Standard timeout in MS
 pub const REQUEST_TIMEOUT: u64 = 60_000;
 
+pub mod blockers;
 pub mod browser;
 pub mod commandfuture;
 pub mod domworld;
@@ -461,6 +463,7 @@ impl Handler {
                 ignore_analytics: self.config.ignore_analytics,
                 extra_headers: self.config.extra_headers.clone(),
                 only_html: self.config.only_html && self.config.created_first_target,
+                intercept_manager: self.config.intercept_manager,
             },
             browser_ctx,
         );
@@ -701,11 +704,13 @@ pub struct HandlerConfig {
     /// Whether to ignore ads.
     pub ignore_ads: bool,
     /// Extra headers.
-    pub extra_headers: Option<HashMap<String, String>>,
+    pub extra_headers: Option<std::collections::HashMap<String, String>>,
     /// Only Html.
     pub only_html: bool,
     /// Created the first target.
     pub created_first_target: bool,
+    /// The network intercept manager.
+    pub intercept_manager: NetworkInterceptManager,
 }
 
 impl Default for HandlerConfig {
@@ -725,6 +730,7 @@ impl Default for HandlerConfig {
             only_html: false,
             extra_headers: Default::default(),
             created_first_target: false,
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }

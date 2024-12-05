@@ -1,5 +1,29 @@
 use crate::utils::trie::Trie;
 
+#[cfg(feature = "chrome")]
+use chromiumoxide::handler::network::NetworkInterceptManager;
+
+/// wrapper for non chrome interception. does nothing.
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg(not(feature = "chrome"))]
+pub enum NetworkInterceptManager {
+    #[default]
+    /// Unknown
+    Unknown,
+}
+
+#[cfg(not(feature = "chrome"))]
+impl NetworkInterceptManager {
+    /// a custom intercept handle.
+    pub fn new(_url: &str) -> NetworkInterceptManager {
+        NetworkInterceptManager::Unknown
+    }
+    /// Setup the intercept handle
+    pub fn setup(&mut self, url: &str) -> Self {
+        NetworkInterceptManager::new(url)
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Wait for network request with optional timeout. This does nothing without the `chrome` flag enabled.
@@ -640,6 +664,8 @@ pub struct RequestInterceptConfiguration {
     pub block_analytics: bool,
     /// Block ads. Requires the `adblock` feature flag.
     pub block_ads: bool,
+    /// Intercept Manager
+    pub intercept_manager: NetworkInterceptManager,
 }
 
 impl RequestInterceptConfiguration {
@@ -654,6 +680,24 @@ impl RequestInterceptConfiguration {
             ..Default::default()
         }
     }
+    /// Setup a new intercept config with a custom intercept manager.
+    pub fn new_manager(enabled: bool, url: &str) -> RequestInterceptConfiguration {
+        RequestInterceptConfiguration {
+            enabled,
+            block_javascript: false,
+            block_visuals: true,
+            block_analytics: true,
+            block_stylesheets: true,
+            intercept_manager: NetworkInterceptManager::new(url),
+            ..Default::default()
+        }
+    }
+
+    /// Setup the network request manager type.
+    pub fn setup_intercept_manager(&mut self, url: &str) {
+        self.intercept_manager = NetworkInterceptManager::new(url);
+    }
+
     /// Block all request besides html and the important stuff.
     pub fn block_all(&mut self) -> &Self {
         self.block_javascript = true;

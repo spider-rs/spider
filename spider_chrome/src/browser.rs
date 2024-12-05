@@ -1,7 +1,7 @@
+use hashbrown::HashMap;
 use std::future::Future;
 use std::time::Duration;
 use std::{
-    collections::HashMap,
     io,
     path::{Path, PathBuf},
 };
@@ -28,6 +28,7 @@ use crate::conn::Connection;
 use crate::detection::{self, DetectionOptions};
 use crate::error::{BrowserStderr, CdpError, Result};
 use crate::handler::browser::BrowserContext;
+use crate::handler::network::NetworkInterceptManager;
 use crate::handler::viewport::Viewport;
 use crate::handler::{Handler, HandlerConfig, HandlerMessage, REQUEST_TIMEOUT};
 use crate::listeners::{EventListenerRequest, EventStream};
@@ -212,6 +213,7 @@ impl Browser {
             extra_headers: config.extra_headers.clone(),
             only_html: config.only_html,
             created_first_target: false,
+            intercept_manager: config.intercept_manager,
         };
 
         let fut = Handler::new(conn, rx, handler_config);
@@ -691,9 +693,11 @@ pub struct BrowserConfig {
     /// Whether to ignore ads when request interception is enabled.
     pub ignore_ads: bool,
     /// Extra headers.
-    pub extra_headers: Option<HashMap<String, String>>,
+    pub extra_headers: Option<std::collections::HashMap<String, String>>,
     /// Only html
     pub only_html: bool,
+    /// The interception intercept manager.
+    pub intercept_manager: NetworkInterceptManager,
 }
 
 #[derive(Debug, Clone)]
@@ -722,7 +726,8 @@ pub struct BrowserConfigBuilder {
     ignore_stylesheets: bool,
     ignore_analytics: bool,
     only_html: bool,
-    extra_headers: Option<HashMap<String, String>>,
+    extra_headers: Option<std::collections::HashMap<String, String>>,
+    intercept_manager: NetworkInterceptManager,
 }
 
 impl BrowserConfig {
@@ -763,6 +768,7 @@ impl Default for BrowserConfigBuilder {
             ignore_stylesheets: false,
             only_html: false,
             extra_headers: Default::default(),
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }
@@ -918,7 +924,10 @@ impl BrowserConfigBuilder {
         self.cache_enabled = false;
         self
     }
-    pub fn set_extra_headers(mut self, headers: Option<HashMap<String, String>>) -> Self {
+    pub fn set_extra_headers(
+        mut self,
+        headers: Option<std::collections::HashMap<String, String>>,
+    ) -> Self {
         self.extra_headers = headers;
         self
     }
@@ -954,6 +963,7 @@ impl BrowserConfigBuilder {
             ignore_stylesheets: self.ignore_stylesheets,
             extra_headers: self.extra_headers,
             only_html: self.only_html,
+            intercept_manager: self.intercept_manager,
         })
     }
 }

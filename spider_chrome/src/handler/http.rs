@@ -1,6 +1,5 @@
 use chromiumoxide_cdp::cdp::browser_protocol::network::{InterceptionId, RequestId, Response};
 use chromiumoxide_cdp::cdp::browser_protocol::page::FrameId;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -9,7 +8,7 @@ pub struct HttpRequest {
     pub failure_text: Option<String>,
     pub interception_id: Option<InterceptionId>,
     pub response: Option<Response>,
-    pub headers: HashMap<String, String>,
+    pub headers: std::collections::HashMap<String, String>,
     pub frame: Option<FrameId>,
     pub is_navigation_request: bool,
     pub allow_interception: bool,

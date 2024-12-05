@@ -1481,6 +1481,11 @@ impl Website {
                 _ => *self.url.clone(),
             });
 
+            // setup link tracking.
+            if self.configuration.return_page_links && page.page_links.is_none() {
+                page.page_links = Some(Box::new(Default::default()));
+            }
+
             let links = if !page.is_empty() {
                 page.links_ssg(&base, &client).await
             } else {
@@ -4019,7 +4024,8 @@ impl Website {
         &mut self,
         chrome_intercept: RequestInterceptConfiguration,
     ) -> &mut Self {
-        self.configuration.with_chrome_intercept(chrome_intercept);
+        self.configuration
+            .with_chrome_intercept(chrome_intercept, &self.url);
         self
     }
 

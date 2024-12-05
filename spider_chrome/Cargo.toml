@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.17.1"
+version = "2.18.0"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -50,6 +50,7 @@ phf = { version = "0.11", features = ["macros"] }
 adblock = { version = "0.8", optional = true, default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 rand = "0.8"
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
+hashbrown = { version = "0.15", default-features = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

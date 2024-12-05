@@ -41,6 +41,8 @@ use chromiumoxide_cdp::cdp::js_protocol::runtime::{
 };
 use std::time::Duration;
 
+use super::network::NetworkInterceptManager;
+
 macro_rules! advance_state {
     ($s:ident, $cx:ident, $now:ident, $cmds: ident, $next_state:expr ) => {{
         if let Poll::Ready(poll) = $cmds.poll($now) {
@@ -112,9 +114,9 @@ impl Target {
         network_manager.ignore_visuals = config.ignore_visuals;
         network_manager.block_javascript = config.ignore_javascript;
         network_manager.block_analytics = config.ignore_analytics;
-
         network_manager.block_stylesheets = config.ignore_stylesheets;
         network_manager.only_html = config.only_html;
+        network_manager.intercept_manager = config.intercept_manager;
 
         Self {
             info,
@@ -636,6 +638,7 @@ pub struct TargetConfig {
     pub ignore_stylesheets: bool,
     pub only_html: bool,
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
+    pub intercept_manager: NetworkInterceptManager,
 }
 
 impl Default for TargetConfig {
@@ -652,6 +655,7 @@ impl Default for TargetConfig {
             ignore_analytics: true,
             only_html: false,
             extra_headers: Default::default(),
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }

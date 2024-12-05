@@ -1,3 +1,4 @@
+use super::blockers::Trie;
 use crate::auth::Credentials;
 use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
@@ -16,7 +17,8 @@ use chromiumoxide_cdp::cdp::browser_protocol::{
     network::EnableParams, security::SetIgnoreCertificateErrorsParams,
 };
 use chromiumoxide_types::{Command, Method, MethodId};
-use std::collections::{HashMap, HashSet, VecDeque};
+use hashbrown::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::time::Duration;
 
 lazy_static::lazy_static! {
@@ -29,14 +31,20 @@ lazy_static::lazy_static! {
             "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
             "d3.js",
-            "app.js",
-            "main.js",
-            "index.js",
+            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
             "https://challenges.cloudflare.com/turnstile",
             "https://js.stripe.com/v3/"
+        }
+    };
+
+    /// path of a js framework
+    pub static ref JS_FRAMEWORK_PATH: phf::Set<&'static str> = {
+        phf::phf_set! {
+            // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
+            "_next/static/", "_astro/",
         }
     };
 
@@ -71,8 +79,7 @@ lazy_static::lazy_static! {
     pub static ref IGNORE_VISUAL_RESOURCE_MAP: phf::Set<&'static str> = phf::phf_set! {
         "Image",
         "Media",
-        "Font",
-        "Other",
+        "Font"
     };
 
     /// Ignore the resources for visual content types.
@@ -144,6 +151,25 @@ lazy_static::lazy_static! {
         trie
     };
 
+     /// Ignore list of scripts paths.
+     static ref URL_IGNORE_TRIE_PATHS: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            // explicit ignore tracking.js and ad files
+            "privacy-notice.js",
+            "tracking.js",
+            "track.js",
+            "ads.js",
+            "analytics.js",
+            "_vercel/insights/script.js",
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+
     /// Ignore list of XHR urls.
     static ref URL_IGNORE_XHR_TRIE: Trie = {
         let mut trie = Trie::new();
@@ -192,6 +218,9 @@ lazy_static::lazy_static! {
             "https://cdn.embedly.com/widgets/",    // Embedly embeds
             "https://player.twitch.tv/",           // Twitch video player embeds
 
+            // vercel live
+            "https://vercel.live/api/",
+
             // insight tracker
             "https://insight.adsrvr.org/track/",
             "cxense.com/",
@@ -217,7 +246,6 @@ lazy_static::lazy_static! {
             // privacy
             "privacy-notice.js",
             // // ignore amazon scripts for media
-            // "https://m.media-amazon.com/images",
             // ".ssl-images-amazon.com/images/"
         ];
         for pattern in &patterns {
@@ -273,63 +301,53 @@ lazy_static::lazy_static! {
 
 }
 
-// Trie node for ignore.
-#[derive(Default)]
-struct TrieNode {
-    children: HashMap<char, TrieNode>,
-    is_end_of_word: bool,
-}
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script(
+    url: &str,
+    block_analytics: bool,
+    intercept_manager: NetworkInterceptManager,
+) -> bool {
+    let mut ignore_script = block_analytics && URL_IGNORE_TRIE.contains_prefix(url);
 
-/// Basic Ignore trie.
-struct Trie {
-    root: TrieNode,
-}
+    if !ignore_script {
+        if let Some(index) = url.find("//") {
+            let pos = index + 2;
 
-impl Trie {
-    /// Setup a new trie.
-    fn new() -> Self {
-        Trie {
-            root: TrieNode::default(),
-        }
-    }
-    // Insert a word into the Trie.
-    fn insert(&mut self, word: &str) {
-        let mut node = &mut self.root;
-        for ch in word.chars() {
-            node = node.children.entry(ch).or_insert_with(TrieNode::default);
-        }
-        node.is_end_of_word = true;
-    }
-    // Check if the Trie contains any prefix of the given string.
-    fn contains_prefix(&self, text: &str) -> bool {
-        let mut node = &self.root;
-        for ch in text.chars() {
-            if let Some(next_node) = node.children.get(&ch) {
-                node = next_node;
-                if node.is_end_of_word {
-                    return true;
+            // Ensure there is something after `//`
+            if pos < url.len() {
+                // Find the first slash after the `//`
+                if let Some(slash_index) = url[pos..].find('/') {
+                    let base_path_index = pos + slash_index + 1;
+
+                    if url.len() > base_path_index {
+                        let new_url: &str = &url[base_path_index..];
+                        ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(new_url);
+
+                        // ignore assets we do not need for frameworks
+                        if !ignore_script && intercept_manager == NetworkInterceptManager::Unknown {
+                            let hydration_file =
+                                JS_FRAMEWORK_PATH.iter().any(|p| new_url.starts_with(p));
+
+                            // ignore astro paths
+                            if hydration_file && new_url.ends_with(".js") {
+                                ignore_script = true;
+                            }
+                        }
+                    }
                 }
-            } else {
-                break;
             }
         }
-        false
     }
-}
 
-/// Url matches analytics that we want to ignore or trackers.
-pub(crate) fn ignore_script(url: &str) -> bool {
-    let ignore_script = URL_IGNORE_TRIE.contains_prefix(url);
-
-    // check for file ending in analytics.js
+    // fallback for file ending in analytics.js
     if !ignore_script {
-        url.ends_with("analytics.js")
+        ignore_script = url.ends_with("analytics.js")
             || url.ends_with("ads.js")
             || url.ends_with("tracking.js")
-            || url.ends_with("track.js")
-    } else {
-        ignore_script
+            || url.ends_with("track.js");
     }
+
+    ignore_script
 }
 
 /// Url matches analytics that we want to ignore or trackers.
@@ -347,6 +365,48 @@ pub(crate) fn ignore_script_xhr_media(url: &str) -> bool {
     URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(url)
 }
 
+/// Custom network intercept types to expect on a domain
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum NetworkInterceptManager {
+    /// tiktok.com
+    TikTok,
+    /// facebook.com
+    Facebook,
+    /// amazon.com
+    Amazon,
+    /// x.com
+    X,
+    /// netflix.com
+    Netflix,
+    #[default]
+    /// Unknown
+    Unknown,
+}
+
+impl NetworkInterceptManager {
+    /// a custom intercept handle.
+    pub fn new(url: &str) -> NetworkInterceptManager {
+        if url.starts_with("https://www.tiktok.com") || url.starts_with("https://tiktok.com") {
+            NetworkInterceptManager::TikTok
+        } else if url.starts_with("https://www.amazon.com") || url.starts_with("https://amazon.com")
+        {
+            NetworkInterceptManager::Amazon
+        } else if url.starts_with("https://www.x.com") || url.starts_with("https://x.com") {
+            NetworkInterceptManager::X
+        } else if url.starts_with("https://www.netflix.com")
+            || url.starts_with("https://netflix.com")
+        {
+            NetworkInterceptManager::Netflix
+        } else {
+            NetworkInterceptManager::Unknown
+        }
+    }
+    /// Setup the intercept handle
+    pub fn setup(&mut self, url: &str) -> Self {
+        NetworkInterceptManager::new(url)
+    }
+}
+
 #[derive(Debug)]
 pub struct NetworkManager {
     queued_events: VecDeque<NetworkEvent>,
@@ -354,7 +414,7 @@ pub struct NetworkManager {
     requests: HashMap<RequestId, HttpRequest>,
     // TODO put event in an Arc?
     requests_will_be_sent: HashMap<RequestId, EventRequestWillBeSent>,
-    extra_headers: HashMap<String, String>,
+    extra_headers: std::collections::HashMap<String, String>,
     request_id_to_interception_id: HashMap<RequestId, InterceptionId>,
     user_cache_disabled: bool,
     attempted_authentications: HashSet<RequestId>,
@@ -374,6 +434,8 @@ pub struct NetworkManager {
     pub block_analytics: bool,
     /// Only html from loading.
     pub only_html: bool,
+    /// The custom intercept handle logic to run on the website.
+    pub intercept_manager: NetworkInterceptManager,
 }
 
 impl NetworkManager {
@@ -397,6 +459,7 @@ impl NetworkManager {
             block_stylesheets: false,
             block_analytics: true,
             only_html: false,
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 
@@ -436,11 +499,11 @@ impl NetworkManager {
         self.queued_events.pop_front()
     }
 
-    pub fn extra_headers(&self) -> &HashMap<String, String> {
+    pub fn extra_headers(&self) -> &std::collections::HashMap<String, String> {
         &self.extra_headers
     }
 
-    pub fn set_extra_headers(&mut self, headers: HashMap<String, String>) {
+    pub fn set_extra_headers(&mut self, headers: std::collections::HashMap<String, String>) {
         self.extra_headers = headers;
         self.extra_headers.remove("proxy-authorization");
         if let Ok(headers) = serde_json::to_value(&self.extra_headers) {
@@ -551,38 +614,66 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
-                    let javascript_resource = ResourceType::Script == event.resource_type;
+                    let javascript_resource = event.resource_type == ResourceType::Script;
+                    let skip_networking = event.resource_type == ResourceType::Other
+                        || event.resource_type == ResourceType::Manifest;
+                    let current_url = event.request.url.as_str();
 
                     // main initial check
-                    let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
-                        .contains(event.resource_type.as_ref())
+                    let skip_networking = !skip_networking
+                        && IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
                         || self.ignore_visuals
                             && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
                         || self.block_stylesheets
                             && ResourceType::Stylesheet == event.resource_type
                         || self.block_javascript
                             && javascript_resource
-                            && !JS_FRAMEWORK_ALLOW.contains(event.request.url.as_str());
+                            && !JS_FRAMEWORK_ALLOW.contains(current_url);
 
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
                         && (javascript_resource || event.resource_type == ResourceType::Document)
                     {
-                        ignore_script_embedded(event.request.url.as_str())
+                        ignore_script_embedded(current_url)
                     } else {
                         skip_networking
                     };
 
                     // analytics check
-                    let skip_networking =
-                        if !skip_networking && javascript_resource && self.block_analytics {
-                            ignore_script(event.request.url.as_str())
-                        } else {
-                            skip_networking
-                        };
+                    let skip_networking = if !skip_networking && javascript_resource {
+                        ignore_script(current_url, self.block_analytics, self.intercept_manager)
+                    } else {
+                        skip_networking
+                    };
 
                     // XHR check
                     let skip_networking = self.skip_xhr(skip_networking, &event);
+
+                    // custom interception layer.
+                    let skip_networking = if !skip_networking
+                        && (javascript_resource
+                            || event.resource_type == ResourceType::Xhr
+                            || event.resource_type == ResourceType::Document
+                            || event.resource_type == ResourceType::Other)
+                    {
+                        match self.intercept_manager {
+                            NetworkInterceptManager::TikTok => {
+                                super::blockers::tiktok_blockers::block_tiktok(event)
+                            }
+                            NetworkInterceptManager::Amazon => {
+                                super::blockers::amazon_blockers::block_amazon(event)
+                            }
+                            NetworkInterceptManager::X => {
+                                super::blockers::x_blockers::block_x(event)
+                            }
+                            NetworkInterceptManager::Netflix => {
+                                super::blockers::netflix_blockers::block_netflix(event)
+                            }
+                            _ => skip_networking,
+                        }
+                    } else {
+                        skip_networking
+                    };
 
                     if skip_networking {
                         let fullfill_params =
@@ -612,35 +703,66 @@ impl NetworkManager {
                 {
                     self.on_request(&request_will_be_sent, Some(event.request_id.clone().into()));
                 } else {
-                    let skip_networking = IGNORE_NETWORKING_RESOURCE_MAP
-                        .contains(&event.resource_type.as_ref())
+                    let javascript_resource = event.resource_type == ResourceType::Script;
+                    let skip_networking = event.resource_type == ResourceType::Other
+                        || event.resource_type == ResourceType::Manifest;
+                    let current_url = event.request.url.as_str();
+
+                    // main initial check
+                    let skip_networking = !skip_networking
+                        && IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
                         || self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(&event.resource_type.as_ref())
-                                || self.block_stylesheets
-                                    && ResourceType::Stylesheet == event.resource_type)
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
+                        || self.block_stylesheets
+                            && ResourceType::Stylesheet == event.resource_type
                         || self.block_javascript
-                            && ResourceType::Script == event.resource_type
-                            && !JS_FRAMEWORK_ALLOW.contains(&event.request.url.as_str());
+                            && javascript_resource
+                            && !JS_FRAMEWORK_ALLOW.contains(current_url);
 
                     let skip_networking = if !skip_networking
-                        && javascript_resource
                         && (self.only_html || self.ignore_visuals)
+                        && (javascript_resource || event.resource_type == ResourceType::Document)
                     {
-                        ignore_script_embedded(event.request.url.as_str())
+                        ignore_script_embedded(current_url)
                     } else {
                         skip_networking
                     };
 
                     // analytics check
-                    let skip_networking =
-                        if !skip_networking && javascript_resource && self.block_analytics {
-                            ignore_script(event.request.url.as_str())
-                        } else {
-                            skip_networking
-                        };
+                    let skip_networking = if !skip_networking && javascript_resource {
+                        ignore_script(current_url, self.block_analytics, self.intercept_manager)
+                    } else {
+                        skip_networking
+                    };
 
                     // XHR check
                     let skip_networking = self.skip_xhr(skip_networking, &event);
+
+                    // custom interception layer.
+                    let skip_networking = if !skip_networking
+                        && (javascript_resource
+                            || event.resource_type == ResourceType::Xhr
+                            || event.resource_type == ResourceType::Document
+                            || event.resource_type == ResourceType::Other)
+                    {
+                        match self.intercept_manager {
+                            NetworkInterceptManager::TikTok => {
+                                super::blockers::tiktok_blockers::block_tiktok(event)
+                            }
+                            NetworkInterceptManager::Amazon => {
+                                super::blockers::amazon_blockers::block_amazon(event)
+                            }
+                            NetworkInterceptManager::X => {
+                                super::blockers::x_blockers::block_x(event)
+                            }
+                            NetworkInterceptManager::Netflix => {
+                                super::blockers::netflix_blockers::block_netflix(event)
+                            }
+                            _ => skip_networking,
+                        }
+                    } else {
+                        skip_networking
+                    };
 
                     if self.detect_ad(event) || skip_networking {
                         let fullfill_params =

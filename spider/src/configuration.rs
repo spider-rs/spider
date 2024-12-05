@@ -853,8 +853,10 @@ impl Configuration {
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: RequestInterceptConfiguration,
+        url: &str,
     ) -> &mut Self {
         self.chrome_intercept = chrome_intercept;
+        self.chrome_intercept.setup_intercept_manager(url);
         self
     }
 
@@ -863,6 +865,7 @@ impl Configuration {
     pub fn with_chrome_intercept(
         &mut self,
         _chrome_intercept: RequestInterceptConfiguration,
+        _url: &str,
     ) -> &mut Self {
         self
     }

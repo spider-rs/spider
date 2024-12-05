@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;

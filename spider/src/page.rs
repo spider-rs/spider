@@ -38,7 +38,9 @@ lazy_static! {
         phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
             "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true"
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true",
+            // possible js that could be critical.
+            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
         }
     };
 }
@@ -79,6 +81,7 @@ lazy_static! {
             "react-dom.production.min.js", "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", ".js?meteor_js_resource=true",
             "d3.js", "layui.js",
+            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
             "https://m.stripe.network/out-4.5.43.js",
@@ -164,7 +167,7 @@ pub struct Page {
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
-    /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
+    /// The total byte transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
     pub bytes_transferred: Option<f64>,
 }
 
@@ -1303,7 +1306,7 @@ impl Page {
                 let sub_matcher = &selectors.0;
 
                 let rewriter_settings = Settings {
-                    element_content_handlers: vec![lol_html::element!("a", |el| {
+                    element_content_handlers: vec![lol_html::element!("a[href]", |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
                                 &self.base.as_ref(),
@@ -1399,7 +1402,7 @@ impl Page {
 
                 let rewriter_settings = Settings {
                     element_content_handlers: vec![
-                        lol_html::element!("a", |el| {
+                        lol_html::element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
                                     &self.base.as_ref(),
@@ -1417,7 +1420,7 @@ impl Page {
                             }
                             Ok(())
                         }),
-                        lol_html::element!("script", |el| {
+                        lol_html::element!("script[src]", |el| {
                             if let Some(source) = el.get_attribute("src") {
                                 if source.starts_with("/_next/static/")
                                     && source.ends_with("/_ssgManifest.js")
