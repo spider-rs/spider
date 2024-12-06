@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.20.1"
+version = "2.20.2"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -63,7 +63,7 @@ tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
 
 [features]
-default = ["tokio-runtime", "bytes", "adblock"]
+default = ["tokio-runtime", "bytes"]
 tokio-runtime = ["async-tungstenite/tokio-runtime"]
 fetcher = []
 bytes = ["dep:bytes"]

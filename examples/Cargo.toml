@@ -129,6 +129,11 @@ path = "chrome_remote.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
+name = "real_world"
+path = "real_world.rs"
+required-features = ["spider/sync", "spider/chrome", "spider_utils/transformations"]
+
+[[example]]
 name = "chrome_viewport"
 path = "chrome_viewport.rs"
 required-features = ["spider/sync", "spider/chrome"]

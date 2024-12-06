@@ -93,6 +93,7 @@ lazy_static::lazy_static! {
         let patterns = [
             "https://www.googletagservices.com/tag/",
             "https://js.hs-analytics.net/analytics/",
+            "https://www.googletagmanager.com/gtag",
             "https://www.googletagmanager.com/gtm.js",
             "https://js.hsadspixel.net",
             "https://www.google.com/adsense/",
@@ -239,6 +240,9 @@ lazy_static::lazy_static! {
             "https://consentcdn.cookiebot.com", // Cookie bot
             // vercel live
             "https://vercel.live/api/",
+
+            // extra CDN scripts
+            "https://cdn.readme.io/public/",
 
             // insight tracker
             "https://insight.adsrvr.org/track/",
