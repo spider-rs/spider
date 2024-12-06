@@ -12,18 +12,26 @@ lazy_static::lazy_static! {
             "ads.js",
             "gtm.js?",
             "googletagmanager.com",
+            "ssl.google-analytics.com",
             // Tracking patterns
             "-tracking.",
             "-tracking/script.",
             ".tracking",
             ".snowplowanalytics.snowplow",
-            "dx.mountain.com",
+            ".mountain.com",
             "tracking.js",
             "track.js",
-
+            "/upi/jslogger",
+            "otBannerSdk.js",
             // Analytics scripts
             "analytics.js",
-
+            "ob.cityrobotflower.com",
+            "siteintercept.qualtrics.com",
+            "iesnare.com",
+            "iovation.com",
+            "googletagmanager.com",
+            "forter.com",
+            "/first.iovation.com",
             // Specific ad and tracking domains
             "googlesyndication.com",
             ".googlesyndication.com/safeframe/",

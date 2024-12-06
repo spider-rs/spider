@@ -20,7 +20,6 @@ use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::time::Duration;
-use url::Url;
 
 lazy_static::lazy_static! {
     /// allowed js frameworks and libs excluding some and adding additional URLs
@@ -94,6 +93,7 @@ lazy_static::lazy_static! {
         let patterns = [
             "https://www.googletagservices.com/tag/",
             "https://js.hs-analytics.net/analytics/",
+            "https://www.googletagmanager.com/gtm.js",
             "https://js.hsadspixel.net",
             "https://www.google.com/adsense/",
             "https://www.googleadservices.com",
@@ -102,10 +102,12 @@ lazy_static::lazy_static! {
             "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
-            "https://www.googletagmanager.com",
             "https://iabusprivacy.pmc.com/geo-info.js",
             "https://cookie-cdn.cookiepro.com/consent",
+            "https://w.usabilla.com/",
             "https://consentcdn.cookiebot.com/",
+            "https://plausible.io/api/event",
+            "https://sentry.io/api/",
             "https://cdn.onesignal.com",
             "https://cdn.cookielaw.org/",
             "https://static.doubleclick.net",
@@ -168,6 +170,7 @@ lazy_static::lazy_static! {
             "track.js",
             "ads.js",
             "analytics.js",
+            "otSDKStub.js",
             "_vercel/insights/script.js",
         ];
         for pattern in &patterns {
@@ -194,6 +197,7 @@ lazy_static::lazy_static! {
             "https://s.yimg.com/wi",
             "https://disney.my.sentry.io/api/",
             "https://www.redditstatic.com/ads",
+            "https://sentry.io/api/",
             "https://buy.tinypass.com/",
             "https://idx.liadm.com",
             "https://geo.privacymanager.io/",
@@ -260,8 +264,11 @@ lazy_static::lazy_static! {
             // repeat consent js
             "/ccpa/user-consent.min.js",
             "/cookiebanner/js/",
+            "cookielaw.org",
             // privacy
+            "otBannerSdk.js",
             "privacy-notice.js",
+            ".ingest.sentry.io/api",
             // ignore amazon scripts for media
             ".ssl-images-amazon.com/images/"
         ];
@@ -315,11 +322,6 @@ lazy_static::lazy_static! {
 
     /// Case insenstive css matching
     pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
-
-    /// Pre parsed hostname to use for adblocking.
-    pub static ref PRE_PARSED_HOSTNAME: url::Url = {
-        Url::parse("http://example.com").expect("a valid url")
-    };
 
 }
 
@@ -869,11 +871,10 @@ impl NetworkManager {
         let block_request = blockable
             // set it to example.com for 3rd party handling is_same_site
         && {
-            let h = PRE_PARSED_HOSTNAME.domain().unwrap_or_default();
             let request = adblock::request::Request::preparsed(
                  &u,
-                 h,
-                 h,
+                 "example.com",
+                 "example.com",
                  &event.resource_type.as_ref().to_lowercase(),
                  !event.request.is_same_site.unwrap_or_default());
 

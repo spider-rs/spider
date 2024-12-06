@@ -37,7 +37,7 @@ lazy_static! {
     pub static ref JS_FRAMEWORK_ASSETS: phf::Set<&'static str> = {
         phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
-            "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
+            "vue.global.js", "vue.global.prod.js", "vue.runtime.", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
             "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true",
             // possible js that could be critical.
             "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
