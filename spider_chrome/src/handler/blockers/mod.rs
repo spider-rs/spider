@@ -1,13 +1,15 @@
-// tiktok blockers
-pub mod tiktok_blockers;
-// amazon blockers
-pub mod amazon_blockers;
-// x blockers
-pub mod x_blockers;
-// netflix blockers
 /// adblock patterns
 pub mod adblock_patterns;
+/// amazon blockers
+pub mod amazon_blockers;
+/// linkedin blockers
+pub mod linkedin_blockers;
+/// netflix blockers
 pub mod netflix_blockers;
+/// tiktok blockers
+pub mod tiktok_blockers;
+/// x blockers
+pub mod x_blockers;
 
 // Trie node for ignore.
 #[derive(Default)]

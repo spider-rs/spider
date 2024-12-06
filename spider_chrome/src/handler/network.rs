@@ -126,6 +126,7 @@ lazy_static::lazy_static! {
             "https://cdn.tinypass.com",
             "https://cd.connatix.com",
             "https://platform-api.sharethis.com/js/sharethis.js",
+            "https://js.hsforms.net/forms/embed/v2.js",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -355,6 +356,8 @@ pub enum NetworkInterceptManager {
     Amazon,
     /// x.com
     X,
+    /// LinkedIn,
+    LinkedIn,
     /// netflix.com
     Netflix,
     #[default]
@@ -376,6 +379,10 @@ impl NetworkInterceptManager {
             || url.starts_with("https://netflix.com")
         {
             NetworkInterceptManager::Netflix
+        } else if url.starts_with("https://www.linkedin.com")
+            || url.starts_with("https://linkedin.com")
+        {
+            NetworkInterceptManager::LinkedIn
         } else {
             NetworkInterceptManager::Unknown
         }
@@ -710,6 +717,9 @@ impl NetworkManager {
                             NetworkInterceptManager::Netflix => {
                                 super::blockers::netflix_blockers::block_netflix(event)
                             }
+                            NetworkInterceptManager::LinkedIn => {
+                                super::blockers::linkedin_blockers::block_linkedin(event)
+                            }
                             _ => skip_networking,
                         }
                     } else {
@@ -814,6 +824,9 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::Netflix => {
                                 super::blockers::netflix_blockers::block_netflix(event)
+                            }
+                            NetworkInterceptManager::LinkedIn => {
+                                super::blockers::linkedin_blockers::block_linkedin(event)
                             }
                             _ => skip_networking,
                         }
