@@ -20,6 +20,7 @@ use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::time::Duration;
+use url::Url;
 
 lazy_static::lazy_static! {
     /// allowed js frameworks and libs excluding some and adding additional URLs
@@ -261,8 +262,8 @@ lazy_static::lazy_static! {
             "/cookiebanner/js/",
             // privacy
             "privacy-notice.js",
-            // // ignore amazon scripts for media
-            // ".ssl-images-amazon.com/images/"
+            // ignore amazon scripts for media
+            ".ssl-images-amazon.com/images/"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -315,55 +316,11 @@ lazy_static::lazy_static! {
     /// Case insenstive css matching
     pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
 
-}
+    /// Pre parsed hostname to use for adblocking.
+    pub static ref PRE_PARSED_HOSTNAME: url::Url = {
+        Url::parse("http://example.com").expect("a valid url")
+    };
 
-/// Url matches analytics that we want to ignore or trackers.
-pub(crate) fn ignore_script(
-    url: &str,
-    block_analytics: bool,
-    intercept_manager: NetworkInterceptManager,
-) -> bool {
-    let mut ignore_script = block_analytics && URL_IGNORE_TRIE.contains_prefix(url);
-
-    if !ignore_script {
-        if let Some(index) = url.find("//") {
-            let pos = index + 2;
-
-            // Ensure there is something after `//`
-            if pos < url.len() {
-                // Find the first slash after the `//`
-                if let Some(slash_index) = url[pos..].find('/') {
-                    let base_path_index = pos + slash_index + 1;
-
-                    if url.len() > base_path_index {
-                        let new_url: &str = &url[base_path_index..];
-                        ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(new_url);
-
-                        // ignore assets we do not need for frameworks
-                        if !ignore_script && intercept_manager == NetworkInterceptManager::Unknown {
-                            let hydration_file =
-                                JS_FRAMEWORK_PATH.iter().any(|p| new_url.starts_with(p));
-
-                            // ignore astro paths
-                            if hydration_file && new_url.ends_with(".js") {
-                                ignore_script = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // fallback for file ending in analytics.js
-    if !ignore_script {
-        ignore_script = url.ends_with("analytics.js")
-            || url.ends_with("ads.js")
-            || url.ends_with("tracking.js")
-            || url.ends_with("track.js");
-    }
-
-    ignore_script
 }
 
 /// Url matches analytics that we want to ignore or trackers.
@@ -568,6 +525,58 @@ impl NetworkManager {
         }
     }
 
+    /// Url matches analytics that we want to ignore or trackers.
+    pub(crate) fn ignore_script(
+        &self,
+        url: &str,
+        block_analytics: bool,
+        intercept_manager: NetworkInterceptManager,
+    ) -> bool {
+        let mut ignore_script = block_analytics && URL_IGNORE_TRIE.contains_prefix(url);
+
+        if !ignore_script {
+            if let Some(index) = url.find("//") {
+                let pos = index + 2;
+
+                // Ensure there is something after `//`
+                if pos < url.len() {
+                    // Find the first slash after the `//`
+                    if let Some(slash_index) = url[pos..].find('/') {
+                        let base_path_index = pos + slash_index + 1;
+
+                        if url.len() > base_path_index {
+                            let new_url: &str = &url[base_path_index..];
+                            ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(new_url);
+
+                            // ignore assets we do not need for frameworks
+                            if !ignore_script
+                                && intercept_manager == NetworkInterceptManager::Unknown
+                            {
+                                let hydration_file =
+                                    JS_FRAMEWORK_PATH.iter().any(|p| new_url.starts_with(p));
+
+                                // ignore astro paths
+                                if hydration_file && new_url.ends_with(".js") {
+                                    ignore_script = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // fallback for file ending in analytics.js
+        if !ignore_script {
+            ignore_script = url.ends_with("analytics.js")
+                || url.ends_with("ads.js")
+                || url.ends_with("tracking.js")
+                || url.ends_with("track.js");
+        }
+
+        ignore_script
+    }
+
     /// Determine if the request should be skipped.
     fn skip_xhr(&self, skip_networking: bool, event: &EventRequestPaused) -> bool {
         // XHR check
@@ -633,7 +642,10 @@ impl NetworkManager {
                     let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
                     let skip_networking = event.resource_type == ResourceType::Other
-                        || event.resource_type == ResourceType::Manifest;
+                        || event.resource_type == ResourceType::Manifest
+                        || event.resource_type == ResourceType::CspViolationReport
+                        || event.resource_type == ResourceType::Ping
+                        || event.resource_type == ResourceType::Prefetch;
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -661,7 +673,11 @@ impl NetworkManager {
 
                     // analytics check
                     let skip_networking = if !skip_networking && javascript_resource {
-                        ignore_script(current_url, self.block_analytics, self.intercept_manager)
+                        self.ignore_script(
+                            current_url,
+                            self.block_analytics,
+                            self.intercept_manager,
+                        )
                     } else {
                         skip_networking
                     };
@@ -725,7 +741,10 @@ impl NetworkManager {
                     let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
                     let skip_networking = event.resource_type == ResourceType::Other
-                        || event.resource_type == ResourceType::Manifest;
+                        || event.resource_type == ResourceType::Manifest
+                        || event.resource_type == ResourceType::CspViolationReport
+                        || event.resource_type == ResourceType::Ping
+                        || event.resource_type == ResourceType::Prefetch;
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -742,6 +761,12 @@ impl NetworkManager {
                         skip_networking
                     };
 
+                    let skip_networking = if !skip_networking {
+                        self.detect_ad(event)
+                    } else {
+                        skip_networking
+                    };
+
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
                         && (javascript_resource || event.resource_type == ResourceType::Document)
@@ -753,7 +778,11 @@ impl NetworkManager {
 
                     // analytics check
                     let skip_networking = if !skip_networking && javascript_resource {
-                        ignore_script(current_url, self.block_analytics, self.intercept_manager)
+                        self.ignore_script(
+                            current_url,
+                            self.block_analytics,
+                            self.intercept_manager,
+                        )
                     } else {
                         skip_networking
                     };
@@ -786,7 +815,7 @@ impl NetworkManager {
                         skip_networking
                     };
 
-                    if self.detect_ad(event) || skip_networking {
+                    if skip_networking {
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -809,42 +838,49 @@ impl NetworkManager {
     #[cfg(feature = "adblock")]
     pub fn detect_ad(&self, event: &EventRequestPaused) -> bool {
         use adblock::{
-            lists::{FilterSet, ParseOptions},
+            lists::{FilterSet, ParseOptions, RuleTypes},
             Engine,
         };
+
         lazy_static::lazy_static! {
             static ref AD_ENGINE: Engine = {
                 let mut filter_set = FilterSet::new(false);
+                let mut rules = ParseOptions::default();
+                rules.rule_types = RuleTypes::All;
+
                 filter_set.add_filters(
-                    &vec![
-                        String::from("-advertisement."),
-                        String::from("-ads."),
-                        String::from("-ad."),
-                        String::from("-advertisement-icon."),
-                        String::from("-advertisement-management/"),
-                        String::from("-advertisement/script."),
-                        String::from("-ads/script."),
-                    ],
-                    ParseOptions::default(),
+                    &*crate::handler::blockers::adblock_patterns::ADBLOCK_PATTERNS,
+                    rules,
                 );
+
                 Engine::from_filter_set(filter_set, true)
             };
         };
 
-        let asset = ResourceType::Image == event.resource_type
-            || ResourceType::Media == event.resource_type
-            || ResourceType::Stylesheet == event.resource_type;
+        let blockable = ResourceType::Image == event.resource_type
+            || event.resource_type == ResourceType::Media
+            || event.resource_type == ResourceType::Stylesheet
+            || event.resource_type == ResourceType::Document
+            || event.resource_type == ResourceType::Fetch
+            || event.resource_type == ResourceType::Xhr;
+
         let u = &event.request.url;
 
-        !self.ignore_visuals
-            && (asset
-                || event.resource_type == ResourceType::Fetch
-                || event.resource_type == ResourceType::Xhr)
-                // set it to example.com for 3rd party handling is_same_site
-            &&   match adblock::request::Request::new(&u,  if event.request.is_same_site.unwrap_or_default() {&u } else { &"https://example.com" }, &event.resource_type.as_ref()) {
-                Ok(adblock_request) => AD_ENGINE.check_network_request(&adblock_request).matched,
-                _ => false,
-            }
+        let block_request = blockable
+            // set it to example.com for 3rd party handling is_same_site
+        && {
+            let h = PRE_PARSED_HOSTNAME.domain().unwrap_or_default();
+            let request = adblock::request::Request::preparsed(
+                 &u,
+                 h,
+                 h,
+                 &event.resource_type.as_ref().to_lowercase(),
+                 !event.request.is_same_site.unwrap_or_default());
+
+            AD_ENGINE.check_network_request(&request).matched
+        };
+
+        block_request
     }
 
     pub fn on_fetch_auth_required(&mut self, event: &EventAuthRequired) {

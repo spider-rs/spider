@@ -5,6 +5,8 @@ pub mod amazon_blockers;
 // x blockers
 pub mod x_blockers;
 // netflix blockers
+/// adblock patterns
+pub mod adblock_patterns;
 pub mod netflix_blockers;
 
 // Trie node for ignore.
