@@ -1,4 +1,4 @@
-//! `cargo run --example real_world --features="chrome chrome_intercept spider_utils/transformations"`
+//! cargo run --example real_world --features="chrome chrome_intercept spider_utils/transformations"
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
@@ -20,6 +20,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
             200,
         )))))
+        .with_block_assets(true)
         .with_stealth(true)
         .with_return_page_links(true)
         .with_fingerprint(true)

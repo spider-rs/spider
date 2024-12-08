@@ -142,6 +142,9 @@ lazy_static! {
             "https://acdn.adnxs.com/ast/ast.js",
             "https://schibsted-cdn.relevant-digital.com/static/tags/",
             "https://bat.bing.net",
+            "https://static.addtoany.com/menu/",
+            "https://www.b2i.us/b2i/",
+            "https://acsbapp.com/apps/app/dist/js/app.js",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -191,7 +194,8 @@ lazy_static! {
             "otSDKStub.js",
             "otBannerSdk.js",
             "_vercel/insights/script.js",
-            "analytics."
+            "analytics.",
+            "cookie-law-info-ccpa.js"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -212,8 +216,11 @@ lazy_static! {
             // amazon product feedback
             "https://www.amazon.com/af/feedback-link?",
             "https://www.google.com/ads/ga-audiences",
+            "https://player.vimeo.com/video/",
+            "https://www.youtube.com/iframe_api",
             "https://tr.snapchat.com/config/",
             "https://collect.tealiumiq.com/",
+            "https://cdn.acsbapp.com/config/",
             "https://s.yimg.com/wi",
             "https://disney.my.sentry.io/api/",
             "https://www.redditstatic.com/ads",
@@ -241,7 +248,9 @@ lazy_static! {
             "https://logs.",
             "/track.php",
             "/api/v1/bulklog",
-            "cookieconsentpub"
+            "cookieconsentpub",
+            "cookie-law-info",
+            "mediaelement-and-player.min.j"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -268,6 +277,8 @@ lazy_static! {
             "https://www.googletagmanager.com/ns.html", // Google tag manager.
             "https://consentcdn.cookiebot.com", // Cookie bot
             "https://www.youtube.com/iframe_api", // Youtube iframes.
+            "https://f.vimeocdn.com", // Vimeo EMBEDDINGS
+            "https://i.vimeocdn.com/",
             // "https://www.youtube.com/s/player/", // Youtube player not needed usually since iframe_api is used mainly
             // vercel live
             "https://vercel.live/api/",
@@ -281,6 +292,7 @@ lazy_static! {
             "https://tr.snapchat.com/",
             "https://buy.tinypass.com",
             "https://nimbleplot.com/",
+            "https://my.actiondata.co/js/tracker.php",
             // ignore font extras
             "https://kit.fontawesome.com/",
             "https://use.typekit.net",
@@ -291,6 +303,7 @@ lazy_static! {
             // ignore extra ads
             ".sharethis.com",
             "amazon-adsystem.com",
+            ".vimeocdn.com",
             "g.doubleclick.net",
             "https://securepubads.g.doubleclick.net",
             "googlesyndication.com",
@@ -324,7 +337,6 @@ lazy_static! {
             "https://open.spotify.com/",
             "https://api.spotify.com/v1/",
             "https://music.apple.com/"
-
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -638,7 +650,11 @@ impl NetworkManager {
     /// Determine if the request should be skipped.
     fn skip_xhr(&self, skip_networking: bool, event: &EventRequestPaused) -> bool {
         // XHR check
-        if !skip_networking && event.resource_type == ResourceType::Xhr {
+        if !skip_networking
+            && (event.resource_type == ResourceType::Xhr
+                || event.resource_type == ResourceType::WebSocket
+                || event.resource_type == ResourceType::Fetch)
+        {
             let request_url = event.request.url.as_str();
 
             // check if part of ignore scripts.
@@ -648,7 +664,7 @@ impl NetworkManager {
                 true
             } else if self.block_stylesheets || self.ignore_visuals {
                 let block_css = self.block_stylesheets;
-                let block_media = self.ignore_visuals && self.only_html;
+                let block_media = self.ignore_visuals;
 
                 let mut block_request = false;
 
@@ -704,6 +720,9 @@ impl NetworkManager {
                         || event.resource_type == ResourceType::CspViolationReport
                         || event.resource_type == ResourceType::Ping
                         || event.resource_type == ResourceType::Prefetch;
+                    let network_resource = event.resource_type == ResourceType::Xhr
+                        || event.resource_type == ResourceType::Fetch
+                        || event.resource_type == ResourceType::WebSocket;
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -746,7 +765,7 @@ impl NetworkManager {
                     // custom interception layer.
                     let skip_networking = if !skip_networking
                         && (javascript_resource
-                            || event.resource_type == ResourceType::Xhr
+                            || network_resource
                             || event.resource_type == ResourceType::Document)
                     {
                         match self.intercept_manager {
@@ -791,6 +810,11 @@ impl NetworkManager {
                             );
                         self.push_cdp_request(fullfill_params);
                     } else {
+                        tracing::debug!(
+                            "Network Allowed: {:?} - {}",
+                            event.resource_type,
+                            event.request.url
+                        );
                         self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
                     }
                 }
@@ -818,6 +842,9 @@ impl NetworkManager {
                         || event.resource_type == ResourceType::CspViolationReport
                         || event.resource_type == ResourceType::Ping
                         || event.resource_type == ResourceType::Prefetch;
+                    let network_resource = event.resource_type == ResourceType::Xhr
+                        || event.resource_type == ResourceType::Fetch
+                        || event.resource_type == ResourceType::WebSocket;
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -866,7 +893,7 @@ impl NetworkManager {
                     // custom interception layer.
                     let skip_networking = if !skip_networking
                         && (javascript_resource
-                            || event.resource_type == ResourceType::Xhr
+                            || network_resource
                             || event.resource_type == ResourceType::Document)
                     {
                         match self.intercept_manager {
