@@ -2,6 +2,8 @@
 pub mod adblock_patterns;
 /// amazon blockers
 pub mod amazon_blockers;
+/// glassdoor blockers
+pub mod glassdoor_blockers;
 /// linkedin blockers
 pub mod linkedin_blockers;
 /// netflix blockers

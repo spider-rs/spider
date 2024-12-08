@@ -130,6 +130,8 @@ lazy_static! {
             "https://js.hsforms.net/forms/embed/v2.js",
             "https://static.parastorage.com/services/wix-thunderbolt/dist/",
             "https://static.parastorage.com/services/tag-manager-client/",
+            "https://www.datadoghq-browser-agent.com/datadog-rum-slim-v4.js",
+            "https://cdn.rudderlabs.com",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -143,6 +145,7 @@ lazy_static! {
             "tinypass.min.js",
             ".airship.com",
             ".adlightning.com",
+            ".lab.amplitude.",
             // explicit ignore tracking.js and ad files
             "privacy-notice.js",
             "tracking.js",
@@ -207,6 +210,8 @@ lazy_static! {
             "https://idx.liadm.com",
             "https://geo.privacymanager.io/",
             "https://nimbleplot.com",
+            "https://api.lab.amplitude.com/",
+            "https://flag.lab.amplitude.com/sdk/v2/flags",
             ".wixapps.net/api/v1/bulklog",
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
@@ -250,7 +255,6 @@ lazy_static! {
 
             // extra CDN scripts
             "https://cdn.readme.io/public/",
-
             // insight tracker
             "https://insight.adsrvr.org/track/",
             "cxense.com/",
@@ -261,6 +265,8 @@ lazy_static! {
             // ignore font extras
             "https://kit.fontawesome.com/",
             "https://use.typekit.net",
+            ".amplitude.com",
+            ".rudderstack.com",
             // ignore tailwind cdn
             "https://cdn.tailwindcss.com",
             // ignore extra ads
@@ -368,6 +374,8 @@ pub enum NetworkInterceptManager {
     Netflix,
     /// upwork.com,
     Upwork,
+    /// glassdoor.com
+    Glassdoor,
     #[default]
     /// Unknown
     Unknown,
@@ -375,7 +383,7 @@ pub enum NetworkInterceptManager {
 
 lazy_static! {
     /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 12] = [
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 14] = [
         ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
         ("https://tiktok.com", NetworkInterceptManager::TikTok),
         ("https://www.amazon.com", NetworkInterceptManager::Amazon),
@@ -391,6 +399,8 @@ lazy_static! {
         ("https://linkedin.com", NetworkInterceptManager::LinkedIn),
         ("https://www.upwork.com", NetworkInterceptManager::Upwork),
         ("https://upwork.com", NetworkInterceptManager::Upwork),
+        ("https://www.glassdoor.com", NetworkInterceptManager::Glassdoor),
+        ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
     ];
 }
 
@@ -736,6 +746,12 @@ impl NetworkManager {
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
                             }
+                            NetworkInterceptManager::Glassdoor => {
+                                super::blockers::glassdoor_blockers::block_glassdoor(
+                                    event,
+                                    self.ignore_visuals,
+                                )
+                            }
                             NetworkInterceptManager::Upwork => {
                                 super::blockers::upwork_blockers::block_upwork(
                                     event,
@@ -849,6 +865,12 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
+                            }
+                            NetworkInterceptManager::Glassdoor => {
+                                super::blockers::glassdoor_blockers::block_glassdoor(
+                                    event,
+                                    self.ignore_visuals,
+                                )
                             }
                             NetworkInterceptManager::Upwork => {
                                 super::blockers::upwork_blockers::block_upwork(

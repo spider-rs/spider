@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
             trie
         };
 
-        /// Ignore list of urls.
+        /// Ignore list of urls styles.
         static ref URL_IGNORE_TRIE_STYLES: Trie = {
             let mut trie = Trie::new();
             let patterns = [
