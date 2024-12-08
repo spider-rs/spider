@@ -8,6 +8,8 @@ pub mod linkedin_blockers;
 pub mod netflix_blockers;
 /// tiktok blockers
 pub mod tiktok_blockers;
+/// upwork blockers
+pub mod upwork_blockers;
 /// x blockers
 pub mod x_blockers;
 

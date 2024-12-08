@@ -38,7 +38,7 @@ lazy_static! {
         phf::phf_set! {
             "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
             "vue.global.js", "vue.global.prod.js", "vue.runtime.", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true",
+            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true", "lodash.min.js", "lodash.js",
             // possible js that could be critical.
             "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
         }
@@ -80,7 +80,7 @@ lazy_static! {
             "react.development.js", "react-dom.development.js", "react.production.min.js",
             "react-dom.production.min.js", "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", ".js?meteor_js_resource=true",
-            "d3.js", "layui.js",
+            "d3.js", "layui.js", "lodash.min.js", "lodash.js",
             "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",

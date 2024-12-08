@@ -18,10 +18,11 @@ use chromiumoxide_cdp::cdp::browser_protocol::{
 };
 use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
+use lazy_static::lazy_static;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-lazy_static::lazy_static! {
+lazy_static! {
     /// allowed js frameworks and libs excluding some and adding additional URLs
     pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
         phf::phf_set! {
@@ -30,7 +31,7 @@ lazy_static::lazy_static! {
             "react.development.js", "react-dom.development.js", "react.production.min.js",
             "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
             "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
-            "d3.js",
+            "d3.js", "lodash.min.js", "lodash.js",
             "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
             // Verified 3rd parties for request
             "https://m.stripe.network/inner.html",
@@ -127,6 +128,8 @@ lazy_static::lazy_static! {
             "https://cd.connatix.com",
             "https://platform-api.sharethis.com/js/sharethis.js",
             "https://js.hsforms.net/forms/embed/v2.js",
+            "https://static.parastorage.com/services/wix-thunderbolt/dist/",
+            "https://static.parastorage.com/services/tag-manager-client/",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -214,6 +217,7 @@ lazy_static::lazy_static! {
             ".onetrust.com/consent/",
             "https://logs.",
             "/track.php",
+            "/api/v1/bulklog"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -239,6 +243,8 @@ lazy_static::lazy_static! {
             "https://www.youtube.com/player_api", // Youtube player.
             "https://www.googletagmanager.com/ns.html", // Google tag manager.
             "https://consentcdn.cookiebot.com", // Cookie bot
+            "https://www.youtube.com/iframe_api", // Youtube iframes.
+            // "https://www.youtube.com/s/player/", // Youtube player not needed usually since iframe_api is used mainly
             // vercel live
             "https://vercel.live/api/",
 
@@ -360,32 +366,42 @@ pub enum NetworkInterceptManager {
     LinkedIn,
     /// netflix.com
     Netflix,
+    /// upwork.com,
+    Upwork,
     #[default]
     /// Unknown
     Unknown,
 }
 
+lazy_static! {
+    /// Top tier list of the most common websites visited.
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 12] = [
+        ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
+        ("https://tiktok.com", NetworkInterceptManager::TikTok),
+        ("https://www.amazon.com", NetworkInterceptManager::Amazon),
+        ("https://amazon.com", NetworkInterceptManager::Amazon),
+        ("https://www.x.com", NetworkInterceptManager::X),
+        ("https://x.com", NetworkInterceptManager::X),
+        ("https://www.netflix.com", NetworkInterceptManager::Netflix),
+        ("https://netflix.com", NetworkInterceptManager::Netflix),
+        (
+            "https://www.linkedin.com",
+            NetworkInterceptManager::LinkedIn
+        ),
+        ("https://linkedin.com", NetworkInterceptManager::LinkedIn),
+        ("https://www.upwork.com", NetworkInterceptManager::Upwork),
+        ("https://upwork.com", NetworkInterceptManager::Upwork),
+    ];
+}
+
 impl NetworkInterceptManager {
     /// a custom intercept handle.
     pub fn new(url: &str) -> NetworkInterceptManager {
-        if url.starts_with("https://www.tiktok.com") || url.starts_with("https://tiktok.com") {
-            NetworkInterceptManager::TikTok
-        } else if url.starts_with("https://www.amazon.com") || url.starts_with("https://amazon.com")
-        {
-            NetworkInterceptManager::Amazon
-        } else if url.starts_with("https://www.x.com") || url.starts_with("https://x.com") {
-            NetworkInterceptManager::X
-        } else if url.starts_with("https://www.netflix.com")
-            || url.starts_with("https://netflix.com")
-        {
-            NetworkInterceptManager::Netflix
-        } else if url.starts_with("https://www.linkedin.com")
-            || url.starts_with("https://linkedin.com")
-        {
-            NetworkInterceptManager::LinkedIn
-        } else {
-            NetworkInterceptManager::Unknown
-        }
+        TOP_TIER_LIST
+            .iter()
+            .find(|&(pattern, _)| url.starts_with(pattern))
+            .map(|&(_, manager_type)| manager_type)
+            .unwrap_or(NetworkInterceptManager::Unknown)
     }
     /// Setup the intercept handle
     pub fn setup(&mut self, url: &str) -> Self {
@@ -720,6 +736,12 @@ impl NetworkManager {
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
                             }
+                            NetworkInterceptManager::Upwork => {
+                                super::blockers::upwork_blockers::block_upwork(
+                                    event,
+                                    self.ignore_visuals,
+                                )
+                            }
                             _ => skip_networking,
                         }
                     } else {
@@ -827,6 +849,12 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
+                            }
+                            NetworkInterceptManager::Upwork => {
+                                super::blockers::upwork_blockers::block_upwork(
+                                    event,
+                                    self.ignore_visuals,
+                                )
                             }
                             _ => skip_networking,
                         }

@@ -2,17 +2,24 @@
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
-use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::tokio;
 use spider::website::Website;
+use spider::{
+    configuration::WaitForIdleNetwork, features::chrome_common::RequestInterceptConfiguration,
+};
 use spider_utils::spider_transformations::transformation::content::{
     transform_content, ReturnFormat, TransformConfig,
 };
 use std::io::Result;
+use std::time::Duration;
+
 async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
         .with_limit(1)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
+        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
+            200,
+        )))))
         .with_stealth(true)
         .with_return_page_links(true)
         .with_fingerprint(true)
