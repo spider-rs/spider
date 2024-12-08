@@ -1134,14 +1134,8 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        let res =
-            tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content_bytes()).await;
-
-        let mut res: Box<bytes::Bytes> = match res {
-            Ok(b) => match b {
-                Ok(b) => b.into(),
-                _ => Default::default(),
-            },
+        let mut res: Box<bytes::Bytes> = match page.content_bytes().await {
+            Ok(b) => b.into(),
             _ => Default::default(),
         };
 

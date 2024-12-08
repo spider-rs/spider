@@ -1277,17 +1277,7 @@ impl Page {
     pub async fn content(&self) -> Result<String> {
         Ok(self
             .evaluate(
-                "{
-          let retVal = '';
-          if (document.doctype) {
-            retVal = new XMLSerializer().serializeToString(document.doctype);
-          }
-          if (document.documentElement) {
-            retVal += document.documentElement.outerHTML;
-          }
-          retVal
-      }
-      ",
+                "{let retVal = ''; if (document.doctype) { return new XMLSerializer().serializeToString(document.doctype); } if (document.documentElement) { retVal += document.documentElement.outerHTML; } retVal }",
             )
             .await?
             .into_value()?)
@@ -1298,17 +1288,7 @@ impl Page {
     pub async fn content_bytes(&self) -> Result<bytes::Bytes> {
         Ok(self
             .evaluate(
-                "{
-            let retVal = '';
-            if (document.doctype) {
-            retVal = new XMLSerializer().serializeToString(document.doctype);
-            }
-            if (document.documentElement) {
-            retVal += document.documentElement.outerHTML;
-            }
-            retVal
-        }
-        ",
+                "{let retVal = ''; if (document.doctype) { retVal = new XMLSerializer().serializeToString(document.doctype); } if (document.documentElement) { retVal += document.documentElement.outerHTML; } retVal }",
             )
             .await?
             .into_value()?)

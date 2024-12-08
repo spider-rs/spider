@@ -132,6 +132,16 @@ lazy_static! {
             "https://static.parastorage.com/services/tag-manager-client/",
             "https://www.datadoghq-browser-agent.com/datadog-rum-slim-v4.js",
             "https://cdn.rudderlabs.com",
+            "https://script.hotjar.com/",
+            "https://static.hotjar.com/",
+            "https://cdn.insurads.com/",
+            "https://cdn-ukwest.onetrust.com",
+            "https://cdn.onetrust.com",
+            "https://services.insurads.com/",
+            "https://platform.iteratehq.com/loader.js",
+            "https://acdn.adnxs.com/ast/ast.js",
+            "https://schibsted-cdn.relevant-digital.com/static/tags/",
+            "https://bat.bing.net",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -179,7 +189,9 @@ lazy_static! {
             "ads.js",
             "analytics.js",
             "otSDKStub.js",
+            "otBannerSdk.js",
             "_vercel/insights/script.js",
+            "analytics."
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -212,6 +224,12 @@ lazy_static! {
             "https://nimbleplot.com",
             "https://api.lab.amplitude.com/",
             "https://flag.lab.amplitude.com/sdk/v2/flags",
+            "https://cdn-ukwest.onetrust.com/",
+            "https://cdn.onetrust.com/",
+            "https://geolocation.onetrust.com/",
+            "https://assets.adobedtm.com/",
+            "https://sdkconfig.pulse.",
+            "https://bat.bing.net",
             ".wixapps.net/api/v1/bulklog",
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
@@ -219,10 +237,11 @@ lazy_static! {
             ".doubleclick.net",
             ".piano.io/",
             ".browsiprod.com",
-            ".onetrust.com/consent/",
+            ".onetrust.",
             "https://logs.",
             "/track.php",
-            "/api/v1/bulklog"
+            "/api/v1/bulklog",
+            "cookieconsentpub"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
