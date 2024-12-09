@@ -79,6 +79,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let _ = tokio::join!(
         crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),

@@ -6,6 +6,8 @@ pub mod amazon_blockers;
 pub mod glassdoor_blockers;
 /// linkedin blockers
 pub mod linkedin_blockers;
+/// medium blockers
+pub mod medium_blockers;
 /// netflix blockers
 pub mod netflix_blockers;
 /// tiktok blockers

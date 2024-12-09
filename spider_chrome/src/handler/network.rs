@@ -162,6 +162,7 @@ lazy_static! {
             // explicit ignore tracking.js and ad files
             "privacy-notice.js",
             "tracking.js",
+            "plugins/cookie-law-info/legacy/",
             "ads.js",
             "insight.min.js",
             "https://ads.",
@@ -181,8 +182,8 @@ lazy_static! {
         trie
     };
 
-     /// Ignore list of scripts paths.
-     static ref URL_IGNORE_TRIE_PATHS: Trie = {
+    /// Ignore list of scripts paths.
+    static ref URL_IGNORE_TRIE_PATHS: Trie = {
         let mut trie = Trie::new();
         let patterns = [
             // explicit ignore tracking.js and ad files
@@ -195,14 +196,12 @@ lazy_static! {
             "otBannerSdk.js",
             "_vercel/insights/script.js",
             "analytics.",
-            "cookie-law-info-ccpa.js"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
         }
         trie
     };
-
 
     /// Ignore list of XHR urls.
     static ref URL_IGNORE_XHR_TRIE: Trie = {
@@ -237,6 +236,8 @@ lazy_static! {
             "https://assets.adobedtm.com/",
             "https://sdkconfig.pulse.",
             "https://bat.bing.net",
+            "https://api.reviews.io/",
+            "https://ads.rubiconproject.com/",
             ".wixapps.net/api/v1/bulklog",
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
@@ -250,7 +251,7 @@ lazy_static! {
             "/api/v1/bulklog",
             "cookieconsentpub",
             "cookie-law-info",
-            "mediaelement-and-player.min.j"
+            "mediaelement-and-player.min.j",
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -344,6 +345,34 @@ lazy_static! {
         trie
     };
 
+    /// Ignore list of path scripts to ignore for tracking and analytics.
+    static ref URL_IGNORE_SCRIPT_BASE_PATHS: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "wp-content/plugins/cookie-law-info",
+            "analytics/",
+            "cookie-tracking",
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+    /// Ignore list of path scripts to ignore for themes.
+    static ref URL_IGNORE_SCRIPT_STYLES_PATHS: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            "wp-content/themes/",
+            "wp-content/plugins/dizo-image-hover/",
+            "wp-content/plugins/supreme-modules-pro-for-divi/"
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
     /// Visual assets to ignore for XHR request.
     pub(crate) static ref IGNORE_XHR_ASSETS: HashSet<CaseInsensitiveString> = {
         let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(36);
@@ -403,6 +432,8 @@ pub enum NetworkInterceptManager {
     LinkedIn,
     /// netflix.com
     Netflix,
+    /// medium.com
+    Medium,
     /// upwork.com,
     Upwork,
     /// glassdoor.com
@@ -414,7 +445,7 @@ pub enum NetworkInterceptManager {
 
 lazy_static! {
     /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 14] = [
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 16] = [
         ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
         ("https://tiktok.com", NetworkInterceptManager::TikTok),
         ("https://www.amazon.com", NetworkInterceptManager::Amazon),
@@ -432,6 +463,8 @@ lazy_static! {
         ("https://upwork.com", NetworkInterceptManager::Upwork),
         ("https://www.glassdoor.com", NetworkInterceptManager::Glassdoor),
         ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
+        ("https://www.medium.com", NetworkInterceptManager::Medium),
+        ("https://medium.com", NetworkInterceptManager::Medium),
     ];
 }
 
@@ -630,6 +663,19 @@ impl NetworkManager {
                                     ignore_script = true;
                                 }
                             }
+
+                            if !ignore_script
+                                && URL_IGNORE_SCRIPT_BASE_PATHS.contains_prefix(new_url)
+                            {
+                                ignore_script = true;
+                            }
+
+                            if !ignore_script
+                                && self.ignore_visuals
+                                && URL_IGNORE_SCRIPT_STYLES_PATHS.contains_prefix(new_url)
+                            {
+                                ignore_script = true;
+                            }
                         }
                     }
                 }
@@ -784,6 +830,9 @@ impl NetworkManager {
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
                             }
+                            NetworkInterceptManager::Medium => {
+                                super::blockers::medium_blockers::block_medium(event)
+                            }
                             NetworkInterceptManager::Glassdoor => {
                                 super::blockers::glassdoor_blockers::block_glassdoor(
                                     event,
@@ -911,6 +960,9 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
+                            }
+                            NetworkInterceptManager::Medium => {
+                                super::blockers::medium_blockers::block_medium(event)
                             }
                             NetworkInterceptManager::Glassdoor => {
                                 super::blockers::glassdoor_blockers::block_glassdoor(
