@@ -20,7 +20,6 @@ lazy_static::lazy_static! {
         trie
     };
 
-
     /// Visual assets to ignore for XHR request.
     pub(crate) static ref IGNORE_XHR_ASSETS: HashSet<CaseInsensitiveString> = {
         let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(36);
@@ -44,7 +43,6 @@ lazy_static::lazy_static! {
 
         m
     };
-
 
     /// Ignore list of XHR urls.
     pub(crate) static ref URL_IGNORE_XHR_TRIE: Trie = {
@@ -89,6 +87,8 @@ lazy_static::lazy_static! {
             "https://static-forms.",
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
+            "https://bes.gcp.data.bigcommerce.com/nobot",
+            "http://ec.editmysite.com",
             "googlesyndication.com",
             ".doubleclick.net",
             ".doofinder.com",

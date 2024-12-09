@@ -10,6 +10,8 @@ pub mod linkedin_blockers;
 pub mod medium_blockers;
 /// netflix blockers
 pub mod netflix_blockers;
+/// script blockers
+pub mod scripts;
 /// tiktok blockers
 pub mod tiktok_blockers;
 /// upwork blockers
