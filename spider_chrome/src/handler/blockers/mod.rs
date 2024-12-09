@@ -16,6 +16,8 @@ pub mod tiktok_blockers;
 pub mod upwork_blockers;
 /// x blockers
 pub mod x_blockers;
+/// xhr blockers
+pub mod xhr;
 
 // Trie node for ignore.
 #[derive(Default)]
