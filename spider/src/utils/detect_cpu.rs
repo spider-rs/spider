@@ -1,20 +1,21 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI8, Ordering};
 use sysinfo::System;
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
 
-/// Atomic value to store CPU usage.
-static CPU_USAGE: AtomicUsize = AtomicUsize::new(0);
+/// The CPU state for the crawl.
+///
+static CPU_STATE: AtomicI8 = AtomicI8::new(0);
 
 /// `OnceCell` CPU tracking.
 static INIT: OnceCell<()> = OnceCell::const_new();
 
 /// Get the total avg CPU being used.
-fn get_cpu_usage(sys: &System) -> usize {
+fn get_cpu_usage(sys: &System) -> f32 {
     sys.cpus()
         .iter()
         .map(|cpu| cpu.cpu_usage() / sys.cpus().len() as f32)
-        .sum::<f32>() as usize
+        .sum::<f32>()
 }
 
 /// Update the cpu usage being used.
@@ -25,7 +26,14 @@ async fn update_cpu_usage() {
         loop {
             sys.refresh_cpu_usage();
             let usage = get_cpu_usage(&sys);
-            CPU_USAGE.store(usage, Ordering::Relaxed);
+            let state = if usage >= 70.0 {
+                1
+            } else if usage >= 95.0 {
+                2
+            } else {
+                0
+            };
+            CPU_STATE.store(state, Ordering::Relaxed);
             sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
         }
     }
@@ -40,7 +48,7 @@ async fn init_once() {
 }
 
 /// Get the cpu usage being used utility.
-pub async fn get_global_cpu_usage() -> usize {
+pub async fn get_global_cpu_usage() -> i8 {
     init_once().await;
-    CPU_USAGE.load(Ordering::Relaxed)
+    CPU_STATE.load(Ordering::Relaxed)
 }

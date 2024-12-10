@@ -2998,6 +2998,10 @@ where
     set.spawn(future)
 }
 
+#[cfg(feature = "balance")]
+/// Period to wait to rebalance cpu in means of IO being main impact.
+const REBALANCE_TIME: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Return the semaphore that should be used.
 #[cfg(feature = "balance")]
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
@@ -3007,7 +3011,11 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Sem
         0
     };
 
-    if cpu_load >= 70 {
+    if cpu_load == 2 {
+        tokio::time::sleep(REBALANCE_TIME).await;
+    }
+
+    if cpu_load >= 1 {
         &*crate::website::SEM_SHARED
     } else {
         semaphore
