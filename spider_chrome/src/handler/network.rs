@@ -160,6 +160,8 @@ pub enum NetworkInterceptManager {
     Glassdoor,
     /// ebay.com
     Ebay,
+    /// nytimes.com
+    Nytimes,
     #[default]
     /// Unknown
     Unknown,
@@ -167,7 +169,7 @@ pub enum NetworkInterceptManager {
 
 lazy_static! {
     /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 18] = [
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 20] = [
         ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
         ("https://tiktok.com", NetworkInterceptManager::TikTok),
         ("https://www.amazon.", NetworkInterceptManager::Amazon),
@@ -189,6 +191,8 @@ lazy_static! {
         ("https://medium.com", NetworkInterceptManager::Medium),
         ("https://www.ebay.", NetworkInterceptManager::Ebay),
         ("https://ebay.", NetworkInterceptManager::Ebay),
+        ("https://www.nytimes.com", NetworkInterceptManager::Nytimes),
+        ("https://nytimes.com", NetworkInterceptManager::Nytimes),
     ];
 }
 
@@ -557,6 +561,15 @@ impl NetworkManager {
                             NetworkInterceptManager::Medium => {
                                 super::blockers::medium_blockers::block_medium(event)
                             }
+                            NetworkInterceptManager::Ebay => {
+                                super::blockers::ebay_blockers::block_ebay(event)
+                            }
+                            NetworkInterceptManager::Nytimes => {
+                                super::blockers::nytimes_blockers::block_nytimes(
+                                    event,
+                                    self.ignore_visuals,
+                                )
+                            }
                             NetworkInterceptManager::Glassdoor => {
                                 super::blockers::glassdoor_blockers::block_glassdoor(
                                     event,
@@ -687,6 +700,15 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::Medium => {
                                 super::blockers::medium_blockers::block_medium(event)
+                            }
+                            NetworkInterceptManager::Ebay => {
+                                super::blockers::ebay_blockers::block_ebay(event)
+                            }
+                            NetworkInterceptManager::Nytimes => {
+                                super::blockers::nytimes_blockers::block_nytimes(
+                                    event,
+                                    self.ignore_visuals,
+                                )
                             }
                             NetworkInterceptManager::Glassdoor => {
                                 super::blockers::glassdoor_blockers::block_glassdoor(

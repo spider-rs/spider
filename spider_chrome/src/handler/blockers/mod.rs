@@ -2,6 +2,8 @@
 pub mod adblock_patterns;
 /// amazon blockers
 pub mod amazon_blockers;
+/// ebay blockers
+pub mod ebay_blockers;
 /// glassdoor blockers
 pub mod glassdoor_blockers;
 /// linkedin blockers
@@ -10,6 +12,8 @@ pub mod linkedin_blockers;
 pub mod medium_blockers;
 /// netflix blockers
 pub mod netflix_blockers;
+/// nytimes blockers
+pub mod nytimes_blockers;
 /// script blockers
 pub mod scripts;
 /// tiktok blockers
@@ -18,8 +22,7 @@ pub mod tiktok_blockers;
 pub mod upwork_blockers;
 /// x blockers
 pub mod x_blockers;
-/// ebay blockers
-pub mod ebay_blockers;
+
 /// xhr blockers
 pub mod xhr;
 

@@ -92,6 +92,10 @@ lazy_static::lazy_static! {
             "https://bes.gcp.data.bigcommerce.com/nobot",
             "http://ec.editmysite.com",
             "https://dcinfos-cache.abtasty.com/",
+            "https://featureassets.org/",
+            "https://mab.chartbeat.com/",
+            "https://c.go-mpulse.net/",
+            "https://prodregistryv2.org/v1/",
             "googlesyndication.com",
             ".doubleclick.net",
             ".doofinder.com",
@@ -104,6 +108,7 @@ lazy_static::lazy_static! {
             "cookieconsentpub",
             "cookie-law-info",
             "mediaelement-and-player.min.j",
+            ".ingest.us.sentry.io/"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
