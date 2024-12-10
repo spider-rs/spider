@@ -11,8 +11,10 @@ static INIT: OnceCell<()> = OnceCell::const_new();
 
 /// Get the total avg CPU being used.
 fn get_cpu_usage(sys: &System) -> usize {
-    let total: f32 = sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum();
-    (total / sys.cpus().len() as f32) as usize
+    sys.cpus()
+        .iter()
+        .map(|cpu| cpu.cpu_usage() / sys.cpus().len() as f32)
+        .sum::<f32>() as usize
 }
 
 /// Update the cpu usage being used.
@@ -37,7 +39,7 @@ async fn init_once() {
     .await;
 }
 
-/// Get the cpu usage being used.
+/// Get the cpu usage being used utility.
 pub async fn get_global_cpu_usage() -> usize {
     init_once().await;
     CPU_USAGE.load(Ordering::Relaxed)

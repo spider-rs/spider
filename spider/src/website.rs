@@ -110,7 +110,7 @@ lazy_static! {
     /// The default Semaphore limits.
     static ref DEFAULT_PERMITS: usize = calc_limits(1);
     /// The shared global Semaphore.
-    pub static ref SEM_SHARED: Arc<Semaphore> = {
+    pub(crate) static ref SEM_SHARED: Arc<Semaphore> = {
         let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
             Ok(multiplier) => match multiplier.parse::<isize>() {
                 Ok(parsed_value) => (*DEFAULT_PERMITS as isize)

@@ -135,6 +135,9 @@ pub struct Page {
     #[cfg(feature = "headers")]
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "remote_addr")]
+    /// The remote address of the page.
+    pub remote_addr: Option<core::net::SocketAddr>,
     #[cfg(feature = "cookies")]
     /// The cookies of the page request response.
     pub cookies: Option<reqwest::header::HeaderMap>,
@@ -407,6 +410,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         html: if resource_found { res.content } else { None },
         #[cfg(feature = "headers")]
         headers: res.headers,
+        #[cfg(feature = "remote_addr")]
+        remote_addr: res.remote_addr,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
         base: if !url.is_empty() {
@@ -461,6 +466,8 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         },
         #[cfg(feature = "headers")]
         headers: res.headers,
+        #[cfg(feature = "remote_addr")]
+        remote_addr: res.remote_addr,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
         final_redirect_destination: res.final_url,
