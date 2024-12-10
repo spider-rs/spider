@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.20.11"
+version = "2.21.0"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -69,6 +69,7 @@ serde_regex = { version = "1", optional = true }
 statrs = { version = "0.17", optional = true }
 aho-corasick = { version = "1", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
+sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -112,7 +113,8 @@ features = [
 ]
 
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend"]
+default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+balance = ["dep:sysinfo"]
 regex = []
 glob = [ "dep:itertools"]
 ua_generator = ["dep:ua_generator"]

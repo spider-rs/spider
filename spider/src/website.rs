@@ -8,7 +8,8 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::{
-    emit_log, emit_log_shutdown, setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
+    emit_log, emit_log_shutdown, get_semaphore, setup_website_selectors, spawn_set, spawn_task,
+    AllowedDomainTypes,
 };
 
 use crate::utils::interner::ListBucket;
@@ -106,8 +107,10 @@ pub fn calc_limits(multiplier: usize) -> usize {
 }
 
 lazy_static! {
+    /// The default Semaphore limits.
     static ref DEFAULT_PERMITS: usize = calc_limits(1);
-    static ref SEM_SHARED: Arc<Semaphore> = {
+    /// The shared global Semaphore.
+    pub static ref SEM_SHARED: Arc<Semaphore> = {
         let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
             Ok(multiplier) => match multiplier.parse::<isize>() {
                 Ok(parsed_value) => (*DEFAULT_PERMITS as isize)
@@ -123,6 +126,7 @@ lazy_static! {
 
 #[cfg(not(feature = "decentralized"))]
 lazy_static! {
+    /// The global Semaphore.
     static ref SEM: Semaphore = {
         let base_limit = calc_limits(1);
 
@@ -140,6 +144,7 @@ lazy_static! {
 
 #[cfg(feature = "decentralized")]
 lazy_static! {
+    /// The global worker count.
     static ref WORKERS: HashSet<String> = {
         let mut set: HashSet<_> = HashSet::new();
 
@@ -2210,6 +2215,9 @@ impl Website {
                             if !concurrency {
                                 tokio::time::sleep(*throttle).await;
                             }
+
+                            let semaphore = get_semaphore(&semaphore).await;
+
                             tokio::select! {
                                 biased;
                                 Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
@@ -2465,6 +2473,9 @@ impl Website {
                                         if !concurrency {
                                             tokio::time::sleep(*throttle).await;
                                         }
+
+                                        let semaphore = get_semaphore(&semaphore).await;
+
                                         tokio::select! {
                                             biased;
                                             Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
@@ -2924,6 +2935,9 @@ impl Website {
                                 if !concurrency {
                                     tokio::time::sleep(*throttle).await;
                                 }
+
+                                let semaphore = get_semaphore(&semaphore).await;
+
                                 tokio::select! {
                                     biased;
                                     Some(link) = stream.next(), if semaphore.available_permits() > 0 => {

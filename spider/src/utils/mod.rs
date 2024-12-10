@@ -7,7 +7,9 @@ pub mod interner;
 /// A trie struct.
 pub mod trie;
 
-use std::str::FromStr;
+#[cfg(feature = "balance")]
+/// CPU detection to balance limitations.
+pub mod detect_cpu;
 
 use crate::RelativeSelectors;
 use abs::parse_absolute_url;
@@ -18,6 +20,9 @@ use lol_html::send::HtmlRewriter;
 use lol_html::OutputSink;
 use phf::phf_set;
 use std::future::Future;
+use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 use url::Url;
 
 #[cfg(feature = "chrome")]
@@ -2962,6 +2967,24 @@ where
     T: Send + 'static,
 {
     set.spawn(future)
+}
+
+/// Return the semaphore that should be used.
+#[cfg(feature = "balance")]
+pub async fn get_semaphore(semaphore: &Arc<Semaphore>) -> &Arc<Semaphore> {
+    let cpu_load = crate::utils::detect_cpu::get_global_cpu_usage().await;
+
+    if cpu_load >= 70 {
+        &*crate::website::SEM_SHARED
+    } else {
+        semaphore
+    }
+}
+
+/// Return the semaphore that should be used.
+#[cfg(not(feature = "balance"))]
+pub async fn get_semaphore(semaphore: &Arc<Semaphore>) -> &Arc<Semaphore> {
+    semaphore
 }
 
 /// Emit a log info event.
