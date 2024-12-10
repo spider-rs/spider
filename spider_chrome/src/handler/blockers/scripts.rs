@@ -62,6 +62,8 @@ lazy_static::lazy_static! {
             "https://schibsted-cdn.relevant-digital.com/static/tags/",
             "https://bat.bing.net",
             "https://static.addtoany.com/menu/",
+            "https://www.gstatic.com/cast/sdk/libs/sender/1.0/cast_framework.js",
+            "https://www.gstatic.com/eureka/clank/131/cast_sender.js",
             "https://www.b2i.us/b2i/",
             "https://acsbapp.com/apps/app/dist/js/app.js",
             "https://cdn.doofinder.com/livelayer/",
@@ -131,6 +133,7 @@ lazy_static::lazy_static! {
             "https://www.youtube.com/embed/",      // YouTube video embeds
             "https://www.google.com/maps/embed?",  // Google Maps embeds
             "https://player.vimeo.com/video/",     // Vimeo video embeds
+            "https://player.vimeo.com/api/player.js", // Vimeo video embeds
             "https://open.spotify.com/embed/",     // Spotify music embeds
             "https://w.soundcloud.com/player/",    // SoundCloud embeds
             "https://platform.twitter.com/embed/", // Twitter embedded tweets
