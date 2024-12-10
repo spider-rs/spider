@@ -2971,8 +2971,12 @@ where
 
 /// Return the semaphore that should be used.
 #[cfg(feature = "balance")]
-pub async fn get_semaphore(semaphore: &Arc<Semaphore>) -> &Arc<Semaphore> {
-    let cpu_load = crate::utils::detect_cpu::get_global_cpu_usage().await;
+pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
+    let cpu_load = if detect {
+        crate::utils::detect_cpu::get_global_cpu_usage().await
+    } else {
+        0
+    };
 
     if cpu_load >= 70 {
         &*crate::website::SEM_SHARED
@@ -2983,7 +2987,7 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>) -> &Arc<Semaphore> {
 
 /// Return the semaphore that should be used.
 #[cfg(not(feature = "balance"))]
-pub async fn get_semaphore(semaphore: &Arc<Semaphore>) -> &Arc<Semaphore> {
+pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Semaphore> {
     semaphore
 }
 

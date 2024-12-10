@@ -158,6 +158,8 @@ pub enum NetworkInterceptManager {
     Upwork,
     /// glassdoor.com
     Glassdoor,
+    /// ebay.com
+    Ebay,
     #[default]
     /// Unknown
     Unknown,
@@ -165,11 +167,11 @@ pub enum NetworkInterceptManager {
 
 lazy_static! {
     /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 16] = [
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 18] = [
         ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
         ("https://tiktok.com", NetworkInterceptManager::TikTok),
-        ("https://www.amazon.com", NetworkInterceptManager::Amazon),
-        ("https://amazon.com", NetworkInterceptManager::Amazon),
+        ("https://www.amazon.", NetworkInterceptManager::Amazon),
+        ("https://amazon.", NetworkInterceptManager::Amazon),
         ("https://www.x.com", NetworkInterceptManager::X),
         ("https://x.com", NetworkInterceptManager::X),
         ("https://www.netflix.com", NetworkInterceptManager::Netflix),
@@ -181,10 +183,12 @@ lazy_static! {
         ("https://linkedin.com", NetworkInterceptManager::LinkedIn),
         ("https://www.upwork.com", NetworkInterceptManager::Upwork),
         ("https://upwork.com", NetworkInterceptManager::Upwork),
-        ("https://www.glassdoor.com", NetworkInterceptManager::Glassdoor),
-        ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
+        ("https://www.glassdoor.", NetworkInterceptManager::Glassdoor),
+        ("https://glassdoor.", NetworkInterceptManager::Glassdoor),
         ("https://www.medium.com", NetworkInterceptManager::Medium),
         ("https://medium.com", NetworkInterceptManager::Medium),
+        ("https://www.ebay.", NetworkInterceptManager::Ebay),
+        ("https://ebay.", NetworkInterceptManager::Ebay),
     ];
 }
 

@@ -2216,7 +2216,8 @@ impl Website {
                                 tokio::time::sleep(*throttle).await;
                             }
 
-                            let semaphore = get_semaphore(&semaphore).await;
+                            let semaphore =
+                                get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
                             tokio::select! {
                                 biased;
@@ -2474,7 +2475,11 @@ impl Website {
                                             tokio::time::sleep(*throttle).await;
                                         }
 
-                                        let semaphore = get_semaphore(&semaphore).await;
+                                        let semaphore = get_semaphore(
+                                            &semaphore,
+                                            !self.configuration.shared_queue,
+                                        )
+                                        .await;
 
                                         tokio::select! {
                                             biased;
@@ -2936,7 +2941,9 @@ impl Website {
                                     tokio::time::sleep(*throttle).await;
                                 }
 
-                                let semaphore = get_semaphore(&semaphore).await;
+                                let semaphore =
+                                    get_semaphore(&semaphore, !self.configuration.shared_queue)
+                                        .await;
 
                                 tokio::select! {
                                     biased;
