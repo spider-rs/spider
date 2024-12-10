@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.21.3"
+version = "2.21.5"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -149,6 +149,7 @@ cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:rand", "chrome_intercept", "dep:aho-corasick"]
 encoding = []
 headers = ["dep:httpdate"]
+remote_addr = []
 real_browser = ["dep:statrs", "dep:rand"]
 openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:serde_json"]
 openai_slim_fit = []

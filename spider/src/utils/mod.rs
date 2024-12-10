@@ -194,6 +194,9 @@ pub struct PageResponse {
     #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "remote_addr")]
+    /// The remote address of the page.
+    pub remote_addr: Option<core::net::SocketAddr>,
     #[cfg(feature = "cookies")]
     /// The cookies of the response.
     pub cookies: Option<reqwest::header::HeaderMap>,
@@ -1482,6 +1485,8 @@ pub async fn handle_response_bytes(
     let status_code: StatusCode = res.status();
     #[cfg(feature = "headers")]
     let headers = res.headers().clone();
+    #[cfg(feature = "remote_addr")]
+    let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
 
     let mut content: Option<Box<bytes::Bytes>> = None;
@@ -1521,6 +1526,8 @@ pub async fn handle_response_bytes(
     PageResponse {
         #[cfg(feature = "headers")]
         headers: Some(headers),
+        #[cfg(feature = "remote_addr")]
+        remote_addr,
         #[cfg(feature = "cookies")]
         cookies,
         content,
@@ -1552,6 +1559,8 @@ where
     let status_code: StatusCode = res.status();
     #[cfg(feature = "headers")]
     let headers = res.headers().clone();
+    #[cfg(feature = "remote_addr")]
+    let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
 
     // let mut content: Option<Box<bytes::Bytes>> = None;
@@ -1601,6 +1610,8 @@ where
         PageResponse {
             #[cfg(feature = "headers")]
             headers: Some(headers),
+            #[cfg(feature = "remote_addr")]
+            remote_addr,
             #[cfg(feature = "cookies")]
             cookies,
             // content,
@@ -1625,6 +1636,8 @@ pub(crate) fn setup_default_response(target_url: &str, res: &Response) -> PageRe
     PageResponse {
         #[cfg(feature = "headers")]
         headers: Some(res.headers().clone()),
+        #[cfg(feature = "remote_addr")]
+        remote_addr: res.remote_addr(),
         #[cfg(feature = "cookies")]
         cookies: get_cookies(res),
         status_code: res.status(),
@@ -1749,6 +1762,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             let cookies = get_cookies(&res);
             #[cfg(feature = "headers")]
             let headers = res.headers().clone();
+            #[cfg(feature = "remote_addr")]
+            let remote_addr = res.remote_addr();
             let mut stream = res.bytes_stream();
             let mut data: BytesMut = BytesMut::new();
             let mut file: Option<tokio::fs::File> = None;
@@ -1802,6 +1817,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             PageResponse {
                 #[cfg(feature = "headers")]
                 headers: Some(headers),
+                #[cfg(feature = "remote_addr")]
+                remote_addr,
                 #[cfg(feature = "cookies")]
                 cookies,
                 content: Some(if file.is_some() {
@@ -1839,6 +1856,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             PageResponse {
                 #[cfg(feature = "headers")]
                 headers: Some(res.headers().clone()),
+                #[cfg(feature = "remote_addr")]
+                remote_addr: res.remote_addr(),
                 #[cfg(feature = "cookies")]
                 cookies: get_cookies(&res),
                 status_code: res.status(),
@@ -1972,6 +1991,8 @@ pub async fn fetch_page_html(
                             PageResponse {
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
+                                #[cfg(feature = "remote_addr")]
+                                remote_addr: res.remote_addr(),
                                 #[cfg(feature = "cookies")]
                                 cookies,
                                 content: Some(if file.is_some() {
@@ -2000,6 +2021,8 @@ pub async fn fetch_page_html(
                         Ok(res) => PageResponse {
                             #[cfg(feature = "headers")]
                             headers: Some(res.headers().clone()),
+                            #[cfg(feature = "remote_addr")]
+                            remote_addr: res.remote_addr(),
                             #[cfg(feature = "cookies")]
                             cookies: get_cookies(&res),
                             status_code: res.status(),
@@ -2109,6 +2132,8 @@ pub async fn fetch_page_html_chrome(
                         Ok(res) if res.status().is_success() => {
                             #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
+                            #[cfg(feature = "remote_addr")]
+                            let remote_addr = res.remote_addr();
                             let cookies = get_cookies(&res);
                             let status_code = res.status();
                             let mut stream = res.bytes_stream();
@@ -2134,6 +2159,8 @@ pub async fn fetch_page_html_chrome(
                             PageResponse {
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
+                                #[cfg(feature = "remote_addr")]
+                                remote_addr,
                                 #[cfg(feature = "cookies")]
                                 cookies,
                                 content: Some(Box::new(data.into())),
@@ -2144,6 +2171,8 @@ pub async fn fetch_page_html_chrome(
                         Ok(res) => PageResponse {
                             #[cfg(feature = "headers")]
                             headers: Some(res.headers().clone()),
+                            #[cfg(feature = "remote_addr")]
+                            remote_addr: res.remote_addr(),
                             #[cfg(feature = "cookies")]
                             cookies: get_cookies(&res),
                             status_code: res.status(),
