@@ -71,6 +71,16 @@ lazy_static::lazy_static! {
             "https://checkout-sdk.bigcommerce.com/v1/loader.js",
             "https://cdn.callrail.com/companies/",
             "https://www.webtraxs.com/trxscript.php",
+            "https://diffuser-cdn.app-us1.com/diffuser/diffuser.js",
+            "https://try.abtasty.com/",
+            "https://imasdk.googleapis.com/js/sdkloader/ima3.js",
+            "https://cdn.registerdisney.go.com/v4/responder.js",
+            "https://cdn.registerdisney.go.com/v4/OneID.js",
+            "https://js-agent.newrelic.com/",
+            "https://bat.bing.com/bat.js",
+            "https://s1.hdslb.com/bfs/cm/cm-sdk/static/js/track-collect.js",
+            "https://hm.baidu.com/hm.js",
+            "https://unpkg.zhimg.com/@efe/zhad-tracker",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -188,6 +198,9 @@ lazy_static::lazy_static! {
         let mut trie = Trie::new();
         let patterns = [
             "wp-content/plugins/cookie-law-info",
+            "wp-content/js/rlt-proxy.js",
+            "wp-admin/rest-proxy/",
+            "wp-content/mu-plugins/a8c-analytics/",
             "analytics/",
             "cookie-tracking",
         ];
@@ -212,6 +225,7 @@ lazy_static::lazy_static! {
             "wp-content/plugins/gravityforms/",
             "wp-content/plugins/wp-rocket/assets/js/lazyload/",
             "wp-content/plugins/w3-total-cache/",
+            "wp-content/js/bilmur.min.js",
             "npm/bootstrap@"
         ];
         for pattern in &patterns {
