@@ -95,15 +95,18 @@ impl Browser {
         url: impl Into<String>,
         config: HandlerConfig,
     ) -> Result<(Self, Handler)> {
+        lazy_static::lazy_static! {
+            static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
+        };
         let mut debug_ws_url = url.into();
 
         if debug_ws_url.starts_with("http") {
-            match reqwest::Client::new()
+            match REQUEST_CLIENT
                 .get(
                     if debug_ws_url.ends_with("/json/version")
                         || debug_ws_url.ends_with("/json/version/")
                     {
-                        debug_ws_url.clone()
+                        debug_ws_url.to_owned()
                     } else {
                         format!(
                             "{}{}json/version",
