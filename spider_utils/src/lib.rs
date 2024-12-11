@@ -50,8 +50,8 @@ where
     let mut map: CSSQueryMap = HashMap::new();
 
     if !selectors.css.is_empty() {
-        let fragment = Html::parse_fragment(html);
         let mut stream = spider::tokio_stream::iter(&selectors.css);
+        let fragment = Box::new(Html::parse_fragment(html));
 
         while let Some(selector) = stream.next().await {
             for s in selector.1 {
@@ -64,7 +64,7 @@ where
 
     if !selectors.xpath.is_empty() {
         if let Ok(package) = parser::parse(html) {
-            let document = package.as_document();
+            let document = Box::new(package.as_document());
 
             for selector in selectors.xpath.iter() {
                 for s in selector.1 {
@@ -100,7 +100,7 @@ where
     let mut map: CSSQueryMap = HashMap::new();
 
     if !selectors.css.is_empty() {
-        let fragment = Html::parse_fragment(html);
+        let fragment = Box::new(Html::parse_fragment(html));
 
         for selector in selectors.css.iter() {
             for s in selector.1 {
