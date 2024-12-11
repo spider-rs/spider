@@ -26,8 +26,8 @@ use chromiumoxide_cdp::cdp::browser_protocol::{
 use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
-use std::collections::VecDeque;
 use std::time::Duration;
+use std::{collections::VecDeque, default};
 
 lazy_static! {
     /// allowed js frameworks and libs excluding some and adding additional URLs
@@ -162,6 +162,8 @@ pub enum NetworkInterceptManager {
     Ebay,
     /// nytimes.com
     Nytimes,
+    /// wikipedia.com
+    Wikipedia,
     #[default]
     /// Unknown
     Unknown,
@@ -169,7 +171,7 @@ pub enum NetworkInterceptManager {
 
 lazy_static! {
     /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 20] = [
+    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 21] = [
         ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
         ("https://tiktok.com", NetworkInterceptManager::TikTok),
         ("https://www.amazon.", NetworkInterceptManager::Amazon),
@@ -193,7 +195,18 @@ lazy_static! {
         ("https://ebay.", NetworkInterceptManager::Ebay),
         ("https://www.nytimes.com", NetworkInterceptManager::Nytimes),
         ("https://nytimes.com", NetworkInterceptManager::Nytimes),
+        ("wikipedia.org", NetworkInterceptManager::Wikipedia),
     ];
+}
+
+/// The find type is own.
+#[derive(Default, Debug, Clone, Hash, PartialEq, Eq)]
+enum FindType {
+    #[default]
+    /// Starts with.
+    StartsWith,
+    /// Contains.
+    Contains,
 }
 
 impl NetworkInterceptManager {
@@ -201,13 +214,27 @@ impl NetworkInterceptManager {
     pub fn new(url: &str) -> NetworkInterceptManager {
         TOP_TIER_LIST
             .iter()
-            .find(|&(pattern, _)| url.starts_with(pattern))
+            .find(|&(pattern, nm)| {
+                if nm.get_pattern() == FindType::StartsWith {
+                    url.starts_with(pattern)
+                } else {
+                    url.contains(pattern)
+                }
+            })
             .map(|&(_, manager_type)| manager_type)
             .unwrap_or(NetworkInterceptManager::Unknown)
     }
     /// Setup the intercept handle
     pub fn setup(&mut self, url: &str) -> Self {
         NetworkInterceptManager::new(url)
+    }
+
+    /// determine the pattern to use.
+    fn get_pattern(&self) -> FindType {
+        match self {
+            NetworkInterceptManager::Wikipedia => FindType::Contains,
+            _ => FindType::StartsWith,
+        }
     }
 }
 
@@ -564,6 +591,9 @@ impl NetworkManager {
                             NetworkInterceptManager::Ebay => {
                                 super::blockers::ebay_blockers::block_ebay(event)
                             }
+                            NetworkInterceptManager::Wikipedia => {
+                                super::blockers::wikipedia_blockers::block_wikipedia(event)
+                            }
                             NetworkInterceptManager::Nytimes => {
                                 super::blockers::nytimes_blockers::block_nytimes(
                                     event,
@@ -703,6 +733,9 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::Ebay => {
                                 super::blockers::ebay_blockers::block_ebay(event)
+                            }
+                            NetworkInterceptManager::Wikipedia => {
+                                super::blockers::wikipedia_blockers::block_wikipedia(event)
                             }
                             NetworkInterceptManager::Nytimes => {
                                 super::blockers::nytimes_blockers::block_nytimes(

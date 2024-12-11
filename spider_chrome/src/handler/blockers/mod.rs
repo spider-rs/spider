@@ -20,6 +20,8 @@ pub mod scripts;
 pub mod tiktok_blockers;
 /// upwork blockers
 pub mod upwork_blockers;
+/// wikipedia blockers
+pub mod wikipedia_blockers;
 /// x blockers
 pub mod x_blockers;
 
