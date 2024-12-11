@@ -7,13 +7,12 @@ use spider::website::Website;
 use spider::{
     configuration::WaitForIdleNetwork, features::chrome_common::RequestInterceptConfiguration,
 };
-use spider_utils::spider_transformations::transformation::content::{
-    transform_content, ReturnFormat, TransformConfig,
-};
 use std::io::Result;
 use std::time::Duration;
 
 async fn crawl_website(url: &str) -> Result<()> {
+    let mut stdout = tokio::io::stdout();
+
     let mut website: Website = Website::new(url)
         .with_limit(1)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
@@ -24,15 +23,12 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_stealth(true)
         .with_return_page_links(true)
         .with_fingerprint(true)
-        .with_proxies(Some(vec!["http://localhost:8888".into()]))
+        // .with_proxies(Some(vec!["http://localhost:8888".into()]))
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
         .unwrap();
 
     let mut rx2 = website.subscribe(16).unwrap();
-    let mut stdout = tokio::io::stdout();
-    let mut conf = TransformConfig::default();
-    conf.return_format = ReturnFormat::Markdown;
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
@@ -50,12 +46,6 @@ async fn crawl_website(url: &str) -> Result<()> {
                     )
                     .as_bytes(),
                 )
-                .await;
-
-            let markup = transform_content(&page, &conf, &None, &None, &None);
-
-            let _ = stdout
-                .write_all(format!("- {}\n {}\n", page.get_url(), markup).as_bytes())
                 .await;
         }
     });

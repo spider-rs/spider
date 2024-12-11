@@ -3,12 +3,12 @@ use std::io;
 use std::process::ExitStatus;
 use std::time::Instant;
 
-use async_tungstenite::tungstenite;
-use async_tungstenite::tungstenite::Message;
 use base64::DecodeError;
 use futures::channel::mpsc::SendError;
 use futures::channel::oneshot::Canceled;
 use thiserror::Error;
+use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::Message;
 
 use chromiumoxide_cdp::cdp::browser_protocol::page::FrameId;
 

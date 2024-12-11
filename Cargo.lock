@@ -273,20 +273,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-tungstenite"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90e661b6cb0a6eb34d02c520b052daa3aa9ac0cc02495c9d066bbce13ead132b"
-dependencies = [
- "futures-io",
- "futures-util",
- "log",
- "pin-project-lite",
- "tokio",
- "tungstenite 0.24.0",
-]
-
-[[package]]
 name = "async_job"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4287,7 +4273,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4350,10 +4336,9 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "adblock",
- "async-tungstenite",
  "base64 0.22.1",
  "bytes",
  "case_insensitive_string",
@@ -4378,6 +4363,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -4387,7 +4373,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "clap",
  "env_logger",
@@ -4412,7 +4398,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -4434,7 +4420,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -4446,7 +4432,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.21.8"
+version = "2.21.10"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -4976,6 +4962,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5430,7 +5428,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-rustls 0.25.0",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.21.0",
  "tokio-util",
  "tower-service",
  "tracing",

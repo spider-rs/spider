@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.21.8"
+version = "2.21.10"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -18,7 +18,7 @@ categories = ["web-programming", "api-bindings", "development-tools::testing"]
 name = "chromiumoxide"
 
 [dependencies]
-async-tungstenite = "0.28"
+tokio-tungstenite = "0.24"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3"
 chromiumoxide_types = { version = "0.7" }
@@ -63,8 +63,8 @@ tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
 
 [features]
-default = ["tokio-runtime", "bytes"]
-tokio-runtime = ["async-tungstenite/tokio-runtime"]
+default = ["bytes"]
+stream = ["tokio-tungstenite/stream"]
 fetcher = []
 bytes = ["dep:bytes"]
 serde0 = []
@@ -77,24 +77,19 @@ _fetcher-native-tokio = ["fetcher", "chromiumoxide_fetcher/_native-tokio"]
 
 [[example]]
 name = "wiki-tokio"
-required-features = ["tokio-runtime"]
 
 [[example]]
 name = "iframe-workaround"
-required-features = ["tokio-runtime", "tokio"]
 
 [[example]]
 name = "storage-cookie"
-required-features = ["tokio-runtime"]
 
 [[example]]
 name = "console-logs"
-required-features = ["tokio-runtime"]
 
 [[example]]
 name = "httpfuture"
-required-features = ["tokio-runtime"]
 
 [[example]]
 name = "fetcher-tokio"
-required-features = ["tokio-runtime", "_fetcher-native-tokio"]
+required-features = ["_fetcher-native-tokio"]

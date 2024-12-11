@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.21.8"
+version = "2.21.10"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -71,6 +71,15 @@ aho-corasick = { version = "1", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
 
+[dependencies.spider_chrome]
+version = "2"
+path = "../spider_chrome"
+optional = true
+features = [
+    "bytes",
+    "stream"
+]
+
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
 
@@ -103,17 +112,9 @@ reqwest = { version = "0.12", features = [
     "stream",
 ] }
 
-[dependencies.spider_chrome]
-version = "2"
-path = "../spider_chrome"
-optional = true
-features = [
-    "tokio-runtime",
-    "bytes",
-]
-
 [features]
 default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+adblock = ["chrome", "spider_chrome/adblock"]
 balance = ["dep:sysinfo"]
 regex = []
 glob = [ "dep:itertools"]
@@ -122,7 +123,6 @@ jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
-adblock = ["spider_chrome/adblock"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde", "string-interner/serde", "dep:serde_regex", "smallvec/serde"]

@@ -75,10 +75,8 @@ Use `chromiumoxide` with the `async-std` runtime:
 chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", branch = "main"}
 ```
 
-To use the `tokio` runtime instead add `features = ["tokio-runtime"]` and set `default-features = false` to disable the default runtime (`async-std`):
-
 ```toml
-chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", features = ["tokio-runtime"], default-features = false, branch = "main"}
+chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", default-features = false, branch = "main"}
 ```
 
 This configuration is made possible primarily by the websocket crate of choice: [`async-tungstenite`](https://github.com/sdroege/async-tungstenite).

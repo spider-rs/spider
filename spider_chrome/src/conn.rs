@@ -3,18 +3,20 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::ready;
 
-use async_tungstenite::tungstenite::Message as WsMessage;
-use async_tungstenite::{tungstenite::protocol::WebSocketConfig, WebSocketStream};
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 use futures::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::MaybeTlsStream;
+use tokio_tungstenite::{tungstenite::protocol::WebSocketConfig, WebSocketStream};
 
 use chromiumoxide_cdp::cdp::browser_protocol::target::SessionId;
 use chromiumoxide_types::{CallId, EventMessage, Message, MethodCall, MethodId};
 
 use crate::error::CdpError;
 use crate::error::Result;
-use async_tungstenite::tokio::ConnectStream;
+
+type ConnectStream = MaybeTlsStream<tokio::net::TcpStream>;
 
 /// Exchanges the messages with the websocket
 #[must_use = "streams do nothing unless polled"]
@@ -40,11 +42,9 @@ impl<T: EventMessage + Unpin> Connection<T> {
             ..Default::default()
         };
 
-        let (ws, _) = async_tungstenite::tokio::connect_async_with_config(
-            debug_ws_url.as_ref(),
-            Some(config),
-        )
-        .await?;
+        let (ws, _) =
+            tokio_tungstenite::connect_async_with_config(debug_ws_url.as_ref(), Some(config), true)
+                .await?;
 
         Ok(Self {
             pending_commands: Default::default(),
