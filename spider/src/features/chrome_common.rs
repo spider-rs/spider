@@ -1,7 +1,7 @@
 use crate::utils::trie::Trie;
 
 #[cfg(feature = "chrome")]
-use chromiumoxide::handler::network::NetworkInterceptManager;
+use chromiumoxide::handler::blockers::intercept_manager::NetworkInterceptManager;
 
 /// wrapper for non chrome interception. does nothing.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]

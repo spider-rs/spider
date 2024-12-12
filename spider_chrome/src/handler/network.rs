@@ -1,10 +1,11 @@
 use super::blockers::{
+    ignore_script_embedded, ignore_script_xhr, ignore_script_xhr_media,
+    intercept_manager::NetworkInterceptManager,
     scripts::{
-        URL_IGNORE_EMBEDED_TRIE, URL_IGNORE_SCRIPT_BASE_PATHS, URL_IGNORE_SCRIPT_STYLES_PATHS,
-        URL_IGNORE_TRIE,
+        URL_IGNORE_SCRIPT_BASE_PATHS, URL_IGNORE_SCRIPT_STYLES_PATHS, URL_IGNORE_TRIE,
+        URL_IGNORE_TRIE_PATHS,
     },
-    xhr::{IGNORE_XHR_ASSETS, URL_IGNORE_XHR_MEDIA_TRIE, URL_IGNORE_XHR_TRIE},
-    Trie,
+    xhr::IGNORE_XHR_ASSETS,
 };
 use crate::auth::Credentials;
 use crate::cmd::CommandChain;
@@ -26,8 +27,9 @@ use chromiumoxide_cdp::cdp::browser_protocol::{
 use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
+use reqwest::header::PROXY_AUTHORIZATION;
+use std::collections::VecDeque;
 use std::time::Duration;
-use std::{collections::VecDeque, default};
 
 lazy_static! {
     /// allowed js frameworks and libs excluding some and adding additional URLs
@@ -96,146 +98,9 @@ lazy_static! {
         "Ping",
     };
 
-    /// Ignore list of scripts paths.
-    static ref URL_IGNORE_TRIE_PATHS: Trie = {
-        let mut trie = Trie::new();
-        let patterns = [
-            // explicit ignore tracking.js and ad files
-            "privacy-notice.js",
-            "tracking.js",
-            "track.js",
-            "ads.js",
-            "analytics.js",
-            "otSDKStub.js",
-            "otBannerSdk.js",
-            "_vercel/insights/script.js",
-            "analytics.",
-        ];
-        for pattern in &patterns {
-            trie.insert(pattern);
-        }
-        trie
-    };
-
     /// Case insenstive css matching
     pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
 
-}
-
-/// Url matches analytics that we want to ignore or trackers.
-pub(crate) fn ignore_script_embedded(url: &str) -> bool {
-    URL_IGNORE_EMBEDED_TRIE.contains_prefix(url)
-}
-
-/// Url matches analytics that we want to ignore or trackers.
-pub(crate) fn ignore_script_xhr(url: &str) -> bool {
-    URL_IGNORE_XHR_TRIE.contains_prefix(url)
-}
-
-/// Url matches media that we want to ignore.
-pub(crate) fn ignore_script_xhr_media(url: &str) -> bool {
-    URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(url)
-}
-
-/// Custom network intercept types to expect on a domain
-#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
-pub enum NetworkInterceptManager {
-    /// tiktok.com
-    TikTok,
-    /// facebook.com
-    Facebook,
-    /// amazon.com
-    Amazon,
-    /// x.com
-    X,
-    /// LinkedIn,
-    LinkedIn,
-    /// netflix.com
-    Netflix,
-    /// medium.com
-    Medium,
-    /// upwork.com,
-    Upwork,
-    /// glassdoor.com
-    Glassdoor,
-    /// ebay.com
-    Ebay,
-    /// nytimes.com
-    Nytimes,
-    /// wikipedia.com
-    Wikipedia,
-    #[default]
-    /// Unknown
-    Unknown,
-}
-
-lazy_static! {
-    /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 21] = [
-        ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
-        ("https://tiktok.com", NetworkInterceptManager::TikTok),
-        ("https://www.amazon.", NetworkInterceptManager::Amazon),
-        ("https://amazon.", NetworkInterceptManager::Amazon),
-        ("https://www.x.com", NetworkInterceptManager::X),
-        ("https://x.com", NetworkInterceptManager::X),
-        ("https://www.netflix.com", NetworkInterceptManager::Netflix),
-        ("https://netflix.com", NetworkInterceptManager::Netflix),
-        (
-            "https://www.linkedin.com",
-            NetworkInterceptManager::LinkedIn
-        ),
-        ("https://linkedin.com", NetworkInterceptManager::LinkedIn),
-        ("https://www.upwork.com", NetworkInterceptManager::Upwork),
-        ("https://upwork.com", NetworkInterceptManager::Upwork),
-        ("https://www.glassdoor.", NetworkInterceptManager::Glassdoor),
-        ("https://glassdoor.", NetworkInterceptManager::Glassdoor),
-        ("https://www.medium.com", NetworkInterceptManager::Medium),
-        ("https://medium.com", NetworkInterceptManager::Medium),
-        ("https://www.ebay.", NetworkInterceptManager::Ebay),
-        ("https://ebay.", NetworkInterceptManager::Ebay),
-        ("https://www.nytimes.com", NetworkInterceptManager::Nytimes),
-        ("https://nytimes.com", NetworkInterceptManager::Nytimes),
-        ("wikipedia.org", NetworkInterceptManager::Wikipedia),
-    ];
-}
-
-/// The find type is own.
-#[derive(Default, Debug, Clone, Hash, PartialEq, Eq)]
-enum FindType {
-    #[default]
-    /// Starts with.
-    StartsWith,
-    /// Contains.
-    Contains,
-}
-
-impl NetworkInterceptManager {
-    /// a custom intercept handle.
-    pub fn new(url: &str) -> NetworkInterceptManager {
-        TOP_TIER_LIST
-            .iter()
-            .find(|&(pattern, nm)| {
-                if nm.get_pattern() == FindType::StartsWith {
-                    url.starts_with(pattern)
-                } else {
-                    url.contains(pattern)
-                }
-            })
-            .map(|&(_, manager_type)| manager_type)
-            .unwrap_or(NetworkInterceptManager::Unknown)
-    }
-    /// Setup the intercept handle
-    pub fn setup(&mut self, url: &str) -> Self {
-        NetworkInterceptManager::new(url)
-    }
-
-    /// determine the pattern to use.
-    fn get_pattern(&self) -> FindType {
-        match self {
-            NetworkInterceptManager::Wikipedia => FindType::Contains,
-            _ => FindType::StartsWith,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -336,7 +201,7 @@ impl NetworkManager {
 
     pub fn set_extra_headers(&mut self, headers: std::collections::HashMap<String, String>) {
         self.extra_headers = headers;
-        self.extra_headers.remove("proxy-authorization");
+        self.extra_headers.remove(PROXY_AUTHORIZATION.as_str());
         if let Ok(headers) = serde_json::to_value(&self.extra_headers) {
             self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
         }

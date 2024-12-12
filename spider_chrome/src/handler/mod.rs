@@ -1,5 +1,5 @@
+use crate::handler::blockers::intercept_manager::NetworkInterceptManager;
 use hashbrown::{HashMap, HashSet};
-use network::NetworkInterceptManager;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 

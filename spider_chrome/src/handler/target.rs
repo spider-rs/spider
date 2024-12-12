@@ -18,6 +18,7 @@ use chromiumoxide_cdp::cdp::events::CdpEvent;
 use chromiumoxide_cdp::cdp::CdpEventMessage;
 use chromiumoxide_types::{Command, Method, Request, Response};
 
+use super::blockers::intercept_manager::NetworkInterceptManager;
 use crate::auth::Credentials;
 use crate::cdp::browser_protocol::target::CloseTargetParams;
 use crate::cmd::CommandChain;
@@ -40,8 +41,6 @@ use chromiumoxide_cdp::cdp::js_protocol::runtime::{
     ExecutionContextId, RunIfWaitingForDebuggerParams,
 };
 use std::time::Duration;
-
-use super::network::NetworkInterceptManager;
 
 macro_rules! advance_state {
     ($s:ident, $cx:ident, $now:ident, $cmds: ident, $next_state:expr ) => {{

@@ -12,7 +12,8 @@ lazy_static::lazy_static! {
             "https://soundcloud.com/player/",
             "https://open.spotify.com/",
             "https://api.spotify.com/v1/",
-            "https://music.apple.com/"
+            "https://music.apple.com/",
+            "https://maps.googleapis.com/"
         ];
         for pattern in &patterns {
             trie.insert(pattern);
@@ -87,6 +88,7 @@ lazy_static::lazy_static! {
             ".wixapps.net/api/v1/bulklog",
             "https://error-analytics-sessions-production.shopifysvc.com/",
             "https://static-forms.",
+            "https://nhst.tt.omtrdc.net/rest/v1/delivery",
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
             "https://bes.gcp.data.bigcommerce.com/nobot",
@@ -96,6 +98,7 @@ lazy_static::lazy_static! {
             "https://mab.chartbeat.com/",
             "https://c.go-mpulse.net/",
             "https://prodregistryv2.org/v1/",
+            "https://dpm.demdex.net/",
             "googlesyndication.com",
             ".doubleclick.net",
             ".doofinder.com",
@@ -116,4 +119,97 @@ lazy_static::lazy_static! {
         trie
     };
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use case_insensitive_string::CaseInsensitiveString;
+
+    #[test]
+    fn test_url_ignore_xhr_media_trie_contains() {
+        // Positive tests - these URLs should be contained in the trie
+        let positive_cases = vec![
+            "https://www.youtube.com/s/player/",
+            "https://api.spotify.com/v1/",
+        ];
+
+        // Negative tests - these URLs should not be contained in the trie
+        let negative_cases = vec!["https://www.google.com/", "https://api.example.com/v1/"];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_ignore_xhr_assets_contains() {
+        // Positive tests - these file types (considering case insensitivity) should be contained in the set
+        let positive_cases = vec!["jpg", "mp3", "WOFF", ".svg"];
+
+        // Negative tests - these file types should not be contained in the set
+        let negative_cases = vec!["randomfiletype", "xyz"];
+
+        for case in positive_cases {
+            let case_ci: CaseInsensitiveString = case.into();
+            assert!(
+                IGNORE_XHR_ASSETS.contains(&case_ci),
+                "HashSet should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            let case_ci: CaseInsensitiveString = case.into();
+            assert!(
+                !IGNORE_XHR_ASSETS.contains(&case_ci),
+                "HashSet should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_ignore_xhr_trie_contains() {
+        // Positive tests - these URLs should be contained in the trie
+        let positive_cases = vec![
+            "https://play.google.com/log?",
+            "https://googleads.g.doubleclick.net/pagead/id",
+            ".doubleclick.net",
+        ];
+
+        // Negative tests - these URLs should not be contained in the trie
+        let negative_cases = vec![
+            "https://example.com/track",
+            "https://anotherdomain.com/api/",
+        ];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_XHR_TRIE.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_XHR_TRIE.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
 }

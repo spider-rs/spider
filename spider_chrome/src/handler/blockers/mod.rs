@@ -6,6 +6,8 @@ pub mod amazon_blockers;
 pub mod ebay_blockers;
 /// glassdoor blockers
 pub mod glassdoor_blockers;
+/// interception manager
+pub mod intercept_manager;
 /// linkedin blockers
 pub mod linkedin_blockers;
 /// medium blockers
@@ -24,7 +26,6 @@ pub mod upwork_blockers;
 pub mod wikipedia_blockers;
 /// x blockers
 pub mod x_blockers;
-
 /// xhr blockers
 pub mod xhr;
 
@@ -74,4 +75,19 @@ impl Trie {
 
         false
     }
+}
+
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script_embedded(url: &str) -> bool {
+    crate::handler::blockers::scripts::URL_IGNORE_EMBEDED_TRIE.contains_prefix(url)
+}
+
+/// Url matches analytics that we want to ignore or trackers.
+pub(crate) fn ignore_script_xhr(url: &str) -> bool {
+    crate::handler::blockers::xhr::URL_IGNORE_XHR_TRIE.contains_prefix(url)
+}
+
+/// Url matches media that we want to ignore.
+pub(crate) fn ignore_script_xhr_media(url: &str) -> bool {
+    crate::handler::blockers::xhr::URL_IGNORE_XHR_MEDIA_TRIE.contains_prefix(url)
 }

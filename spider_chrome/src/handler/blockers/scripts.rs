@@ -17,6 +17,7 @@ lazy_static::lazy_static! {
             "https://www.gstatic.com/cv/js/sender/",
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
+            "https://www.googleanalytics.com",
             "https://iabusprivacy.pmc.com/geo-info.js",
             "https://cookie-cdn.cookiepro.com/consent",
             "https://load.sumome.com/",
@@ -88,6 +89,11 @@ lazy_static::lazy_static! {
             "https://mab.chartbeat.com/mab_strategy/",
             "https://c.amazon-adsystem.com/",
             "https://rumcdn.geoedge.be/",
+            "https://assets.adobedtm.com/extensions/",
+            "https://macro.adnami.io/macro/spec/adsm.macro.",
+            "https://log.medietall.no/analytics.js",
+            "https://lwadm.com/lw/pbjs?",
+            "https://cl.k5a.io/",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
@@ -242,4 +248,177 @@ lazy_static::lazy_static! {
         trie
     };
 
+    /// Ignore list of scripts paths.
+    pub (crate) static ref URL_IGNORE_TRIE_PATHS: Trie = {
+        let mut trie = Trie::new();
+        let patterns = [
+            // explicit ignore tracking.js and ad files
+            "privacy-notice.js",
+            "tracking.js",
+            "track.js",
+            "ads.js",
+            "analytics.js",
+            "otSDKStub.js",
+            "otBannerSdk.js",
+            "_vercel/insights/script.js",
+            "analytics.",
+        ];
+        for pattern in &patterns {
+            trie.insert(pattern);
+        }
+        trie
+    };
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_ignore_trie_contains() {
+        // Positive tests - these URLs should be contained in the trie
+        let positive_cases = vec![
+            "https://www.googletagservices.com/tag/",
+            "https://www.google-analytics.com",
+            "https://www.googleanalytics.com",
+            ".newrelic.com",
+            "privacy-notice.js",
+        ];
+
+        // Negative tests - these URLs should not be contained in the trie
+        let negative_cases = vec![
+            "https://not-a-tracked-url.com/script.js",
+            "https://google.com",
+        ];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_TRIE.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_TRIE.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_ignore_embedded_trie_contains() {
+        // Positive tests - these URLs should be contained in the trie
+        let positive_cases = vec![
+            "https://www.youtube.com/embed/",
+            "https://www.google.com/maps/embed?",
+            ".amplitude.com",
+        ];
+
+        // Negative tests - these URLs should not be contained in the trie
+        let negative_cases = vec![
+            "https://secure-site.com/resource.js",
+            "https://example.com/embed.js",
+        ];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_EMBEDED_TRIE.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_EMBEDED_TRIE.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_ignore_script_base_paths_contains() {
+        // Positive tests - these paths should be contained in the trie
+        let positive_cases = vec!["wp-content/plugins/cookie-law-info", "analytics/"];
+
+        // Negative tests - these paths should not be contained in the trie
+        let negative_cases = vec![
+            "wp-content/some-untracked-plugin/",
+            "random/path/analytics.js",
+        ];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_SCRIPT_BASE_PATHS.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_SCRIPT_BASE_PATHS.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_ignore_script_style_paths_contains() {
+        // Positive tests - these paths should be contained in the trie
+        let positive_cases = vec!["wp-content/themes/", "npm/bootstrap@"];
+
+        // Negative tests - these paths should not be contained in the trie
+        let negative_cases = vec![
+            "wp-content/some-other-theme/",
+            "wp-content/plugins/untracked-plugin/",
+        ];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_SCRIPT_STYLES_PATHS.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_SCRIPT_STYLES_PATHS.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_ignore_trie_paths_contains() {
+        // Positive tests - these paths should be contained in the trie
+        let positive_cases = vec!["privacy-notice.js", "tracking.js"];
+
+        // Negative tests - these paths should not be contained in the trie
+        let negative_cases = vec!["non-ignored.js", "non-related/tracking.js"];
+
+        for case in positive_cases {
+            assert!(
+                URL_IGNORE_TRIE_PATHS.contains_prefix(case),
+                "Trie should contain: {}",
+                case
+            );
+        }
+
+        for case in negative_cases {
+            assert!(
+                !URL_IGNORE_TRIE_PATHS.contains_prefix(case),
+                "Trie should not contain: {}",
+                case
+            );
+        }
+    }
 }
