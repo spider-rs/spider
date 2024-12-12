@@ -18,6 +18,8 @@ pub mod netflix_blockers;
 pub mod nytimes_blockers;
 /// script blockers
 pub mod scripts;
+/// block tcgplayer.com
+pub mod tcgplayer_blockers;
 /// tiktok blockers
 pub mod tiktok_blockers;
 /// upwork blockers
@@ -26,6 +28,7 @@ pub mod upwork_blockers;
 pub mod wikipedia_blockers;
 /// x blockers
 pub mod x_blockers;
+
 /// xhr blockers
 pub mod xhr;
 

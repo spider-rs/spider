@@ -229,6 +229,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 ) {
     if let Some(b) = base {
         let mut abs = convert_abs_path(b, href);
+
         let new_page = abs != **b;
 
         if let Some(link_map) = links_pages {

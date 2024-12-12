@@ -4046,7 +4046,7 @@ impl Website {
         chrome_intercept: RequestInterceptConfiguration,
     ) -> &mut Self {
         self.configuration
-            .with_chrome_intercept(chrome_intercept, &self.url);
+            .with_chrome_intercept(chrome_intercept, &self.domain_parsed);
         self
     }
 

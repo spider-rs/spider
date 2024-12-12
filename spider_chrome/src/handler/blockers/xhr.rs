@@ -87,6 +87,7 @@ lazy_static::lazy_static! {
             "https://events.api.secureserver.net/",
             "https://csp.secureserver.net/eventbus",
             "https://doh.cq0.co/resolve",
+            "https://cdn.segment.",
             ".wixapps.net/api/v1/bulklog",
             "https://error-analytics-sessions-production.shopifysvc.com/",
             "https://static-forms.",

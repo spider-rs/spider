@@ -459,6 +459,9 @@ impl NetworkManager {
                             NetworkInterceptManager::Wikipedia => {
                                 super::blockers::wikipedia_blockers::block_wikipedia(event)
                             }
+                            NetworkInterceptManager::Tcgplayer => {
+                                super::blockers::tcgplayer_blockers::block_tcgplayer(event)
+                            }
                             NetworkInterceptManager::Nytimes => {
                                 super::blockers::nytimes_blockers::block_nytimes(
                                     event,
@@ -484,6 +487,11 @@ impl NetworkManager {
                     };
 
                     if skip_networking {
+                        tracing::debug!(
+                            "Blocked: {:?} - {}",
+                            event.resource_type,
+                            event.request.url
+                        );
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -492,7 +500,7 @@ impl NetworkManager {
                         self.push_cdp_request(fullfill_params);
                     } else {
                         tracing::debug!(
-                            "Network Allowed: {:?} - {}",
+                            "Allowed: {:?} - {}",
                             event.resource_type,
                             event.request.url
                         );
@@ -592,6 +600,9 @@ impl NetworkManager {
                             }
                             NetworkInterceptManager::LinkedIn => {
                                 super::blockers::linkedin_blockers::block_linkedin(event)
+                            }
+                            NetworkInterceptManager::Tcgplayer => {
+                                super::blockers::tcgplayer_blockers::block_tcgplayer(event)
                             }
                             NetworkInterceptManager::Medium => {
                                 super::blockers::medium_blockers::block_medium(event)

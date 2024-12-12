@@ -16,12 +16,8 @@ pub enum NetworkInterceptManager {
 #[cfg(not(feature = "chrome"))]
 impl NetworkInterceptManager {
     /// a custom intercept handle.
-    pub fn new(_url: &str) -> NetworkInterceptManager {
+    pub fn new(_url: &Option<Box<url::Url>>) -> NetworkInterceptManager {
         NetworkInterceptManager::Unknown
-    }
-    /// Setup the intercept handle
-    pub fn setup(&mut self, url: &str) -> Self {
-        NetworkInterceptManager::new(url)
     }
 }
 
@@ -682,7 +678,10 @@ impl RequestInterceptConfiguration {
         }
     }
     /// Setup a new intercept config with a custom intercept manager.
-    pub fn new_manager(enabled: bool, url: &str) -> RequestInterceptConfiguration {
+    pub fn new_manager(
+        enabled: bool,
+        url: &Option<Box<url::Url>>,
+    ) -> RequestInterceptConfiguration {
         RequestInterceptConfiguration {
             enabled,
             block_javascript: false,
@@ -695,7 +694,7 @@ impl RequestInterceptConfiguration {
     }
 
     /// Setup the network request manager type.
-    pub fn setup_intercept_manager(&mut self, url: &str) {
+    pub fn setup_intercept_manager(&mut self, url: &Option<Box<url::Url>>) {
         self.intercept_manager = NetworkInterceptManager::new(url);
     }
 

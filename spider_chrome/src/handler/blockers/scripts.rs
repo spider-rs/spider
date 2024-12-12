@@ -92,6 +92,7 @@ lazy_static::lazy_static! {
             "https://assets.adobedtm.com/extensions/",
             "https://macro.adnami.io/macro/spec/adsm.macro.",
             "https://log.medietall.no/analytics.js",
+            "https://cdn.siftscience.com/s.js",
             "https://lwadm.com/lw/pbjs?",
             "https://cl.k5a.io/",
             "https://cdn-cookieyes.com/",
@@ -139,6 +140,7 @@ lazy_static::lazy_static! {
         let patterns = [
             "https://www.youtube.com/embed/",      // YouTube video embeds
             "https://www.google.com/maps/embed?",  // Google Maps embeds
+            "https://maps.google.com", // Google maps iframe.
             "https://player.vimeo.com/video/",     // Vimeo video embeds
             "https://player.vimeo.com/api/player.js", // Vimeo video embeds
             "https://open.spotify.com/embed/",     // Spotify music embeds
@@ -193,6 +195,7 @@ lazy_static::lazy_static! {
             ".googlesyndication.com/safeframe/",
             // repeat consent js
             "/ccpa/user-consent.min.js",
+            "consent-manager",
             "/cookiebanner/js/",
             "cookielaw.org",
             // privacy

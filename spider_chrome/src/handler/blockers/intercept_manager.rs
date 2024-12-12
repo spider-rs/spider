@@ -1,3 +1,5 @@
+use phf::phf_map;
+
 /// Custom network intercept types to expect on a domain
 #[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum NetworkInterceptManager {
@@ -25,76 +27,115 @@ pub enum NetworkInterceptManager {
     Nytimes,
     /// wikipedia.com
     Wikipedia,
+    /// tcgplayer.com
+    Tcgplayer,
     #[default]
     /// Unknown
     Unknown,
 }
 
-lazy_static::lazy_static! {
-    /// Top tier list of the most common websites visited.
-    pub static ref TOP_TIER_LIST: [(&'static str, NetworkInterceptManager); 21] = [
-        ("https://www.tiktok.com", NetworkInterceptManager::TikTok),
-        ("https://tiktok.com", NetworkInterceptManager::TikTok),
-        ("https://www.amazon.", NetworkInterceptManager::Amazon),
-        ("https://amazon.", NetworkInterceptManager::Amazon),
-        ("https://www.x.com", NetworkInterceptManager::X),
-        ("https://x.com", NetworkInterceptManager::X),
-        ("https://www.netflix.com", NetworkInterceptManager::Netflix),
-        ("https://netflix.com", NetworkInterceptManager::Netflix),
-        (
-            "https://www.linkedin.com",
-            NetworkInterceptManager::LinkedIn
-        ),
-        ("https://linkedin.com", NetworkInterceptManager::LinkedIn),
-        ("https://www.upwork.com", NetworkInterceptManager::Upwork),
-        ("https://upwork.com", NetworkInterceptManager::Upwork),
-        ("https://www.glassdoor.", NetworkInterceptManager::Glassdoor),
-        ("https://glassdoor.", NetworkInterceptManager::Glassdoor),
-        ("https://www.medium.com", NetworkInterceptManager::Medium),
-        ("https://medium.com", NetworkInterceptManager::Medium),
-        ("https://www.ebay.", NetworkInterceptManager::Ebay),
-        ("https://ebay.", NetworkInterceptManager::Ebay),
-        ("https://www.nytimes.com", NetworkInterceptManager::Nytimes),
-        ("https://nytimes.com", NetworkInterceptManager::Nytimes),
-        ("wikipedia.org", NetworkInterceptManager::Wikipedia),
-    ];
-}
-
-/// The find type is own.
-#[derive(Default, Debug, Clone, Hash, PartialEq, Eq)]
-enum FindType {
-    #[default]
-    /// Starts with.
-    StartsWith,
-    /// Contains.
-    Contains,
-}
+/// Top tier 100 domain list.
+static DOMAIN_MAP: phf::Map<&'static str, NetworkInterceptManager> = phf_map! {
+    "tiktok.com" => NetworkInterceptManager::TikTok,
+    "facebook.com" => NetworkInterceptManager::Facebook,
+    "amazon.com" => NetworkInterceptManager::Amazon,
+    "x.com" => NetworkInterceptManager::X,
+    "linkedin.com" => NetworkInterceptManager::LinkedIn,
+    "netflix.com" => NetworkInterceptManager::Netflix,
+    "medium.com" => NetworkInterceptManager::Medium,
+    "upwork.com" => NetworkInterceptManager::Upwork,
+    "glassdoor.com" => NetworkInterceptManager::Glassdoor,
+    "ebay.com" => NetworkInterceptManager::Ebay,
+    "nytimes.com" => NetworkInterceptManager::Nytimes,
+    "wikipedia.org" => NetworkInterceptManager::Wikipedia,
+    "tcgplayer.com" => NetworkInterceptManager::Tcgplayer,
+};
 
 impl NetworkInterceptManager {
-    /// a custom intercept handle.
-    pub fn new(url: &str) -> NetworkInterceptManager {
-        TOP_TIER_LIST
-            .iter()
-            .find(|&(pattern, nm)| {
-                if nm.get_pattern() == FindType::StartsWith {
-                    url.starts_with(pattern)
+    pub fn new(url: &Option<Box<url::Url>>) -> NetworkInterceptManager {
+        if let Some(parsed_url) = url {
+            if let Some(domain) = parsed_url.domain() {
+                // list of top websites should at most two - can always do a second pass.
+                let domain_parts: Vec<&str> = domain.split('.').collect();
+
+                let base_domain = if domain_parts.len() > 2 {
+                    format!(
+                        "{}.{}",
+                        domain_parts[domain_parts.len() - 2],
+                        domain_parts[domain_parts.len() - 1]
+                    )
                 } else {
-                    url.contains(pattern)
-                }
-            })
-            .map(|&(_, manager_type)| manager_type)
-            .unwrap_or(NetworkInterceptManager::Unknown)
+                    domain.to_string()
+                };
+
+                return *DOMAIN_MAP
+                    .get(&base_domain)
+                    .unwrap_or(&NetworkInterceptManager::Unknown);
+            }
+        }
+        NetworkInterceptManager::Unknown
     }
-    /// Setup the intercept handle
-    pub fn setup(&mut self, url: &str) -> Self {
-        NetworkInterceptManager::new(url)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    /// Helper function to create an Option<Box<Url>> from a string
+    fn create_url(url: &str) -> Option<Box<Url>> {
+        Url::parse(url).ok().map(Box::new)
     }
 
-    /// determine the pattern to use.
-    fn get_pattern(&self) -> FindType {
-        match self {
-            NetworkInterceptManager::Wikipedia => FindType::Contains,
-            _ => FindType::StartsWith,
+    #[test]
+    fn test_known_domains() {
+        let cases = vec![
+            ("http://www.tiktok.com", NetworkInterceptManager::TikTok),
+            ("https://facebook.com", NetworkInterceptManager::Facebook),
+            ("https://www.amazon.com", NetworkInterceptManager::Amazon),
+            ("https://subdomain.x.com", NetworkInterceptManager::X),
+            ("https://linkedin.com/in/someone", NetworkInterceptManager::LinkedIn),
+            ("https://www.netflix.com/browse", NetworkInterceptManager::Netflix),
+            ("https://medium.com", NetworkInterceptManager::Medium),
+            ("https://sub.upwork.com", NetworkInterceptManager::Upwork),
+            ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
+            ("https://ebay.com", NetworkInterceptManager::Ebay),
+            ("https://nytimes.com/section/world", NetworkInterceptManager::Nytimes),
+            ("https://en.wikipedia.org/wiki/Rust", NetworkInterceptManager::Wikipedia),
+            ("https://market.tcgplayer.com", NetworkInterceptManager::Tcgplayer),
+        ];
+
+        for (url, expected) in cases {
+            assert_eq!(NetworkInterceptManager::new(&create_url(url)), expected);
+        }
+    }
+
+    #[test]
+    fn test_unknown_domains() {
+        let cases = vec![
+            "https://www.unknown.com",
+            "http://subdomain.randomstuff.org",
+            "https://notindatabase.co.uk",
+            "https://another.unknown.site",
+        ];
+
+        for url in cases {
+            assert_eq!(NetworkInterceptManager::new(&create_url(url)), NetworkInterceptManager::Unknown);
+        }
+    }
+
+    #[test]
+    fn test_invalid_urls() {
+        let cases = vec![
+            "not-a-url",
+            "ftp://invalid.protocol.com",
+            "http://",
+            "",
+        ];
+
+        for url in cases {
+            assert_eq!(NetworkInterceptManager::new(&create_url(url)), NetworkInterceptManager::Unknown);
         }
     }
 }

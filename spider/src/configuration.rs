@@ -853,7 +853,7 @@ impl Configuration {
     pub fn with_chrome_intercept(
         &mut self,
         chrome_intercept: RequestInterceptConfiguration,
-        url: &str,
+        url: &Option<Box<url::Url>>,
     ) -> &mut Self {
         self.chrome_intercept = chrome_intercept;
         self.chrome_intercept.setup_intercept_manager(url);
@@ -865,7 +865,7 @@ impl Configuration {
     pub fn with_chrome_intercept(
         &mut self,
         _chrome_intercept: RequestInterceptConfiguration,
-        _url: &str,
+        _url: &Option<Box<url::Url>>,
     ) -> &mut Self {
         self
     }
