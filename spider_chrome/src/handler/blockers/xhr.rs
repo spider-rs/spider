@@ -84,6 +84,8 @@ lazy_static::lazy_static! {
             "https://conf.config-security.com/model",
             "https://sumome.com/api/load/",
             "https://public-api.wordpress.com/geo/",
+            "https://events.api.secureserver.net/",
+            "https://csp.secureserver.net/eventbus",
             "https://doh.cq0.co/resolve",
             ".wixapps.net/api/v1/bulklog",
             "https://error-analytics-sessions-production.shopifysvc.com/",

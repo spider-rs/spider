@@ -94,6 +94,7 @@ lazy_static::lazy_static! {
             "https://log.medietall.no/analytics.js",
             "https://lwadm.com/lw/pbjs?",
             "https://cl.k5a.io/",
+            "https://cdn-cookieyes.com/",
             ".sharethis.com",
             ".newrelic.com",
             ".googlesyndication.com",
