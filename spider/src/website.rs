@@ -3914,7 +3914,7 @@ impl Website {
         self.configuration.budget = budget;
     }
 
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
+    /// Set a crawl depth limit. If the value is 0 there is no limit.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.configuration.with_depth(depth);
         self
@@ -4079,7 +4079,7 @@ impl Website {
         self
     }
 
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
+    /// Set a crawl page limit. If the value is 0 there is no limit.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.configuration.with_limit(limit);
         self

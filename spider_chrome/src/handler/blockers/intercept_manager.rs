@@ -77,7 +77,6 @@ impl NetworkInterceptManager {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,15 +94,30 @@ mod tests {
             ("https://facebook.com", NetworkInterceptManager::Facebook),
             ("https://www.amazon.com", NetworkInterceptManager::Amazon),
             ("https://subdomain.x.com", NetworkInterceptManager::X),
-            ("https://linkedin.com/in/someone", NetworkInterceptManager::LinkedIn),
-            ("https://www.netflix.com/browse", NetworkInterceptManager::Netflix),
+            (
+                "https://linkedin.com/in/someone",
+                NetworkInterceptManager::LinkedIn,
+            ),
+            (
+                "https://www.netflix.com/browse",
+                NetworkInterceptManager::Netflix,
+            ),
             ("https://medium.com", NetworkInterceptManager::Medium),
             ("https://sub.upwork.com", NetworkInterceptManager::Upwork),
             ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
             ("https://ebay.com", NetworkInterceptManager::Ebay),
-            ("https://nytimes.com/section/world", NetworkInterceptManager::Nytimes),
-            ("https://en.wikipedia.org/wiki/Rust", NetworkInterceptManager::Wikipedia),
-            ("https://market.tcgplayer.com", NetworkInterceptManager::Tcgplayer),
+            (
+                "https://nytimes.com/section/world",
+                NetworkInterceptManager::Nytimes,
+            ),
+            (
+                "https://en.wikipedia.org/wiki/Rust",
+                NetworkInterceptManager::Wikipedia,
+            ),
+            (
+                "https://market.tcgplayer.com",
+                NetworkInterceptManager::Tcgplayer,
+            ),
         ];
 
         for (url, expected) in cases {
@@ -121,21 +135,22 @@ mod tests {
         ];
 
         for url in cases {
-            assert_eq!(NetworkInterceptManager::new(&create_url(url)), NetworkInterceptManager::Unknown);
+            assert_eq!(
+                NetworkInterceptManager::new(&create_url(url)),
+                NetworkInterceptManager::Unknown
+            );
         }
     }
 
     #[test]
     fn test_invalid_urls() {
-        let cases = vec![
-            "not-a-url",
-            "ftp://invalid.protocol.com",
-            "http://",
-            "",
-        ];
+        let cases = vec!["not-a-url", "ftp://invalid.protocol.com", "http://", ""];
 
         for url in cases {
-            assert_eq!(NetworkInterceptManager::new(&create_url(url)), NetworkInterceptManager::Unknown);
+            assert_eq!(
+                NetworkInterceptManager::new(&create_url(url)),
+                NetworkInterceptManager::Unknown
+            );
         }
     }
 }

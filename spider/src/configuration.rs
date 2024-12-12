@@ -643,7 +643,7 @@ impl Configuration {
         self
     }
 
-    /// Set a crawl page limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
+    /// Set a crawl page limit. If the value is 0 there is no limit.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.with_budget(Some(hashbrown::HashMap::from([("*", limit)])));
         self
@@ -693,7 +693,7 @@ impl Configuration {
         self
     }
 
-    /// Set a crawl depth limit. If the value is 0 there is no limit. This does nothing without the feat flag `budget` enabled.
+    /// Set a crawl depth limit. If the value is 0 there is no limit.
     pub fn with_depth(&mut self, depth: usize) -> &mut Self {
         self.depth = depth;
         self
