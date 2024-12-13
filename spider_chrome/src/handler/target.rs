@@ -30,7 +30,7 @@ use crate::handler::emulation::EmulationManager;
 use crate::handler::frame::{
     FrameEvent, FrameManager, NavigationError, NavigationId, NavigationOk,
 };
-use crate::handler::frame::{FrameNavigationRequest, UTILITY_WORLD_NAME};
+use crate::handler::frame::{FrameRequestedNavigation, UTILITY_WORLD_NAME};
 use crate::handler::network::{NetworkEvent, NetworkManager};
 use crate::handler::page::PageHandle;
 use crate::handler::viewport::Viewport;
@@ -167,7 +167,7 @@ impl Target {
     }
 
     /// Navigate a frame
-    pub fn goto(&mut self, req: FrameNavigationRequest) {
+    pub fn goto(&mut self, req: FrameRequestedNavigation) {
         self.frame_manager.goto(req)
     }
 
@@ -309,7 +309,7 @@ impl Target {
             CdpEvent::NetworkLoadingFailed(ev) => {
                 self.network_manager.on_network_loading_failed(ev)
             }
-            _ => {}
+            _ => (),
         }
         chromiumoxide_cdp::consume_event!(match params {
            |ev| self.event_listeners.start_send(ev),

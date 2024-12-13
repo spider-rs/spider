@@ -44,6 +44,8 @@ lazy_static::lazy_static! {
             "https://cdn.cxense.com",
             "https://cdn.tinypass.com",
             "https://cd.connatix.com",
+            "https://js.chargebee.com/v2/chargebee.js",
+            "https://consent.cookiebot.com/",
             "https://platform-api.sharethis.com/js/sharethis.js",
             "https://js.hsforms.net/forms/embed/v2.js",
             "https://static.parastorage.com/services/wix-thunderbolt/dist/",

@@ -1,0 +1,29 @@
+[package]
+name = "spider_chromiumoxide_pdl"
+version = "0.7.1"
+authors = ["Matthias Seitz <matthias.seitz@outlook.de>", "j-mendez <jeff@spider.cloud>"]
+edition = "2021"
+rust-version = "1.70"
+license = "MIT OR Apache-2.0"
+description = "Contains a PDL parser and rust generator"
+homepage = "https://github.com/mattsse/chromiumoxide"
+repository = "https://github.com/mattsse/chromiumoxide"
+readme = "../README.md"
+include = ["src/**/*", "LICENSE-*"]
+
+[lib]
+name = "chromiumoxide_pdl"
+
+[dependencies]
+once_cell = "1"
+regex = "1"
+quote = "1"
+proc-macro2 = "1"
+heck = "0.4"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+spider_chromiumoxide_types = { path = "../types", version = "0.7" }
+either = "1.6.1"
+
+[features]
+serde0 = []

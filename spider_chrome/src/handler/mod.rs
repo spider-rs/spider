@@ -22,7 +22,7 @@ use crate::cmd::{to_command_response, CommandMessage};
 use crate::conn::Connection;
 use crate::error::{CdpError, Result};
 use crate::handler::browser::BrowserContext;
-use crate::handler::frame::FrameNavigationRequest;
+use crate::handler::frame::FrameRequestedNavigation;
 use crate::handler::frame::{NavigationError, NavigationId, NavigationOk};
 use crate::handler::job::PeriodicJob;
 use crate::handler::session::Session;
@@ -347,7 +347,7 @@ impl Handler {
         if msg.is_navigation() {
             let (req, tx) = msg.split();
             let id = self.next_navigation_id();
-            target.goto(FrameNavigationRequest::new(id, req));
+            target.goto(FrameRequestedNavigation::new(id, req));
             self.navigations.insert(
                 id,
                 NavigationRequest::Navigate(NavigationInProgress::new(tx)),

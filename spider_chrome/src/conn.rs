@@ -142,6 +142,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
                         Err(err.into())
                     }
                 };
+
                 Poll::Ready(Some(ready))
             }
             Some(Ok(WsMessage::Close(_))) => Poll::Ready(None),

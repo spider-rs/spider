@@ -193,7 +193,7 @@ pub struct FrameManager {
     /// arrive results in an error
     request_timeout: Duration,
     /// Track currently in progress navigation
-    pending_navigations: VecDeque<(FrameNavigationRequest, NavigationWatcher)>,
+    pending_navigations: VecDeque<(FrameRequestedNavigation, NavigationWatcher)>,
     /// The currently ongoing navigation
     navigation: Option<(NavigationWatcher, Instant)>,
 }
@@ -342,14 +342,14 @@ impl FrameManager {
     }
 
     /// Entrypoint for page navigation
-    pub fn goto(&mut self, req: FrameNavigationRequest) {
+    pub fn goto(&mut self, req: FrameRequestedNavigation) {
         if let Some(frame_id) = self.main_frame.clone() {
             self.navigate_frame(frame_id, req);
         }
     }
 
     /// Navigate a specific frame
-    pub fn navigate_frame(&mut self, frame_id: FrameId, mut req: FrameNavigationRequest) {
+    pub fn navigate_frame(&mut self, frame_id: FrameId, mut req: FrameRequestedNavigation) {
         let loader_id = self.frames.get(&frame_id).and_then(|f| f.loader_id.clone());
         let watcher = NavigationWatcher::until_page_load(req.id, frame_id.clone(), loader_id);
         // insert the frame_id in the request if not present
@@ -667,7 +667,7 @@ pub struct NavigationId(pub usize);
 
 /// Represents a the request for a navigation
 #[derive(Debug)]
-pub struct FrameNavigationRequest {
+pub struct FrameRequestedNavigation {
     /// The internal identifier
     pub id: NavigationId,
     /// the cdp request that will trigger the navigation
@@ -676,7 +676,7 @@ pub struct FrameNavigationRequest {
     pub timeout: Duration,
 }
 
-impl FrameNavigationRequest {
+impl FrameRequestedNavigation {
     pub fn new(id: NavigationId, req: Request) -> Self {
         Self {
             id,

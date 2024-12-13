@@ -1,0 +1,29 @@
+[package]
+name = "spider_chromiumoxide_cdp"
+version = "0.7.1"
+authors = ["Matthias Seitz <matthias.seitz@outlook.de>", "j-mendez <jeff@spider.cloud>"]
+edition = "2021"
+rust-version = "1.70"
+description = "Contains all the generated types for chromiumoxide"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/mattsse/chromiumoxide"
+repository = "https://github.com/mattsse/chromiumoxide"
+readme = "../README.md"
+include = ["src/**/*", "*.pdl", "LICENSE-*"]
+
+[lib]
+name = "chromiumoxide_cdp"
+
+[features]
+serde0 = []
+
+[dev-dependencies]
+spider_chromiumoxide_pdl = { path = "../pdl", version = "0.7" }
+ureq = "2"
+tempfile = "3"
+
+[dependencies]
+spider_chromiumoxide_pdl = { path = "../pdl", version = "0.7" }
+spider_chromiumoxide_types = { path = "../types", version = "0.7" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
