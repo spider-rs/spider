@@ -1201,12 +1201,13 @@ mod tests {
     #[test]
     fn test_serde_import() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
         Generator::default()
             .out_dir(dir.join("src"))
             .serde(SerdeSupport::with_feature("serde0"))
             .compile_pdls(&[
-                dir.join("js_protocol.pdl"),
-                dir.join("browser_protocol.pdl"),
+                dir.join("../cdp/js_protocol.pdl"),
+                dir.join("../cdp/browser_protocol.pdl"),
             ])
             .unwrap();
     }
