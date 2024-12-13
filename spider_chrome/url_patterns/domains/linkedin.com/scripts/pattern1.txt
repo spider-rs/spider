@@ -1,0 +1,8 @@
+/log
+https://www.linkedin.com/li/track
+https://li.protechts.net
+https://www.linkedin.com/platform-telemetry/li
+https://www.linkedin.com/organization-guest/api/feedUpdates/
+https://www.linkedin.com/feedcontent-guest/api/ingraphs/gauge
+https://www.linkedin.com/voyager/api/
+https://platform.linkedin.com/litms/allowlist/voyager-web-global

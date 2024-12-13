@@ -155,7 +155,7 @@ impl NetworkManager {
             block_stylesheets: false,
             block_analytics: true,
             only_html: false,
-            intercept_manager: NetworkInterceptManager::Unknown,
+            intercept_manager: NetworkInterceptManager::UNKNOWN,
         }
     }
 
@@ -273,7 +273,7 @@ impl NetworkManager {
 
                             // ignore assets we do not need for frameworks
                             if !ignore_script
-                                && intercept_manager == NetworkInterceptManager::Unknown
+                                && intercept_manager == NetworkInterceptManager::UNKNOWN
                             {
                                 let hydration_file =
                                     JS_FRAMEWORK_PATH.iter().any(|p| new_url.starts_with(p));
@@ -434,54 +434,11 @@ impl NetworkManager {
                             || network_resource
                             || event.resource_type == ResourceType::Document)
                     {
-                        match self.intercept_manager {
-                            NetworkInterceptManager::TikTok => {
-                                super::blockers::tiktok_blockers::block_tiktok(event)
-                            }
-                            NetworkInterceptManager::Amazon => {
-                                super::blockers::amazon_blockers::block_amazon(event)
-                            }
-                            NetworkInterceptManager::X => {
-                                super::blockers::x_blockers::block_x(event)
-                            }
-                            NetworkInterceptManager::Netflix => {
-                                super::blockers::netflix_blockers::block_netflix(event)
-                            }
-                            NetworkInterceptManager::LinkedIn => {
-                                super::blockers::linkedin_blockers::block_linkedin(event)
-                            }
-                            NetworkInterceptManager::Medium => {
-                                super::blockers::medium_blockers::block_medium(event)
-                            }
-                            NetworkInterceptManager::Ebay => {
-                                super::blockers::ebay_blockers::block_ebay(event)
-                            }
-                            NetworkInterceptManager::Wikipedia => {
-                                super::blockers::wikipedia_blockers::block_wikipedia(event)
-                            }
-                            NetworkInterceptManager::Tcgplayer => {
-                                super::blockers::tcgplayer_blockers::block_tcgplayer(event)
-                            }
-                            NetworkInterceptManager::Nytimes => {
-                                super::blockers::nytimes_blockers::block_nytimes(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            NetworkInterceptManager::Glassdoor => {
-                                super::blockers::glassdoor_blockers::block_glassdoor(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            NetworkInterceptManager::Upwork => {
-                                super::blockers::upwork_blockers::block_upwork(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            _ => skip_networking,
-                        }
+                        self.intercept_manager.intercept_detection(
+                            &event.request.url,
+                            self.ignore_visuals,
+                            network_resource,
+                        )
                     } else {
                         skip_networking
                     };
@@ -585,54 +542,11 @@ impl NetworkManager {
                             || network_resource
                             || event.resource_type == ResourceType::Document)
                     {
-                        match self.intercept_manager {
-                            NetworkInterceptManager::TikTok => {
-                                super::blockers::tiktok_blockers::block_tiktok(event)
-                            }
-                            NetworkInterceptManager::Amazon => {
-                                super::blockers::amazon_blockers::block_amazon(event)
-                            }
-                            NetworkInterceptManager::X => {
-                                super::blockers::x_blockers::block_x(event)
-                            }
-                            NetworkInterceptManager::Netflix => {
-                                super::blockers::netflix_blockers::block_netflix(event)
-                            }
-                            NetworkInterceptManager::LinkedIn => {
-                                super::blockers::linkedin_blockers::block_linkedin(event)
-                            }
-                            NetworkInterceptManager::Tcgplayer => {
-                                super::blockers::tcgplayer_blockers::block_tcgplayer(event)
-                            }
-                            NetworkInterceptManager::Medium => {
-                                super::blockers::medium_blockers::block_medium(event)
-                            }
-                            NetworkInterceptManager::Ebay => {
-                                super::blockers::ebay_blockers::block_ebay(event)
-                            }
-                            NetworkInterceptManager::Wikipedia => {
-                                super::blockers::wikipedia_blockers::block_wikipedia(event)
-                            }
-                            NetworkInterceptManager::Nytimes => {
-                                super::blockers::nytimes_blockers::block_nytimes(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            NetworkInterceptManager::Glassdoor => {
-                                super::blockers::glassdoor_blockers::block_glassdoor(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            NetworkInterceptManager::Upwork => {
-                                super::blockers::upwork_blockers::block_upwork(
-                                    event,
-                                    self.ignore_visuals,
-                                )
-                            }
-                            _ => skip_networking,
-                        }
+                        self.intercept_manager.intercept_detection(
+                            &event.request.url,
+                            self.ignore_visuals,
+                            network_resource,
+                        )
                     } else {
                         skip_networking
                     };

@@ -1,0 +1,8 @@
+https://cdn-client.medium.com/lite/static/js/instrumentation.
+https://medium.com/_/clientele/reports/performance/
+https://cdn-client.medium.com/lite/static/js/reporting.f
+https://medium.com/_/clientele/reports/performance/
+https://cdn-client.medium.com/lite/static/js/manifest.
+clientele/reports/performance/
+https://www.google.com/js/bg/
+https://chitaranjanbiswal93.medium.com/_/clientele/reports/performance/

@@ -1,0 +1,4 @@
+https://www.upwork.com/static/assets/TopNavSsi/visitor-v2/
+https://www.upwork.com/static/assets/UniversalSearchNuxt/styles~
+https://www.upwork.com/static/assets/Brontes/styles
+https://www.upwork.com/static/assets/Brontes/google-one-tap.6226625d.js

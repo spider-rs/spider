@@ -1,0 +1,15 @@
+https://cognito-identity.us-east-1.amazonaws.com
+https://completion.amazon.com/api/2017/suggestions
+https://sts.us-east-1.amazonaws.com/
+https://www.amazon.com/cross_border_interstitial_sp/render
+https://aax-us-east-retail-direct.amazon.com/e/xsp/getAd
+https://fls-na.amazon.com/1/batch/1/OE/
+https://unagi.amazon.com/1/events/
+https://images-na.ssl-images-amazon.com/images/S/apesafeframe/ape/sf/desktop/
+https://m.media-amazon.com/images/G/01/csm/showads
+https://dataplane.rum
+https://client.rum
+.amazon-adsystem.com
+SearchPartnerAssets
+inner-host.min.js
+https://s.amazon-adsystem.com/

@@ -1,0 +1,8 @@
+https://meta.wikimedia.org/w/index.php?title=MediaWiki:Wikiminiatlas.js&action=raw&ctype=text/javascript
+https://login.wikimedia.org/wiki/Special:CentralAutoLogin/checkLoggedIn?useformat=desktop&wikiid=ptwiki&type=script&wikiid=ptwiki&type=script
+.wikipedia.org/w/load.php?lang=pt&modules=ext.centralNotice.choiceData%2CgeoIP%2CstartUp%7Cext.centralauth.ForeignApi%2Ccentralautologin%7Cext.checkUser.clientHints%7Cext.cite.ux-enhancements%7Cext.cx.eventlogging.campaigns
+.wikipedia.org/w/load.php?lang=pt&modules=startup&only=scripts&raw=1&skin=vector-2022
+.eventlogging.campaigns
+%2CFeedbackHighlight%2
+.quicksurveys.
+Special:CentralAutoLogin/start?type=script

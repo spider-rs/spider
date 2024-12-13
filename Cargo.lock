@@ -4354,6 +4354,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "lazy_static",
  "phf 0.11.2",
+ "phf_codegen 0.11.2",
  "pin-project-lite",
  "proc-macro2",
  "quote",

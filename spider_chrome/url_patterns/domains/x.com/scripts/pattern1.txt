@@ -1,0 +1,6 @@
+https://accounts.google.com/gsi/
+https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js
+https://api.x.com/1.1/onboarding/sso_init.json
+https://api.x.com/1.1/jot/client_event.json
+https://api.x.com/1.1/jot/error_log.json
+https://api.x.com/1.1/hashflags.json

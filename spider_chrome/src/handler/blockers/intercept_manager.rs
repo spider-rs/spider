@@ -1,79 +1,21 @@
-use phf::phf_map;
-
-/// Custom network intercept types to expect on a domain
-#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
-pub enum NetworkInterceptManager {
-    /// tiktok.com
-    TikTok,
-    /// facebook.com
-    Facebook,
-    /// amazon.com
-    Amazon,
-    /// x.com
-    X,
-    /// LinkedIn,
-    LinkedIn,
-    /// netflix.com
-    Netflix,
-    /// medium.com
-    Medium,
-    /// upwork.com,
-    Upwork,
-    /// glassdoor.com
-    Glassdoor,
-    /// ebay.com
-    Ebay,
-    /// nytimes.com
-    Nytimes,
-    /// wikipedia.com
-    Wikipedia,
-    /// tcgplayer.com
-    Tcgplayer,
-    #[default]
-    /// Unknown
-    Unknown,
-}
-
-/// Top tier 100 domain list.
-static DOMAIN_MAP: phf::Map<&'static str, NetworkInterceptManager> = phf_map! {
-    "tiktok.com" => NetworkInterceptManager::TikTok,
-    "facebook.com" => NetworkInterceptManager::Facebook,
-    "amazon.com" => NetworkInterceptManager::Amazon,
-    "x.com" => NetworkInterceptManager::X,
-    "linkedin.com" => NetworkInterceptManager::LinkedIn,
-    "netflix.com" => NetworkInterceptManager::Netflix,
-    "medium.com" => NetworkInterceptManager::Medium,
-    "upwork.com" => NetworkInterceptManager::Upwork,
-    "glassdoor.com" => NetworkInterceptManager::Glassdoor,
-    "ebay.com" => NetworkInterceptManager::Ebay,
-    "nytimes.com" => NetworkInterceptManager::Nytimes,
-    "wikipedia.org" => NetworkInterceptManager::Wikipedia,
-    "tcgplayer.com" => NetworkInterceptManager::Tcgplayer,
-};
+include!(concat!(env!("OUT_DIR"), "/domain_map.rs"));
 
 impl NetworkInterceptManager {
     pub fn new(url: &Option<Box<url::Url>>) -> NetworkInterceptManager {
         if let Some(parsed_url) = url {
             if let Some(domain) = parsed_url.domain() {
-                // list of top websites should at most two - can always do a second pass.
                 let domain_parts: Vec<&str> = domain.split('.').collect();
 
-                let base_domain = if domain_parts.len() > 2 {
-                    format!(
-                        "{}.{}",
-                        domain_parts[domain_parts.len() - 2],
-                        domain_parts[domain_parts.len() - 1]
-                    )
-                } else {
-                    domain.to_string()
-                };
-
                 return *DOMAIN_MAP
-                    .get(&base_domain)
-                    .unwrap_or(&NetworkInterceptManager::Unknown);
+                    .get(if domain_parts.len() >= 2 {
+                        domain_parts[domain_parts.len() - 2]
+                    } else {
+                        domain
+                    })
+                    .unwrap_or(&NetworkInterceptManager::UNKNOWN);
             }
         }
-        NetworkInterceptManager::Unknown
+        NetworkInterceptManager::UNKNOWN
     }
 }
 
@@ -82,7 +24,7 @@ mod tests {
     use super::*;
     use url::Url;
 
-    /// Helper function to create an Option<Box<Url>> from a string
+    // Helper function to create an Option<Box<Url>> from a string
     fn create_url(url: &str) -> Option<Box<Url>> {
         Url::parse(url).ok().map(Box::new)
     }
@@ -90,33 +32,33 @@ mod tests {
     #[test]
     fn test_known_domains() {
         let cases = vec![
-            ("http://www.tiktok.com", NetworkInterceptManager::TikTok),
-            ("https://facebook.com", NetworkInterceptManager::Facebook),
-            ("https://www.amazon.com", NetworkInterceptManager::Amazon),
+            ("http://www.tiktok.com", NetworkInterceptManager::TIKTOK),
+            ("https://facebook.com", NetworkInterceptManager::FACEBOOK),
+            ("https://www.amazon.com", NetworkInterceptManager::AMAZON),
             ("https://subdomain.x.com", NetworkInterceptManager::X),
             (
                 "https://linkedin.com/in/someone",
-                NetworkInterceptManager::LinkedIn,
+                NetworkInterceptManager::LINKEDIN,
             ),
             (
                 "https://www.netflix.com/browse",
-                NetworkInterceptManager::Netflix,
+                NetworkInterceptManager::NETFLIX,
             ),
-            ("https://medium.com", NetworkInterceptManager::Medium),
-            ("https://sub.upwork.com", NetworkInterceptManager::Upwork),
-            ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
-            ("https://ebay.com", NetworkInterceptManager::Ebay),
+            ("https://medium.com", NetworkInterceptManager::MEDIUM),
+            ("https://sub.upwork.com", NetworkInterceptManager::UPWORK),
+            ("https://glassdoor.com", NetworkInterceptManager::GLASSDOOR),
+            ("https://ebay.com", NetworkInterceptManager::EBAY),
             (
                 "https://nytimes.com/section/world",
-                NetworkInterceptManager::Nytimes,
+                NetworkInterceptManager::NYTIMES,
             ),
             (
                 "https://en.wikipedia.org/wiki/Rust",
-                NetworkInterceptManager::Wikipedia,
+                NetworkInterceptManager::WIKIPEDIA,
             ),
             (
                 "https://market.tcgplayer.com",
-                NetworkInterceptManager::Tcgplayer,
+                NetworkInterceptManager::TCGPLAYER,
             ),
         ];
 
@@ -137,7 +79,7 @@ mod tests {
         for url in cases {
             assert_eq!(
                 NetworkInterceptManager::new(&create_url(url)),
-                NetworkInterceptManager::Unknown
+                NetworkInterceptManager::UNKNOWN
             );
         }
     }
@@ -149,7 +91,7 @@ mod tests {
         for url in cases {
             assert_eq!(
                 NetworkInterceptManager::new(&create_url(url)),
-                NetworkInterceptManager::Unknown
+                NetworkInterceptManager::UNKNOWN
             );
         }
     }

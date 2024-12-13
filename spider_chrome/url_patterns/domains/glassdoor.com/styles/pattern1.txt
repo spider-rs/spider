@@ -1,0 +1,6 @@
+https://www.glassdoor.com/sam-global-nav/static/
+https://www.glassdoor.com/garnish/static/js/gd-
+https://unpkg.com/@dotlottie/player-component@
+https://www.glassdoor.com/job-search-next/assets/_next/static/
+https://www.glassdoor.com/ei-overview-next/assets/_next/static/
+https://www.glassdoor.com/occ-salaries-web/assets/_next/static/

@@ -1,47 +1,26 @@
 /// adblock patterns
 pub mod adblock_patterns;
-/// amazon blockers
-pub mod amazon_blockers;
-/// ebay blockers
-pub mod ebay_blockers;
-/// glassdoor blockers
-pub mod glassdoor_blockers;
 /// interception manager
 pub mod intercept_manager;
-/// linkedin blockers
-pub mod linkedin_blockers;
-/// medium blockers
-pub mod medium_blockers;
-/// netflix blockers
-pub mod netflix_blockers;
-/// nytimes blockers
-pub mod nytimes_blockers;
 /// script blockers
 pub mod scripts;
-/// block tcgplayer.com
-pub mod tcgplayer_blockers;
-/// tiktok blockers
-pub mod tiktok_blockers;
-/// upwork blockers
-pub mod upwork_blockers;
-/// wikipedia blockers
-pub mod wikipedia_blockers;
-/// x blockers
-pub mod x_blockers;
-
 /// xhr blockers
 pub mod xhr;
 
 // Trie node for ignore.
-#[derive(Default)]
-pub(crate) struct TrieNode {
-    children: hashbrown::HashMap<char, TrieNode>,
-    is_end_of_word: bool,
+#[derive(Default, Debug)]
+pub struct TrieNode {
+    /// Children for trie.
+    pub children: hashbrown::HashMap<char, TrieNode>,
+    /// End of word match.
+    pub is_end_of_word: bool,
 }
 
 /// Basic Ignore trie.
-pub(crate) struct Trie {
-    root: TrieNode,
+#[derive(Debug)]
+pub struct Trie {
+    /// The trie node.
+    pub root: TrieNode,
 }
 
 impl Trie {

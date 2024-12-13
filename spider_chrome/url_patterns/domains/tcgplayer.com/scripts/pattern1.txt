@@ -1,0 +1,6 @@
+https://data.tcgplayer.com/suggestions/trending
+https://mpapi.tcgplayer.com/v2/kickbacks?active=true
+https://homepage.marketplace.tcgplayer.com/sitealert.json
+https://infinite-api.tcgplayer.com/signup/?
+https://features.tcgplayer.com/v1/optimizely/Variation/
+https://mpapi.tcgplayer.com/v2/address/countryCodes?mpfev=3031

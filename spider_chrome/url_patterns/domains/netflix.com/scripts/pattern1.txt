@@ -1,0 +1,3 @@
+/log
+https://assets.nflxext.com/web/
+https://ae.nflximg.net/monet/scripts/adtech_iframe

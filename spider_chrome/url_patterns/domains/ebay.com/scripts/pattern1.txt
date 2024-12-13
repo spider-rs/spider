@@ -1,0 +1,8 @@
+https://www.ebay.com/sch/ajax/autocomplete
+https://www.ebay.com/blueberry/v1/ads/identity/pixelUrls
+https://svcs.ebay.com/ufeservice/v1/events
+https://www.ebay.com/gh/useracquisition?
+https://vi.vipr.ebaydesc.com/
+https://srv.main.ebayrtm.com/
+https://www.ebay.com/nap/napkinapi/
+https://ir.ebaystatic.com/rs/c/scandal/ScandalJS-

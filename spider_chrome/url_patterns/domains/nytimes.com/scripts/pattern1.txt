@@ -1,0 +1,9 @@
+https://purr.nytimes.com/v1/purr-cache
+https://static01.nyt.com/ads/tpc-check.html
+https://www.nytimes.com/vi-assets/static-assets/adslot
+https://purr.nytimes.com/v2/tcf
+https://a.et.nytimes.com//.status
+https://www.nytimes.com/fides/api/v1/privacy-experience?
+https://o82024.ingest.us.sentry.io/
+https://a.nytimes.com/svc/nyt/data-layer?
+https://www.nytimes.com/ads/prebid9.11.0.js

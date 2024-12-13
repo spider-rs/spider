@@ -10,14 +10,14 @@ use chromiumoxide::handler::blockers::intercept_manager::NetworkInterceptManager
 pub enum NetworkInterceptManager {
     #[default]
     /// Unknown
-    Unknown,
+    UNKNOWN,
 }
 
 #[cfg(not(feature = "chrome"))]
 impl NetworkInterceptManager {
     /// a custom intercept handle.
     pub fn new(_url: &Option<Box<url::Url>>) -> NetworkInterceptManager {
-        NetworkInterceptManager::Unknown
+        NetworkInterceptManager::UNKNOWN
     }
 }
 
