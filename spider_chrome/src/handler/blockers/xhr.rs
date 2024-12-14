@@ -115,7 +115,9 @@ lazy_static::lazy_static! {
             "cookieconsentpub",
             "cookie-law-info",
             "mediaelement-and-player.min.j",
-            ".ingest.us.sentry.io/"
+            ".ingest.us.sentry.io/",
+            "/analytics",
+            "/tracking"
         ];
         for pattern in &patterns {
             trie.insert(pattern);

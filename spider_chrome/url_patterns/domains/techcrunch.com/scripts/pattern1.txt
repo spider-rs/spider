@@ -1,0 +1,16 @@
+https://js.hubspot.com/web-interactives-embed.js
+https://js.hs-banner.com/v2/44101848/banner.js
+https://ssp-sync.criteo.com/user-sync/iframe?
+https://assets.a-mo.net/js/cframe.js
+https://eb2.3lift.com/sync
+https://secure-assets.rubiconproject.com/utils/xapi/multi-sync.
+https://cs.emxdgt.com/
+https://u.openx.net/w/
+https://sdk.mrf.io/statics/
+https://eus.rubiconproject.com/usync.js
+https://js.hs-scripts.com/44101848.js
+https://tsdtocl.com/
+https://opus.analytics.yahoo.com/
+https://opus.analytics.yahoo.com/tag/opus.js
+https://jac.yahoosandbox.com/2.0.0/safeframe.html
+https://s.yimg.com/
