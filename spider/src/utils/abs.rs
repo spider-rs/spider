@@ -51,13 +51,23 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     }
 }
 
-/// Convert to absolute path. The base url must be the root path to avoid infinite appending.
+/// Return handling for the links
+enum LinkReturn {
+    /// Early return
+    EarlyReturn,
+    /// Empty ignore
+    Empty,
+    /// Absolute url
+    Absolute(Url),
+}
+
 #[inline]
-pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
+/// Handle the base url return to determine 3rd party urls.
+fn handle_base(href: &str) -> LinkReturn {
     let href = href.trim();
 
     if href.is_empty() || href == "#" || href == "javascript:void(0);" {
-        return base.clone();
+        return LinkReturn::EarlyReturn;
     }
 
     // handle absolute urls.
@@ -81,7 +91,7 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
 
             // Ignore protocols that are in the IGNORED_PROTOCOLS set
             if IGNORED_PROTOCOLS.contains(protocol_slice_section) {
-                return base.clone();
+                return LinkReturn::EarlyReturn;
             }
 
             // valid protocol to take absolute
@@ -91,27 +101,58 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
                 if PROTOCOLS.contains(protocol_slice) {
                     if let Ok(mut next_url) = Url::parse(href) {
                         next_url.set_fragment(None);
-                        return next_url;
+                        return LinkReturn::Absolute(next_url);
                     }
                 }
             }
         }
     }
 
-    // we can swap the domains if they do not match incase of crawler redirect anti-bot
-    match base.join(href) {
-        Ok(mut joined) => {
-            joined.set_fragment(None);
-            joined
+    LinkReturn::Empty
+}
+
+/// Convert to absolute path. The base url must be the root path to avoid infinite appending.
+/// We always handle the urls from the base path.
+#[inline]
+pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
+    if base.path() != "/" {
+        let mut base = base.clone();
+        convert_abs_url(&mut base);
+
+        match handle_base(href) {
+            LinkReturn::Absolute(u) => return u,
+            LinkReturn::EarlyReturn => return base.to_owned(),
+            _ => (),
         }
-        Err(_) => base.clone(),
+
+        match base.join(href) {
+            Ok(mut joined) => {
+                joined.set_fragment(None);
+                joined
+            }
+            Err(_) => base.to_owned(),
+        }
+    } else {
+        match handle_base(href) {
+            LinkReturn::Absolute(u) => return u,
+            LinkReturn::EarlyReturn => return base.to_owned(),
+            _ => (),
+        }
+        // we can swap the domains if they do not match incase of crawler redirect anti-bot
+        match base.join(href) {
+            Ok(mut joined) => {
+                joined.set_fragment(None);
+                joined
+            }
+            Err(_) => base.to_owned(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::parse_absolute_url;
     use super::convert_abs_path;
+    use crate::utils::parse_absolute_url;
 
     #[test]
     fn test_basic_join() {
