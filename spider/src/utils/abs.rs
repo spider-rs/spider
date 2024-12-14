@@ -1,4 +1,3 @@
-use crate::page::IGNORE_ASSETS;
 use phf::phf_set;
 use url::Url;
 
@@ -97,26 +96,6 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
                 }
             }
         }
-
-        if let Some(position) = href.rfind('.') {
-            let hlen = href.len();
-            let has_asset = hlen - position;
-
-            if has_asset >= 3 {
-                let next_position = position + 1;
-
-                if IGNORE_ASSETS.contains::<case_insensitive_string::CaseInsensitiveString>(
-                    &href[next_position..].into(),
-                ) {
-                    let full_url = format!("{}://{}", base.scheme(), href);
-
-                    if let Ok(mut next_url) = Url::parse(&full_url) {
-                        next_url.set_fragment(None);
-                        return next_url;
-                    }
-                }
-            }
-        }
     }
 
     // we can swap the domains if they do not match incase of crawler redirect anti-bot
@@ -131,12 +110,12 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::parse_absolute_url;
     use super::convert_abs_path;
-    use url::Url;
 
     #[test]
     fn test_basic_join() {
-        let base = Url::parse("https://example.com/path/").unwrap();
+        let base = parse_absolute_url("https://example.com/path/").unwrap();
         let href = "/subpage";
         let result = convert_abs_path(&base, href);
         assert_eq!(result.as_str(), "https://example.com/subpage");
@@ -144,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_absolute_href() {
-        let base = Url::parse("https://example.com/path/").unwrap();
+        let base = parse_absolute_url("https://example.com/path/").unwrap();
         let href = "https://example.org/anotherpath";
         let result = convert_abs_path(&base, href);
         assert_eq!(result.as_str(), href);
@@ -152,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_slash_join() {
-        let base = Url::parse("https://example.com/path/").unwrap();
+        let base = parse_absolute_url("https://example.com/path/").unwrap();
         let href = "/absolute";
         let result = convert_abs_path(&base, href);
         assert_eq!(result.as_str(), "https://example.com/absolute");
@@ -160,15 +139,15 @@ mod tests {
 
     #[test]
     fn test_empty_href() {
-        let base = Url::parse("https://example.com/path/").unwrap();
+        let base = parse_absolute_url("https://example.com/path/").unwrap();
         let href = "";
         let result = convert_abs_path(&base, href);
-        assert_eq!(result.as_str(), "https://example.com/path/");
+        assert_eq!(result.as_str(), "https://example.com/");
     }
 
     #[test]
     fn test_double_dot_href() {
-        let base = Url::parse("https://example.com/path/").unwrap();
+        let base = parse_absolute_url("https://example.com/path/").unwrap();
         let href = "..";
         let result = convert_abs_path(&base, href);
         assert_eq!(result.as_str(), "https://example.com/");
@@ -176,19 +155,19 @@ mod tests {
 
     #[test]
     fn test_domain_like_link() {
-        let base = Url::parse("https://www.example.com/path/").unwrap();
+        let base = parse_absolute_url("https://www.example.com/path/").unwrap();
         let href = "example.org/another-path";
         let result = convert_abs_path(&base, href);
         assert_eq!(
             result.as_str(),
-            "https://example.org/another-path",
+            "https://www.example.com/example.org/another-path",
             "Should treat as a domain"
         );
     }
 
     #[test]
     fn test_relative_path_with_slash() {
-        let base = Url::parse("https://www.example.com/path/").unwrap();
+        let base = parse_absolute_url("https://www.example.com/path/").unwrap();
         let href = "/another-path";
         let result = convert_abs_path(&base, href);
         assert_eq!(
@@ -200,19 +179,19 @@ mod tests {
 
     #[test]
     fn test_no_protocol_with_slash() {
-        let base = Url::parse("https://www.example.com/path/").unwrap();
+        let base = parse_absolute_url("https://www.example.com/path/").unwrap();
         let href = "example.com/other-path";
         let result = convert_abs_path(&base, href);
         assert_eq!(
             result.as_str(),
-            "https://example.com/other-path",
+            "https://www.example.com/example.com/other-path",
             "Should treat domain-like href as full URL"
         );
     }
 
     #[test]
     fn test_no_invalid_protocols() {
-        let base = Url::parse("https://www.example.com").unwrap();
+        let base = parse_absolute_url("https://www.example.com").unwrap();
         let href = "mailto:info@laminarpharma.com";
         let result = convert_abs_path(&base, href);
 
