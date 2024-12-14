@@ -1,4 +1,4 @@
-//! cargo run --example real_world --features="chrome chrome_intercept real_browser spider_utils/transformations"
+//! cargo run --example real_world --features="chrome chrome_intercept real_browser"
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
@@ -13,10 +13,13 @@ use std::time::Duration;
 
 async fn crawl_website(url: &str) -> Result<()> {
     let mut stdout = tokio::io::stdout();
+    let mut interception = RequestInterceptConfiguration::new(true);
+
+    interception.block_javascript = true;
 
     let mut website: Website = Website::new(url)
         .with_limit(5)
-        .with_chrome_intercept(RequestInterceptConfiguration::new(true))
+        .with_chrome_intercept(interception)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
             500,
         )))))
@@ -82,7 +85,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 async fn main() -> Result<()> {
     env_logger::init();
     let _ = tokio::join!(
-        crawl_website("https://www.choosealicense.com"),
+        crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),
         crawl_website("https://example.com"),
     );

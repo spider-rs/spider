@@ -10,6 +10,7 @@ use super::blockers::{
 use crate::auth::Credentials;
 use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
+use aho_corasick::AhoCorasick;
 use case_insensitive_string::CaseInsensitiveString;
 use chromiumoxide_cdp::cdp::browser_protocol::fetch::{
     self, AuthChallengeResponse, AuthChallengeResponseResponse, ContinueRequestParams,
@@ -32,23 +33,32 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 lazy_static! {
-    /// allowed js frameworks and libs excluding some and adding additional URLs
-    pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
-        phf::phf_set! {
-            // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
-            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js",
-            "react.development.js", "react-dom.development.js", "react.production.min.js",
-            "react-dom.production.min.js", "vue.global.js", "vue.esm-browser.js", "vue.js",
-            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js",
-            "d3.js", "lodash.min.js", "lodash.js",
-            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
-            // Verified 3rd parties for request
-            "https://m.stripe.network/inner.html",
-            "https://m.stripe.network/out-4.5.43.js",
-            "https://challenges.cloudflare.com/turnstile",
-            "https://js.stripe.com/v3/"
-        }
-    };
+    /// General patterns for popular libraries and resources
+    static ref JS_FRAMEWORK_ALLOW: Vec<&'static str> = vec![
+        "jquery",           // Covers jquery.min.js, jquery.js, etc.
+        "angular",
+        "react",            // Covers all React-related patterns
+        "vue",              // Covers all Vue-related patterns
+        "bootstrap",
+        "d3",
+        "lodash",
+        "ajax",
+        "app",              // Covers general app scripts like app.js
+        "main",
+        "index",
+        "bundle",
+        "vendor",
+        "/wp-content/js/",  // Covers word press content
+        // Verified 3rd parties for request
+        "https://m.stripe.network/",
+        "https://challenges.cloudflare.com/",
+        "https://js.stripe.com/",
+        "https://cdn.prod.website-files.com/", // webflow cdn scripts
+        "https://cdnjs.cloudflare.com/"        // cloudflare cdn scripts
+    ];
+
+    /// Create a static AhoCorasick matcher based on the allowed list
+    static ref ALLOWED_MATCHER: AhoCorasick = AhoCorasick::new(JS_FRAMEWORK_ALLOW.iter()).unwrap();
 
     /// path of a js framework
     pub static ref JS_FRAMEWORK_PATH: phf::Set<&'static str> = {
@@ -400,7 +410,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
-                                && !JS_FRAMEWORK_ALLOW.contains(current_url)
+                                && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
                     };
@@ -502,7 +512,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
-                                && !JS_FRAMEWORK_ALLOW.contains(current_url)
+                                && !ALLOWED_MATCHER.contains(current_url)
                     } else {
                         skip_networking
                     };

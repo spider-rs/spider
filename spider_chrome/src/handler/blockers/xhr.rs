@@ -95,6 +95,7 @@ lazy_static::lazy_static! {
             // video embeddings
             "https://video.squarespace-cdn.com/content/",
             "https://bes.gcp.data.bigcommerce.com/nobot",
+            "https://www.youtube.com/youtubei/",
             "http://ec.editmysite.com",
             "https://dcinfos-cache.abtasty.com/",
             "https://featureassets.org/",
