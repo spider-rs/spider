@@ -48,7 +48,7 @@ lazy_static! {
         "index",
         "bundle",
         "vendor",
-        "/wp-content/js/",  // Covers word press content
+        "/wp-content/js/",  // Covers Wordpress content
         // Verified 3rd parties for request
         "https://m.stripe.network/",
         "https://challenges.cloudflare.com/",
@@ -512,7 +512,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
-                                && !ALLOWED_MATCHER.contains(current_url)
+                                && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
                     };
