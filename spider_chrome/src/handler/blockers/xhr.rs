@@ -65,6 +65,7 @@ lazy_static::lazy_static! {
             "https://s.yimg.com/wi",
             "https://disney.my.sentry.io/api/",
             "https://www.redditstatic.com/ads",
+            "https://static.hotjar.com/",
             "https://sentry.io/api/",
             "https://buy.tinypass.com/",
             "https://idx.liadm.com",

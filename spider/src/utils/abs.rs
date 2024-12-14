@@ -1,4 +1,4 @@
-use crate::page::ONLY_RESOURCES;
+use crate::page::IGNORE_ASSETS;
 use phf::phf_set;
 use url::Url;
 
@@ -101,12 +101,15 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
         if let Some(position) = href.rfind('.') {
             let hlen = href.len();
             let has_asset = hlen - position;
+
             if has_asset >= 3 {
                 let next_position = position + 1;
-                if !ONLY_RESOURCES.contains::<case_insensitive_string::CaseInsensitiveString>(
+
+                if IGNORE_ASSETS.contains::<case_insensitive_string::CaseInsensitiveString>(
                     &href[next_position..].into(),
                 ) {
                     let full_url = format!("{}://{}", base.scheme(), href);
+
                     if let Ok(mut next_url) = Url::parse(&full_url) {
                         next_url.set_fragment(None);
                         return next_url;

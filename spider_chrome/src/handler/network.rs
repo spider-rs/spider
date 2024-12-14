@@ -57,8 +57,8 @@ lazy_static! {
         "https://cdnjs.cloudflare.com/"        // cloudflare cdn scripts
     ];
 
-    /// Create a static AhoCorasick matcher based on the allowed list
-    static ref ALLOWED_MATCHER: AhoCorasick = AhoCorasick::new(JS_FRAMEWORK_ALLOW.iter()).unwrap();
+    /// Determine if a script should be rendered in the browser by name.
+    pub static ref ALLOWED_MATCHER: AhoCorasick = AhoCorasick::new(JS_FRAMEWORK_ALLOW.iter()).unwrap();
 
     /// path of a js framework
     pub static ref JS_FRAMEWORK_PATH: phf::Set<&'static str> = {

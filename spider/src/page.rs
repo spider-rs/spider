@@ -31,20 +31,6 @@ lazy_static! {
     static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
 }
 
-#[cfg(any(feature = "smart", feature = "chrome_intercept"))]
-lazy_static! {
-    /// popular js frameworks and libs
-    pub static ref JS_FRAMEWORK_ASSETS: phf::Set<&'static str> = {
-        phf::phf_set! {
-            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js", "react.development.js", "react-dom.development.js", "react.production.min.js", "react-dom.production.min.js",
-            "vue.global.js", "vue.global.prod.js", "vue.runtime.", "vue.esm-browser.js", "vue.js", "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", "d3.js", "material-components-web.min.js",
-            "otSDKStub.js", "clipboard.min.js", "moment.js", "moment.min.js", "dexie.js", "layui.js", ".js?meteor_js_resource=true", "lodash.min.js", "lodash.js",
-            // possible js that could be critical.
-            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
-        }
-    };
-}
-
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "full_resources"),
@@ -70,39 +56,55 @@ lazy_static! {
     };
 }
 
-#[cfg(any(feature = "chrome_intercept"))]
 lazy_static! {
-    /// allowed js frameworks and libs excluding some and adding additional URLs.
-    pub static ref JS_FRAMEWORK_ALLOW: phf::Set<&'static str> = {
-        phf::phf_set! {
-            // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
-            "jquery.min.js", "jquery.qtip.min.js", "jquery.js", "angular.js", "jquery.slim.js",
-            "react.development.js", "react-dom.development.js", "react.production.min.js",
-            "react-dom.production.min.js", "vue.global.js", "vue.global.prod.js", "vue.esm-browser.js", "vue.js",
-            "bootstrap.min.js", "bootstrap.bundle.min.js", "bootstrap.esm.min.js", "d3.min.js", ".js?meteor_js_resource=true",
-            "d3.js", "layui.js", "lodash.min.js", "lodash.js",
-            "app.js", "main.js", "index.js", "bundle.js", "vendor.js",
-            // Verified 3rd parties for request
-            "https://m.stripe.network/inner.html",
-            "https://m.stripe.network/out-4.5.43.js",
-            "https://challenges.cloudflare.com/turnstile",
-            "https://js.stripe.com/v3/"
-        }
-    };
-}
-
-lazy_static! {
-    /// include only list of resources
-    pub(crate) static ref ONLY_RESOURCES: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(28);
+    /// Visual assets to ignore.
+    pub(crate) static ref IGNORE_ASSETS: HashSet<CaseInsensitiveString> = {
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(62);
 
         m.extend([
-            "html", "htm", "shtml", "asp", "aspx", "php", "jps", "jpsx", "jsp", "cfm", "xhtml", "rhtml", "phtml", "erb",
-            // handle .. prefix for urls ending with an extra ending
-            ".html", ".htm", ".shtml", ".asp", ".aspx", ".php", ".jps", ".jpsx", ".jsp", ".cfm", ".xhtml", ".rhtml", ".phtml", ".erb",
+            "jpg", "jpeg", "png", "gif", "svg", "webp",       // Image files
+            "mp4", "avi", "mov", "wmv", "flv",               // Video files
+            "mp3", "wav", "ogg",                             // Audio files
+            "woff", "woff2", "ttf", "otf",                   // Font files
+            "swf", "xap",                                    // Flash/Silverlight files
+            "ico", "eot",                                    // Other resource files
+            "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
+            "mkv", "webm", "m4v",                            // Additional Video files
+            "aac", "flac", "m4a", "aiff",                    // Additional Audio files
+            "pdf", "eps",                                    // Other additional files
+
+            // Including extensions with extra dot
+            ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+            ".mp4", ".avi", ".mov", ".wmv", ".flv",
+            ".mp3", ".wav", ".ogg",
+            ".woff", ".woff2", ".ttf", ".otf",
+            ".swf", ".xap",
+            ".ico", ".eot",
+            ".bmp", ".tiff", ".tif", ".heic", ".heif",
+            ".mkv", ".webm", ".m4v",
+            ".aac", ".flac", ".m4a", ".aiff",
+            ".pdf", ".eps"
         ].map(|s| s.into()));
 
         m
+    };
+
+    /// The chunk size for the rewriter. Can be adjusted using the env var "SPIDER_STREAMING_CHUNK_SIZE".
+    pub(crate) static ref STREAMING_CHUNK_SIZE: usize = {
+        const DEFAULT_STREAMING_CHUNK_SIZE: usize = 8192;
+        const MIN_STREAMING_CHUNK_SIZE: usize = DEFAULT_STREAMING_CHUNK_SIZE / 4;
+
+        std::env::var("SPIDER_STREAMING_CHUNK_SIZE")
+            .ok()
+            .and_then(|val| val.parse::<usize>().ok())
+            .map(|val| {
+                if val < MIN_STREAMING_CHUNK_SIZE {
+                    MIN_STREAMING_CHUNK_SIZE
+                } else {
+                    val
+                }
+            })
+            .unwrap_or(DEFAULT_STREAMING_CHUNK_SIZE)
     };
 }
 
@@ -240,8 +242,10 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 
         if new_page {
             let scheme = abs.scheme();
+
             if scheme == "https" || scheme == "http" {
                 let host_name = abs.host_str();
+
                 let mut can_process = parent_host_match(
                     host_name,
                     base_domain,
@@ -264,6 +268,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 
                     let hchars = abs.path();
 
+                    // check if the file is a resource and block if it is
                     if let Some(position) = hchars.rfind('.') {
                         let hlen = hchars.len();
                         let has_asset = hlen - position;
@@ -272,7 +277,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
                             let next_position = position + 1;
 
                             if !full_resources
-                                && !ONLY_RESOURCES.contains::<CaseInsensitiveString>(
+                                && IGNORE_ASSETS.contains::<CaseInsensitiveString>(
                                     &hchars[next_position..].into(),
                                 )
                             {
@@ -1342,8 +1347,7 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunk_size = 8192;
-                let chunks = html_bytes.chunks(chunk_size);
+                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
 
                 let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
 
@@ -1394,6 +1398,7 @@ impl Page {
         } else {
             None
         };
+
         if !html.is_empty() {
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map)
@@ -1449,8 +1454,7 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunk_size = 8192;
-                let chunks = html_bytes.chunks(chunk_size);
+                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
 
                 let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
@@ -1677,9 +1681,7 @@ impl Page {
                                                 abs.path_segments().ok_or_else(|| "cannot be base")
                                             {
                                                 while let Some(p) = paths.next() {
-                                                    // todo: get the path last before None instead of checking for ends_with
-                                                    if p.ends_with(".js")
-                                                        && JS_FRAMEWORK_ASSETS.contains(&p)
+                                                    if chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(&p)
                                                     {
                                                         rerender.swap(true, Ordering::Relaxed);
                                                     }
@@ -1731,8 +1733,7 @@ impl Page {
                     });
 
                 let html_bytes = html_resource.as_bytes();
-                let chunk_size = 8192;
-                let chunks = html_bytes.chunks(chunk_size);
+                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
 
                 let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
@@ -1804,14 +1805,14 @@ impl Page {
                                 true,
                                 &Some(crate::configuration::WaitFor::new(
                                     Some(
-                                        core::time::Duration::from_secs(120), // default a duration for smart handling. (maybe expose later on.)
+                                        core::time::Duration::from_secs(60), // default a duration for smart handling. (maybe expose later on.)
                                     ),
                                     None,
                                     true,
                                     true,
                                     None,
                                     Some(crate::configuration::WaitForSelector::new(
-                                        Some(core::time::Duration::from_millis(500)),
+                                        Some(core::time::Duration::from_millis(250)),
                                         "body".into(),
                                     )),
                                 )),
@@ -1827,7 +1828,14 @@ impl Page {
                             .await;
 
                             if let Some(h) = intercept_handle {
-                                let _ = h.await;
+                                let abort_handle = h.abort_handle();
+                                if let Err(elasped) =
+                                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h)
+                                        .await
+                                {
+                                    log::warn!("Handler timeout exceeded {elasped}");
+                                    abort_handle.abort();
+                                }
                             }
 
                             if let Ok(resource) = page_resource {
@@ -1946,8 +1954,7 @@ impl Page {
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunk_size = 8192;
-                let chunks = html_bytes.chunks(chunk_size);
+                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
 
                 let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);

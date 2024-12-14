@@ -1,4 +1,4 @@
-//! cargo run --example real_world --features="chrome chrome_intercept real_browser"
+//! cargo run --example real_world --features="chrome chrome_intercept real_browser spider_utils/transformations"
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
@@ -8,6 +8,7 @@ use spider::website::Website;
 use spider::{
     configuration::WaitForIdleNetwork, features::chrome_common::RequestInterceptConfiguration,
 };
+
 use std::io::Result;
 use std::time::Duration;
 
@@ -23,7 +24,6 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
             500,
         )))))
-        .with_subdomains(true)
         .with_wait_for_idle_dom(Some(WaitForSelector::new(
             Some(Duration::from_millis(100)),
             "body".into(),
