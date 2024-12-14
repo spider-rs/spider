@@ -410,6 +410,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
+                                && self.intercept_manager == NetworkInterceptManager::UNKNOWN
                                 && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
@@ -512,6 +513,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
+                                && self.intercept_manager == NetworkInterceptManager::UNKNOWN
                                 && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
