@@ -4,15 +4,21 @@ impl NetworkInterceptManager {
     pub fn new(url: &Option<Box<url::Url>>) -> NetworkInterceptManager {
         if let Some(parsed_url) = url {
             if let Some(domain) = parsed_url.domain() {
-                let domain_parts: Vec<&str> = domain.split('.').collect();
+                let mut domain_parts: Vec<&str> = domain.split('.').collect();
 
-                return *DOMAIN_MAP
-                    .get(if domain_parts.len() >= 2 {
-                        domain_parts[domain_parts.len() - 2]
-                    } else {
-                        domain
-                    })
-                    .unwrap_or(&NetworkInterceptManager::UNKNOWN);
+                let base = DOMAIN_MAP.get(if domain_parts.len() >= 2 {
+                    domain_parts[domain_parts.len() - 2]
+                } else {
+                    domain
+                });
+                let base = if base.is_none() && domain_parts.len() >= 3 {
+                    domain_parts.pop();
+                    DOMAIN_MAP.get(&domain_parts.join("."))
+                } else {
+                    base
+                };
+
+                return *base.unwrap_or(&NetworkInterceptManager::UNKNOWN);
             }
         }
         NetworkInterceptManager::UNKNOWN

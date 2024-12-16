@@ -1,0 +1,6 @@
+http://web.archive.org/screenshot/
+https://news.google.com/
+https://static01.nyt.com/video-static/vhs3/vhs.min.js
+video-static/vhs3/vhs.min.js
+https://web.archive.org/_static/js/ruffle/ruffle.js
+https://web.archive.org/_static/js/bundle-playback.js

@@ -1,0 +1,10 @@
+https://www.gstatic.com/
+https://archive.org/includes/donate.php
+https://www.googletagmanager.com/
+/ads/tpc-check.html
+securepubads.g.doubleclick.net
+https://archive.org/includes/athena.js
+https://news.google.com/swg/
+tag/js/gpt.js
+swg/js/v1/swg.js
+ads/tpc-check.html
