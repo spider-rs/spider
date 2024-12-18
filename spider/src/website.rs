@@ -2194,6 +2194,7 @@ impl Website {
                             self.configuration.subdomains,
                             self.configuration.tld,
                         ),
+                        self.domain_parsed.clone(),
                     ));
 
                     let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -2277,7 +2278,7 @@ impl Website {
                                                 &r_settings,
                                                 &mut links,
                                                 None,
-                                                &None,
+                                                &shared.8,
                                                 &mut domain_parsed,
                                                 &mut links_pages).await;
 
@@ -2301,7 +2302,7 @@ impl Website {
                                                             &r_settings,
                                                             &mut links,
                                                             None,
-                                                            &None,
+                                                            &shared.8,
                                                             &mut domain_parsed,
                                                             &mut links_pages).await;
 
@@ -2322,7 +2323,7 @@ impl Website {
                                                         &r_settings,
                                                         &mut links,
                                                         None,
-                                                        &None,
+                                                        &shared.8,
                                                         &mut domain_parsed,
                                                         &mut links_pages).await);
                                                 }
