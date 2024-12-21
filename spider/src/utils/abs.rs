@@ -95,13 +95,19 @@ fn handle_base(href: &str) -> LinkReturn {
             }
 
             // valid protocol to take absolute
-            if protocol_slice.len() >= protocol_end + 3 {
-                let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
+            if let Some(protocol_end) = href
+                .char_indices()
+                .nth(protocol_end + 2)
+                .map(|(idx, _)| idx)
+            {
+                if protocol_slice.len() >= protocol_end + 3 {
+                    let protocol_slice = &href[..protocol_end + 3]; // +3 to include "://"
 
-                if PROTOCOLS.contains(protocol_slice) {
-                    if let Ok(mut next_url) = Url::parse(href) {
-                        next_url.set_fragment(None);
-                        return LinkReturn::Absolute(next_url);
+                    if PROTOCOLS.contains(protocol_slice) {
+                        if let Ok(mut next_url) = Url::parse(href) {
+                            next_url.set_fragment(None);
+                            return LinkReturn::Absolute(next_url);
+                        }
                     }
                 }
             }
