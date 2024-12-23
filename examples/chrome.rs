@@ -27,7 +27,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 
     let duration = start.elapsed();
 
-    let links = website.get_links();
+    let links = website.get_all_links_visited().await;
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",

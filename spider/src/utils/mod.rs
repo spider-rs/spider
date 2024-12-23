@@ -8,8 +8,8 @@ pub mod interner;
 pub mod trie;
 
 #[cfg(feature = "balance")]
-/// CPU detection to balance limitations.
-pub mod detect_cpu;
+/// CPU and Memory detection to balance limitations.
+pub mod detect_system;
 
 use crate::RelativeSelectors;
 use abs::parse_absolute_url;
@@ -3006,7 +3006,7 @@ const REBALANCE_TIME: std::time::Duration = std::time::Duration::from_millis(100
 #[cfg(feature = "balance")]
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
     let cpu_load = if detect {
-        crate::utils::detect_cpu::get_global_cpu_usage().await
+        crate::utils::detect_system::get_global_cpu_state().await
     } else {
         0
     };

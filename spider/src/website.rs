@@ -4,6 +4,8 @@ use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
 };
 use crate::features::chrome_common::RequestInterceptConfiguration;
+#[cfg(feature = "disk")]
+use crate::features::disk::DatabaseHandler;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
@@ -268,12 +270,14 @@ pub struct Website {
     /// The initial status code of the first request.
     initial_status_code: StatusCode,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
-    #[cfg(feature = "control")]
     pub crawl_id: Box<String>,
     /// The website was manually stopped.
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
+    #[cfg(feature = "disk")]
+    /// The disk handler to use
+    sqlite: DatabaseHandler,
 }
 
 impl Website {
@@ -318,6 +322,117 @@ impl Website {
         self.domain_parsed = parse_absolute_url(&domain);
         self.url = domain;
         self
+    }
+
+    /// Get the target id for a crawl. This takes the crawl ID and the url and concats it without delimiters.
+    pub fn target_id(&self) -> String {
+        string_concat!(self.crawl_id, self.url.inner())
+    }
+
+    /// Setup SQLite. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    pub fn setup_disk(&mut self) {
+        if !self.sqlite.pool_inited() {
+            self.sqlite
+                .clone_from(&DatabaseHandler::new(&Some(self.target_id())));
+        }
+    }
+
+    /// Setup SQLite. This does nothing with [disk] flag enabled.
+    #[cfg(not(feature = "disk"))]
+    pub fn setup_disk(&mut self) {}
+
+    /// Get the db pool. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn get_db_pool(&self) -> &sqlx::SqlitePool {
+        self.sqlite.get_db_pool().await
+    }
+
+    /// Check if URL exists (ignore case). This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
+        if !self.sqlite.ready() {
+            true
+        } else {
+            !self
+                .sqlite
+                .url_exists(self.get_db_pool().await, url_to_check)
+                .await
+        }
+    }
+
+    /// Check if URL exists (ignore case). This does nothing with [disk] flag enabled.
+    #[cfg(not(feature = "disk"))]
+    async fn is_allowed_disk(&self, _url_to_check: &str) -> bool {
+        true
+    }
+
+    /// Clear the disk. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn clear_disk(&self) {
+        let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+    }
+
+    /// Clear the disk. This does nothing with [disk] flag enabled.
+    #[cfg(not(feature = "disk"))]
+    async fn clear_disk(&self) {}
+
+    /// Insert a new URL to disk if it doesn't exist. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn insert_url_disk(&self, new_url: &CaseInsensitiveString) {
+        self.sqlite
+            .insert_url(self.get_db_pool().await, new_url)
+            .await
+    }
+
+    /// Insert a new URL if it doesn't exist. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
+        let mem_load = crate::utils::detect_system::get_global_memory_state().await;
+        let beyond_memory_limits =
+            self.links_visited.len() >= *crate::features::LINKS_VISITED_MEMORY_LIMIT;
+
+        let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
+
+        if seed_check && !self.sqlite.ready() {
+            let _ = self.seed().await;
+        }
+
+        if mem_load == 2 || beyond_memory_limits {
+            self.insert_url_disk(&new_url).await
+        } else if mem_load == 1 {
+            if self.links_visited.len() <= 100 {
+                self.links_visited.insert(new_url);
+            } else {
+                self.insert_url_disk(&new_url).await
+            }
+        } else {
+            self.links_visited.insert(new_url);
+        }
+    }
+
+    /// Insert a new URL if it doesn't exist. This does nothing with [disk] flag enabled.
+    #[cfg(not(feature = "disk"))]
+    async fn insert_link(&mut self, link: CaseInsensitiveString) {
+        self.links_visited.insert(link);
+    }
+
+    /// Seed the DB and clear the Hashset. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    async fn seed(&mut self) -> Result<(), sqlx::Error> {
+        let links = self.get_links();
+
+        if let Ok(links) = self.sqlite.seed(self.get_db_pool().await, links).await {
+            self.links_visited.clear();
+
+            for link in links {
+                self.links_visited.insert(link);
+            }
+
+            self.sqlite.seeded = true;
+        }
+
+        Ok(())
     }
 
     /// Return `false` if the crawl should shutdown. Process in between each link.
@@ -568,9 +683,30 @@ impl Website {
         }
     }
 
-    /// Amount of pages crawled.
+    /// Amount of pages crawled in memory only. Use get_size for full links between memory and disk.
     pub fn size(&self) -> usize {
         self.links_visited.len()
+    }
+
+    /// Get the amount of resources collected.
+    #[cfg(not(feature = "disk"))]
+    pub async fn get_size(&self) -> usize {
+        self.links_visited.len()
+    }
+
+    /// Get the amount of resources collected.
+    #[cfg(feature = "disk")]
+    pub async fn get_size(&self) -> usize {
+        use crate::features::LINKS_VISITED_MEMORY_LIMIT;
+        let disk_count = DatabaseHandler::count_records(self.get_db_pool().await).await;
+        let disk_count = disk_count.unwrap_or_default() as usize;
+        let mut mem_count = self.links_visited.len();
+
+        if mem_count >= *LINKS_VISITED_MEMORY_LIMIT {
+            mem_count -= *LINKS_VISITED_MEMORY_LIMIT;
+        }
+
+        disk_count + mem_count
     }
 
     /// Drain the extra links used for things like the sitemap.
@@ -614,6 +750,12 @@ impl Website {
         &self.extra_links
     }
 
+    /// Clear all pages, disk, and links stored in memory.
+    pub async fn clear_all(&mut self) {
+        self.clear();
+        self.clear_disk().await;
+    }
+
     /// Clear all pages and links stored.
     pub fn clear(&mut self) {
         self.links_visited.clear();
@@ -631,7 +773,40 @@ impl Website {
         self.pages.as_ref()
     }
 
-    /// Links visited getter.
+    /// Links visited getter for disk. This does nothing with [disk] flag enabled.
+    #[cfg(not(feature = "disk"))]
+    pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
+        Default::default()
+    }
+
+    /// Links visited getter for disk. This does nothing with [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
+        if let Ok(links) = DatabaseHandler::get_all_resources(self.get_db_pool().await).await {
+            links
+        } else {
+            Default::default()
+        }
+    }
+
+    /// Links all the links visited between memory and disk.
+    #[cfg(feature = "disk")]
+    pub async fn get_all_links_visited(&self) -> HashSet<CaseInsensitiveString> {
+        let mut l = self.get_links_disk().await;
+        let m = self.links_visited.get_links();
+
+        l.extend(m);
+
+        l
+    }
+
+    /// Links all the links visited between memory and disk.
+    #[cfg(not(feature = "disk"))]
+    pub async fn get_all_links_visited(&self) -> HashSet<CaseInsensitiveString> {
+        self.get_links()
+    }
+
+    /// Links visited getter for memory resources.
     pub fn get_links(&self) -> HashSet<CaseInsensitiveString> {
         self.links_visited.get_links()
     }
@@ -1142,7 +1317,8 @@ impl Website {
         use crate::utils::{Handler, CONTROLLER};
         let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
         let handle = c.clone();
-        let target_id = string_concat!(self.crawl_id, self.url.inner());
+        let target_id = self.target_id();
+
         let c_lock = CONTROLLER.clone();
 
         let join_handle = spawn_task("control_handler", async move {
@@ -1207,9 +1383,10 @@ impl Website {
     #[cfg(feature = "control")]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
+        self.setup_disk();
 
         if self.status != CrawlStatus::Active {
-            self.clear();
+            self.clear_all().await;
         }
 
         let client = match self.client.take() {
@@ -1227,9 +1404,10 @@ impl Website {
     #[cfg(not(feature = "control"))]
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
+        self.setup_disk();
 
         if self.status != CrawlStatus::Active {
-            self.clear();
+            self.clear_all().await;
         }
 
         let client = match self.client.take() {
@@ -1379,13 +1557,14 @@ impl Website {
 
             emit_log(url);
 
-            self.links_visited.insert(match self.on_link_find_callback {
+            self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.clone(), None);
                     c.0
                 }
                 _ => *self.url.clone(),
-            });
+            })
+            .await;
 
             if page.is_empty() {
                 self.status = CrawlStatus::Empty;
@@ -1477,14 +1656,15 @@ impl Website {
 
             emit_log(&self.url.inner());
 
-            self.links_visited.insert(match self.on_link_find_callback {
+            self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.clone(), None);
 
                     c.0
                 }
                 _ => *self.url.clone(),
-            });
+            })
+            .await;
 
             // setup link tracking.
             if self.configuration.return_page_links && page.page_links.is_none() {
@@ -1663,14 +1843,15 @@ impl Website {
 
             emit_log(&self.url.inner());
 
-            self.links_visited.insert(match self.on_link_find_callback {
+            self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.clone(), None);
 
                     c.0
                 }
                 _ => *self.url.clone(),
-            });
+            })
+            .await;
 
             let links = if !page_links.is_empty() {
                 page_links
@@ -1731,14 +1912,15 @@ impl Website {
             )
             .await;
 
-            self.links_visited.insert(match self.on_link_find_callback {
+            self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.to_owned(), None);
 
                     c.0
                 }
                 _ => *self.url.to_owned(),
-            });
+            })
+            .await;
 
             self.initial_status_code = page.status_code;
 
@@ -1785,7 +1967,7 @@ impl Website {
             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                 break;
             }
-            if allowed.eq(&ProcessLinkStatus::Blocked) {
+            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                 continue;
             }
 
@@ -1807,7 +1989,7 @@ impl Website {
                 _ => (u, None),
             };
 
-            self.links_visited.insert(link_result.0);
+            self.insert_link(link_result.0).await;
 
             if self.configuration.return_page_links {
                 page.page_links = Some(Default::default());
@@ -1842,7 +2024,7 @@ impl Website {
             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                 break;
             }
-            if allowed.eq(&ProcessLinkStatus::Blocked) {
+            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                 continue;
             }
 
@@ -1861,7 +2043,7 @@ impl Website {
                 _ => (u, None),
             };
 
-            self.links_visited.insert(link_result.0);
+            self.insert_link(link_result.0).await;
 
             if self.configuration.return_page_links {
                 page.page_links = Some(Default::default());
@@ -1906,7 +2088,7 @@ impl Website {
                 break;
             }
 
-            if allowed.eq(&ProcessLinkStatus::Blocked) {
+            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                 continue;
             }
 
@@ -1934,7 +2116,7 @@ impl Website {
                 _ => (u, None),
             };
 
-            self.links_visited.insert(link_result.0);
+            self.insert_link(link_result.0).await;
 
             if !page.is_empty() {
                 if self.configuration.return_page_links {
@@ -2075,11 +2257,12 @@ impl Website {
             w.crawl().await;
         });
 
-        if let Some(p) = self.pages.as_mut() {
+        if let Some(mut p) = self.pages.as_mut().cloned() {
             while let Ok(res) = rx2.recv().await {
-                self.links_visited.insert(res.get_url().into());
+                self.insert_link(res.get_url().into()).await;
                 p.push(res);
             }
+            self.pages.replace(p);
         }
     }
 
@@ -2096,11 +2279,12 @@ impl Website {
             w.crawl_raw().await;
         });
 
-        if let Some(p) = self.pages.as_mut() {
+        if let Some(mut p) = self.pages.as_mut().cloned() {
             while let Ok(res) = rx2.recv().await {
-                self.links_visited.insert(res.get_url().into());
+                self.insert_link(res.get_url().into()).await;
                 p.push(res);
             }
+            self.pages.replace(p);
         }
     }
 
@@ -2117,11 +2301,12 @@ impl Website {
             w.crawl_smart().await;
         });
 
-        if let Some(p) = self.pages.as_mut() {
+        if let Some(mut p) = self.pages.as_mut().cloned() {
             while let Ok(res) = rx2.recv().await {
-                self.links_visited.insert(res.get_url().into());
+                self.insert_link(res.get_url().into()).await;
                 p.push(res);
             }
+            self.pages.replace(p);
         }
     }
 
@@ -2138,11 +2323,12 @@ impl Website {
             w.crawl_sitemap().await;
         });
 
-        if let Some(p) = self.pages.as_mut() {
+        if let Some(mut p) = self.pages.as_mut().cloned() {
             while let Ok(res) = rx2.recv().await {
-                self.links_visited.insert(res.get_url().into());
+                self.insert_link(res.get_url().into()).await;
                 p.push(res);
             }
+            self.pages.replace(p);
         }
     }
 
@@ -2238,13 +2424,13 @@ impl Website {
                                         break;
                                     }
 
-                                    if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                    if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                                         continue;
                                     }
 
                                     emit_log(link.inner());
 
-                                    self.links_visited.insert(link.clone());
+                                    self.insert_link(link.clone()).await;
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
@@ -2349,9 +2535,10 @@ impl Website {
                                                 exceeded_budget = true;
                                                 break;
                                             }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
                                                 continue;
                                             }
+
                                             self.links_visited.extend_with_new_links(&mut links, s);
                                         }
                                     }
@@ -2509,13 +2696,13 @@ impl Website {
                                                     exceeded_budget = true;
                                                     break;
                                                 }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                                                     continue;
                                                 }
 
                                                 emit_log(&link.inner());
 
-                                                self.links_visited.insert(link.clone());
+                                                self.insert_link(link.clone()).await;
 
                                                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                     let shared = shared.clone();
@@ -2783,13 +2970,15 @@ impl Website {
                                     exceeded_budget = true;
                                     break;
                                 }
-                                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                if allowed.eq(&ProcessLinkStatus::Blocked)
+                                    || !self.is_allowed_disk(&link).await
+                                {
                                     continue;
                                 }
 
                                 emit_log(&link.inner());
 
-                                self.links_visited.insert(link.clone());
+                                self.insert_link(link.clone()).await;
 
                                 if let Ok(permit) = SEM.acquire().await {
                                     let client = client.clone();
@@ -2826,7 +3015,9 @@ impl Website {
                                                 exceeded_budget = true;
                                                 break;
                                             }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                            if allowed.eq(&ProcessLinkStatus::Blocked)
+                                                || !self.is_allowed_disk(&s).await
+                                            {
                                                 continue;
                                             }
 
@@ -2972,12 +3163,12 @@ impl Website {
                                             exceeded_budget = true;
                                             break;
                                         }
-                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                        if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
                                             continue;
                                         }
 
                                         emit_log(&link.inner());
-                                        self.links_visited.insert(link.clone());
+                                        self.insert_link(link.clone()).await;
 
                                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                             let shared = shared.clone();
@@ -3082,7 +3273,7 @@ impl Website {
                                                     exceeded_budget = true;
                                                     break;
                                                 }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
                                                     continue;
                                                 }
 
@@ -3272,7 +3463,7 @@ impl Website {
                                                                 continue;
                                                             }
 
-                                                            self.links_visited.insert(link.clone());
+                                                            self.insert_link(link.clone()).await;
 
                                                             let client = client.clone();
                                                             let tx = tx.clone();
@@ -3375,7 +3566,9 @@ impl Website {
                                             exceeded_budget = true;
                                             break;
                                         }
-                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                        if allowed.eq(&ProcessLinkStatus::Blocked)
+                                            || !self.is_allowed_disk(&s).await
+                                        {
                                             continue;
                                         }
 
@@ -3545,8 +3738,8 @@ impl Website {
                                                                         continue;
                                                                     }
 
-                                                                    self.links_visited
-                                                                        .insert(link.clone());
+                                                                    self.insert_link(link.clone())
+                                                                        .await;
 
                                                                     let client = client.clone();
                                                                     let tx = tx.clone();

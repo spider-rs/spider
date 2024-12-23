@@ -10,7 +10,7 @@ use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
 use bytes::Bytes;
 use hashbrown::HashSet;
-use lol_html::{AsciiCompatibleEncoding, Settings};
+use lol_html::AsciiCompatibleEncoding;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
@@ -1318,7 +1318,7 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let rewriter_settings = Settings {
+                let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![lol_html::element!("a[href]", |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
@@ -1413,7 +1413,7 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let rewriter_settings = Settings {
+                let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
                         lol_html::element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
@@ -1661,7 +1661,7 @@ impl Page {
 
                 let mut static_app = false;
 
-                let rewriter_settings = Settings {
+                let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
                         element!("script", |element| {
                             if !static_app {

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.21.33"
+version = "2.22.2"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -70,6 +70,7 @@ statrs = { version = "0.17", optional = true }
 aho-corasick = { version = "1", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite" ], optional = true }
 
 [dependencies.spider_chrome]
 version = "2"
@@ -113,7 +114,10 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+default = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+disk = ["dep:sqlx"]
+disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
+disk_aws = ["disk", "sqlx/tls-rustls-aws-lc-rs"]
 adblock = ["chrome", "spider_chrome/adblock"]
 balance = ["dep:sysinfo"]
 regex = []
