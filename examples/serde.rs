@@ -12,7 +12,7 @@ async fn main() {
 
     website.crawl().await;
 
-    let links = website.get_links();
+    let links = website.get_all_links_visited().await;
 
     let mut s = flexbuffers::FlexbufferSerializer::new();
 

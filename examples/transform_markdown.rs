@@ -40,7 +40,7 @@ async fn main() {
             format!(
                 "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
                 duration,
-                website.get_links().len()
+                website.get_size().await
             )
             .as_bytes(),
         )

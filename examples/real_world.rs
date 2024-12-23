@@ -46,7 +46,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         async move {
             website.crawl().await;
             website.unsubscribe();
-            website.get_links()
+            website.get_all_links_visited().await
         },
         async move {
             while let Ok(page) = rx2.recv().await {

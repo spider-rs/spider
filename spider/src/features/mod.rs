@@ -12,6 +12,8 @@ pub mod chrome_viewport;
 /// Decentralized header handling
 #[cfg(feature = "decentralized_headers")]
 pub mod decentralized_headers;
+/// Disk options
+pub mod disk;
 /// URL globbing
 #[cfg(feature = "glob")]
 pub mod glob;
@@ -22,3 +24,15 @@ pub mod openai;
 pub mod openai_common;
 /// Spoof the refereer
 pub mod spoof_referrer;
+
+lazy_static::lazy_static! {
+    /// The max links to store in memory.
+    pub(crate) static ref LINKS_VISITED_MEMORY_LIMIT: usize = {
+        const DEFAULT_LIMIT: usize = 150_00;
+
+        match std::env::var("LINKS_VISITED_MEMORY_LIMIT") {
+            Ok(limit) => limit.parse::<usize>().unwrap_or(DEFAULT_LIMIT),
+            _ => DEFAULT_LIMIT
+        }
+    };
+}
