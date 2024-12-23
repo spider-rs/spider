@@ -48,11 +48,8 @@ async fn main() {
                 .await
                 .expect("Unable to open file");
 
-            match page.get_bytes() {
-                Some(b) => {
-                    file.write_all(b).await.unwrap_or_default();
-                }
-                _ => (),
+            if let Some(b) = page.get_bytes() {
+                file.write_all(b).await.unwrap_or_default();
             }
 
             log("downloaded", download_file)

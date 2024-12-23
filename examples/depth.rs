@@ -17,7 +17,7 @@ async fn main() -> Result<(), Error> {
     website.crawl().await;
     let duration: std::time::Duration = start.elapsed();
 
-    let links = website.get_links();
+    let links = website.get_all_links_visited().await;
 
     for link in links.iter() {
         println!("- {:?}", link.as_ref());

@@ -17,5 +17,5 @@ async fn main() {
 
     website.crawl_smart().await;
 
-    println!("Links found {:?}", website.get_links().len());
+    println!("Links found {:?}", website.get_size().await);
 }

@@ -97,7 +97,8 @@ spider = { version = "2", features = ["regex", "ua_generator"] }
 ```
 
 1. `ua_generator`: Enables auto generating a random real User-Agent.
-1. `regex`: Enables blacklisting paths with regx
+1. `regex`: Enables blacklisting and whitelisting paths with regex.
+1. `disk`: Enables SQLite hybrid disk storage to balance memory usage. 
 1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
 1. `sync`: Subscribe to changes for Page data processing async. [Enabled by default]
@@ -132,6 +133,9 @@ spider = { version = "2", features = ["regex", "ua_generator"] }
 1. `headers`: Enables the extraction of header information on each retrieved page. Adds a `headers` field to the page struct.
 1. `decentralized_headers`: Enables the extraction of suppressed header information of the decentralized processing of IO.
 This is needed if `headers` is set in both [spider](../spider/README.md) and [spider_worker](../spider_worker/README.md).
+1. `string_interner_buffer_backend`: Enables the String interning using the buffer backend [default].
+1. `string_interner_string_backend`: Enables the String interning using the string backend.
+1. `string_interner_bucket_backend`: Enables the String interning using the bucket backend.
 
 ### Decentralization
 

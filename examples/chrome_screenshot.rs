@@ -39,7 +39,7 @@ async fn main() {
     website.crawl().await;
     let duration = start.elapsed();
 
-    let links = website.get_links();
+    let links = website.get_all_links_visited().await;
 
     println!(
         "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
