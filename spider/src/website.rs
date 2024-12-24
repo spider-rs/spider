@@ -370,7 +370,9 @@ impl Website {
     /// Clear the disk. This does nothing with [disk] flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
-        let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+        if self.sqlite.ready() {
+            let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+        }
     }
 
     /// Clear the disk. This does nothing with [disk] flag enabled.
@@ -698,8 +700,15 @@ impl Website {
     #[cfg(feature = "disk")]
     pub async fn get_size(&self) -> usize {
         use crate::features::LINKS_VISITED_MEMORY_LIMIT;
-        let disk_count = DatabaseHandler::count_records(self.get_db_pool().await).await;
-        let disk_count = disk_count.unwrap_or_default() as usize;
+
+        let disk_count = if self.sqlite.pool_inited() {
+            let disk_count = DatabaseHandler::count_records(self.get_db_pool().await).await;
+            let disk_count = disk_count.unwrap_or_default() as usize;
+            disk_count
+        } else {
+            0
+        };
+
         let mut mem_count = self.links_visited.len();
 
         if mem_count >= *LINKS_VISITED_MEMORY_LIMIT {

@@ -3175,7 +3175,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5364,7 +5364,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5428,7 +5428,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5518,7 +5518,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "clap",
  "env_logger",
@@ -5543,7 +5543,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5565,7 +5565,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -5577,7 +5577,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.22.2"
+version = "2.22.6"
 dependencies = [
  "env_logger",
  "lazy_static",

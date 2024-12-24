@@ -28,7 +28,7 @@ pub mod spoof_referrer;
 lazy_static::lazy_static! {
     /// The max links to store in memory.
     pub(crate) static ref LINKS_VISITED_MEMORY_LIMIT: usize = {
-        const DEFAULT_LIMIT: usize = 150_00;
+        const DEFAULT_LIMIT: usize = 15_000;
 
         match std::env::var("LINKS_VISITED_MEMORY_LIMIT") {
             Ok(limit) => limit.parse::<usize>().unwrap_or(DEFAULT_LIMIT),
