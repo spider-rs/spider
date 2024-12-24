@@ -370,7 +370,9 @@ impl Website {
     /// Clear the disk. This does nothing with [disk] flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
-        let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+        if self.sqlite.ready() {
+            let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+        }
     }
 
     /// Clear the disk. This does nothing with [disk] flag enabled.

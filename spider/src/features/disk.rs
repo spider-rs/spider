@@ -49,7 +49,7 @@ impl DatabaseHandler {
             persist: false,
             pool: tokio::sync::OnceCell::const_new(),
             crawl_id: match crawl_id {
-                Some(id) => Some(format!("{}_{}", id.replace(".", "_"), get_id())),
+                Some(id) => Some(format!("{}_{}", urlencoding::encode(&id), get_id())),
                 _ => None,
             },
             seeded: false,
