@@ -40,6 +40,10 @@ use chromiumoxide_types::*;
 /// Default `Browser::launch` timeout in MS
 pub const LAUNCH_TIMEOUT: u64 = 20_000;
 
+lazy_static::lazy_static! {
+    static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
+}
+
 /// A [`Browser`] is created when chromiumoxide connects to a Chromium instance.
 #[derive(Debug)]
 pub struct Browser {
@@ -94,9 +98,6 @@ impl Browser {
         url: impl Into<String>,
         config: HandlerConfig,
     ) -> Result<(Self, Handler)> {
-        lazy_static::lazy_static! {
-            static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
-        };
         let mut debug_ws_url = url.into();
 
         if debug_ws_url.starts_with("http") {

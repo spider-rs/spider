@@ -124,6 +124,15 @@ lazy_static! {
         };
         Arc::new(Semaphore::const_new(base_limit))
     };
+    /// The max links to store in memory.
+    pub(crate) static ref LINKS_VISITED_MEMORY_LIMIT: usize = {
+        const DEFAULT_LIMIT: usize = 15_000;
+
+        match std::env::var("LINKS_VISITED_MEMORY_LIMIT") {
+            Ok(limit) => limit.parse::<usize>().unwrap_or(DEFAULT_LIMIT),
+            _ => DEFAULT_LIMIT
+        }
+    };
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -391,8 +400,7 @@ impl Website {
     #[cfg(feature = "disk")]
     async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
         let mem_load = crate::utils::detect_system::get_global_memory_state().await;
-        let beyond_memory_limits =
-            self.links_visited.len() >= *crate::features::LINKS_VISITED_MEMORY_LIMIT;
+        let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
 
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
@@ -699,8 +707,6 @@ impl Website {
     /// Get the amount of resources collected.
     #[cfg(feature = "disk")]
     pub async fn get_size(&self) -> usize {
-        use crate::features::LINKS_VISITED_MEMORY_LIMIT;
-
         let disk_count = if self.sqlite.pool_inited() {
             let disk_count = DatabaseHandler::count_records(self.get_db_pool().await).await;
             let disk_count = disk_count.unwrap_or_default() as usize;

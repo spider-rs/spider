@@ -9,6 +9,16 @@ use crate::utils::emit_log;
 #[cfg(feature = "disk")]
 use sqlx::{sqlite::SqlitePool, Sqlite, Transaction};
 
+use aho_corasick::AhoCorasick;
+
+lazy_static! {
+    static ref AC: AhoCorasick = {
+        let patterns = vec![".", "/", ":", "\\", "?", "*", "\"", "<", ">", "|"];
+        AhoCorasick::new(&patterns).expect("valid replacer")
+    };
+    static ref AC_REPLACE: [&'static str; 10] = ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"];
+}
+
 #[derive(Default, Debug, Clone)]
 #[cfg(feature = "disk")]
 /// Manage Sqlite database operations
@@ -50,15 +60,6 @@ impl DatabaseHandler {
             pool: tokio::sync::OnceCell::const_new(),
             crawl_id: match crawl_id {
                 Some(id) => {
-                    use aho_corasick::AhoCorasick;
-                    lazy_static::lazy_static! {
-                        static ref AC: AhoCorasick = {
-                            let patterns = vec![".", "/", ":", "\\", "?", "*", "\"", "<", ">", "|"];
-                            AhoCorasick::new(&patterns).expect("valid replacer")
-                        };
-                        static ref AC_REPLACE: [&'static str; 10] = ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"];
-                    }
-
                     let sanitized_id = AC.replace_all(&id, &*AC_REPLACE);
 
                     Some(format!("{}_{}", sanitized_id, get_id()))
