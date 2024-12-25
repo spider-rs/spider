@@ -5014,19 +5014,20 @@ async fn test_crawl_tld() {
 async fn test_crawl_subscription() {
     let mut website: Website = Website::new("https://choosealicense.com");
     let mut rx2 = website.subscribe(100).unwrap();
-    let count = Arc::new(tokio::sync::Mutex::new(0));
-    let count1 = count.clone();
 
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
+        let mut count = 0;
+
         while let Ok(_) = rx2.recv().await {
-            let mut lock = count1.lock().await;
-            *lock += 1;
+            count += 1;
         }
+        count
     });
 
     website.crawl().await;
+    website.unsubscribe();
     let website_links = website.get_links().len();
-    let count = *count.lock().await;
+    let count = join_handle.await.unwrap();
 
     // no subscription if did not fulfill. The root page is always captured in links.
     assert!(count == website_links, "{:?}", true);
