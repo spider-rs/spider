@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! A high-level API for programmatically interacting with the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/).
 //!
 //! This crate uses the [Chrome DevTools protocol] to drive/launch a Chromium or

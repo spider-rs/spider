@@ -677,11 +677,8 @@ pub async fn run_openai_request(
                                 if json_res.js.len() <= 400
                                     && json_res.js.contains("window.location")
                                 {
-                                    match page.content_bytes().await {
-                                        Ok(b) => {
-                                            page_response.content = Some(b.into());
-                                        }
-                                        _ => (),
+                                    if let Ok(b) = page.content_bytes().await {
+                                        page_response.content = Some(b.into());
                                     }
                                 } else {
                                     page_response.content = html;

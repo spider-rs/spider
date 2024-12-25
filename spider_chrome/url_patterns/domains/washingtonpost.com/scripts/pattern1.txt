@@ -1,0 +1,3 @@
+https://static.files.bbci.co.uk/core/bundle-component-consent-banner.
+https://static.files.bbci.co.uk/core/bundle-consent-banner.
+https://static.files.bbci.co.uk/core/website/assets/static/scripts/riddle/

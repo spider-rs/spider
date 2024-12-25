@@ -1,0 +1,3 @@
+https://player.h-cdn.com/loader.js?
+https://static.foxnews.com/static/orion/scripts/core/video/
+https://foxnewsplayer-a.akamaihd.net/player/

@@ -370,7 +370,7 @@ impl Website {
     /// Clear the disk. This does nothing with [disk] flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
-        if self.sqlite.ready() {
+        if self.sqlite.pool_inited() {
             let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
         }
     }
@@ -791,8 +791,12 @@ impl Website {
     /// Links visited getter for disk. This does nothing with [disk] flag enabled.
     #[cfg(feature = "disk")]
     pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
-        if let Ok(links) = DatabaseHandler::get_all_resources(self.get_db_pool().await).await {
-            links
+        if self.sqlite.pool_inited() {
+            if let Ok(links) = DatabaseHandler::get_all_resources(self.get_db_pool().await).await {
+                links
+            } else {
+                Default::default()
+            }
         } else {
             Default::default()
         }

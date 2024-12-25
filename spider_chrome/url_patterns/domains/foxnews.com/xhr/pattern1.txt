@@ -1,0 +1,7 @@
+https://prod.pyxis.atp.fox/pyxis/submit
+https://sdk.iad-05.braze.com/api/v3/data/
+https://psb.taboola.com/topics_api
+https://direct-events-collector.spot.im/api/v2/events?stream_name=init
+https://launcher.spot.im/spot/sp_ANQXRpqH
+https://p.flipp.com/beacons
+https://api.foxnews.com/v3/video-player/

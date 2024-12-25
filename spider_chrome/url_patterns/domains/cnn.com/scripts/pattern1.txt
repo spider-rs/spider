@@ -1,0 +1,10 @@
+https://eus.rubiconproject.com/usync.html?p=20986&endpoint=us-east
+https://widgets.outbrain.com/keystone/conv/KS_conversions.js
+https://simage2.pubmatic.com/AdServer/
+https://segment-data-us-east.zqtk.net
+https://cdn.ml314.com/taglw.js
+https://cdn.optimizely.com/public/
+https://s.ntv.io/serve/load.js
+https://ads.pubmatic.com
+https://widgets.outbrain.com/nanoWidget/externals/obPixelFrame/obPixelFrame.htm
+https://js-sec.indexww.com/um/ixmatch.html

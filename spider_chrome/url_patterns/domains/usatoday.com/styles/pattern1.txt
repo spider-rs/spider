@@ -1,0 +1,3 @@
+https://vidstat.taboola.com/vpaid/
+https://imprnjmp.taboola.com/
+https://cdn.taboola.com/libtrc/usatodaydemo/loader.js

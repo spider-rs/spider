@@ -1,0 +1,9 @@
+https://ny77jj.washingtonpost.com/
+https://api.permutive.com/v2.0/
+https://targeting.washingtonpost.com/api/v1/targeting
+https://subscribe.washingtonpost.com/offers/service/v2/offers/
+https://www.washingtonpost.com/prism/api/alerts
+https://mug.criteo.com/sid?
+https://subscribe.washingtonpost.com/offers/service/get-adot-offer/
+https://subscribe.washingtonpost.com/logging/logHandledError
+https://ib.adnxs.com/getuidj

@@ -55,6 +55,7 @@ lazy_static::lazy_static! {
             "https://static.parastorage.com/services/tag-manager-client/",
             "https://static.parastorage.com/services/form-app/",
             "https://www.datadoghq-browser-agent.com/",
+            "https://image6.pubmatic.com/AdServer/",
             "https://featureassets.org",
             "https://cdn.rudderlabs.com",
             "https://script.hotjar.com/",
@@ -70,6 +71,10 @@ lazy_static::lazy_static! {
             "https://static.addtoany.com/menu/",
             "https://www.gstatic.com/cast/sdk/libs/sender/1.0/cast_framework.js",
             "https://www.gstatic.com/eureka/clank/131/cast_sender.js",
+            "https://static.adsafeprotected.com/",
+            "https://ssum-sec.casalemedia.com/usermatch",
+            "https://cdn.brandmetrics.com/scripts/",
+            "https://cdn.confiant-integrations.net/",
             "https://www.b2i.us/b2i/",
             "https://acsbapp.com/apps/app/dist/js/app.js",
             "https://cdn.doofinder.com/livelayer/",
@@ -102,6 +107,9 @@ lazy_static::lazy_static! {
             "https://cl.k5a.io/",
             "https://cdn-cookieyes.com/",
             "https://pbs.yahoo.com/",
+            "https://ads.pubmatic.com/AdServer/js/",
+            "https://widgets.outbrain.com/nanoWidget/externals/obPixelFrame/obPixelFrame.js",
+            "https://widgets.outbrain.com/external/externals/intentiq.js",
             "//d2wy8f7a9ursnm.cloudfront.net/v8/bugsnag.min.js",
             ".sharethis.com",
             ".newrelic.com",
@@ -126,6 +134,7 @@ lazy_static::lazy_static! {
             "assets/TrackingPixel",
             "https://ads.",
             "http://ads.",
+            ".pubmatic.com/AdServer/",
             "https://tracking.",
             "http://tracking.",
             "https://static-tracking.",
@@ -165,6 +174,11 @@ lazy_static::lazy_static! {
             "https://www.youtube.com/iframe_api", // Youtube iframes.
             "https://f.vimeocdn.com", // Vimeo EMBEDDINGS
             "https://i.vimeocdn.com/",
+            "https://image2.pubmatic.com/AdServer/",
+            "https://ads.pubmatic.com/AdServer/js/",
+            "https://cdn.taboola.com/libtrc/static/topics/",
+            "https://pm-widget.taboola.com/",
+            "https://gum.criteo.com/syncframe",
             // "https://www.youtube.com/s/player/", // Youtube player not needed usually since iframe_api is used mainly
             // vercel live
             "https://vercel.live/api/",

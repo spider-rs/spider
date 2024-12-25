@@ -1,0 +1,8 @@
+https://mcdp-chidc2.outbrain.com/
+https://receive.wmcdp.io/v1/reg
+https://collector.cdp.cnn.com/com.snowplowanalytics.snowplow/tp2
+https://i.clean.gg/1a
+https://www.cnn.com/public/api/alerts
+https://collector-px611dwqp1.px-cloud.net/api/v2/collector
+https://ids.cdnwidget.com/
+https://dfp.bouncex.net/pub/v2/segment/2qi31PsFb3FLPiCctqR86TDa7Ws

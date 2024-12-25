@@ -1,0 +1,6 @@
+https://amplify.outbrain.com/cp/obtp.js
+https://static.criteo.net/js/ld/ld.js
+https://fundingchoicesmessages.google.com/
+https://static.foxnews.com/static/leap/sites/fnc/metrics.js
+https://static.foxnews.com/static/isa/app/lib/VisitorAPI.js
+https://static.foxnews.com/static/orion/scripts/core/utils/geo.js
