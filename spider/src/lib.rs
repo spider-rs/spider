@@ -71,6 +71,10 @@
 //! ## Feature flags
 //!
 //! - `ua_generator`: Enables auto generating a random real User-Agent.
+//! - `disk`: Enables SQLite hybrid disk storage to balance memory usage with no tls.
+//! - `disk_native_tls`: Enables SQLite hybrid disk storage to balance memory usage with native tls.
+//! - `disk_aws`: Enables SQLite hybrid disk storage to balance memory usage with aws_tls.
+//! - `balance`: Enables balancing the CPU and memory to scale more efficiently.
 //! - `regex`: Enables blacklisting paths with regx
 //! - `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 //! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](https://docs.rs/crate/spider_worker/latest) startup before crawls.
