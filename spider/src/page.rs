@@ -91,20 +91,20 @@ lazy_static! {
 
     /// The chunk size for the rewriter. Can be adjusted using the env var "SPIDER_STREAMING_CHUNK_SIZE".
     pub(crate) static ref STREAMING_CHUNK_SIZE: usize = {
-        const DEFAULT_STREAMING_CHUNK_SIZE: usize = 8192;
-        const MIN_STREAMING_CHUNK_SIZE: usize = DEFAULT_STREAMING_CHUNK_SIZE / 4;
+        let default_streaming_chunk_size: usize = 8192 * num_cpus::get_physical();
+        let min_streaming_chunk_size: usize = default_streaming_chunk_size / 4;
 
         std::env::var("SPIDER_STREAMING_CHUNK_SIZE")
             .ok()
             .and_then(|val| val.parse::<usize>().ok())
             .map(|val| {
-                if val < MIN_STREAMING_CHUNK_SIZE {
-                    MIN_STREAMING_CHUNK_SIZE
+                if val < min_streaming_chunk_size {
+                    min_streaming_chunk_size
                 } else {
                     val
                 }
             })
-            .unwrap_or(DEFAULT_STREAMING_CHUNK_SIZE)
+            .unwrap_or(default_streaming_chunk_size)
     };
 }
 
@@ -606,7 +606,11 @@ impl Page {
         };
         let page_response: PageResponse = match client.get(url).send().await {
             Ok(res) if res.status().is_success() => {
-                let cell = tokio::sync::OnceCell::new();
+                let cell = if r_settings.ssg_build {
+                    Some(tokio::sync::OnceCell::new())
+                } else {
+                    None
+                };
 
                 let (encoding, adjust_charset_on_meta_tag) =
                     match get_charset_from_content_type(res.headers()) {
@@ -693,7 +697,10 @@ impl Page {
                     })
                 };
 
-                let mut element_content_handlers = vec![base_links_settings];
+                let mut element_content_handlers =
+                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 });
+
+                element_content_handlers.push(base_links_settings);
 
                 if r_settings.ssg_build {
                     element_content_handlers.push(lol_html::element!("script", |el| {
@@ -701,7 +708,9 @@ impl Page {
                             if build_path.starts_with("/_next/static/")
                                 && build_path.ends_with("/_ssgManifest.js")
                             {
-                                let _ = cell.set(build_path.to_string());
+                                if let Some(ref cell) = cell {
+                                    let _ = cell.set(build_path.to_string());
+                                }
                             }
                         }
                         Ok(())
@@ -739,37 +748,41 @@ impl Page {
 
                 if r_settings.ssg_build {
                     if let Some(ssg_map) = ssg_map {
-                        if let Some(source) = cell.get() {
-                            if let Some(url_base) = base {
-                                let build_ssg_path = convert_abs_path(url_base, source);
-                                let build_page =
-                                    Page::new_page(build_ssg_path.as_str(), client).await;
+                        if let Some(ref cell) = cell {
+                            if let Some(source) = cell.get() {
+                                if let Some(url_base) = base {
+                                    let build_ssg_path = convert_abs_path(url_base, source);
+                                    let build_page =
+                                        Page::new_page(build_ssg_path.as_str(), client).await;
 
-                                for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
-                                {
-                                    if let Some(matched) = cap.get(1) {
-                                        let href = auto_encode_bytes(matched.as_bytes())
-                                            .replace(r#"\u002F"#, "/");
+                                    for cap in
+                                        SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
+                                    {
+                                        if let Some(matched) = cap.get(1) {
+                                            let href = auto_encode_bytes(matched.as_bytes())
+                                                .replace(r#"\u002F"#, "/");
 
-                                        let last_segment = crate::utils::get_last_segment(&href);
+                                            let last_segment =
+                                                crate::utils::get_last_segment(&href);
 
-                                        // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
-                                        if !(last_segment.starts_with("[")
-                                            && last_segment.ends_with("]"))
-                                        {
-                                            push_link(
-                                                &base,
-                                                &href,
-                                                ssg_map,
-                                                &selectors.0,
-                                                parent_host,
-                                                parent_host_scheme,
-                                                base_input_domain,
-                                                sub_matcher,
-                                                &external_domains_caseless,
-                                                r_settings.full_resources,
-                                                &mut None,
-                                            );
+                                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                            if !(last_segment.starts_with("[")
+                                                && last_segment.ends_with("]"))
+                                            {
+                                                push_link(
+                                                    &base,
+                                                    &href,
+                                                    ssg_map,
+                                                    &selectors.0,
+                                                    parent_host,
+                                                    parent_host_scheme,
+                                                    base_input_domain,
+                                                    sub_matcher,
+                                                    &external_domains_caseless,
+                                                    r_settings.full_resources,
+                                                    &mut None,
+                                                );
+                                            }
                                         }
                                     }
                                 }
