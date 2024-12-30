@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.22.11"
+version = "2.22.13"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -66,6 +66,7 @@ aho-corasick = { version = "1", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite" ], optional = true }
+h2 = "0.4"
 
 [dependencies.spider_chrome]
 version = "2"

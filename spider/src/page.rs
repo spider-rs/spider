@@ -24,6 +24,9 @@ use crate::utils::FetchPageResult;
 use tokio_stream::StreamExt;
 use url::Url;
 
+/// Allocate up to 16kb upfront for small pages.
+const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
+
 lazy_static! {
     /// Wildcard match all domains.
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
@@ -401,6 +404,33 @@ pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
     }
 }
 
+/// Extract a specific type of error from a chain of errors.
+fn extract_specific_error<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut current_error = Some(error);
+    while let Some(err) = current_error {
+        if let Some(desired_error) = err.downcast_ref::<T>() {
+            return Some(desired_error);
+        }
+        current_error = err.source();
+    }
+    None
+}
+
+/// Determine if the response is goaway and should retry.
+fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
+    if let Some(e) = extract_specific_error::<h2::Error>(error) {
+        if e.is_go_away() && e.is_remote() && e.reason() == Some(h2::Reason::NO_ERROR) {
+            return true;
+        }
+        if e.is_remote() && e.reason() == Some(h2::Reason::REFUSED_STREAM) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {
@@ -440,6 +470,9 @@ pub fn build(url: &str, res: PageResponse) -> Page {
                 Err(er) => {
                     if er.is_status() || er.is_connect() || er.is_timeout() {
                         should_retry = !er.to_string().contains("ENOTFOUND");
+                    }
+                    if !should_retry && should_attempt_retry(&er) {
+                        should_retry = true;
                     }
                     Some(er.to_string())
                 }
@@ -501,9 +534,6 @@ pub struct PageLinkBuildSettings {
     /// Subdomain handling resources.
     pub subdomains: bool,
 }
-
-/// Default byte capacity for response stream collecting.
-const DEFAULT_BYTE_CAPACITY: u64 = 8 * 1024;
 
 impl PageLinkBuildSettings {
     /// New build link settings.
@@ -618,9 +648,12 @@ impl Page {
                         _ => (AsciiCompatibleEncoding::utf_8(), true),
                     };
 
-                let mut collected_bytes = bytes::BytesMut::with_capacity(
-                    res.content_length().unwrap_or(DEFAULT_BYTE_CAPACITY) as usize,
-                );
+                let mut collected_bytes = match res.content_length() {
+                    Some(cap) if cap <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
+                        bytes::BytesMut::with_capacity(cap as usize)
+                    }
+                    _ => bytes::BytesMut::new(),
+                };
 
                 let target_url = res.url().as_str();
 
