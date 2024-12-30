@@ -94,8 +94,8 @@ lazy_static! {
 
     /// The chunk size for the rewriter. Can be adjusted using the env var "SPIDER_STREAMING_CHUNK_SIZE".
     pub(crate) static ref STREAMING_CHUNK_SIZE: usize = {
-        let default_streaming_chunk_size: usize = 8192 * num_cpus::get_physical();
-        let min_streaming_chunk_size: usize = default_streaming_chunk_size / 4;
+        let default_streaming_chunk_size: usize = 8192 * num_cpus::get_physical().min(64);
+        let min_streaming_chunk_size: usize = default_streaming_chunk_size * 2 / 3;
 
         std::env::var("SPIDER_STREAMING_CHUNK_SIZE")
             .ok()
@@ -405,6 +405,7 @@ pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
 }
 
 /// Extract a specific type of error from a chain of errors.
+#[cfg(not(feature = "decentralized"))]
 fn extract_specific_error<'a, T: std::error::Error + 'static>(
     error: &'a (dyn std::error::Error + 'static),
 ) -> Option<&'a T> {
@@ -419,6 +420,7 @@ fn extract_specific_error<'a, T: std::error::Error + 'static>(
 }
 
 /// Determine if the response is goaway and should retry.
+#[cfg(not(feature = "decentralized"))]
 fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
     if let Some(e) = extract_specific_error::<h2::Error>(error) {
         if e.is_go_away() && e.is_remote() && e.reason() == Some(h2::Reason::NO_ERROR) {
@@ -2115,16 +2117,6 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     fn abs_path(&self, href: &str) -> Option<Url> {
         self.base.as_ref().map(|b| convert_abs_path(b, href))
-    }
-
-    /// Convert a URL to its absolute path without any fragments or params. [unused in the worker atm by default all is returned]
-    #[inline(never)]
-    #[cfg(feature = "decentralized")]
-    fn abs_path(&self, href: &str) -> Option<Url> {
-        match Url::parse(&href) {
-            Ok(u) => Some(convert_abs_path(&u, href)),
-            _ => None,
-        }
     }
 }
 
