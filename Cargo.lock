@@ -5364,7 +5364,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5378,9 +5378,6 @@ dependencies = [
  "chrono",
  "const_format",
  "cron",
- "cssparser 0.31.2",
- "ego-tree",
- "fast_html5ever",
  "fastrand 2.3.0",
  "flexbuffers",
  "hashbrown 0.15.2",
@@ -5403,7 +5400,6 @@ dependencies = [
  "regex",
  "reqwest",
  "reqwest-middleware",
- "selectors 0.25.0",
  "serde",
  "serde_json",
  "serde_regex",
@@ -5416,7 +5412,6 @@ dependencies = [
  "string_concat",
  "strum",
  "sysinfo",
- "tendril",
  "tiktoken-rs",
  "tikv-jemallocator",
  "tokio",
@@ -5428,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5518,7 +5513,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "clap",
  "env_logger",
@@ -5542,8 +5537,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "spider_scraper"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb1b2e09bb57a18a9a1e5762dff4b0248c0fff76a24c9002d03c08de4e3aa257"
+dependencies = [
+ "ahash",
+ "auto_encoder",
+ "cssparser 0.31.2",
+ "ego-tree",
+ "fast_html5ever",
+ "hashbrown 0.15.2",
+ "lazy_static",
+ "selectors 0.25.0",
+ "smallvec",
+ "tendril",
+]
+
+[[package]]
 name = "spider_transformations"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5558,6 +5571,7 @@ dependencies = [
  "regex",
  "serde",
  "spider",
+ "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
  "unicode-width 0.2.0",
@@ -5565,11 +5579,12 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
  "spider",
+ "spider_scraper",
  "spider_transformations",
  "sxd-document",
  "sxd-xpath",
@@ -5577,7 +5592,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.22.9"
+version = "2.22.10"
 dependencies = [
  "env_logger",
  "lazy_static",

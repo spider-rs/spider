@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.22.9"
+version = "2.22.10"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -26,13 +26,8 @@ regex = { version = "1" }
 ua_generator = { version = "^0.5", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1"
-fast_html5ever = "0.26.6"
-selectors = "0.25.0"
-tendril = "0.4.3"
 ahash = { version = "0.8", default-features = false, features = ["std"] }
-cssparser = "0.31.2"
 smallvec = "1"
-ego-tree = "0.10"
 num_cpus = "1"
 bytes = { version = "1", features = ["serde"] }
 serde = { version = "1", optional = true, features = ["derive"] }

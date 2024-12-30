@@ -286,7 +286,7 @@ fn get_html_with_selector(
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
 ) -> String {
-    use spider::packages::scraper::{Html, Selector};
+    use scraper::{Html, Selector};
     let html = get_html(res, encoding);
 
     if let Some(selector_config) = selector_config.as_ref() {

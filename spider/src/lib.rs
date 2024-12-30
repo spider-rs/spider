@@ -158,8 +158,6 @@ pub extern crate string_concat;
 pub extern crate strum;
 #[macro_use]
 pub extern crate lazy_static;
-#[macro_use]
-pub extern crate fast_html5ever;
 
 /// Configuration structure for `Website`.
 pub mod configuration;

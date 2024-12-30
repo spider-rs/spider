@@ -1,10 +1,9 @@
+use scraper::{ElementRef, Html, Selector};
 use spider::lazy_static::lazy_static;
-use spider::packages::scraper::ElementRef;
 use spider::tokio_stream::StreamExt;
 use spider::utils::log;
 use spider::{
     hashbrown::{hash_map::Entry, HashMap},
-    packages::scraper::{Html, Selector},
     tokio,
 };
 use std::{fmt::Debug, hash::Hash};
