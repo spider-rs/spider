@@ -22,6 +22,7 @@ A web crawler and scraper, building blocks for data curation workloads.
 - Subscriptions
 - Smart Mode
 - Anti-Bot mitigation
+- Disk persistence
 - Privacy and Efficiency through Ad, Analytics, and Custom Tiered Network Blocking
 - Blacklisting, Whitelisting, and Budgeting Depth
 - Dynamic AI Prompt Scripting Headless with Step Caching
