@@ -5367,7 +5367,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5383,6 +5383,7 @@ dependencies = [
  "cron",
  "fastrand 2.3.0",
  "flexbuffers",
+ "h2 0.4.7",
  "hashbrown 0.15.2",
  "http 1.2.0",
  "http-cache",
@@ -5426,7 +5427,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5516,7 +5517,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "clap",
  "env_logger",
@@ -5559,7 +5560,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5582,7 +5583,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -5595,7 +5596,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.22.11"
+version = "2.22.12"
 dependencies = [
  "env_logger",
  "lazy_static",
