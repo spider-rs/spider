@@ -1056,6 +1056,12 @@ impl Website {
             _ => client,
         };
 
+        let client = if crate::utils::connect::background_connect_threading() {
+            client.connector_layer(crate::utils::connect::BackgroundProcessorLayer::new())
+        } else {
+            client
+        };
+
         let client = match self.configuration.concurrency_limit {
             Some(limit) => {
                 client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
@@ -1121,6 +1127,13 @@ impl Website {
         };
 
         let client = self.configure_http_client_cookies(client);
+
+        let client = if crate::utils::connect::background_connect_threading() {
+            client.connector_layer(crate::utils::connect::BackgroundProcessorLayer::new())
+        } else {
+            client
+        };
+
         let client = match self.configuration.concurrency_limit {
             Some(limit) => {
                 client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
@@ -1416,6 +1429,7 @@ impl Website {
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
         self.setup_disk();
+        crate::utils::connect::init_background_runtime();
 
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
@@ -1437,6 +1451,7 @@ impl Website {
     async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
         self.setup_disk();
+        crate::utils::connect::init_background_runtime();
 
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
