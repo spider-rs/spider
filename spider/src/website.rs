@@ -1056,6 +1056,13 @@ impl Website {
             _ => client,
         };
 
+        let client = match self.configuration.concurrency_limit {
+            Some(limit) => {
+                client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
+            }
+            _ => client,
+        };
+
         self.configure_http_client_cookies(client)
     }
 
@@ -1114,6 +1121,12 @@ impl Website {
         };
 
         let client = self.configure_http_client_cookies(client);
+        let client = match self.configuration.concurrency_limit {
+            Some(limit) => {
+                client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
+            }
+            _ => client,
+        };
         let client = ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
 
         if self.configuration.cache {
