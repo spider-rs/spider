@@ -1,5 +1,7 @@
 /// Absolute path domain handling.
 pub mod abs;
+/// Connect layer for reqwest.
+pub mod connect;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// String interner.

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.22.16"
+version = "2.22.17"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -68,6 +68,7 @@ sysinfo = { version = "0.33", default-features = false, features = ["system"], o
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite" ], optional = true }
 h2 = "0.4"
 tower = { version = "0.5", features = ["limit"]}
+pin-project-lite = "0.2"
 
 [dependencies.spider_chrome]
 version = "2"
@@ -80,6 +81,7 @@ features = [
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
+libc = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = [

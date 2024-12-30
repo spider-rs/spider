@@ -5367,7 +5367,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5392,6 +5392,7 @@ dependencies = [
  "httpdate",
  "itertools 0.13.0",
  "lazy_static",
+ "libc",
  "log",
  "lol_html",
  "moka",
@@ -5399,6 +5400,7 @@ dependencies = [
  "percent-encoding",
  "phf 0.11.2",
  "phf_codegen 0.11.2",
+ "pin-project-lite",
  "quick-xml",
  "rand 0.8.5",
  "regex",
@@ -5428,7 +5430,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5518,7 +5520,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "clap",
  "env_logger",
@@ -5561,7 +5563,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5584,7 +5586,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -5597,7 +5599,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.22.16"
+version = "2.22.17"
 dependencies = [
  "env_logger",
  "lazy_static",
