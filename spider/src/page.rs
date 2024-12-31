@@ -10,9 +10,10 @@ use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
 use bytes::Bytes;
 use hashbrown::HashSet;
-use lol_html::AsciiCompatibleEncoding;
+use lol_html::{AsciiCompatibleEncoding, OutputSink};
 use regex::bytes::Regex;
 use reqwest::StatusCode;
+use tokio::sync::oneshot::{self, Sender};
 use tokio::time::Duration;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
@@ -109,6 +110,37 @@ lazy_static! {
             })
             .unwrap_or(default_streaming_chunk_size)
     };
+}
+
+#[derive(Debug)]
+/// Html output sink for the rewriter.
+struct HtmlOutputSink {
+    /// The bytes collected.
+    pub(crate) data: Vec<u8>,
+    /// The sender to send once finished.
+    pub(crate) sender: Option<Sender<Vec<u8>>>,
+}
+
+impl HtmlOutputSink {
+    /// A new output sink.
+    fn new(sender: Sender<Vec<u8>>) -> Self {
+        HtmlOutputSink {
+            data: Vec::new(),
+            sender: Some(sender),
+        }
+    }
+}
+
+impl OutputSink for HtmlOutputSink {
+    fn handle_chunk(&mut self, chunk: &[u8]) {
+        self.data.extend_from_slice(chunk);
+        if chunk.len() == 0 {
+            if let Some(sender) = self.sender.take() {
+                let data_to_send = std::mem::take(&mut self.data);
+                let _ = sender.send(data_to_send);
+            }
+        }
+    }
 }
 
 /// The AI data returned from a GPT.
@@ -650,13 +682,6 @@ impl Page {
                         _ => (AsciiCompatibleEncoding::utf_8(), true),
                     };
 
-                let mut collected_bytes = match res.content_length() {
-                    Some(cap) if cap <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                        bytes::BytesMut::with_capacity(cap as usize)
-                    }
-                    _ => bytes::BytesMut::new(),
-                };
-
                 let target_url = res.url().as_str();
 
                 // handle redirects
@@ -752,6 +777,9 @@ impl Page {
                     }));
                 }
 
+                // let (tx, rx) = oneshot::channel();
+                // let output_sink = HtmlOutputSink::new(tx);
+
                 let settings = lol_html::send::Settings {
                     element_content_handlers,
                     adjust_charset_on_meta_tag,
@@ -760,6 +788,13 @@ impl Page {
                 };
 
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
+
+                let mut collected_bytes = match res.content_length() {
+                    Some(cap) if cap <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
+                        bytes::BytesMut::with_capacity(cap as usize)
+                    }
+                    _ => bytes::BytesMut::new(),
+                };
 
                 let mut response = handle_response_bytes_writer(
                     res,
@@ -775,6 +810,10 @@ impl Page {
                 if !rewrite_error {
                     let _ = rewriter.end();
                 }
+
+                // if let Ok(output) = rx.await {
+                //     response.0.content.replace(Box::new(output.into()));
+                // }
 
                 response
                     .0
@@ -1851,16 +1890,7 @@ impl Page {
                                 &new_page,
                                 true,
                                 true,
-                                &Some(crate::configuration::WaitFor::new(
-                                    Some(
-                                        core::time::Duration::from_secs(60), // default a duration for smart handling. (maybe expose later on.)
-                                    ),
-                                    None,
-                                    true,
-                                    true,
-                                    None,
-                                    None,
-                                )),
+                                &configuration.wait_for,
                                 &configuration.screenshot,
                                 false,
                                 &configuration.openai_config,
