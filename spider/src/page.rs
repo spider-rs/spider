@@ -10,10 +10,9 @@ use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
 use bytes::Bytes;
 use hashbrown::HashSet;
-use lol_html::{AsciiCompatibleEncoding, OutputSink};
+use lol_html::AsciiCompatibleEncoding;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
-use tokio::sync::oneshot::{self, Sender};
 use tokio::time::Duration;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
@@ -110,37 +109,6 @@ lazy_static! {
             })
             .unwrap_or(default_streaming_chunk_size)
     };
-}
-
-#[derive(Debug)]
-/// Html output sink for the rewriter.
-struct HtmlOutputSink {
-    /// The bytes collected.
-    pub(crate) data: Vec<u8>,
-    /// The sender to send once finished.
-    pub(crate) sender: Option<Sender<Vec<u8>>>,
-}
-
-impl HtmlOutputSink {
-    /// A new output sink.
-    fn new(sender: Sender<Vec<u8>>) -> Self {
-        HtmlOutputSink {
-            data: Vec::new(),
-            sender: Some(sender),
-        }
-    }
-}
-
-impl OutputSink for HtmlOutputSink {
-    fn handle_chunk(&mut self, chunk: &[u8]) {
-        self.data.extend_from_slice(chunk);
-        if chunk.len() == 0 {
-            if let Some(sender) = self.sender.take() {
-                let data_to_send = std::mem::take(&mut self.data);
-                let _ = sender.send(data_to_send);
-            }
-        }
-    }
 }
 
 /// The AI data returned from a GPT.
@@ -777,9 +745,6 @@ impl Page {
                     }));
                 }
 
-                // let (tx, rx) = oneshot::channel();
-                // let output_sink = HtmlOutputSink::new(tx);
-
                 let settings = lol_html::send::Settings {
                     element_content_handlers,
                     adjust_charset_on_meta_tag,
@@ -810,10 +775,6 @@ impl Page {
                 if !rewrite_error {
                     let _ = rewriter.end();
                 }
-
-                // if let Ok(output) = rx.await {
-                //     response.0.content.replace(Box::new(output.into()));
-                // }
 
                 response
                     .0
@@ -1731,7 +1692,6 @@ impl Page {
                     .await;
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                let (txx, mut rxx) = tokio::sync::mpsc::unbounded_channel();
 
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -1814,10 +1774,11 @@ impl Page {
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
+                let (dtx, rdx) = tokio::sync::oneshot::channel();
+                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
+
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |c: &[u8]| {
-                        let _ = txx.send(c.to_vec());
-                    });
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -1838,13 +1799,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                drop(txx);
-
-                let mut rewrited_bytes: Vec<u8> = Vec::new();
-
-                while let Some(c) = rxx.recv().await {
-                    rewrited_bytes.extend_from_slice(&c);
-                }
+                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
 
                 let mut rerender = rerender.load(Ordering::Relaxed);
 
@@ -2172,28 +2127,6 @@ pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
         _ => Default::default(),
     }
 }
-
-// /// Rewrite a string without encoding it.
-// #[cfg(all(
-//     not(feature = "decentralized"),
-//     not(feature = "full_resources"),
-//     feature = "smart"
-// ))]
-// pub(crate) fn rewrite_str_as_bytes<'h, 's>(
-//     html: &str,
-//     settings: impl Into<lol_html::Settings<'h, 's>>,
-// ) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
-//     let mut output = vec![];
-
-//     let mut rewriter = lol_html::HtmlRewriter::new(settings.into(), |c: &[u8]| {
-//         output.extend_from_slice(c);
-//     });
-
-//     rewriter.write(html.as_bytes())?;
-//     rewriter.end()?;
-
-//     Ok(output)
-// }
 
 #[cfg(test)]
 pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));

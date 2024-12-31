@@ -3026,6 +3026,40 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Se
     semaphore
 }
 
+#[derive(Debug)]
+/// Html output sink for the rewriter.
+#[cfg(feature = "smart")]
+pub(crate) struct HtmlOutputSink {
+    /// The bytes collected.
+    pub(crate) data: Vec<u8>,
+    /// The sender to send once finished.
+    pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
+}
+
+#[cfg(feature = "smart")]
+impl HtmlOutputSink {
+    /// A new output sink.
+    pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
+        HtmlOutputSink {
+            data: Vec::new(),
+            sender: Some(sender),
+        }
+    }
+}
+
+#[cfg(feature = "smart")]
+impl OutputSink for HtmlOutputSink {
+    fn handle_chunk(&mut self, chunk: &[u8]) {
+        self.data.extend_from_slice(chunk);
+        if chunk.len() == 0 {
+            if let Some(sender) = self.sender.take() {
+                let data_to_send = std::mem::take(&mut self.data);
+                let _ = sender.send(data_to_send);
+            }
+        }
+    }
+}
+
 /// Emit a log info event.
 #[cfg(feature = "tracing")]
 pub fn emit_log(link: &str) {

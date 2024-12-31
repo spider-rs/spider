@@ -16,7 +16,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 
     let mut rx2 = website.subscribe(16).unwrap();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
             println!("{:?}", page.get_url());
         }
@@ -24,13 +24,15 @@ async fn crawl_website(url: &str) -> Result<()> {
 
     let start = crate::tokio::time::Instant::now();
     website.crawl().await;
+    website.unsubscribe();
+    let _ = handle.await;
 
     let duration = start.elapsed();
 
     let links = website.get_all_links_visited().await;
 
     println!(
-        "Time elapsed in website.crawl() is: {:?} for total pages: {:?}",
+        "Time elapsed in website.crawl({url}) is: {:?} for total pages: {:?}",
         duration,
         links.len()
     );
