@@ -25,6 +25,29 @@ pub(crate) fn background_connect_threading() -> bool {
 }
 
 /// Init a background thread for request connect handling.
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
+pub(crate) fn init_background_runtime() {
+    let _ = CONNECT_THREAD_POOL.set({
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let builder = std::thread::Builder::new();
+
+        if let Err(_) = builder.spawn(move || {
+            tokio_uring::builder().start(async {
+                while let Some(work) = rx.recv().await {
+                    tokio_uring::spawn(work);
+                }
+            })
+        }) {
+            let _ = tx.downgrade();
+            BACKGROUND_THREAD_CONNECT_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        };
+
+        tx
+    });
+}
+
+/// Init a background thread for request connect handling.
+#[cfg(any(not(target_os = "linux"), not(feature = "io_uring")))]
 pub(crate) fn init_background_runtime() {
     let _ = CONNECT_THREAD_POOL.set({
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

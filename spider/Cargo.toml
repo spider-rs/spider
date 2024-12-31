@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.22.19"
+version = "2.23.1"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -81,6 +81,7 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+tokio-uring = { version = "0.4", optional = true }
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
@@ -115,7 +116,7 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+default = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance", "io_uring"]
 disk = ["dep:sqlx", "dep:aho-corasick"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
 disk_aws = ["disk", "sqlx/tls-rustls-aws-lc-rs"]
@@ -128,6 +129,7 @@ jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
+io_uring = ["dep:tokio-uring"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = ["dep:serde", "hashbrown/serde", "string-interner/serde", "dep:serde_regex", "smallvec/serde"]
