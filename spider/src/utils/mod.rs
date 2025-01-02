@@ -1787,12 +1787,9 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 
                                         data.put(text);
 
-                                        match file.write_all(data.as_bytes()).await {
-                                            Ok(_) => {
-                                                data.clear();
-                                            }
-                                            _ => (),
-                                        };
+                                        if let Ok(_) = file.write_all(data.as_bytes()).await {
+                                            data.clear();
+                                        }
                                     }
                                     _ => data.put(text),
                                 };
@@ -1822,20 +1819,19 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 content: Some(if file.is_some() {
                     let mut buffer = vec![];
 
-                    match tokio::fs::File::open(&file_path).await {
-                        Ok(mut b) => match b.read_to_end(&mut buffer).await {
-                            _ => (),
-                        },
-                        _ => (),
-                    };
+                    if let Ok(mut b) = tokio::fs::File::open(&file_path).await {
+                        if let Ok(_) = b.read_to_end(&mut buffer).await {
+                            let _ = tokio::fs::remove_file(file_path).await;
+                        }
+                    }
 
-                    match tokio::fs::remove_file(file_path).await {
-                        _ => (),
-                    };
+                    let mut b = BytesMut::with_capacity(buffer.capacity());
 
-                    buffer.into()
+                    b.extend_from_slice(&buffer);
+
+                    b.freeze().into()
                 } else {
-                    data.into()
+                    data.freeze().into()
                 }),
                 status_code,
                 final_url: rd,
@@ -1910,7 +1906,7 @@ pub async fn fetch_page_html(
                 execution_scripts,
                 automation_scripts,
                 &viewport,
-                request_timeout,
+                &request_timeout.map(Box::new),
             )
             .await
             {
@@ -1960,22 +1956,20 @@ pub async fn fetch_page_html(
 
                                                         data.put(text);
 
-                                                        match file.write_all(data.as_bytes()).await
+                                                        if let Ok(_) =
+                                                            file.write_all(data.as_bytes()).await
                                                         {
-                                                            Ok(_) => {
-                                                                data.clear();
-                                                            }
-                                                            _ => (),
-                                                        };
+                                                            data.clear();
+                                                        }
                                                     }
                                                     _ => data.put(text),
                                                 };
                                             } else {
-                                                match &file.as_mut().unwrap().write_all(&text).await
-                                                {
-                                                    Ok(_) => (),
-                                                    _ => data.put(text),
-                                                };
+                                                if let Some(f) = file.as_mut() {
+                                                    if let Ok(_) = f.write_all(&text).await {
+                                                        data.put(text)
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1996,20 +1990,19 @@ pub async fn fetch_page_html(
                                 content: Some(if file.is_some() {
                                     let mut buffer = vec![];
 
-                                    match tokio::fs::File::open(&file_path).await {
-                                        Ok(mut b) => match b.read_to_end(&mut buffer).await {
-                                            _ => (),
-                                        },
-                                        _ => (),
-                                    };
+                                    if let Ok(mut b) = tokio::fs::File::open(&file_path).await {
+                                        if let Ok(_) = b.read_to_end(&mut buffer).await {
+                                            let _ = tokio::fs::remove_file(file_path).await;
+                                        }
+                                    }
 
-                                    match tokio::fs::remove_file(file_path).await {
-                                        _ => (),
-                                    };
+                                    let mut b = BytesMut::with_capacity(buffer.capacity());
 
-                                    buffer.into()
+                                    b.extend_from_slice(&buffer);
+
+                                    b.freeze().into()
                                 } else {
-                                    data.into()
+                                    data.freeze().into()
                                 }),
                                 status_code,
                                 ..Default::default()
