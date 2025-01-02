@@ -4,14 +4,14 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// TrieNode structure to handle clean url path mappings.
-pub struct TrieNode<V: std::fmt::Debug> {
+pub struct TrieNode<V: Debug> {
     /// The children for the trie.
     pub children: HashMap<String, TrieNode<V>>,
     /// The value for the trie.
     pub value: Option<V>,
 }
 
-impl<V: std::fmt::Debug> TrieNode<V> {
+impl<V: Debug> TrieNode<V> {
     /// A new trie node.
     pub fn new() -> Self {
         TrieNode {
@@ -21,7 +21,7 @@ impl<V: std::fmt::Debug> TrieNode<V> {
     }
 }
 
-impl<V: std::fmt::Debug> Default for TrieNode<V> {
+impl<V: Debug> Default for TrieNode<V> {
     fn default() -> Self {
         Self::new()
     }

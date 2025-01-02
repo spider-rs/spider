@@ -1024,7 +1024,7 @@ impl Website {
             .user_agent(user_agent)
             .redirect(policy)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
-            .tcp_keepalive(Duration::from_millis(500));
+            .tcp_keepalive(Duration::from_secs(1));
 
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
@@ -1094,7 +1094,7 @@ impl Website {
             .user_agent(user_agent)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .redirect(policy)
-            .tcp_keepalive(Duration::from_millis(500));
+            .tcp_keepalive(Duration::from_secs(1));
 
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
@@ -1237,10 +1237,9 @@ impl Website {
             headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
         }
 
-        match &self.configuration.headers {
-            Some(h) => headers.extend(h.inner().clone()),
-            _ => (),
-        };
+        if let Some(ref h) = self.configuration.headers {
+            headers.extend(h.inner().clone());
+        }
 
         if let Some(domain_url) = self.get_absolute_path(None) {
             let domain_url = domain_url.as_str();
@@ -1249,11 +1248,8 @@ impl Website {
             } else {
                 domain_url
             };
-            match HeaderValue::from_str(domain_host) {
-                Ok(value) => {
-                    headers.insert(reqwest::header::HOST, value);
-                }
-                _ => (),
+            if let Ok(value) = HeaderValue::from_str(domain_host) {
+                headers.insert(reqwest::header::HOST, value);
             }
         }
 
@@ -1309,27 +1305,20 @@ impl Website {
             headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
         }
 
-        match &self.configuration.headers {
-            Some(h) => headers.extend(h.inner().clone()),
-            _ => (),
-        };
+        if let Some(ref h) = self.configuration.headers {
+            headers.extend(h.inner().clone());
+        }
 
-        match self.get_absolute_path(None) {
-            Some(domain_url) => {
-                let domain_url = domain_url.as_str();
-                let domain_host = if domain_url.ends_with("/") {
-                    &domain_url[0..domain_url.len() - 1]
-                } else {
-                    domain_url
-                };
-                match HeaderValue::from_str(domain_host) {
-                    Ok(value) => {
-                        headers.insert(reqwest::header::HOST, value);
-                    }
-                    _ => (),
-                }
+        if let Some(domain_url) = self.get_absolute_path(None) {
+            let domain_url = domain_url.as_str();
+            let domain_host = if domain_url.ends_with("/") {
+                &domain_url[0..domain_url.len() - 1]
+            } else {
+                domain_url
+            };
+            if let Ok(value) = HeaderValue::from_str(domain_host) {
+                headers.insert(reqwest::header::HOST, value);
             }
-            _ => (),
         }
 
         for worker in WORKERS.iter() {

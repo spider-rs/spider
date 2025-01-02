@@ -103,7 +103,7 @@ impl DatabaseHandler {
                 let pool =
                     SqlitePool::connect_lazy(&db_url).expect("Failed to connect to the database");
 
-                sqlx::query(
+                if let Err(e) = sqlx::query(
                     r#"
                 CREATE TABLE IF NOT EXISTS resources (
                     id INTEGER PRIMARY KEY,
@@ -114,7 +114,9 @@ impl DatabaseHandler {
                 )
                 .execute(&pool)
                 .await
-                .expect("Failed to create table and index.");
+                {
+                    log::warn!("SQLite error: {:?}", e)
+                }
 
                 pool
             })
