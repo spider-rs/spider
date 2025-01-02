@@ -60,6 +60,16 @@ use markup5ever::Attribute;
 use markup5ever::ExpandedName;
 use markup5ever::QualName;
 
+lazy_static! {
+    static ref Q: QualName = {
+        QualName::new(
+            Some(markup5ever::Prefix::from("")),
+            markup5ever::Namespace::from(""),
+            markup5ever::LocalName::from(""),
+        )
+    };
+}
+
 /// The different kinds of nodes in the DOM.
 #[derive(Debug)]
 pub enum NodeData {
@@ -269,19 +279,7 @@ impl TreeSink for RcDom {
     fn elem_name<'a>(&self, target: &'a Handle) -> ExpandedName<'a> {
         return match target.data {
             NodeData::Element { ref name, .. } => name.expanded(),
-            _ => {
-                lazy_static! {
-                    static ref Q: QualName = {
-                        QualName::new(
-                            Some(markup5ever::Prefix::from("")),
-                            markup5ever::Namespace::from(""),
-                            markup5ever::LocalName::from(""),
-                        )
-                    };
-                }
-
-                Q.expanded()
-            }
+            _ => Q.expanded(),
         };
     }
 

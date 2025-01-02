@@ -1,25 +1,25 @@
 use crate::CaseInsensitiveString;
 
+lazy_static! {
+    static ref RE: Regex = {
+        unsafe {
+            regex::Regex::new(
+                r"(?x)
+                    # list
+                    (?<list>\{(?<items>[^}\\}^\{]+)}) |
+                    # range
+                    (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
+                ",
+            )
+            .unwrap_unchecked()
+        }
+    };
+}
+
 /// expand a website url to a glob pattern set
 pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
     use regex::Regex;
-
-    lazy_static! {
-        static ref RE: Regex = {
-            unsafe {
-                regex::Regex::new(
-                    r"(?x)
-                        # list
-                        (?<list>\{(?<items>[^}\\}^\{]+)}) |
-                        # range
-                        (?<range>\[(?:(?<start>(?<padding>0*)\d+|[a-z]))-(?:(?<end>\d+|[a-z]))(?::(?<step>\d+))?])
-                    ",
-                )
-                .unwrap_unchecked()
-            }
-        };
-    }
 
     let mut matches = Vec::new();
 

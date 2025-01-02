@@ -25,12 +25,12 @@ pub use spider_transformations;
 /// Extracted content from CSS query selectors.
 type CSSQueryMap = HashMap<String, Vec<String>>;
 
+lazy_static! {
+    static ref XPATH_FACTORY: sxd_xpath::Factory = sxd_xpath::Factory::new();
+}
+
 /// Check if a selector is a valid xpath
 fn is_valid_xpath(expression: &str) -> bool {
-    use sxd_xpath::Factory;
-    lazy_static! {
-        static ref XPATH_FACTORY: Factory = Factory::new();
-    };
     match XPATH_FACTORY.build(expression) {
         Ok(Some(_)) => true,
         Ok(None) => false,

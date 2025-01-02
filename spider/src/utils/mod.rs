@@ -2203,6 +2203,31 @@ pub async fn openai_request(
 }
 
 #[cfg(feature = "openai")]
+lazy_static! {
+    static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
+    static ref SEM: tokio::sync::Semaphore = {
+        let logical = num_cpus::get();
+        let physical = num_cpus::get_physical();
+
+        let sem_limit = if logical > physical {
+            (logical) / (physical)
+        } else {
+            logical
+        };
+
+        let (sem_limit, sem_max) = if logical == physical {
+            (sem_limit * physical, 20)
+        } else {
+            (sem_limit * 4, 10)
+        };
+        let sem_limit = sem_limit / 3;
+        tokio::sync::Semaphore::const_new(sem_limit.max(sem_max))
+    };
+    static ref CLIENT: async_openai::Client<async_openai::config::OpenAIConfig> =
+        async_openai::Client::new();
+}
+
+#[cfg(feature = "openai")]
 /// Perform a request to OpenAI Chat. This does nothing without the 'openai' flag enabled.
 pub async fn openai_request_base(
     gpt_configs: &crate::configuration::GPTConfigs,
@@ -2210,30 +2235,6 @@ pub async fn openai_request_base(
     url: &str,
     prompt: &str,
 ) -> crate::features::openai_common::OpenAIReturn {
-    lazy_static! {
-        static ref CORE_BPE_TOKEN_COUNT: tiktoken_rs::CoreBPE = tiktoken_rs::cl100k_base().unwrap();
-        static ref SEM: tokio::sync::Semaphore = {
-            let logical = num_cpus::get();
-            let physical = num_cpus::get_physical();
-
-            let sem_limit = if logical > physical {
-                (logical) / (physical)
-            } else {
-                logical
-            };
-
-            let (sem_limit, sem_max) = if logical == physical {
-                (sem_limit * physical, 20)
-            } else {
-                (sem_limit * 4, 10)
-            };
-            let sem_limit = sem_limit / 3;
-            tokio::sync::Semaphore::const_new(sem_limit.max(sem_max))
-        };
-        static ref CLIENT: async_openai::Client<async_openai::config::OpenAIConfig> =
-            async_openai::Client::new();
-    };
-
     match SEM.acquire().await {
         Ok(permit) => {
             let mut chat_completion_defaults =
