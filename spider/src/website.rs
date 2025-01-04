@@ -268,6 +268,8 @@ pub struct Website {
     pub on_link_find_callback: Option<
         fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
     >,
+    /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
+    pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
     /// Subscribe and broadcast changes.
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
     /// Guard counter for channel handling. This prevents things like the browser from closing after the crawl so that subscriptions can finalize events.
@@ -1622,6 +1624,13 @@ impl Website {
                 self.status = CrawlStatus::ServerError;
             }
 
+            if let Some(cb) = self.on_should_crawl_callback {
+                if !cb(&page) {
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return Default::default();
+                }
+            }
+
             channel_send_page(&self.channel, page, &self.channel_guard);
 
             links
@@ -1722,6 +1731,13 @@ impl Website {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
+            }
+
+            if let Some(cb) = self.on_should_crawl_callback {
+                if !cb(&page) {
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return Default::default();
+                }
             }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -1911,6 +1927,13 @@ impl Website {
                 } else {
                     Some(Box::new(links.clone()))
                 };
+            }
+
+            if let Some(cb) = self.on_should_crawl_callback {
+                if !cb(&page) {
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return Default::default();
+                }
             }
 
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -2385,6 +2408,8 @@ impl Website {
                     self._crawl_establish(client, &mut selector, false).await;
                 } else {
                     let on_link_find_callback = self.on_link_find_callback;
+                    let on_should_crawl_callback = self.on_should_crawl_callback;
+
                     let full_resources = self.configuration.full_resources;
                     let return_page_links = self.configuration.return_page_links;
                     let only_html = self.configuration.only_html && !full_resources;
@@ -2555,6 +2580,14 @@ impl Website {
                                                 page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
                                             }
 
+                                            if let Some(cb) = on_should_crawl_callback {
+                                                if !cb(&page) {
+                                                    channel_send_page(&shared.2, page, &shared.4);
+                                                    drop(permit);
+                                                    return Default::default()
+                                                }
+                                            }
+
                                             channel_send_page(&shared.2, page, &shared.4);
                                             drop(permit);
 
@@ -2679,6 +2712,7 @@ impl Website {
 
                                 let add_external = shared.3.len() > 0;
                                 let on_link_find_callback = self.on_link_find_callback;
+                                let on_should_crawl_callback = self.on_should_crawl_callback;
                                 let full_resources = self.configuration.full_resources;
                                 let return_page_links = self.configuration.return_page_links;
                                 let mut exceeded_budget = false;
@@ -2855,6 +2889,14 @@ impl Website {
 
                                                                 page.base = prev_domain;
 
+                                                                if let Some(cb) = on_should_crawl_callback {                    
+                                                                    if !cb(&page) {
+                                                                        channel_send_page(&shared.2, page, &shared.4);
+                                                                        drop(permit);
+                                                                        return Default::default()
+                                                                    }
+                                                                }
+                                                                
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
                                                                 );
@@ -3123,6 +3165,7 @@ impl Website {
 
                         let (mut interval, throttle) = self.setup_crawl();
                         let on_link_find_callback = self.on_link_find_callback;
+                        let on_should_crawl_callback = self.on_should_crawl_callback;
                         let return_page_links = self.configuration.return_page_links;
 
                         links.extend(
@@ -3290,6 +3333,16 @@ impl Website {
                                                     .await;
 
                                                     page.base = prev_domain;
+
+
+                                                if let Some(cb) = on_should_crawl_callback {    
+                                                    if !cb(&page) {
+                                                        channel_send_page(&shared.2, page, &shared.3);
+                                                        drop(permit);
+                                                        return Default::default()
+                                                    }
+                                                }
+                                                    
 
                                                 channel_send_page(&shared.2, page, &shared.3);
                                                 drop(permit);
