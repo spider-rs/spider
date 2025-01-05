@@ -218,6 +218,8 @@ pub struct Page {
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
+    /// The page was blocked from crawling usual from using website::on_should_crawl_callback
+    pub blocked_crawl: bool,
 }
 
 /// Validate link and push into the map
