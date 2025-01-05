@@ -2,6 +2,7 @@
 use case_insensitive_string::CaseInsensitiveString;
 #[cfg(feature = "disk")]
 use hashbrown::HashSet;
+#[cfg(feature = "disk")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(feature = "disk")]
@@ -9,12 +10,11 @@ use crate::utils::emit_log;
 #[cfg(feature = "disk")]
 use sqlx::{sqlite::SqlitePool, Sqlite, Transaction};
 
-use aho_corasick::AhoCorasick;
-
+#[cfg(feature = "disk")]
 lazy_static! {
-    static ref AC: AhoCorasick = {
+    static ref AC: aho_corasick::AhoCorasick = {
         let patterns = vec![".", "/", ":", "\\", "?", "*", "\"", "<", ">", "|"];
-        AhoCorasick::new(&patterns).expect("valid replacer")
+        aho_corasick::AhoCorasick::new(&patterns).expect("valid replacer")
     };
     static ref AC_REPLACE: [&'static str; 10] = ["_", "_", "_", "_", "_", "_", "_", "_", "_", "_"];
 }
