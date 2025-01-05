@@ -171,13 +171,13 @@ pub struct Page {
     pub extra_ai_data: Option<Vec<AIResults>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
-    /// The request should retry
+    /// The request should retry.
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
     /// The total byte transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
     pub bytes_transferred: Option<f64>,
-    /// The page was blocked from crawling usual from using website::on_should_crawl_callback
+    /// The page was blocked from crawling usual from using website::on_should_crawl_callback.
     pub blocked_crawl: bool,
 }
 
@@ -214,11 +214,11 @@ pub struct Page {
     pub extra_ai_data: Option<Vec<AIResults>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
-    /// The request should retry
+    /// The request should retry.
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
-    /// The page was blocked from crawling usual from using website::on_should_crawl_callback
+    /// The page was blocked from crawling usual from using website::on_should_crawl_callback.
     pub blocked_crawl: bool,
 }
 
@@ -657,9 +657,10 @@ impl Page {
 
                 let target_url = res.url().as_str();
 
-                // handle redirects
-                if url != target_url && !exact_url_match(&url, &target_url) {
+                // handle initial redirects
+                if ssg_map.is_some() && url != target_url && !exact_url_match(&url, &target_url) {
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
+
                     modify_selectors(
                         prior_domain,
                         target_url,
