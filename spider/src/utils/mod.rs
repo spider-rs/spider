@@ -1739,12 +1739,9 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 #[cfg(all(feature = "fs", not(feature = "chrome")))]
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
-    use crate::tokio::io::AsyncReadExt;
-    use crate::tokio::io::AsyncWriteExt;
+    use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use bytes::BytesMut;
-    use percent_encoding::utf8_percent_encode;
-    use percent_encoding::NON_ALPHANUMERIC;
-    use tendril::fmt::Slice;
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => {
@@ -1787,7 +1784,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 
                                         data.put(text);
 
-                                        if let Ok(_) = file.write_all(data.as_bytes()).await {
+                                        if let Ok(_) = file.write_all(&data.as_ref()).await {
                                             data.clear();
                                         }
                                     }
@@ -1887,9 +1884,7 @@ pub async fn fetch_page_html(
     request_timeout: &Option<tokio::time::Duration>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use percent_encoding::utf8_percent_encode;
-    use percent_encoding::NON_ALPHANUMERIC;
-    use tendril::fmt::Slice;
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     match &page {
         page => {
@@ -1957,7 +1952,7 @@ pub async fn fetch_page_html(
                                                         data.put(text);
 
                                                         if let Ok(_) =
-                                                            file.write_all(data.as_bytes()).await
+                                                            file.write_all(&data.as_ref()).await
                                                         {
                                                             data.clear();
                                                         }
