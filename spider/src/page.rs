@@ -177,6 +177,8 @@ pub struct Page {
     pub waf_check: bool,
     /// The total byte transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
     pub bytes_transferred: Option<f64>,
+    /// The page was blocked from crawling usual from using website::on_should_crawl_callback
+    pub blocked_crawl: bool,
 }
 
 /// Represent a page visited.
@@ -493,6 +495,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
+        blocked_crawl: false,
     }
 }
 

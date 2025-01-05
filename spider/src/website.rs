@@ -1626,6 +1626,7 @@ impl Website {
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
+                    page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
                 }
@@ -1735,6 +1736,7 @@ impl Website {
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
+                    page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
                 }
@@ -1931,6 +1933,7 @@ impl Website {
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
+                    page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
                 }
@@ -2582,6 +2585,7 @@ impl Website {
 
                                             if let Some(cb) = on_should_crawl_callback {
                                                 if !cb(&page) {
+                                                    page.blocked_crawl = true;
                                                     channel_send_page(&shared.2, page, &shared.4);
                                                     drop(permit);
                                                     return Default::default()
@@ -2889,14 +2893,15 @@ impl Website {
 
                                                                 page.base = prev_domain;
 
-                                                                if let Some(cb) = on_should_crawl_callback {                    
+                                                                if let Some(cb) = on_should_crawl_callback {
                                                                     if !cb(&page) {
+                                                                        page.blocked_crawl = true;
                                                                         channel_send_page(&shared.2, page, &shared.4);
                                                                         drop(permit);
                                                                         return Default::default()
                                                                     }
                                                                 }
-                                                                
+
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
                                                                 );
@@ -3335,14 +3340,15 @@ impl Website {
                                                     page.base = prev_domain;
 
 
-                                                if let Some(cb) = on_should_crawl_callback {    
+                                                if let Some(cb) = on_should_crawl_callback {
                                                     if !cb(&page) {
+                                                        page.blocked_crawl = true;
                                                         channel_send_page(&shared.2, page, &shared.3);
                                                         drop(permit);
                                                         return Default::default()
                                                     }
                                                 }
-                                                    
+
 
                                                 channel_send_page(&shared.2, page, &shared.3);
                                                 drop(permit);
@@ -4222,6 +4228,18 @@ impl Website {
         match on_link_find_callback {
             Some(callback) => self.on_link_find_callback = Some(callback),
             _ => self.on_link_find_callback = None,
+        };
+        self
+    }
+
+    /// Use a callback to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
+    pub fn with_on_should_crawl_callback(
+        &mut self,
+        on_should_crawl_callback: Option<fn(&Page) -> bool>,
+    ) -> &mut Self {
+        match on_should_crawl_callback {
+            Some(callback) => self.on_should_crawl_callback = Some(callback),
+            _ => self.on_should_crawl_callback = None,
         };
         self
     }
