@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.24.6"
+version = "2.24.7"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -115,7 +115,8 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance", "io_uring"]
+default = ["basic", "io_uring"]
+basic = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
 disk = ["dep:sqlx", "dep:aho-corasick"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
 disk_aws = ["disk", "sqlx/tls-rustls-aws-lc-rs"]
