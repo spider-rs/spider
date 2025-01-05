@@ -879,8 +879,6 @@ impl Page {
         viewport: &Option<crate::configuration::Viewport>,
         request_timeout: &Option<Box<Duration>>,
     ) -> Self {
-        let request_timeout = request_timeout.as_deref().map(|r| *r);
-
         let page_resource = crate::utils::fetch_page_html(
             &url,
             &client,

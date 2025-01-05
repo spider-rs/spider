@@ -1881,7 +1881,7 @@ pub async fn fetch_page_html(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<tokio::time::Duration>,
+    request_timeout: &Option<Box<std::time::Duration>>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -1901,7 +1901,7 @@ pub async fn fetch_page_html(
                 execution_scripts,
                 automation_scripts,
                 &viewport,
-                &request_timeout.map(Box::new),
+                &request_timeout,
             )
             .await
             {
@@ -2082,7 +2082,7 @@ pub async fn fetch_page_html_chrome(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<Box<tokio::time::Duration>>,
+    request_timeout: &Option<Box<std::time::Duration>>,
 ) -> PageResponse {
     match &page {
         page => {
