@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.24.7"
+version = "2.24.8"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -81,6 +81,7 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.4", optional = true }
+libc = "0.2"
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
