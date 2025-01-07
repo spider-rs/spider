@@ -148,8 +148,12 @@ pub struct Page {
     pub cookies: Option<reqwest::header::HeaderMap>,
     /// The status code of the page request.
     pub status_code: StatusCode,
+    #[cfg(not(feature = "page_error_status_details"))]
     /// The error of the request if any.
     pub error_status: Option<String>,
+    #[cfg(feature = "page_error_status_details")]
+    /// The error of the request if any.
+    pub error_status: Option<std::sync::Arc<reqwest::Error>>,
     /// The external urls to group with the domain
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Not implemented in the chrome feature].
@@ -437,6 +441,38 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
+
+/// Get the error status of the page base.
+fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<reqwest::Error> {
+    match error_for_status {
+        Some(e) => match e {
+            Ok(_) => None,
+            Err(er) => {
+                if er.is_status() || er.is_connect() || er.is_timeout() {
+                    *should_retry = !er.to_string().contains("ENOTFOUND");
+                }
+                if !*should_retry && should_attempt_retry(&er) {
+                    *should_retry = true;
+                }
+                Some(er)
+            }
+        },
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "page_error_status_details"))]
+/// Get the error status of the page.
+fn get_error_status(should_retry: &mut bool, error_for_status:  Option<Result<reqwest::Response, reqwest::Error>>) -> Option<String> {
+    get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
+}
+
+#[cfg(feature = "page_error_status_details")]
+/// Get the error status of the page.
+fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<std::sync::Arc<reqwest::Error>> {
+    get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
+}
+
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {
@@ -470,21 +506,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         external_domains_caseless: Default::default(),
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
-        error_status: match res.error_for_status {
-            Some(e) => match e {
-                Ok(_) => None,
-                Err(er) => {
-                    if er.is_status() || er.is_connect() || er.is_timeout() {
-                        should_retry = !er.to_string().contains("ENOTFOUND");
-                    }
-                    if !should_retry && should_attempt_retry(&er) {
-                        should_retry = true;
-                    }
-                    Some(er.to_string())
-                }
-            },
-            _ => None,
-        },
+        error_status: get_error_status(&mut should_retry, res.error_for_status),
         #[cfg(feature = "chrome")]
         chrome_page: None,
         #[cfg(feature = "chrome")]

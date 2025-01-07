@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.24.8"
+version = "2.24.9"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -177,6 +177,7 @@ tracing = ["tokio/tracing", "dep:tracing"]
 string_interner_buffer_backend = ["dep:string-interner"]
 string_interner_string_backend = ["dep:string-interner"]
 string_interner_bucket_backend = ["dep:string-interner"]
+page_error_status_details = []
 
 # Allows full concurrency.
 cowboy = []
