@@ -443,6 +443,7 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
 
 
 /// Get the error status of the page base.
+#[cfg(not(feature = "decentralized"))]
 fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<reqwest::Error> {
     match error_for_status {
         Some(e) => match e {
@@ -461,13 +462,13 @@ fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Resul
     }
 }
 
-#[cfg(not(feature = "page_error_status_details"))]
+#[cfg(all(not(feature = "page_error_status_details"), not(feature = "decentralized")))]
 /// Get the error status of the page.
 fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>>) -> Option<String> {
     get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
 }
 
-#[cfg(feature = "page_error_status_details")]
+#[cfg(all(feature = "page_error_status_details", not(feature = "decentralized")))]
 /// Get the error status of the page.
 fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<std::sync::Arc<reqwest::Error>> {
     get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
