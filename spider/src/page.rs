@@ -463,7 +463,7 @@ fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Resul
 
 #[cfg(not(feature = "page_error_status_details"))]
 /// Get the error status of the page.
-fn get_error_status(should_retry: &mut bool, error_for_status:  Option<Result<reqwest::Response, reqwest::Error>>) -> Option<String> {
+fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>>) -> Option<String> {
     get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
 }
 
@@ -857,12 +857,14 @@ impl Page {
                 response.0
             }
             Ok(res) => setup_default_response(url, &res),
-            Err(_) => {
+            Err(err) => {
                 log::info!("error fetching {}", url);
                 let mut page_response = PageResponse::default();
                 if let Ok(status_code) = StatusCode::from_u16(599) {
                     page_response.status_code = status_code;
                 }
+                page_response.error_for_status = Some(Err(err));
+
                 page_response
             }
         };
