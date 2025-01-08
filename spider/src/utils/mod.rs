@@ -37,8 +37,16 @@ use log::{info, log_enabled, Level};
 
 use reqwest::{
     header::{HeaderName, HeaderValue},
-    Error, Response, StatusCode,
+    Response, StatusCode,
 };
+
+/// The request error.
+#[cfg(not(feature = "cache_request"))]
+pub(crate) type RequestError = reqwest::Error;
+
+/// The request error.
+#[cfg(feature = "cache_request")]
+pub(crate) type RequestError = reqwest_middleware::Error;
 
 /// Ignore the content types.
 pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
@@ -206,7 +214,7 @@ pub struct PageResponse {
     /// The final url destination after any redirects.
     pub final_url: Option<String>,
     /// The message of the response error if any.
-    pub error_for_status: Option<Result<Response, Error>>,
+    pub error_for_status: Option<Result<Response, RequestError>>,
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page. The ScreenShotConfig bytes boolean needs to be set to true.
     pub screenshot_bytes: Option<Vec<u8>>,

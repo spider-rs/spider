@@ -3,7 +3,7 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::{convert_abs_path, convert_abs_url_base};
-use crate::utils::PageResponse;
+use crate::utils::{PageResponse, RequestError};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -441,10 +441,12 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-
 /// Get the error status of the page base.
 #[cfg(not(feature = "decentralized"))]
-fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<reqwest::Error> {
+fn get_error_status_base(
+    should_retry: &mut bool,
+    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+) -> Option<RequestError> {
     match error_for_status {
         Some(e) => match e {
             Ok(_) => None,
@@ -462,15 +464,24 @@ fn get_error_status_base(should_retry: &mut bool, error_for_status: Option<Resul
     }
 }
 
-#[cfg(all(not(feature = "page_error_status_details"), not(feature = "decentralized")))]
+#[cfg(all(
+    not(feature = "page_error_status_details"),
+    not(feature = "decentralized")
+))]
 /// Get the error status of the page.
-fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>>) -> Option<String> {
+fn get_error_status(
+    should_retry: &mut bool,
+    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+) -> Option<String> {
     get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
 }
 
 #[cfg(all(feature = "page_error_status_details", not(feature = "decentralized")))]
 /// Get the error status of the page.
-fn get_error_status(should_retry: &mut bool, error_for_status: Option<Result<reqwest::Response, reqwest::Error>> ) -> Option<std::sync::Arc<reqwest::Error>> {
+fn get_error_status(
+    should_retry: &mut bool,
+    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+) -> Option<std::sync::Arc<reqwest::Error>> {
     get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
 }
 
@@ -493,6 +504,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         remote_addr: res.remote_addr,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
+        // we do not need to parse the Url on each page. Next version this should be set to None.
         base: if !url.is_empty() {
             match Url::parse(url) {
                 Ok(u) => Some(u),
@@ -869,7 +881,6 @@ impl Page {
                 page_response
             }
         };
-
         build(url, page_response)
     }
 
@@ -1205,6 +1216,14 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     pub fn set_url(&mut self, url: String) {
         self.url = url;
+    }
+
+    /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn set_url_parsed_direct(&mut self) {
+        if let Ok(base) = Url::parse(&self.url) {
+            self.base = Some(base);
+        }
     }
 
     /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
