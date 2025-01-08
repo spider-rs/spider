@@ -17,7 +17,7 @@ pub struct BrowserFetcherOptions {
 
     /// The host that will be used for downloading.
     ///
-    /// defaults to https://storage.googleapis.com
+    /// defaults to <https://storage.googleapis.com>
     pub(crate) host: String,
 
     /// The path to download browsers to.

@@ -340,7 +340,7 @@ impl Website {
         string_concat!(self.crawl_id, self.url.inner())
     }
 
-    /// Setup SQLite. This does nothing with [disk] flag enabled.
+    /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub fn setup_disk(&mut self) {
         if !self.sqlite.pool_inited() {
@@ -349,17 +349,17 @@ impl Website {
         }
     }
 
-    /// Setup SQLite. This does nothing with [disk] flag enabled.
+    /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     pub fn setup_disk(&mut self) {}
 
-    /// Get the db pool. This does nothing with [disk] flag enabled.
+    /// Get the db pool. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn get_db_pool(&self) -> &sqlx::SqlitePool {
         self.sqlite.get_db_pool().await
     }
 
-    /// Check if URL exists (ignore case). This does nothing with [disk] flag enabled.
+    /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
         if !self.sqlite.ready() {
@@ -372,13 +372,13 @@ impl Website {
         }
     }
 
-    /// Check if URL exists (ignore case). This does nothing with [disk] flag enabled.
+    /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     async fn is_allowed_disk(&self, _url_to_check: &str) -> bool {
         true
     }
 
-    /// Clear the disk. This does nothing with [disk] flag enabled.
+    /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
         if self.sqlite.pool_inited() {
@@ -386,11 +386,11 @@ impl Website {
         }
     }
 
-    /// Clear the disk. This does nothing with [disk] flag enabled.
+    /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     async fn clear_disk(&self) {}
 
-    /// Insert a new URL to disk if it doesn't exist. This does nothing with [disk] flag enabled.
+    /// Insert a new URL to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn insert_url_disk(&self, new_url: &CaseInsensitiveString) {
         self.sqlite
@@ -398,7 +398,7 @@ impl Website {
             .await
     }
 
-    /// Insert a new URL if it doesn't exist. This does nothing with [disk] flag enabled.
+    /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
         let mem_load = crate::utils::detect_system::get_global_memory_state().await;
@@ -423,13 +423,13 @@ impl Website {
         }
     }
 
-    /// Insert a new URL if it doesn't exist. This does nothing with [disk] flag enabled.
+    /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     async fn insert_link(&mut self, link: CaseInsensitiveString) {
         self.links_visited.insert(link);
     }
 
-    /// Seed the DB and clear the Hashset. This does nothing with [disk] flag enabled.
+    /// Seed the DB and clear the Hashset. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn seed(&mut self) -> Result<(), sqlx::Error> {
         let links = self.get_links();
@@ -790,13 +790,13 @@ impl Website {
         self.pages.as_ref()
     }
 
-    /// Links visited getter for disk. This does nothing with [disk] flag enabled.
+    /// Links visited getter for disk. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
         Default::default()
     }
 
-    /// Links visited getter for disk. This does nothing with [disk] flag enabled.
+    /// Links visited getter for disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
         if self.sqlite.pool_inited() {
@@ -4311,7 +4311,7 @@ impl Website {
         self
     }
 
-    /// Wait for idle dom mutations for target element. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for idle dom mutations for target element. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_wait_for_idle_dom(
         &mut self,
         wait_for_selector: Option<crate::configuration::WaitForSelector>,

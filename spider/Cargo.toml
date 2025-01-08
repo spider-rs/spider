@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.24.12"
+version = "2.24.13"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -11,7 +11,7 @@ keywords = ["crawler", "spider", "scraper"]
 categories = ["web-programming", "command-line-utilities"]
 license = "MIT"
 documentation = "https://docs.rs/spider"
-edition = "2018"
+edition = "2021"
 
 [badges]
 maintenance = { status = "as-is" }
@@ -61,7 +61,7 @@ string-interner = { version = "0.18", default-features = false, features = ["std
 httpdate = { version = "1", optional = true }
 rand = { version = "0.8", optional = true }
 serde_regex = { version = "1", optional = true }
-statrs = { version = "0.17", optional = true }
+statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1", optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }

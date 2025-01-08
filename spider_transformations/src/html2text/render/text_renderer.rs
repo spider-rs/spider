@@ -258,7 +258,7 @@ impl<T: Debug + Eq + PartialEq + Clone + Default> TaggedLine<T> {
     }
 
     /// Iterator over TaggedLineElements
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &TaggedLineElement<T>> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a TaggedLineElement<T>> + 'a {
         self.v.iter()
     }
 
