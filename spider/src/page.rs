@@ -1579,7 +1579,9 @@ impl Page {
                                 if source.starts_with("/_next/static/")
                                     && source.ends_with("/_ssgManifest.js")
                                 {
-                                    if let Some(build_path) = self.abs_path(&source) {
+                                    if let Some(build_path) =
+                                        base.map(|b| convert_abs_path(&b, &source))
+                                    {
                                         let _ = cell.set(build_path.to_string());
                                     }
                                 }
@@ -2176,15 +2178,6 @@ impl Page {
     pub async fn links(&self, _: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
         self.links.to_owned()
     }
-
-    /// Convert a URL to its absolute path without any fragments or params.
-    #[inline]
-    #[cfg(not(feature = "decentralized"))]
-    fn abs_path(&self, href: &str) -> Option<Url> {
-        self.get_url_parsed_ref()
-            .as_ref()
-            .map(|b| convert_abs_path(b, href))
-    }
 }
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
@@ -2290,59 +2283,6 @@ async fn test_status_code() {
     let page: Page = Page::new(link_result, &client).await;
 
     assert_eq!(page.status_code.as_u16(), 404);
-}
-
-#[tokio::test]
-async fn test_abs_path() {
-    let link_result = "https://choosealicense.com/";
-    let mut page: Page = build(&link_result, Default::default());
-
-    page.set_url_parsed_direct_empty();
-
-    assert_eq!(
-        page.abs_path("?query=keyword").expect("a valid url"),
-        Url::parse("https://choosealicense.com?query=keyword").expect("a valid url")
-    );
-
-    assert_eq!(
-        page.abs_path("#query=keyword").expect("a valid url"),
-        Url::parse("https://choosealicense.com").expect("a valid url")
-    );
-
-    assert_eq!(
-        page.abs_path("/page").expect("a valid url"),
-        Url::parse("https://choosealicense.com/page").expect("a valid url")
-    );
-
-    assert_eq!(
-        page.abs_path("/page?query=keyword").expect("a valid url"),
-        Url::parse("https://choosealicense.com/page?query=keyword").expect("a valid url")
-    );
-    assert_eq!(
-        page.abs_path("/page#hash").expect("a valid url"),
-        Url::parse("https://choosealicense.com/page").expect("a valid url")
-    );
-    assert_eq!(
-        page.abs_path("/page?query=keyword#hash")
-            .expect("a valid url"),
-        Url::parse("https://choosealicense.com/page?query=keyword").unwrap()
-    );
-    assert_eq!(
-        page.abs_path("#hash").unwrap(),
-        Url::parse("https://choosealicense.com/").expect("a valid url")
-    );
-    assert_eq!(
-        page.abs_path("tel://+212 3456").unwrap(),
-        Url::parse("https://choosealicense.com/").expect("a valid url")
-    );
-
-    let mut page: Page = build(&format!("{}index.php", link_result), Default::default());
-    page.set_url_parsed_direct_empty();
-
-    assert_eq!(
-        page.abs_path("index.html").expect("a valid url"),
-        Url::parse("https://choosealicense.com/index.html").expect("a valid url")
-    );
 }
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
