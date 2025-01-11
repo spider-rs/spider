@@ -1718,7 +1718,7 @@ impl Website {
             }
 
             let links = if !page.is_empty() {
-                page.links_ssg(&base, &client).await
+                page.links_ssg(&base, &client, &self.domain_parsed).await
             } else {
                 self.status = CrawlStatus::Empty;
                 Default::default()
@@ -1880,7 +1880,13 @@ impl Website {
             }
 
             let page_links: HashSet<CaseInsensitiveString> = page
-                .smart_links(&base, &browser, &self.configuration, &context_id)
+                .smart_links(
+                    &base,
+                    &browser,
+                    &self.configuration,
+                    &context_id,
+                    &self.domain_parsed,
+                )
                 .await;
 
             if let Some(ref domain) = page.final_redirect_destination {
@@ -2886,9 +2892,9 @@ impl Website {
                                                                 }
 
                                                                 let links = if full_resources {
-                                                                    page.links_full(&shared.1).await
+                                                                    page.links_full(&shared.1, &shared.9).await
                                                                 } else {
-                                                                    page.links(&shared.1).await
+                                                                    page.links(&shared.1, &shared.9).await
                                                                 };
 
                                                                 page.base = prev_domain;
@@ -3334,6 +3340,7 @@ impl Website {
                                                     .smart_links(
                                                         &shared.1, &shared.4, &shared.5,
                                                         &shared.6,
+                                                        &shared.7
                                                     )
                                                     .await;
 
@@ -3635,13 +3642,13 @@ impl Website {
                         drop(tx);
 
                         if let Ok(mut handle) = handles.await {
-                            for mut page in handle.iter_mut() {
+                            for page in handle.iter_mut() {
                                 let prev_domain = page.base.take();
                                 page.base = self.domain_parsed.as_deref().cloned();
                                 if self.configuration.return_page_links {
                                     page.page_links = Some(Default::default());
                                 }
-                                let links = page.links(&selectors).await;
+                                let links = page.links(&selectors, &self.domain_parsed).await;
                                 page.base = prev_domain;
                                 self.extra_links.extend(links)
                             }
@@ -3948,7 +3955,9 @@ impl Website {
                                     for page in handle.iter_mut() {
                                         let prev_domain = page.base.take();
                                         page.base = self.domain_parsed.as_deref().cloned();
-                                        self.extra_links.extend(page.links(&selectors).await);
+                                        self.extra_links.extend(
+                                            page.links(&selectors, &self.domain_parsed).await,
+                                        );
                                         page.base = prev_domain;
                                     }
                                     if scrape {

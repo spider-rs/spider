@@ -175,6 +175,8 @@ async fn main() {
                         None
                     };
 
+                    let base = website.get_url_parsed().clone();
+
                     tokio::spawn(async move {
                         website.crawl().await;
                     });
@@ -188,7 +190,7 @@ async fn main() {
                                 Default::default()
                             },
                             "links": match selectors {
-                                Some(ref s) => res.links(s).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
+                                Some(ref s) => res.links(s, &base).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
                                 _ => Default::default()
                             }
                         });
