@@ -10,7 +10,6 @@ use options::{Cli, Commands};
 use serde_json::json;
 use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::hashbrown::HashMap;
-use spider::page::get_page_selectors;
 use spider::string_concat::string_concat;
 use spider::string_concat::string_concat_impl;
 use spider::tokio;
@@ -169,19 +168,15 @@ async fn main() {
                 }) => {
                     let mut stdout = tokio::io::stdout();
 
-                    let selectors: Option<spider::RelativeSelectors> = if output_links {
-                        get_page_selectors(&url, cli.subdomains, cli.tld)
-                    } else {
-                        None
-                    };
-
-                    let base = website.get_url_parsed().clone();
+                    if output_links {
+                        website.configuration.return_page_links = true;
+                    }
 
                     tokio::spawn(async move {
                         website.crawl().await;
                     });
 
-                    while let Ok(mut res) = rx2.recv().await {
+                    while let Ok(res) = rx2.recv().await {
                         let page_json = json!({
                             "url": res.get_url(),
                             "html": if output_html {
@@ -189,8 +184,8 @@ async fn main() {
                             } else {
                                 Default::default()
                             },
-                            "links": match selectors {
-                                Some(ref s) => res.links(s, &base).await.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
+                            "links": match res.page_links {
+                                Some(ref s) => s.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
                                 _ => Default::default()
                             }
                         });
