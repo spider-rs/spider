@@ -227,7 +227,7 @@ pub struct Page {
 }
 
 /// Validate link and push into the map
-pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     base: &Option<&Url>,
     href: &str,
     map: &mut HashSet<A>,
@@ -240,66 +240,70 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     full_resources: bool,
     links_pages: &mut Option<HashSet<A>>,
 ) {
-    if let Some(b) = base {
-        let mut abs = convert_abs_path(b, href);
-
-        let new_page = abs != **b;
-
-        if let Some(link_map) = links_pages {
-            link_map.insert(A::from(
-                (if new_page { abs.as_str() } else { href }).to_string(),
-            ));
+    let mut abs = if let Some(b) = base {
+        convert_abs_path(b, href)
+    } else {
+        match Url::parse(href) {
+            Ok(b) => convert_abs_path(&b, href),
+            _ => return,
         }
+    };
 
-        if new_page {
-            let scheme = abs.scheme();
+    let new_page = if let Some(b) = base { abs != **b } else { true };
 
-            if scheme == "https" || scheme == "http" {
-                let host_name = abs.host_str();
+    if let Some(link_map) = links_pages {
+        link_map.insert(A::from(
+            (if new_page { abs.as_str() } else { href }).to_string(),
+        ));
+    }
 
-                let mut can_process = parent_host_match(
-                    host_name,
-                    base_domain,
-                    parent_host,
-                    base_input_domain,
-                    sub_matcher,
-                );
+    if new_page {
+        let scheme = abs.scheme();
 
-                if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
-                    can_process = external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                        || external_domains_caseless
-                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+        if scheme == "https" || scheme == "http" {
+            let host_name = abs.host_str();
+
+            let mut can_process = parent_host_match(
+                host_name,
+                base_domain,
+                parent_host,
+                base_input_domain,
+                sub_matcher,
+            );
+
+            if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
+                can_process = external_domains_caseless
+                    .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                    || external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+            }
+
+            if can_process {
+                if abs.scheme() != parent_host_scheme.as_str() {
+                    let _ = abs.set_scheme(parent_host_scheme.as_str());
+                }
+
+                let hchars = abs.path();
+
+                // check if the file is a resource and block if it is
+                if let Some(position) = hchars.rfind('.') {
+                    let hlen = hchars.len();
+                    let has_asset = hlen - position;
+
+                    if has_asset >= 3 {
+                        let next_position = position + 1;
+
+                        if !full_resources
+                            && IGNORE_ASSETS
+                                .contains::<CaseInsensitiveString>(&hchars[next_position..].into())
+                        {
+                            can_process = false;
+                        }
+                    }
                 }
 
                 if can_process {
-                    if abs.scheme() != parent_host_scheme.as_str() {
-                        let _ = abs.set_scheme(parent_host_scheme.as_str());
-                    }
-
-                    let hchars = abs.path();
-
-                    // check if the file is a resource and block if it is
-                    if let Some(position) = hchars.rfind('.') {
-                        let hlen = hchars.len();
-                        let has_asset = hlen - position;
-
-                        if has_asset >= 3 {
-                            let next_position = position + 1;
-
-                            if !full_resources
-                                && IGNORE_ASSETS.contains::<CaseInsensitiveString>(
-                                    &hchars[next_position..].into(),
-                                )
-                            {
-                                can_process = false;
-                            }
-                        }
-                    }
-
-                    if can_process {
-                        map.insert(abs.as_str().to_string().into());
-                    }
+                    map.insert(abs.as_str().to_string().into());
                 }
             }
         }
@@ -307,7 +311,7 @@ pub fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 }
 
 /// get the clean domain name
-pub fn domain_name(domain: &Url) -> &str {
+pub(crate) fn domain_name(domain: &Url) -> &str {
     domain.host_str().unwrap_or_default()
 }
 
@@ -335,7 +339,7 @@ fn is_subdomain(subdomain: &str, domain: &str) -> bool {
 }
 
 /// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host' and 'base_host' being the input start domain.
-pub fn parent_host_match(
+pub(crate) fn parent_host_match(
     host_name: Option<&str>,
     base_domain: &str,           // the base domain input
     parent_host: &CompactString, // the main parent host
@@ -357,7 +361,11 @@ pub fn parent_host_match(
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors_base(u: &Url, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
+pub(crate) fn get_page_selectors_base(
+    u: &Url,
+    subdomains: bool,
+    tld: bool,
+) -> Option<RelativeSelectors> {
     let u = convert_abs_url_base(u);
 
     let b = match u.host_str() {
@@ -1334,6 +1342,7 @@ impl Page {
         selectors: &RelativeSelectors,
         xml: &str,
         map: &mut HashSet<A>,
+        base: &Option<Box<Url>>,
     ) {
         use quick_xml::events::Event;
         use quick_xml::reader::NsReader;
@@ -1356,8 +1365,13 @@ impl Page {
             None
         };
 
-        self.set_url_parsed_direct_empty();
-        let base = self.get_url_parsed_ref().as_ref();
+        let base = if base.is_some() {
+            base.as_deref()
+        } else {
+            self.set_url_parsed_direct_empty();
+            let base = self.get_url_parsed_ref().as_ref();
+            base
+        };
 
         loop {
             match reader.read_event_into_async(&mut buf).await {
@@ -1423,6 +1437,7 @@ impl Page {
         &mut self,
         selectors: &RelativeSelectors,
         html: &str,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         let mut map: HashSet<A> = HashSet::new();
         let mut links_pages = if self.page_links.is_some() {
@@ -1433,7 +1448,7 @@ impl Page {
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, html, &mut map)
+                self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
                     .await;
             } else {
                 let parent_host = &selectors.1[0];
@@ -1441,7 +1456,11 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
-                let base = self.get_url_parsed_ref().as_ref();
+                let base = if base.is_some() {
+                    base.as_deref()
+                } else {
+                    self.get_url_parsed_ref().as_ref()
+                };
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![lol_html::element!("a[href]", |el| {
@@ -1513,6 +1532,7 @@ impl Page {
         selectors: &RelativeSelectors,
         html: &str,
         client: &Client,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         use auto_encoder::auto_encode_bytes;
 
@@ -1526,7 +1546,7 @@ impl Page {
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, html, &mut map)
+                self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
                     .await;
             } else {
                 let cell = tokio::sync::OnceCell::new();
@@ -1538,8 +1558,11 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                self.set_url_parsed_direct_empty();
-                let base = self.get_url_parsed_ref().as_ref();
+                let base = if base.is_some() {
+                    base.as_deref()
+                } else {
+                    self.get_url_parsed_ref().as_ref()
+                };
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
@@ -1655,11 +1678,12 @@ impl Page {
         &mut self,
         selectors: &RelativeSelectors,
         client: &Client,
+        prior_domain: &Option<Box<Url>>,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
-            self.links_stream_base_ssg(selectors, &Box::new(self.get_html()), client)
+            self.links_stream_base_ssg(selectors, &Box::new(self.get_html()), client, prior_domain)
                 .await
         }
     }
@@ -1671,11 +1695,12 @@ impl Page {
         &mut self,
         selectors: &RelativeSelectors,
         client: &Client,
+        prior_domain: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
             true => {
-                self.links_stream_ssg::<CaseInsensitiveString>(selectors, client)
+                self.links_stream_ssg::<CaseInsensitiveString>(selectors, client, prior_domain)
                     .await
             }
         }
@@ -1689,11 +1714,12 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
-            self.links_stream_base(selectors, &Box::new(self.get_html()))
+            self.links_stream_base(selectors, &Box::new(self.get_html()), base)
                 .await
         }
     }
@@ -1714,6 +1740,7 @@ impl Page {
         browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
@@ -1732,7 +1759,7 @@ impl Page {
             let html_resource = Box::new(self.get_html());
 
             if html_resource.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map)
+                self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
                     .await;
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1745,8 +1772,6 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
-                self.set_url_parsed_direct_empty();
-                let base = self.get_url_parsed_ref();
                 let base1 = base.clone();
 
                 let rerender = AtomicBool::new(false);
@@ -1788,7 +1813,7 @@ impl Page {
                         element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
-                                    &base.as_ref(),
+                                    &base.as_deref(),
                                     &href,
                                     &mut inner_map,
                                     &selectors.0,
@@ -1930,6 +1955,7 @@ impl Page {
                                         Some(h) => auto_encode_bytes(&h),
                                         _ => Default::default(),
                                     },
+                                    &base,
                                 )
                                 .await;
                             map.extend(extended_map)
@@ -1968,6 +1994,7 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         let mut map = HashSet::new();
         let mut links_pages = if self.page_links.is_some() {
@@ -1980,7 +2007,7 @@ impl Page {
             let html = Box::new(self.get_html());
 
             if html.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html, &mut map)
+                self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
                     .await;
             } else {
                 // let base_domain = &selectors.0;
@@ -1990,8 +2017,14 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                self.set_url_parsed_direct_empty();
-                let base = self.get_url_parsed_ref();
+                let base = if base.is_some() {
+                    base.as_deref()
+                } else {
+                    self.set_url_parsed_direct_empty();
+                    let base = self.get_url_parsed_ref().as_ref();
+                    base
+                };
+
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
                 let base_links_settings =
@@ -2003,7 +2036,7 @@ impl Page {
                         };
                         if let Some(href) = el.get_attribute(attribute) {
                             push_link(
-                                &base.as_ref(),
+                                &base,
                                 &href,
                                 &mut map,
                                 &selectors.0,
@@ -2060,11 +2093,12 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
+        base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
-            self.links_stream_full_resource(selectors).await
+            self.links_stream_full_resource(selectors, base).await
         }
     }
 
@@ -2083,10 +2117,17 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     #[cfg(not(feature = "decentralized"))]
     #[inline(always)]
-    pub async fn links(&mut self, selectors: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
+    pub async fn links(
+        &mut self,
+        selectors: &RelativeSelectors,
+        base: &Option<Box<Url>>,
+    ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
-            true => self.links_stream::<CaseInsensitiveString>(selectors).await,
+            true => {
+                self.links_stream::<CaseInsensitiveString>(selectors, base)
+                    .await
+            }
         }
     }
 
@@ -2096,6 +2137,7 @@ impl Page {
     pub async fn links_full(
         &mut self,
         selectors: &RelativeSelectors,
+        base: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -2103,7 +2145,7 @@ impl Page {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
-                self.links_stream_full_resource::<CaseInsensitiveString>(selectors)
+                self.links_stream_full_resource::<CaseInsensitiveString>(selectors, base)
                     .await
             }
         }
@@ -2118,6 +2160,7 @@ impl Page {
         page: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
         context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+        base: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
         match self.html.is_some() {
             false => Default::default(),
@@ -2130,6 +2173,7 @@ impl Page {
                     page,
                     configuration,
                     context_id,
+                    base,
                 )
                 .await
             }
