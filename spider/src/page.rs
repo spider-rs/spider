@@ -1220,6 +1220,14 @@ impl Page {
 
     /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
     #[cfg(not(feature = "decentralized"))]
+    pub fn set_url_parsed_direct_empty(&mut self) {
+        if !self.base.is_some() {
+            self.set_url_parsed_direct()
+        }
+    }
+
+    /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
+    #[cfg(not(feature = "decentralized"))]
     pub fn set_url_parsed(&mut self, url_parsed: Url) {
         self.base = Some(url_parsed);
     }
@@ -1348,6 +1356,9 @@ impl Page {
             None
         };
 
+        self.set_url_parsed_direct_empty();
+        let base = self.get_url_parsed_ref().as_ref();
+
         loop {
             match reader.read_event_into_async(&mut buf).await {
                 Ok(e) => match e {
@@ -1362,7 +1373,7 @@ impl Page {
                         if is_link_tag {
                             if let Ok(v) = e.unescape() {
                                 push_link(
-                                    &self.base.as_ref(),
+                                    &base,
                                     &v,
                                     map,
                                     &selectors.0,
@@ -1430,12 +1441,13 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
+                let base = self.get_url_parsed_ref().as_ref();
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![lol_html::element!("a[href]", |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
-                                &self.base.as_ref(),
+                                &base,
                                 &href,
                                 &mut map,
                                 &selectors.0,
@@ -1526,12 +1538,15 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
+                self.set_url_parsed_direct_empty();
+                let base = self.get_url_parsed_ref().as_ref();
+
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
                         lol_html::element!("a[href]", |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
-                                    &self.base.as_ref(),
+                                    &base,
                                     &href,
                                     &mut map,
                                     &selectors.0,
@@ -1599,7 +1614,7 @@ impl Page {
                                 // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
                                     push_link(
-                                        &self.base.as_ref(),
+                                        &base,
                                         &href,
                                         &mut map_ssg,
                                         &selectors.0,
@@ -1631,42 +1646,6 @@ impl Page {
 
         map
     }
-
-    // /// Extract raw links into the list.
-    // #[inline(always)]
-    // #[cfg(all(not(feature = "decentralized")))]
-    // pub async fn extract_links_raw<
-    //     A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
-    // >(
-    //     &self,
-    //     selectors: &RelativeSelectors,
-    //     links: &HashSet<CaseInsensitiveString>,
-    // ) -> HashSet<A> {
-    //     let mut map = HashSet::new();
-
-    //     // the original url
-    //     let parent_host = &selectors.1[0];
-    //     // the host schemes
-    //     let parent_host_scheme: &CompactString = &selectors.1[1];
-    //     let base_input_domain = &selectors.2; // the domain after redirects
-    //     let sub_matcher: &CompactString = &selectors.0;
-
-    //     for link in links.iter() {
-    //         push_link(
-    //             &self.base,
-    //             &link.inner(),
-    //             &mut map,
-    //             &selectors.0,
-    //             parent_host,
-    //             parent_host_scheme,
-    //             base_input_domain,
-    //             sub_matcher,
-    //             &self.external_domains_caseless,
-    //         );
-    //     }
-
-    //     map
-    // }
 
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
     #[cfg(all(not(feature = "decentralized")))]
@@ -1766,7 +1745,8 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base = self.base.clone();
+                self.set_url_parsed_direct_empty();
+                let base = self.get_url_parsed_ref();
                 let base1 = base.clone();
 
                 let rerender = AtomicBool::new(false);
@@ -2010,7 +1990,8 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let base = self.base.clone();
+                self.set_url_parsed_direct_empty();
+                let base = self.get_url_parsed_ref();
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
                 let base_links_settings =
@@ -2166,7 +2147,9 @@ impl Page {
     #[inline]
     #[cfg(not(feature = "decentralized"))]
     fn abs_path(&self, href: &str) -> Option<Url> {
-        self.base.as_ref().map(|b| convert_abs_path(b, href))
+        self.get_url_parsed_ref()
+            .as_ref()
+            .map(|b| convert_abs_path(b, href))
     }
 }
 
