@@ -120,7 +120,7 @@ async fn main() {
                     });
 
                     while let Ok(res) = rx2.recv().await {
-                        if let Some(parsed_url) = res.get_url_parsed() {
+                        if let Some(parsed_url) = res.get_url_parsed_ref() {
                             log("Storing", parsed_url);
                                 let url_path = parsed_url.path();
 

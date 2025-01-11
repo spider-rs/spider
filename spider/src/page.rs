@@ -504,15 +504,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         remote_addr: res.remote_addr,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
-        // we do not need to parse the Url on each page. Next version this should be set to None.
-        base: if !url.is_empty() {
-            match Url::parse(url) {
-                Ok(u) => Some(u),
-                _ => None,
-            }
-        } else {
-            None
-        },
+        base: None,
         url: url.into(),
         #[cfg(feature = "time")]
         duration: Instant::now(),
@@ -1234,13 +1226,36 @@ impl Page {
 
     /// Parsed URL getter for page.
     #[cfg(not(feature = "decentralized"))]
-    pub fn get_url_parsed(&self) -> &Option<Url> {
+    pub fn get_url_parsed_ref(&self) -> &Option<Url> {
+        if self.base.is_none() {
+            if !self.url.is_empty() {
+                Url::parse(&self.url).ok()
+            } else {
+                None
+            };
+        }
+
+        &self.base
+    }
+
+    /// Parsed URL getter for page.
+    #[cfg(not(feature = "decentralized"))]
+    pub fn get_url_parsed(&mut self) -> &Option<Url> {
+        if self.base.is_none() && !self.url.is_empty() {
+            self.base = Url::parse(&self.url).ok();
+        }
         &self.base
     }
 
     /// Parsed URL getter for page.
     #[cfg(feature = "decentralized")]
-    pub fn get_url_parsed(&self) -> &Option<Url> {
+    pub fn get_url_parsed(&mut self) -> &Option<Url> {
+        &None
+    }
+
+    /// Parsed URL getter for page.
+    #[cfg(feature = "decentralized")]
+    pub fn get_url_parsed_ref(&mut self) -> &Option<Url> {
         &None
     }
 

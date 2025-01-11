@@ -340,7 +340,7 @@ pub fn transform_content(
         return base_html;
     }
 
-    let url_parsed = res.get_url_parsed();
+    let url_parsed = res.get_url_parsed_ref();
 
     let base_html = {
         let mut ignore_list = build_static_vector(c);
@@ -431,7 +431,7 @@ pub async fn transform_content_send(
         return base_html;
     }
 
-    let url_parsed = res.get_url_parsed();
+    let url_parsed = res.get_url_parsed_ref();
 
     let base_html = {
         let mut ignore_list = build_static_vector(c);
