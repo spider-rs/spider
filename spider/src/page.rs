@@ -489,6 +489,21 @@ fn get_error_status(
     get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
 }
 
+
+/// Instantiate a new page without scraping it and with the base URL parsed (used for testing purposes).
+#[cfg(not(feature = "decentralized"))]
+pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
+    let mut page = build(url, res);
+    page.set_url_parsed_direct_empty();
+    page
+}
+
+/// Instantiate a new page without scraping it and with the base URL parsed (used for testing purposes).
+#[cfg(feature = "decentralized")]
+pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
+    build(url, res)
+}
+
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {

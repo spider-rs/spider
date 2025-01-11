@@ -13,7 +13,7 @@ mod tests {
     use maud::PreEscaped;
     use spider::{
         bytes::Bytes,
-        page::build,
+        page::build_with_parse,
         tokio::{self, fs::File},
         utils::PageResponse,
     };
@@ -51,7 +51,7 @@ mod tests {
         let mut page_response = PageResponse::default();
 
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
 
@@ -111,7 +111,7 @@ mod tests {
         let mut page_response = PageResponse::default();
         conf.return_format = ReturnFormat::XML;
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
         let content = content::transform_content(&page, &conf, &None, &None, &None);
         assert!(
             content
@@ -129,7 +129,7 @@ mod tests {
         let mut page_response = PageResponse::default();
 
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
 
@@ -154,7 +154,7 @@ mod tests {
         let mut page_response = PageResponse::default();
 
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
 
         conf.return_format = ReturnFormat::Markdown;
 
@@ -179,7 +179,7 @@ mod tests {
         let mut page_response = PageResponse::default();
 
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
 
         conf.return_format = ReturnFormat::Text;
 
@@ -204,7 +204,7 @@ mod tests {
         let mut page_response = PageResponse::default();
 
         page_response.content = Some(Bytes::from(markup).into());
-        let page = build(url, page_response);
+        let page = build_with_parse(url, page_response);
 
         conf.return_format = ReturnFormat::Text;
 
@@ -236,7 +236,7 @@ mod tests {
 
         page_response.content = Some(b.into());
 
-        let page = build("https://example.com/example.pdf", page_response);
+        let page = build_with_parse("https://example.com/example.pdf", page_response);
 
         let content = content::transform_content(&page, &conf, &None, &None, &None);
 
