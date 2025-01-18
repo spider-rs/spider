@@ -3527,14 +3527,7 @@ impl Website {
                             }
 
                             if scrape || persist_links {
-                                let mut page = page.clone();
-
-                                if !scrape {
-                                    // remove the bytes as we do not need it anymore.
-                                    page.set_html_bytes(None);
-                                }
-
-                                pages.push(page);
+                                pages.push(page.clone());
                             };
 
                             // reset the page links before sending to the main subscriber.
@@ -3543,7 +3536,7 @@ impl Website {
                             }
 
                             if shared.0.is_some() {
-                                channel_send_page(&shared.0.clone(), page, &shared.1);
+                                channel_send_page(&shared.0, page, &shared.1);
                             }
                         }
 
@@ -3700,6 +3693,8 @@ impl Website {
                     Some((browser, browser_handle, mut context_id)) => {
                         let domain = self.url.inner().as_str();
                         self.domain_parsed = parse_absolute_url(&domain);
+                        let persist_links = self.status == CrawlStatus::Start;
+
                         let mut interval = tokio::time::interval(Duration::from_millis(15));
                         let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
                             Some(sitemap_path) => {
@@ -3763,17 +3758,11 @@ impl Website {
                                     let mut pages = Vec::new();
 
                                     while let Some(page) = rx.recv().await {
+                                        if scrape || persist_links {
+                                            pages.push(page.clone());
+                                        };
                                         if shared_1.0.is_some() {
-                                            if scrape {
-                                                pages.push(page.clone());
-                                            };
-                                            channel_send_page(
-                                                &shared_1.0.clone(),
-                                                page,
-                                                &shared_1.1,
-                                            );
-                                        } else {
-                                            pages.push(page);
+                                            channel_send_page(&shared_1.0, page, &shared_1.1);
                                         }
                                     }
 
@@ -3942,10 +3931,9 @@ impl Website {
                                         page.base = prev_domain;
                                     }
                                     if scrape {
-                                        match self.pages.as_mut() {
-                                            Some(p) => p.extend(handle),
-                                            _ => (),
-                                        };
+                                        if let Some(p) = self.pages.as_mut() {
+                                            p.extend(handle)
+                                        }
                                     }
                                 }
                             }
