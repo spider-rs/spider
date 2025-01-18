@@ -3453,246 +3453,227 @@ impl Website {
         handle: &Option<Arc<AtomicI8>>,
         scrape: bool,
     ) {
-        use sitemap::reader::{SiteMapEntity, SiteMapReader};
-        use sitemap::structs::Location;
+        if let Some(selectors) = self.setup_selectors() {
+            let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
-        match self.setup_selectors() {
-            Some(selectors) => {
-                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+            let domain = self.url.inner().as_str();
+            self.domain_parsed = parse_absolute_url(&domain);
 
-                let domain = self.url.inner().as_str();
-                self.domain_parsed = parse_absolute_url(&domain);
+            let persist_links = self.status == CrawlStatus::Start;
 
-                let mut interval = tokio::time::interval(Duration::from_millis(15));
-                let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
-                    Some(sitemap_path) => {
-                        let sitemap_path = sitemap_path.as_str();
-                        if domain.ends_with('/') && sitemap_path.starts_with('/') {
-                            (&sitemap_path[1..], false)
-                        } else if !domain.ends_with('/')
-                            && !sitemap_path.is_empty()
-                            && !sitemap_path.starts_with('/')
-                        {
-                            (sitemap_path, true)
-                        } else {
-                            (sitemap_path, false)
-                        }
+            let mut interval: Interval = tokio::time::interval(Duration::from_millis(15));
+
+            let (sitemap_path, needs_trailing) = match &self.configuration.sitemap_url {
+                Some(sitemap_path) => {
+                    let sitemap_path = sitemap_path.as_str();
+                    if domain.ends_with('/') && sitemap_path.starts_with('/') {
+                        (&sitemap_path[1..], false)
+                    } else if !domain.ends_with('/')
+                        && !sitemap_path.is_empty()
+                        && !sitemap_path.starts_with('/')
+                    {
+                        (sitemap_path, true)
+                    } else {
+                        (sitemap_path, false)
                     }
-                    _ => ("sitemap.xml", !domain.ends_with("/")),
-                };
+                }
+                _ => ("sitemap.xml", !domain.ends_with("/")),
+            };
 
-                self.configuration.sitemap_url = Some(Box::new(
-                    string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path)
-                        .into(),
-                ));
+            self.configuration.sitemap_url = Some(Box::new(
+                string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path).into(),
+            ));
 
-                self.configuration.configure_allowlist();
+            self.configuration.configure_allowlist();
 
-                let shared = Arc::new((self.channel.clone(), self.channel_guard.clone()));
-                let mut sitemaps = match self.configuration.sitemap_url {
-                    Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
-                    _ => Default::default(),
-                };
+            let domain_parsed_ref = self.domain_parsed.as_deref().cloned().map(Box::new);
 
-                let retry = self.configuration.retry;
-                let mut exceeded_budget = false;
+            let shared = Arc::new((
+                self.channel.clone(),
+                self.channel_guard.clone(),
+                selectors,
+                domain_parsed_ref,
+            ));
+            let mut sitemaps = match self.configuration.sitemap_url {
+                Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
+                _ => Default::default(),
+            };
 
-                'outer: loop {
-                    let stream =
-                        tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
-                    tokio::pin!(stream);
+            let mut exceeded_budget = false;
+            let return_page_links = self.configuration.return_page_links;
 
-                    while let Some(sitemap_url) = stream.next().await {
-                        if !self.handle_process(handle, &mut interval, async {}).await {
-                            break 'outer;
-                        }
-                        let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(100);
+            'outer: loop {
+                let stream =
+                    tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
+                tokio::pin!(stream);
 
-                        let shared = shared.clone();
+                let mut first_request = false;
 
-                        let handles = spawn_task("page_fetch", async move {
-                            let mut pages = Vec::new();
+                while let Some(mut sitemap_url) = stream.next().await {
+                    if !self.handle_process(handle, &mut interval, async {}).await {
+                        break 'outer;
+                    }
+                    let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(100);
 
-                            while let Some(page) = rx.recv().await {
-                                if shared.0.is_some() {
-                                    if scrape {
-                                        pages.push(page.clone());
-                                    };
+                    let shared = shared.clone();
 
-                                    channel_send_page(&shared.0.clone(), page, &shared.1);
-                                } else {
-                                    pages.push(page);
-                                }
+                    let handles = spawn_task("page_fetch", async move {
+                        let mut pages = Vec::new();
+
+                        while let Some(mut page) = rx.recv().await {
+                            if page.page_links.is_none() {
+                                let links = page.links(&shared.2, &shared.3).await;
+                                page.page_links = Some(links.into());
                             }
 
-                            pages
-                        });
+                            if scrape || persist_links {
+                                let mut page = page.clone();
 
+                                if !scrape {
+                                    // remove the bytes as we do not need it anymore.
+                                    page.set_html_bytes(None);
+                                }
+
+                                pages.push(page);
+                            };
+
+                            // reset the page links before sending to the main subscriber.
+                            if !return_page_links {
+                                page.page_links = None;
+                            }
+
+                            if shared.0.is_some() {
+                                channel_send_page(&shared.0.clone(), page, &shared.1);
+                            }
+                        }
+
+                        pages
+                    });
+
+                    let mut attempted_correct = false;
+
+                    while !first_request {
+                        // try to get the original sitemap if it had an error on the first request make a request to the root html and parse out the sitemap path.
                         match client.get(sitemap_url.as_str()).send().await {
                             Ok(response) => {
-                                match response.text().await {
-                                    Ok(text) => {
-                                        // <html><head><title>Invalid request</title></head><body><p>Blocked by WAF</p><
-                                        let mut stream =
-                                            tokio_stream::iter(SiteMapReader::new(text.as_bytes()));
+                                let limit = *crate::utils::MAX_SIZE_BYTES as u64;
 
-                                        while let Some(entity) = stream.next().await {
-                                            if !self
-                                                .handle_process(handle, &mut interval, async {})
-                                                .await
-                                            {
-                                                break;
-                                            }
+                                if let Some(response_content_length) = response.content_length() {
+                                    if limit > 0 && response_content_length >= limit {
+                                        // we need a error here
+                                        first_request = true;
+                                        log::info!(
+                                            "{} exceeded parse limit: {:?}",
+                                            sitemap_url,
+                                            limit
+                                        );
+                                        break;
+                                    }
+                                }
 
-                                            match entity {
-                                                SiteMapEntity::Url(url_entry) => {
-                                                    match url_entry.loc {
-                                                        Location::Url(url) => {
-                                                            let link: CaseInsensitiveString =
-                                                                url.as_str().into();
-
-                                                            let allowed = self.is_allowed(&link);
-
-                                                            if allowed.eq(
-                                                                &ProcessLinkStatus::BudgetExceeded,
-                                                            ) {
-                                                                exceeded_budget = true;
-                                                                break;
-                                                            }
-                                                            if allowed
-                                                                .eq(&ProcessLinkStatus::Blocked)
-                                                            {
-                                                                continue;
-                                                            }
-
-                                                            self.insert_link(link.clone()).await;
-
-                                                            let client = client.clone();
-                                                            let tx = tx.clone();
-
-                                                            spawn_task("page_fetch", async move {
-                                                                let mut page = Page::new_page(
-                                                                    &link.inner(),
-                                                                    &client,
-                                                                )
-                                                                .await;
-
-                                                                let mut retry_count = retry;
-
-                                                                while page.should_retry
-                                                                    && retry_count > 0
-                                                                {
-                                                                    if let Some(timeout) =
-                                                                        page.get_timeout()
-                                                                    {
-                                                                        tokio::time::sleep(timeout)
-                                                                            .await;
-                                                                    }
-                                                                    page.clone_from(
-                                                                        &Page::new_page(
-                                                                            link.inner(),
-                                                                            &client,
-                                                                        )
-                                                                        .await,
-                                                                    );
-                                                                    retry_count -= 1;
-                                                                }
-
-                                                                if let Ok(permit) =
-                                                                    tx.reserve().await
-                                                                {
-                                                                    permit.send(page);
-                                                                }
-                                                            });
-                                                        }
-                                                        Location::None | Location::ParseErr(_) => {
-                                                            ()
-                                                        }
-                                                    }
-                                                }
-                                                SiteMapEntity::SiteMap(sitemap_entry) => {
-                                                    match sitemap_entry.loc {
-                                                        Location::Url(url) => {
-                                                            sitemaps.push(Box::new(
-                                                                CompactString::new(&url.as_str()),
-                                                            ));
-                                                        }
-                                                        Location::None | Location::ParseErr(_) => {
-                                                            ()
-                                                        }
-                                                    }
-                                                }
-                                                SiteMapEntity::Err(err) => {
-                                                    log::info!(
-                                                        "incorrect sitemap error: {:?}",
-                                                        err.msg()
-                                                    )
-                                                }
-                                            };
+                                if response.status() == 404 {
+                                    if !self
+                                        .sitemap_parse(
+                                            client,
+                                            &mut first_request,
+                                            &mut sitemap_url,
+                                            &mut attempted_correct,
+                                        )
+                                        .await
+                                    {
+                                        break;
+                                    }
+                                } else {
+                                    match response.bytes().await {
+                                        Ok(b) => {
+                                            first_request = true;
+                                            self.sitemap_parse_crawl(
+                                                client,
+                                                handle,
+                                                b,
+                                                &mut interval,
+                                                &mut exceeded_budget,
+                                                &tx,
+                                                &mut sitemaps,
+                                                true,
+                                            )
+                                            .await;
                                         }
-                                    }
-                                    Err(err) => {
-                                        log::info!("http parse error: {:?}", err.to_string())
-                                    }
-                                };
+                                        Err(err) => {
+                                            first_request = true;
+                                            log::info!("http parse error: {:?}", err.to_string())
+                                        }
+                                    };
+                                }
                             }
-                            Err(err) => log::info!("http network error: {}", err.to_string()),
+                            Err(err) => {
+                                // do not retry error again.
+                                if attempted_correct {
+                                    break;
+                                }
+
+                                log::info!("attempting to find sitemap path: {}", err.to_string());
+
+                                if !self
+                                    .sitemap_parse(
+                                        client,
+                                        &mut first_request,
+                                        &mut sitemap_url,
+                                        &mut attempted_correct,
+                                    )
+                                    .await
+                                {
+                                    break;
+                                }
+                            }
                         };
+                    }
 
-                        drop(tx);
+                    drop(tx);
 
-                        if let Ok(mut handle) = handles.await {
-                            for page in handle.iter_mut() {
-                                let prev_domain = page.base.take();
-                                page.base = self.domain_parsed.as_deref().cloned();
-                                if self.configuration.return_page_links {
-                                    page.page_links = Some(Default::default());
-                                }
-                                let links = page.links(&selectors, &self.domain_parsed).await;
-                                page.base = prev_domain;
-                                self.extra_links.extend(links)
-                            }
-                            if scrape {
-                                if let Some(p) = self.pages.as_mut() {
-                                    p.extend(handle);
-                                }
-                            }
-
-                            match q.as_mut() {
-                                Some(q) => {
-                                    while let Ok(link) = q.try_recv() {
-                                        let s = link.into();
-                                        let allowed = self.is_allowed(&s);
-
-                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                            exceeded_budget = true;
-                                            break;
-                                        }
-                                        if allowed.eq(&ProcessLinkStatus::Blocked)
-                                            || !self.is_allowed_disk(&s).await
-                                        {
-                                            continue;
-                                        }
-
-                                        self.links_visited
-                                            .extend_with_new_links(&mut self.extra_links, s);
-                                    }
-                                }
-                                _ => (),
+                    if let Ok(mut handle) = handles.await {
+                        for page in handle.iter_mut() {
+                            if let Some(links) = page.page_links.clone() {
+                                self.extra_links.extend(*links)
                             }
                         }
 
-                        if exceeded_budget {
-                            break;
+                        if scrape {
+                            if let Some(p) = self.pages.as_mut() {
+                                p.extend(handle);
+                            }
+                        }
+
+                        if let Some(q) = q.as_mut() {
+                            while let Ok(link) = q.try_recv() {
+                                let s = link.into();
+                                let allowed = self.is_allowed(&s);
+
+                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                    exceeded_budget = true;
+                                    break;
+                                }
+                                if allowed.eq(&ProcessLinkStatus::Blocked)
+                                    || !self.is_allowed_disk(&s).await
+                                {
+                                    continue;
+                                }
+
+                                self.links_visited
+                                    .extend_with_new_links(&mut self.extra_links, s);
+                            }
                         }
                     }
 
-                    if sitemaps.len() == 0 || exceeded_budget {
+                    if exceeded_budget {
                         break;
                     }
                 }
+
+                if sitemaps.len() == 0 || exceeded_budget {
+                    break;
+                }
             }
-            _ => (),
         }
     }
 
@@ -4029,6 +4010,178 @@ impl Website {
     ) {
         if !self.configuration.ignore_sitemap {
             self.sitemap_crawl_chrome(client, handle, scrape).await
+        }
+    }
+
+    /// Sitemap parse entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
+    #[cfg(feature = "sitemap")]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn sitemap_parse(
+        &mut self,
+        client: &Client,
+        first_request: &mut bool,
+        sitemap_url: &mut Box<CompactString>,
+        attempted_correct: &mut bool,
+    ) -> bool {
+        let mut valid = true;
+
+        if let Some(ref domain) = self.domain_parsed {
+            // attempt to parse the sitemap from the html.
+            match client.get(domain.as_str()).send().await {
+                Ok(response) => {
+                    let limit = *crate::utils::MAX_SIZE_BYTES as u64;
+
+                    if let Some(response_content_length) = response.content_length() {
+                        if limit > 0 && response_content_length >= limit {
+                            log::info!("{} exceeded parse limit: {:?}", domain, limit);
+                            *first_request = true;
+                            *attempted_correct = true;
+                            valid = false;
+                        }
+                    }
+
+                    if valid {
+                        // stream the bytes to lol_html to parse the sitemap from the path.
+                        let cell = tokio::sync::OnceCell::new();
+
+                        let rewriter_settings = lol_html::Settings {
+                            element_content_handlers: vec![lol_html::element!(
+                                r#"link[rel="sitemap"]"#,
+                                |el| {
+                                    if let Some(href) = el.get_attribute("href") {
+                                        let _ = cell.set(href);
+                                    }
+                                    Ok(())
+                                }
+                            )],
+                            adjust_charset_on_meta_tag: false,
+                            ..lol_html::send::Settings::new_for_handler_types()
+                        };
+
+                        let mut rewriter =
+                            lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+                        let mut wrote_error = false;
+                        let mut stream = response.bytes_stream();
+
+                        while let Some(chunk) = stream.next().await {
+                            if let Ok(chunk) = chunk {
+                                if rewriter.write(&chunk).is_err() {
+                                    wrote_error = true;
+                                    break;
+                                }
+                            }
+                            if cell.initialized() {
+                                break;
+                            }
+                        }
+
+                        if !wrote_error {
+                            let _ = rewriter.end();
+                        }
+
+                        if let Some(sitemap) = cell.get() {
+                            if sitemap.is_empty() {
+                                *first_request = true;
+                            }
+
+                            if let Err(_) = domain.join(sitemap) {
+                                *first_request = true;
+                            }
+                            // if we retried the request here it should succeed.
+                            *sitemap_url = Box::new(sitemap.into());
+                            *attempted_correct = true;
+                        } else {
+                            *first_request = true;
+                        }
+                    }
+                }
+                Err(err) => {
+                    *first_request = true;
+                    valid = false;
+                    log::info!("http parse error: {:?}", err.to_string())
+                }
+            };
+        }
+
+        valid
+    }
+    /// Sitemap parse entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
+    #[cfg(feature = "sitemap")]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn sitemap_parse_crawl(
+        &mut self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+        b: bytes::Bytes,
+        mut interval: &mut Interval,
+        exceeded_budget: &mut bool,
+        tx: &tokio::sync::mpsc::Sender<Page>,
+        sitemaps: &mut Vec<Box<CompactString>>,
+        crawl: bool,
+    ) {
+        use sitemap::reader::{SiteMapEntity, SiteMapReader};
+        use sitemap::structs::Location;
+        let mut stream = tokio_stream::iter(SiteMapReader::new(&*b));
+
+        let retry = self.configuration.retry;
+
+        while let Some(entity) = stream.next().await {
+            if !self.handle_process(handle, &mut interval, async {}).await {
+                break;
+            }
+            match entity {
+                SiteMapEntity::Url(url_entry) => match url_entry.loc {
+                    Location::Url(url) => {
+                        let link: CaseInsensitiveString = url.as_str().into();
+
+                        let allowed = self.is_allowed(&link);
+
+                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                            *exceeded_budget = true;
+                            break;
+                        }
+                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                            continue;
+                        }
+
+                        self.insert_link(link.clone()).await;
+
+                        if crawl {
+                            let client = client.clone();
+                            let tx = tx.clone();
+
+                            spawn_task("page_fetch", async move {
+                                let mut page = Page::new_page(&link.inner(), &client).await;
+
+                                let mut retry_count = retry;
+
+                                while page.should_retry && retry_count > 0 {
+                                    if let Some(timeout) = page.get_timeout() {
+                                        tokio::time::sleep(timeout).await;
+                                    }
+                                    page.clone_from(&Page::new_page(link.inner(), &client).await);
+                                    retry_count -= 1;
+                                }
+
+                                if let Ok(permit) = tx.reserve().await {
+                                    permit.send(page);
+                                }
+                            });
+                        }
+                    }
+                    Location::None | Location::ParseErr(_) => (),
+                },
+                SiteMapEntity::SiteMap(sitemap_entry) => match sitemap_entry.loc {
+                    Location::Url(url) => {
+                        sitemaps.push(Box::new(CompactString::new(&url.as_str())));
+                    }
+                    Location::None | Location::ParseErr(_) => (),
+                },
+                SiteMapEntity::Err(err) => {
+                    log::info!("incorrect sitemap error: {:?}", err.msg())
+                }
+            };
         }
     }
 

@@ -102,7 +102,7 @@ lazy_static! {
 
 lazy_static! {
     /// Prevent fetching resources beyond the bytes limit.
-    static ref MAX_SIZE_BYTES: usize = {
+    pub(crate) static ref MAX_SIZE_BYTES: usize = {
         match std::env::var("SPIDER_MAX_SIZE_BYTES") {
             Ok(b) => {
                 const DEFAULT_MAX_SIZE_BYTES: usize = 1_073_741_824; // 1GB in bytes

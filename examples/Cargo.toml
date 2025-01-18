@@ -92,6 +92,11 @@ path = "sitemap.rs"
 required-features = ["spider/sitemap"]
 
 [[example]]
+name = "sitemap_only"
+path = "sitemap_only.rs"
+required-features = ["spider/sitemap"]
+
+[[example]]
 name = "configuration"
 path = "configuration.rs"
 
