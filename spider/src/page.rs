@@ -27,6 +27,89 @@ use url::Url;
 /// Allocate up to 16kb upfront for small pages.
 const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
 
+/// Base css selector to use for getting valid web pages.
+const BASE_CSS_SELECTORS: &str = concat!(
+    "a[href]",
+    ":not([href$=\".jpg\"])",
+    ":not([href$=\".jpeg\"])",
+    ":not([href$=\".png\"])",
+    ":not([href$=\".gif\"])",
+    ":not([href$=\".svg\"])",
+    ":not([href$=\".webp\"])",
+    ":not([href$=\".mp4\"])",
+    ":not([href$=\".avi\"])",
+    ":not([href$=\".mov\"])",
+    ":not([href$=\".wmv\"])",
+    ":not([href$=\".flv\"])",
+    ":not([href$=\".mp3\"])",
+    ":not([href$=\".wav\"])",
+    ":not([href$=\".wma\"])",
+    ":not([href$=\".wpl\"])",
+    ":not([href$=\".mpa\"])",
+    ":not([href$=\".ogg\"])",
+    ":not([href$=\".woff\"])",
+    ":not([href$=\".woff2\"])",
+    ":not([href$=\".ttf\"])",
+    ":not([href$=\".otf\"])",
+    ":not([href$=\".swf\"])",
+    ":not([href$=\".xap\"])",
+    ":not([href$=\".ico\"])",
+    ":not([href$=\".eot\"])",
+    ":not([href$=\".bmp\"])",
+    ":not([href$=\".psd\"])",
+    ":not([href$=\".tiff\"])",
+    ":not([href$=\".tif\"])",
+    ":not([href$=\".heic\"])",
+    ":not([href$=\".heif\"])",
+    ":not([href$=\".mkv\"])",
+    ":not([href$=\".webm\"])",
+    ":not([href$=\".m4v\"])",
+    ":not([href$=\".aac\"])",
+    ":not([href$=\".flac\"])",
+    ":not([href$=\".m4a\"])",
+    ":not([href$=\".aiff\"])",
+    ":not([href$=\".pdf\"])",
+    ":not([href$=\".eps\"])",
+    ":not([href$=\".yaml\"])",
+    ":not([href$=\".yml\"])",
+    ":not([href$=\".xml\"])",
+    ":not([href$=\".css\"])",
+    ":not([href$=\".js\"])",
+    ":not([href$=\".txt\"])",
+    ":not([href$=\".tar\"])",
+    ":not([href$=\".doc\"])",
+    ":not([href$=\".docx\"])",
+    ":not([href$=\".zip\"])",
+    ":not([href$=\".deb\"])",
+    ":not([href$=\".pkg\"])",
+    ":not([href$=\".tar.gz\"])",
+    ":not([href$=\".rpm\"])",
+    ":not([href$=\".z\"])",
+    ":not([href$=\".7z\"])",
+    ":not([href$=\".arj\"])",
+    ":not([href$=\".rar\"])",
+    ":not([href$=\".bin\"])",
+    ":not([href$=\".msi\"])",
+    ":not([href$=\".sh\"])",
+    ":not([href$=\".bat\"])",
+    ":not([href$=\".dmg\"])",
+    ":not([href$=\".iso\"])",
+    ":not([href$=\".toast\"])",
+    ":not([href$=\".vcd\"])",
+    ":not([href$=\".csv\"])",
+    ":not([href$=\".log\"])",
+    ":not([href$=\".sql\"])",
+    ":not([href$=\".db\"])",
+    ":not([href$=\".exe\"])",
+    ":not([href$=\".rss\"])",
+    ":not([href$=\".key\"])",
+    ":not([href$=\".odp\"])",
+    ":not([href$=\".pps\"])",
+    ":not([href$=\".ptt\"])",
+    ":not([href$=\".pptx\"])",
+    ":not([href$=\".dump\"])",
+);
+
 lazy_static! {
     /// Wildcard match all domains.
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
@@ -74,7 +157,7 @@ lazy_static! {
             "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
             "mkv", "webm", "m4v",                            // Additional Video files
             "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps",                                    // Other additional files
+            "pdf", "eps", "yaml", "yml", "xml",              // Other additional files
 
             // Including extensions with extra dot
             ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
@@ -86,7 +169,7 @@ lazy_static! {
             ".bmp", ".tiff", ".tif", ".heic", ".heif",
             ".mkv", ".webm", ".m4v",
             ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps"
+            ".pdf", ".eps", ".yaml", ".yml", ".xml"
         ].map(|s| s.into()));
 
         m
@@ -756,7 +839,7 @@ impl Page {
                         Ok(())
                     })
                 } else {
-                    lol_html::element!("a[href]", |el| {
+                    lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
                                 &base,
@@ -1466,7 +1549,7 @@ impl Page {
                 };
 
                 let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![lol_html::element!("a[href]", |el| {
+                    element_content_handlers: vec![lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
                             push_link(
                                 &base,
@@ -1570,7 +1653,7 @@ impl Page {
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
-                        lol_html::element!("a[href]", |el| {
+                        lol_html::element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
                                     &base,
@@ -1816,7 +1899,7 @@ impl Page {
                             }
                             Ok(())
                         }),
-                        element!("a[href]", |el| {
+                        element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
                                 push_link(
                                     &base.as_deref(),
