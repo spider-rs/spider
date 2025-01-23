@@ -50,7 +50,7 @@ where
 
     if !selectors.css.is_empty() {
         let mut stream = spider::tokio_stream::iter(&selectors.css);
-        let fragment = Box::new(Html::parse_fragment(html));
+        let fragment = Box::new(Html::parse_document(html));
 
         while let Some(selector) = stream.next().await {
             for s in selector.1 {
@@ -99,7 +99,7 @@ where
     let mut map: CSSQueryMap = HashMap::new();
 
     if !selectors.css.is_empty() {
-        let fragment = Box::new(Html::parse_fragment(html));
+        let fragment = Box::new(Html::parse_document(html));
 
         for selector in selectors.css.iter() {
             for s in selector.1 {
