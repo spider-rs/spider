@@ -137,25 +137,53 @@ where
 }
 
 /// Process a single element and update the map with the results.
-fn process_selector<K>(element: ElementRef, selector: &K, map: &mut CSSQueryMap)
+fn process_selector<K>(element: ElementRef, name: &K, map: &mut CSSQueryMap)
 where
     K: AsRef<str> + Eq + Hash + Sized,
 {
-    let name = selector.as_ref();
-    let entry_name = if name.is_empty() {
-        Default::default()
+    let name = name.as_ref();
+
+    let text = if name == "meta" {
+        element.attr("content").unwrap_or_default().into()
+    } else if name == "link" || name == "script" || name == "styles" {
+        let tag_name = if name == "link" { "href" } else { "src" };
+        match element.attr(tag_name) {
+            Some(href) => href.into(),
+            _ => clean_element_text(&element),
+        }
+    } else if name == "img" || name == "source" {
+        let mut img_text = String::new();
+
+        if let Some(src) = element.attr("src") {
+            if !src.is_empty() {
+                img_text.push('[');
+                img_text.push_str(src.trim());
+                img_text.push(']');
+            }
+        }
+        if let Some(alt) = element.attr("alt") {
+            if !alt.is_empty() {
+                if img_text.is_empty() {
+                    img_text.push_str(alt);
+                } else {
+                    img_text.push('(');
+                    img_text.push('"');
+                    img_text.push_str(alt);
+                    img_text.push('"');
+                    img_text.push(')');
+                }
+            }
+        }
+
+        img_text
     } else {
-        name.to_string()
+        clean_element_text(&element)
     };
 
-    let text = clean_element_text(&element);
-
-    if !text.is_empty() {
-        match map.entry(entry_name) {
-            Entry::Occupied(mut entry) => entry.get_mut().push(text),
-            Entry::Vacant(entry) => {
-                entry.insert(vec![text]);
-            }
+    match map.entry(name.to_string()) {
+        Entry::Occupied(mut entry) => entry.get_mut().push(text),
+        Entry::Vacant(entry) => {
+            entry.insert(vec![text]);
         }
     }
 }
@@ -259,6 +287,22 @@ async fn test_css_query_select_map_streamed() {
 
     let data = css_query_select_map_streamed(
         r#"<html><body><ul class="list"><li>Test</li></ul></body></html>"#,
+        &build_selectors(map),
+    )
+    .await;
+
+    assert!(!data.is_empty(), "CSS extraction failed",);
+}
+
+#[tokio::test]
+async fn test_css_query_select_map_streamed_meta() {
+    let map = QueryCSSMap::from([(
+        "meta_og_locale",
+        QueryCSSSelectSet::from([r#"meta[property="og:locale"]"#]),
+    )]);
+
+    let data = css_query_select_map_streamed(
+        r#"<html><head><meta property="og:locale" content="en_US"></head><body><ul class="list"><li>Test</li></ul></body></html>"#,
         &build_selectors(map),
     )
     .await;
