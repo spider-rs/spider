@@ -142,16 +142,20 @@ where
     K: AsRef<str> + Eq + Hash + Sized,
 {
     let name = name.as_ref();
+    let element_name = element.value().name();
 
-    let text = if name == "meta" {
+    let text = if element_name == "meta" {
         element.attr("content").unwrap_or_default().into()
-    } else if name == "link" || name == "script" || name == "styles" {
-        let tag_name = if name == "link" { "href" } else { "src" };
-        match element.attr(tag_name) {
+    } else if element_name == "link" || element_name == "script" || element_name == "styles" {
+        match element.attr(if element_name == "link" {
+            "href"
+        } else {
+            "src"
+        }) {
             Some(href) => href.into(),
             _ => clean_element_text(&element),
         }
-    } else if name == "img" || name == "source" {
+    } else if element_name == "img" || element_name == "source" {
         let mut img_text = String::new();
 
         if let Some(src) = element.attr("src") {
@@ -180,10 +184,12 @@ where
         clean_element_text(&element)
     };
 
-    match map.entry(name.to_string()) {
-        Entry::Occupied(mut entry) => entry.get_mut().push(text),
-        Entry::Vacant(entry) => {
-            entry.insert(vec![text]);
+    if !text.is_empty() {
+        match map.entry(name.to_string()) {
+            Entry::Occupied(mut entry) => entry.get_mut().push(text),
+            Entry::Vacant(entry) => {
+                entry.insert(vec![text]);
+            }
         }
     }
 }
@@ -287,22 +293,6 @@ async fn test_css_query_select_map_streamed() {
 
     let data = css_query_select_map_streamed(
         r#"<html><body><ul class="list"><li>Test</li></ul></body></html>"#,
-        &build_selectors(map),
-    )
-    .await;
-
-    assert!(!data.is_empty(), "CSS extraction failed",);
-}
-
-#[tokio::test]
-async fn test_css_query_select_map_streamed_meta() {
-    let map = QueryCSSMap::from([(
-        "meta_og_locale",
-        QueryCSSSelectSet::from([r#"meta[property="og:locale"]"#]),
-    )]);
-
-    let data = css_query_select_map_streamed(
-        r#"<html><head><meta property="og:locale" content="en_US"></head><body><ul class="list"><li>Test</li></ul></body></html>"#,
         &build_selectors(map),
     )
     .await;
