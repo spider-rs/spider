@@ -489,24 +489,16 @@ impl Website {
     #[inline]
     #[cfg(not(feature = "regex"))]
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
-        if self.links_visited.contains(link) {
-            ProcessLinkStatus::Blocked
-        } else {
-            let status = self.is_allowed_default(link.inner());
+        let status = self.is_allowed_budgetless(link);
 
-            if status.eq(&ProcessLinkStatus::Allowed) {
-                if self.is_over_depth(link) {
-                    ProcessLinkStatus::Blocked
-                } else {
-                    if self.is_over_budget(link) {
-                        ProcessLinkStatus::BudgetExceeded
-                    } else {
-                        status
-                    }
-                }
+        if status.eq(&ProcessLinkStatus::Allowed) {
+            if self.is_over_budget(link) {
+                ProcessLinkStatus::BudgetExceeded
             } else {
                 status
             }
+        } else {
+            status
         }
     }
 
@@ -521,23 +513,16 @@ impl Website {
     #[inline]
     #[cfg(feature = "regex")]
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
-        if self.links_visited.contains(link) {
-            ProcessLinkStatus::Blocked
-        } else {
-            let status = self.is_allowed_default(link);
-            if status.eq(&ProcessLinkStatus::Allowed) {
-                if self.is_over_depth(link) {
-                    ProcessLinkStatus::Blocked
-                } else {
-                    if self.is_over_budget(link) {
-                        ProcessLinkStatus::BudgetExceeded
-                    } else {
-                        status
-                    }
-                }
+        let status = self.is_allowed_budgetless(link);
+
+        if status.eq(&ProcessLinkStatus::Allowed) {
+            if self.is_over_budget(link) {
+                ProcessLinkStatus::BudgetExceeded
             } else {
                 status
             }
+        } else {
+            status
         }
     }
 
