@@ -310,7 +310,83 @@ pub struct Page {
 }
 
 /// Validate link and push into the map
+pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    base: &Option<&Url>,
+    href: &str,
+    base_domain: &CompactString,
+    parent_host: &CompactString,
+    base_input_domain: &CompactString,
+    sub_matcher: &CompactString,
+    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    links_pages: &mut Option<HashSet<A>>,
+) -> Option<Url> {
+    if let Some(b) = base {
+        let abs = convert_abs_path(b, href);
+        let new_page = abs != **b;
+        if let Some(link_map) = links_pages {
+            link_map.insert(A::from(
+                (if new_page { abs.as_str() } else { href }).to_string(),
+            ));
+        }
+        if new_page {
+            let scheme = abs.scheme();
+            if scheme == "https" || scheme == "http" {
+                let host_name = abs.host_str();
+                let mut can_process = parent_host_match(
+                    host_name,
+                    base_domain,
+                    parent_host,
+                    base_input_domain,
+                    sub_matcher,
+                );
+                if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
+                    can_process = external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                        || external_domains_caseless
+                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+                }
+                if can_process {
+                    return Some(abs);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Validate link and push into the map without extended verify.
 pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    base: &Option<&Url>,
+    href: &str,
+    map: &mut HashSet<A>,
+    base_domain: &CompactString,
+    parent_host: &CompactString,
+    parent_host_scheme: &CompactString,
+    base_input_domain: &CompactString,
+    sub_matcher: &CompactString,
+    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    links_pages: &mut Option<HashSet<A>>,
+) {
+    let abs = validate_link(
+        base,
+        href,
+        base_domain,
+        parent_host,
+        base_input_domain,
+        sub_matcher,
+        external_domains_caseless,
+        links_pages,
+    );
+    if let Some(mut abs) = abs {
+        if abs.scheme() != parent_host_scheme.as_str() {
+            let _ = abs.set_scheme(parent_host_scheme.as_str());
+        }
+        map.insert(abs.as_str().to_string().into());
+    }
+}
+
+/// Validate link and push into the map
+pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     base: &Option<&Url>,
     href: &str,
     map: &mut HashSet<A>,
@@ -322,70 +398,57 @@ pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
     full_resources: bool,
     links_pages: &mut Option<HashSet<A>>,
+    verify: bool,
 ) {
-    if let Some(b) = base {
-        let mut abs = convert_abs_path(b, href);
-
-        let new_page = abs != **b;
-
-        if let Some(link_map) = links_pages {
-            link_map.insert(A::from(
-                (if new_page { abs.as_str() } else { href }).to_string(),
-            ));
+    let abs = validate_link(
+        base,
+        href,
+        base_domain,
+        parent_host,
+        base_input_domain,
+        sub_matcher,
+        external_domains_caseless,
+        links_pages,
+    );
+    if let Some(mut abs) = abs {
+        if abs.scheme() != parent_host_scheme.as_str() {
+            let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
+        if verify {
+            push_link_check(&mut abs, map, full_resources, &mut true);
+        } else {
+            map.insert(abs.as_str().to_string().into());
+        }
+    }
+}
 
-        if new_page {
-            let scheme = abs.scheme();
+/// Validate link and push into the map checking if asset
+pub(crate) fn push_link_check<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+    abs: &mut Url,
+    map: &mut HashSet<A>,
+    full_resources: bool,
+    can_process: &mut bool,
+) {
+    let hchars = abs.path();
 
-            if scheme == "https" || scheme == "http" {
-                let host_name = abs.host_str();
+    // check if the file is a resource and block if it is
+    if let Some(position) = hchars.rfind('.') {
+        let hlen = hchars.len();
+        let has_asset = hlen - position;
 
-                let mut can_process = parent_host_match(
-                    host_name,
-                    base_domain,
-                    parent_host,
-                    base_input_domain,
-                    sub_matcher,
-                );
+        if has_asset >= 3 {
+            let next_position = position + 1;
 
-                if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
-                    can_process = external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                        || external_domains_caseless
-                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                }
-
-                if can_process {
-                    if abs.scheme() != parent_host_scheme.as_str() {
-                        let _ = abs.set_scheme(parent_host_scheme.as_str());
-                    }
-
-                    let hchars = abs.path();
-
-                    // check if the file is a resource and block if it is
-                    if let Some(position) = hchars.rfind('.') {
-                        let hlen = hchars.len();
-                        let has_asset = hlen - position;
-
-                        if has_asset >= 3 {
-                            let next_position = position + 1;
-
-                            if !full_resources
-                                && IGNORE_ASSETS.contains::<CaseInsensitiveString>(
-                                    &hchars[next_position..].into(),
-                                )
-                            {
-                                can_process = false;
-                            }
-                        }
-                    }
-
-                    if can_process {
-                        map.insert(abs.as_str().to_string().into());
-                    }
-                }
+            if !full_resources
+                && IGNORE_ASSETS.contains::<CaseInsensitiveString>(&hchars[next_position..].into())
+            {
+                *can_process = false;
             }
         }
+    }
+
+    if *can_process {
+        map.insert(abs.as_str().to_string().into());
     }
 }
 
@@ -832,7 +895,6 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
-                                r_settings.full_resources,
                                 links_pages,
                             );
                         }
@@ -851,7 +913,6 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
-                                r_settings.full_resources,
                                 links_pages,
                             );
                         }
@@ -948,7 +1009,6 @@ impl Page {
                                                     base_input_domain,
                                                     sub_matcher,
                                                     &external_domains_caseless,
-                                                    r_settings.full_resources,
                                                     &mut None,
                                                 );
                                             }
@@ -1471,7 +1531,7 @@ impl Page {
                     Event::Text(e) => {
                         if is_link_tag {
                             if let Ok(v) = e.unescape() {
-                                push_link(
+                                push_link_verify(
                                     &base,
                                     &v,
                                     map,
@@ -1483,6 +1543,7 @@ impl Page {
                                     &self.external_domains_caseless,
                                     false,
                                     &mut links_pages,
+                                    true,
                                 );
                             }
                         }
@@ -1561,7 +1622,6 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &self.external_domains_caseless,
-                                false,
                                 &mut links_pages,
                             );
                         }
@@ -1665,7 +1725,6 @@ impl Page {
                                     base_input_domain,
                                     sub_matcher,
                                     &self.external_domains_caseless,
-                                    false,
                                     &mut links_pages,
                                 );
                             }
@@ -1735,7 +1794,6 @@ impl Page {
                                         base_input_domain,
                                         sub_matcher,
                                         &self.external_domains_caseless,
-                                        false,
                                         &mut None,
                                     );
                                 }
@@ -1911,7 +1969,6 @@ impl Page {
                                     base_input_domain,
                                     sub_matcher,
                                     &external_domains_caseless,
-                                    false,
                                     &mut links_pages,
                                 );
                             }
@@ -2134,7 +2191,6 @@ impl Page {
                                 base_input_domain,
                                 sub_matcher,
                                 &external_domains_caseless,
-                                true,
                                 &mut links_pages,
                             );
                         }
