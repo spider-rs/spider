@@ -375,29 +375,31 @@ impl Handler {
     /// ready and idle), the `Target` sends its newly created `Page` as response
     /// to the initiator (`tx`) of the `CreateTargetParams` request.
     fn create_page(&mut self, params: CreateTargetParams, tx: OneshotSender<Result<Page>>) {
-        match url::Url::parse(&params.url) {
-            Ok(_) => {
-                let method = params.identifier();
-                match serde_json::to_value(params) {
-                    Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
-                        Ok(call_id) => {
-                            self.pending_commands.insert(
-                                call_id,
-                                (PendingRequest::CreateTarget(tx), method, Instant::now()),
-                            );
-                        }
-                        Err(err) => {
-                            let _ = tx.send(Err(err.into())).ok();
-                        }
-                    },
+        let about_blank = params.url == "about:blank";
+        let http_check =
+            !about_blank && params.url.starts_with("http") || params.url.starts_with("file://");
+
+        if about_blank || http_check {
+            let method = params.identifier();
+
+            match serde_json::to_value(params) {
+                Ok(params) => match self.conn.submit_command(method.clone(), None, params) {
+                    Ok(call_id) => {
+                        self.pending_commands.insert(
+                            call_id,
+                            (PendingRequest::CreateTarget(tx), method, Instant::now()),
+                        );
+                    }
                     Err(err) => {
                         let _ = tx.send(Err(err.into())).ok();
                     }
+                },
+                Err(err) => {
+                    let _ = tx.send(Err(err.into())).ok();
                 }
             }
-            Err(err) => {
-                let _ = tx.send(Err(err.into())).ok();
-            }
+        } else {
+            let _ = tx.send(Err(CdpError::NotFound)).ok();
         }
     }
 

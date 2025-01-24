@@ -72,18 +72,6 @@ fn handle_base(href: &str) -> LinkReturn {
 
     // handle absolute urls.
     if !href.starts_with("/") {
-        let protocol_slice = if href.is_char_boundary(8) {
-            &href[0..8]
-        } else if href.is_char_boundary(7) {
-            &href[0..7]
-        } else if href.is_char_boundary(6) {
-            &href[0..6]
-        } else if href.is_char_boundary(5) {
-            &href[0..5]
-        } else {
-            ""
-        };
-
         // ignore protocols that are not crawlable
         if let Some(protocol_end) = href.find(':') {
             // Extract the potential protocol up to and including the ':'
@@ -93,6 +81,18 @@ fn handle_base(href: &str) -> LinkReturn {
             if IGNORED_PROTOCOLS.contains(protocol_slice_section) {
                 return LinkReturn::EarlyReturn;
             }
+
+            let protocol_slice = if href.is_char_boundary(8) {
+                &href[0..8]
+            } else if href.is_char_boundary(7) {
+                &href[0..7]
+            } else if href.is_char_boundary(6) {
+                &href[0..6]
+            } else if href.is_char_boundary(5) {
+                &href[0..5]
+            } else {
+                ""
+            };
 
             // valid protocol to take absolute
             if let Some(protocol_end) = href
