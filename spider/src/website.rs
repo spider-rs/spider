@@ -2421,6 +2421,30 @@ impl Website {
         }
     }
 
+    /// Dequeue the links to a set
+    async fn dequeue(
+        &mut self,
+        q: &mut Option<tokio::sync::broadcast::Receiver<String>>,
+        links: &mut HashSet<CaseInsensitiveString>,
+        exceeded_budget: &mut bool,
+    ) {
+        if let Some(q) = q {
+            while let Ok(link) = q.try_recv() {
+                let s = link.into();
+                let allowed = self.is_allowed(&s);
+
+                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                    *exceeded_budget = true;
+                    break;
+                }
+                if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
+                    continue;
+                }
+                self.links_visited.extend_with_new_links(links, s);
+            }
+        }
+    }
+
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
@@ -2479,6 +2503,8 @@ impl Website {
                     // track budgeting one time.
                     let mut exceeded_budget = false;
                     let concurrency = throttle.is_zero();
+
+                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                     if !concurrency && !links.is_empty() {
                         tokio::time::sleep(*throttle).await;
@@ -2626,22 +2652,7 @@ impl Website {
                                         });
                                     }
 
-                                    if let Some(q) = &mut q {
-                                        while let Ok(link) = q.try_recv() {
-                                            let s = link.into();
-                                            let allowed = self.is_allowed(&s);
-
-                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                exceeded_budget = true;
-                                                break;
-                                            }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
-                                                continue;
-                                            }
-
-                                            self.links_visited.extend_with_new_links(&mut links, s);
-                                        }
-                                    }
+                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                 },
                                 Some(result) = set.join_next(), if !set.is_empty() => {
                                     if let Ok(res) = result {
@@ -2748,6 +2759,8 @@ impl Website {
                                 let return_page_links = self.configuration.return_page_links;
                                 let mut exceeded_budget = false;
                                 let concurrency = throttle.is_zero();
+
+                                self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                                 if !concurrency && !links.is_empty() {
                                     tokio::time::sleep(*throttle).await;
@@ -2944,28 +2957,7 @@ impl Website {
                                                     });
                                                 }
 
-                                                if let Some(q) = q.as_mut() {
-                                                    while let Ok(link) = q.try_recv() {
-                                                        let s = link.into();
-                                                        let allowed = self.is_allowed(&s);
-
-                                                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                        exceeded_budget = true;
-                                                        break;
-                                                    }
-                                                        if allowed
-                                                            .eq(&ProcessLinkStatus::Blocked)
-                                                        {
-                                                            continue;
-                                                        }
-
-                                                        self.links_visited
-                                                            .extend_with_new_links(
-                                                                &mut links, s,
-                                                            );
-                                                    }
-                                                }
-
+                                                self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                             }
                                             Some(result) = set.join_next(), if !set.is_empty() => {
                                                 match result {
@@ -3116,24 +3108,7 @@ impl Website {
                                         page.links
                                     });
 
-                                    if let Some(q) = q.as_mut() {
-                                        while let Ok(link) = q.try_recv() {
-                                            let s = link.into();
-                                            let allowed = self.is_allowed(&s);
-
-                                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                                exceeded_budget = true;
-                                                break;
-                                            }
-                                            if allowed.eq(&ProcessLinkStatus::Blocked)
-                                                || !self.is_allowed_disk(&s).await
-                                            {
-                                                continue;
-                                            }
-
-                                            self.links_visited.extend_with_new_links(&mut links, s);
-                                        }
-                                    }
+                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                 }
                             }
                             _ => break,
@@ -3229,6 +3204,8 @@ impl Website {
                         let add_external = self.configuration.external_domains_caseless.len() > 0;
                         let mut exceeded_budget = false;
                         let concurrency = throttle.is_zero();
+
+                        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                         if !concurrency && !links.is_empty() {
                             tokio::time::sleep(*throttle).await;
@@ -3385,25 +3362,7 @@ impl Website {
                                             });
                                         }
 
-                                        if let Some(q) = q.as_mut() {
-                                            while let Ok(link) = q.try_recv() {
-                                                let s = link.into();
-                                                let allowed = self.is_allowed(&s);
-
-                                                if allowed
-                                                    .eq(&ProcessLinkStatus::BudgetExceeded)
-                                                {
-                                                    exceeded_budget = true;
-                                                    break;
-                                                }
-                                                if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
-                                                    continue;
-                                                }
-
-                                                self.links_visited
-                                                    .extend_with_new_links(&mut links, s);
-                                            }
-                                        }
+                                        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                     }
                                     Some(result) = set.join_next(), if !set.is_empty() => {
                                         match result {
@@ -3522,6 +3481,11 @@ impl Website {
 
             let mut exceeded_budget = false;
             let return_page_links = self.configuration.return_page_links;
+
+            let mut extra_links = self.extra_links.clone();
+            self.dequeue(&mut q, &mut *extra_links, &mut exceeded_budget)
+                .await;
+            self.extra_links.clone_from(&extra_links);
 
             'outer: loop {
                 let stream =
@@ -3646,34 +3610,14 @@ impl Website {
 
                     if let Ok(mut handle) = handles.await {
                         for page in handle.iter_mut() {
-                            if let Some(links) = page.page_links.clone() {
+                            if let Some(mut links) = page.page_links.clone() {
+                                self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                 self.extra_links.extend(*links)
                             }
                         }
-
                         if scrape {
                             if let Some(p) = self.pages.as_mut() {
                                 p.extend(handle);
-                            }
-                        }
-
-                        if let Some(q) = q.as_mut() {
-                            while let Ok(link) = q.try_recv() {
-                                let s = link.into();
-                                let allowed = self.is_allowed(&s);
-
-                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                    exceeded_budget = true;
-                                    break;
-                                }
-                                if allowed.eq(&ProcessLinkStatus::Blocked)
-                                    || !self.is_allowed_disk(&s).await
-                                {
-                                    continue;
-                                }
-
-                                self.links_visited
-                                    .extend_with_new_links(&mut self.extra_links, s);
                             }
                         }
                     }
@@ -3709,6 +3653,7 @@ impl Website {
 
         if let Some(selectors) = self.setup_selectors() {
             if let Some((browser, browser_handle, mut context_id)) = self.setup_browser().await {
+                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
                 let domain = self.url.inner().as_str();
                 self.domain_parsed = parse_absolute_url(&domain);
                 let persist_links = self.status == CrawlStatus::Start;
@@ -3757,6 +3702,11 @@ impl Website {
                 };
 
                 let mut exceeded_budget = false;
+
+                let mut extra_links = self.extra_links.clone();
+                self.dequeue(&mut q, &mut *extra_links, &mut exceeded_budget)
+                    .await;
+                self.extra_links.clone_from(&extra_links);
 
                 'outer: loop {
                     let stream: tokio_stream::Iter<std::vec::IntoIter<Box<CompactString>>> =
@@ -4002,7 +3952,8 @@ impl Website {
 
                         if let Ok(mut handle) = handles.await {
                             for page in handle.iter_mut() {
-                                if let Some(links) = page.page_links.clone() {
+                                if let Some(mut links) = page.page_links.clone() {
+                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                     self.extra_links.extend(*links)
                                 }
                             }
