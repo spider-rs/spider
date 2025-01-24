@@ -2937,6 +2937,25 @@ pub fn get_last_segment(path: &str) -> &str {
     }
 }
 
+/// Get the path from a url
+pub(crate) fn get_path_from_url(url: &str) -> &str {
+    if let Some(start_pos) = url.find("//") {
+        let pos = start_pos + 2;
+
+        if pos < url.len() {
+            if let Some(third_slash_pos) = url[pos..].find('/') {
+                &url[pos + third_slash_pos..]
+            } else {
+                "/"
+            }
+        } else {
+            "/"
+        }
+    } else {
+        "/"
+    }
+}
+
 #[cfg(feature = "tracing")]
 /// Spawns a new asynchronous task.
 pub(crate) fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>

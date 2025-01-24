@@ -10,8 +10,8 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::{
-    emit_log, emit_log_shutdown, get_semaphore, setup_website_selectors, spawn_set, spawn_task,
-    AllowedDomainTypes,
+    emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, setup_website_selectors,
+    spawn_set, spawn_task, AllowedDomainTypes,
 };
 
 use crate::utils::interner::ListBucket;
@@ -493,8 +493,16 @@ impl Website {
         } else {
             let status = self.is_allowed_default(link.inner());
 
-            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(link) {
-                ProcessLinkStatus::BudgetExceeded
+            if status.eq(&ProcessLinkStatus::Allowed) {
+                if self.is_over_depth(link) {
+                    ProcessLinkStatus::Blocked
+                } else {
+                    if self.is_over_budget(link) {
+                        ProcessLinkStatus::BudgetExceeded
+                    } else {
+                        status
+                    }
+                }
             } else {
                 status
             }
@@ -515,8 +523,16 @@ impl Website {
             ProcessLinkStatus::Blocked
         } else {
             let status = self.is_allowed_default(link);
-            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(&link) {
-                ProcessLinkStatus::BudgetExceeded
+            if status.eq(&ProcessLinkStatus::Allowed) {
+                if self.is_over_depth(link) {
+                    ProcessLinkStatus::Blocked
+                } else {
+                    if self.is_over_budget(link) {
+                        ProcessLinkStatus::BudgetExceeded
+                    } else {
+                        status
+                    }
+                }
             } else {
                 status
             }
@@ -587,26 +603,24 @@ impl Website {
 
     /// Detect if the inner budget is exceeded
     pub(crate) fn is_over_inner_depth_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        match Url::parse(link.inner()) {
-            Ok(r) => match r.path_segments() {
-                Some(segments) => {
-                    let mut over = false;
-                    let mut depth: usize = 0;
+        let mut over = false;
 
-                    for _ in segments {
-                        depth = depth.saturating_add(1);
-                        if depth >= self.configuration.depth_distance {
-                            over = true;
-                            break;
-                        }
-                    }
+        if let Some(segments) = get_path_from_url(link)
+            .strip_prefix('/')
+            .map(|remainder| remainder.split('/'))
+        {
+            let mut depth: usize = 0;
 
-                    over
+            for _ in segments {
+                depth = depth.saturating_add(1);
+                if depth > self.configuration.depth_distance {
+                    over = true;
+                    break;
                 }
-                _ => false,
-            },
-            _ => false,
+            }
         }
+
+        over
     }
 
     /// Detect if the inner budget is exceeded
@@ -614,15 +628,16 @@ impl Website {
         match self.configuration.inner_budget.as_mut() {
             Some(budget) => {
                 let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
-                    if let Some(budget) = budget.get_mut(&*WILD_CARD_PATH) {
-                        if budget.abs_diff(0) == 1 {
-                            true
-                        } else {
-                            *budget -= 1;
-                            false
+                    match budget.get_mut(&*WILD_CARD_PATH) {
+                        Some(budget) => {
+                            if budget.abs_diff(0) == 1 {
+                                true
+                            } else {
+                                *budget -= 1;
+                                false
+                            }
                         }
-                    } else {
-                        false
+                        _ => false,
                     }
                 } else {
                     false
@@ -635,41 +650,42 @@ impl Website {
 
                 // check if paths pass
                 if !skip_paths && !exceeded_wild_budget {
-                    match Url::parse(link.inner()) {
-                        Ok(r) => match r.path_segments() {
-                            Some(segments) => {
-                                let mut joint_segment = CaseInsensitiveString::default();
-                                let mut over = false;
-                                let mut depth: usize = 0;
+                    let path_segments = get_path_from_url(link)
+                        .strip_prefix('/')
+                        .map(|remainder| remainder.split('/'));
 
-                                for seg in segments {
-                                    if has_depth_control {
-                                        depth = depth.saturating_add(1);
-                                        if depth >= self.configuration.depth_distance {
-                                            over = true;
-                                            break;
-                                        }
-                                    }
+                    match path_segments {
+                        Some(segments) => {
+                            let mut joint_segment = CaseInsensitiveString::default();
+                            let mut over = false;
+                            let mut depth: usize = 0;
 
-                                    joint_segment.push_str(seg);
-
-                                    if budget.contains_key(&joint_segment) {
-                                        if let Some(budget) = budget.get_mut(&joint_segment) {
-                                            if budget.abs_diff(0) == 0 || *budget == 0 {
-                                                over = true;
-                                                break;
-                                            } else {
-                                                *budget -= 1;
-                                                continue;
-                                            }
-                                        }
+                            for seg in segments {
+                                if has_depth_control {
+                                    depth = depth.saturating_add(1);
+                                    if depth > self.configuration.depth_distance {
+                                        over = true;
+                                        break;
                                     }
                                 }
 
-                                over
+                                joint_segment.push_str(seg);
+
+                                if budget.contains_key(&joint_segment) {
+                                    if let Some(budget) = budget.get_mut(&joint_segment) {
+                                        if budget.abs_diff(0) == 0 || *budget == 0 {
+                                            over = true;
+                                            break;
+                                        } else {
+                                            *budget -= 1;
+                                            continue;
+                                        }
+                                    }
+                                }
                             }
-                            _ => false,
-                        },
+
+                            over
+                        }
                         _ => false,
                     }
                 } else {
@@ -680,19 +696,14 @@ impl Website {
         }
     }
 
+    /// Validate if url exceeds crawl depth and should be ignored.
+    pub(crate) fn is_over_depth(&mut self, link: &CaseInsensitiveString) -> bool {
+        self.configuration.depth_distance > 0 && self.is_over_inner_depth_budget(link)
+    }
+
     /// Validate if url exceeds crawl budget and should not be handled.
     pub(crate) fn is_over_budget(&mut self, link: &CaseInsensitiveString) -> bool {
-        let has_depth_control = self.configuration.depth_distance > 0;
-
-        if self.configuration.inner_budget.is_some() || has_depth_control {
-            if self.configuration.inner_budget.is_none() && has_depth_control {
-                self.is_over_inner_depth_budget(link)
-            } else {
-                self.is_over_inner_budget(link)
-            }
-        } else {
-            false
-        }
+        self.is_over_inner_budget(link)
     }
 
     /// Amount of pages crawled in memory only. Use get_size for full links between memory and disk.
