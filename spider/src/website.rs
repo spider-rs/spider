@@ -481,6 +481,7 @@ impl Website {
     /// return `true` if URL:
     ///
     /// - is not already crawled
+    /// - is not over depth
     /// - is not over crawl budget
     /// - is optionally whitelisted
     /// - is not blacklisted
@@ -512,6 +513,7 @@ impl Website {
     /// return `true` if URL:
     ///
     /// - is not already crawled
+    /// - is not over depth
     /// - is not over crawl budget
     /// - is optionally whitelisted
     /// - is not blacklisted
@@ -532,6 +534,59 @@ impl Website {
                     } else {
                         status
                     }
+                }
+            } else {
+                status
+            }
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over depth
+    /// - is optionally whitelisted
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(not(feature = "regex"))]
+    pub fn is_allowed_budgetless(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else {
+            let status = self.is_allowed_default(link.inner());
+
+            if status.eq(&ProcessLinkStatus::Allowed) {
+                if self.is_over_depth(link) {
+                    ProcessLinkStatus::Blocked
+                } else {
+                    status
+                }
+            } else {
+                status
+            }
+        }
+    }
+
+    /// return `true` if URL:
+    ///
+    /// - is not already crawled
+    /// - is not over depth
+    /// - is optionally whitelisted
+    /// - is not blacklisted
+    /// - is not forbidden in robot.txt file (if parameter is defined)
+    #[inline]
+    #[cfg(feature = "regex")]
+    pub fn is_allowed_budgetless(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
+        if self.links_visited.contains(link) {
+            ProcessLinkStatus::Blocked
+        } else {
+            let status = self.is_allowed_default(link);
+            if status.eq(&ProcessLinkStatus::Allowed) {
+                if self.is_over_depth(link) {
+                    ProcessLinkStatus::Blocked
+                } else {
+                    status
                 }
             } else {
                 status
@@ -2442,15 +2497,17 @@ impl Website {
         if let Some(q) = q {
             while let Ok(link) = q.try_recv() {
                 let s = link.into();
-                let allowed = self.is_allowed(&s);
+                let allowed = self.is_allowed_budgetless(&s);
 
                 if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                     *exceeded_budget = true;
                     break;
                 }
+
                 if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&s).await {
                     continue;
                 }
+
                 self.links_visited.extend_with_new_links(links, s);
             }
         }
@@ -2662,7 +2719,6 @@ impl Website {
                                             links
                                         });
                                     }
-
                                     self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                 },
                                 Some(result) = set.join_next(), if !set.is_empty() => {
@@ -2674,6 +2730,8 @@ impl Website {
                                 else => break,
                             }
 
+                            self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
                             if links.is_empty() && set.is_empty() || exceeded_budget {
                                 // await for all tasks to complete.
                                 if exceeded_budget {
@@ -2682,6 +2740,8 @@ impl Website {
                                 break 'outer;
                             }
                         }
+
+                        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                         if links.is_empty() && set.is_empty() {
                             break;
@@ -2989,6 +3049,8 @@ impl Website {
                                         }
                                     }
 
+                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
                                     if links.is_empty() && set.is_empty() {
                                         break;
                                     }
@@ -3129,6 +3191,8 @@ impl Website {
                     self.links_visited.extend_links(&mut links, msg);
                 }
             }
+
+            self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
             if links.is_empty() || exceeded_budget {
                 break;
@@ -3385,6 +3449,8 @@ impl Website {
                                     break 'outer;
                                 }
                             }
+
+                            self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                             if links.is_empty() && set.is_empty() {
                                 break;
