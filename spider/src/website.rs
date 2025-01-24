@@ -3032,115 +3032,107 @@ impl Website {
     #[cfg(feature = "decentralized")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
-        match url::Url::parse(&self.url.inner()) {
-            Ok(_) => {
-                let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+        let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
-                self.configuration.configure_allowlist();
-                let domain = self.url.inner().as_str();
-                let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
-                let throttle = Box::pin(self.get_delay());
-                let on_link_find_callback = self.on_link_find_callback;
-                // http worker verify
-                let http_worker = std::env::var("SPIDER_WORKER")
-                    .unwrap_or_else(|_| "http:".to_string())
-                    .starts_with("http:");
+        self.configuration.configure_allowlist();
+        let domain = self.url.inner().as_str();
+        let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
+        let throttle = Box::pin(self.get_delay());
+        let on_link_find_callback = self.on_link_find_callback;
+        // http worker verify
+        let http_worker = std::env::var("SPIDER_WORKER")
+            .unwrap_or_else(|_| "http:".to_string())
+            .starts_with("http:");
 
-                let mut links: HashSet<CaseInsensitiveString> = self
-                    .crawl_establish(
-                        &client,
-                        &mut (domain.into(), Default::default()),
-                        http_worker,
-                    )
-                    .await;
+        let mut links: HashSet<CaseInsensitiveString> = self
+            .crawl_establish(
+                &client,
+                &mut (domain.into(), Default::default()),
+                http_worker,
+            )
+            .await;
 
-                let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
-                let mut exceeded_budget = false;
+        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+        let mut exceeded_budget = false;
 
-                'outer: loop {
-                    let stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                        links.drain().collect(),
-                    )
+        'outer: loop {
+            let stream =
+                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
                     .throttle(*throttle);
-                    tokio::pin!(stream);
+            tokio::pin!(stream);
 
-                    loop {
-                        match stream.next().await {
-                            Some(link) => {
-                                if !self
-                                    .handle_process(handle, &mut interval, async {
-                                        emit_log_shutdown(&link.inner());
-                                        set.shutdown().await;
-                                    })
-                                    .await
-                                {
-                                    break 'outer;
-                                }
-
-                                let allowed = self.is_allowed(&link);
-
-                                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                                    exceeded_budget = true;
-                                    break;
-                                }
-                                if allowed.eq(&ProcessLinkStatus::Blocked)
-                                    || !self.is_allowed_disk(&link).await
-                                {
-                                    continue;
-                                }
-
-                                emit_log(&link.inner());
-
-                                self.insert_link(link.clone()).await;
-
-                                if let Ok(permit) = SEM.acquire().await {
-                                    let client = client.clone();
-
-                                    spawn_set("page_fetch", &mut set, async move {
-                                        let link_results = match on_link_find_callback {
-                                            Some(cb) => cb(link, None),
-                                            _ => (link, None),
-                                        };
-                                        let link_results = link_results.0.as_ref();
-                                        let page = Page::new_links_only(
-                                            &if http_worker && link_results.starts_with("https") {
-                                                link_results
-                                                    .replacen("https", "http", 1)
-                                                    .to_string()
-                                            } else {
-                                                link_results.to_string()
-                                            },
-                                            &client,
-                                        )
-                                        .await;
-
-                                        drop(permit);
-
-                                        page.links
-                                    });
-
-                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
-                                }
-                            }
-                            _ => break,
+            loop {
+                match stream.next().await {
+                    Some(link) => {
+                        if !self
+                            .handle_process(handle, &mut interval, async {
+                                emit_log_shutdown(&link.inner());
+                                set.shutdown().await;
+                            })
+                            .await
+                        {
+                            break 'outer;
                         }
-                        if exceeded_budget {
+
+                        let allowed = self.is_allowed(&link);
+
+                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                            exceeded_budget = true;
                             break;
                         }
-                    }
+                        if allowed.eq(&ProcessLinkStatus::Blocked)
+                            || !self.is_allowed_disk(&link).await
+                        {
+                            continue;
+                        }
 
-                    while let Some(res) = set.join_next().await {
-                        if let Ok(msg) = res {
-                            self.links_visited.extend_links(&mut links, msg);
+                        emit_log(&link.inner());
+
+                        self.insert_link(link.clone()).await;
+
+                        if let Ok(permit) = SEM.acquire().await {
+                            let client = client.clone();
+
+                            spawn_set("page_fetch", &mut set, async move {
+                                let link_results = match on_link_find_callback {
+                                    Some(cb) => cb(link, None),
+                                    _ => (link, None),
+                                };
+                                let link_results = link_results.0.as_ref();
+                                let page = Page::new_links_only(
+                                    &if http_worker && link_results.starts_with("https") {
+                                        link_results.replacen("https", "http", 1).to_string()
+                                    } else {
+                                        link_results.to_string()
+                                    },
+                                    &client,
+                                )
+                                .await;
+
+                                drop(permit);
+
+                                page.links
+                            });
+
+                            self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                         }
                     }
-
-                    if links.is_empty() || exceeded_budget {
-                        break;
-                    }
+                    _ => break,
+                }
+                if exceeded_budget {
+                    break;
                 }
             }
-            _ => (),
+
+            while let Some(res) = set.join_next().await {
+                if let Ok(msg) = res {
+                    self.links_visited.extend_links(&mut links, msg);
+                }
+            }
+
+            if links.is_empty() || exceeded_budget {
+                break;
+            }
         }
     }
 

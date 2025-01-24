@@ -608,12 +608,9 @@ pub async fn run_openai_request(
                     let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
 
                     if !c.is_some() && gpt_configs.paths_map {
-                        match url::Url::parse(source) {
-                            Ok(u) => h.get::<case_insensitive_string::CaseInsensitiveString>(
-                                &u.path().into(),
-                            ),
-                            _ => None,
-                        }
+                        h.get::<case_insensitive_string::CaseInsensitiveString>(
+                            &get_path_from_url(&source).into(),
+                        )
                     } else {
                         c
                     }
@@ -630,7 +627,7 @@ pub async fn run_openai_request(
                             openai_request(
                                 gpt_configs,
                                 match page_response.content.as_ref() {
-                                    Some(html) => String::from_utf8_lossy(html).to_string(),
+                                    Some(html) => auto_encoder::auto_encode_bytes(html),
                                     _ => Default::default(),
                                 },
                                 &source,
@@ -2940,14 +2937,11 @@ pub fn get_last_segment(path: &str) -> &str {
 /// Get the path from a url
 pub(crate) fn get_path_from_url(url: &str) -> &str {
     if let Some(start_pos) = url.find("//") {
-        let pos = start_pos + 2;
+        let mut pos = start_pos + 2;
 
-        if pos < url.len() {
-            if let Some(third_slash_pos) = url[pos..].find('/') {
-                &url[pos + third_slash_pos..]
-            } else {
-                "/"
-            }
+        if let Some(third_slash_pos) = url[pos..].find('/') {
+            pos += third_slash_pos;
+            &url[pos..]
         } else {
             "/"
         }
