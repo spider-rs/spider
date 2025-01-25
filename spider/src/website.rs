@@ -254,6 +254,8 @@ pub struct Website {
     pub configuration: Box<Configuration>,
     /// All URLs visited.
     links_visited: Box<ListBucket>,
+    /// All signatures.
+    signatures: Box<HashSet<u64>>,
     /// Extra links to crawl.
     extra_links: Box<HashSet<CaseInsensitiveString>>,
     /// Pages visited.
@@ -305,13 +307,7 @@ impl Website {
 
         Self {
             configuration: Configuration::new().into(),
-            links_visited: Box::new(ListBucket::new()),
-            pages: None,
-            robot_file_parser: None,
-            on_link_find_callback: None,
-            channel: None,
             status: CrawlStatus::Start,
-            shutdown: false,
             domain_parsed,
             url,
             ..Default::default()
@@ -380,6 +376,30 @@ impl Website {
         true
     }
 
+    /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
+    #[cfg(feature = "disk")]
+    async fn is_allowed_signature_disk(&self, signature_to_check: u64) -> bool {
+        if !self.sqlite.ready() {
+            true
+        } else {
+            !self
+                .sqlite
+                .signature_exists(self.get_db_pool().await, signature_to_check)
+                .await
+        }
+    }
+
+    /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
+    #[cfg(not(feature = "disk"))]
+    async fn is_allowed_signature_disk(&self, _signature_to_check: &str) -> bool {
+        true
+    }
+
+    /// Is the signature allowed.
+    async fn is_signature_allowed(&self, signature: u64) -> bool {
+        !self.signatures.contains(&signature) || self.is_allowed_signature_disk(signature).await
+    }
+
     /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
@@ -394,9 +414,17 @@ impl Website {
 
     /// Insert a new URL to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn insert_url_disk(&self, new_url: &CaseInsensitiveString) {
+    async fn insert_url_disk(&self, new_url: &str) {
         self.sqlite
             .insert_url(self.get_db_pool().await, new_url)
+            .await
+    }
+
+    /// Insert a new signature to disk if it doesn't exist. This does nothing with `disk` flag enabled.
+    #[cfg(feature = "disk")]
+    async fn insert_signature_disk(&self, signature: u64) {
+        self.sqlite
+            .insert_signature(self.get_db_pool().await, signature)
             .await
     }
 
@@ -405,7 +433,6 @@ impl Website {
     async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
         let mem_load = crate::utils::detect_system::get_global_memory_state().await;
         let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
-
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
         if seed_check && !self.sqlite.ready() {
@@ -429,6 +456,36 @@ impl Website {
     #[cfg(not(feature = "disk"))]
     async fn insert_link(&mut self, link: CaseInsensitiveString) {
         self.links_visited.insert(link);
+    }
+
+    /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
+    #[cfg(feature = "disk")]
+    async fn insert_signature(&mut self, new_signature: u64) {
+        let mem_load = crate::utils::detect_system::get_global_memory_state().await;
+        let beyond_memory_limits = self.signatures.len() >= *LINKS_VISITED_MEMORY_LIMIT;
+        let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
+
+        if seed_check && !self.sqlite.ready() {
+            let _ = self.seed().await;
+        }
+
+        if mem_load == 2 || beyond_memory_limits {
+            self.insert_signature_disk(new_signature).await
+        } else if mem_load == 1 {
+            if self.signatures.len() <= 100 {
+                self.signatures.insert(new_signature);
+            } else {
+                self.insert_signature_disk(new_signature).await
+            }
+        } else {
+            self.signatures.insert(new_signature);
+        }
+    }
+
+    /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
+    #[cfg(not(feature = "disk"))]
+    async fn insert_signature(&mut self, link: CaseInsensitiveString) {
+        self.signatures.insert(link);
     }
 
     /// Seed the DB and clear the Hashset. This does nothing with `disk` flag enabled.
@@ -811,6 +868,26 @@ impl Website {
         self.links_visited.drain()
     }
 
+    /// Drain the signatures visited.
+    #[cfg(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    ))]
+    pub fn drain_signatures(&mut self) -> hashbrown::hash_set::Drain<'_, u64> {
+        self.signatures.drain()
+    }
+
+    #[cfg(not(any(
+        feature = "string_interner_bucket_backend",
+        feature = "string_interner_string_backend",
+        feature = "string_interner_buffer_backend",
+    )))]
+    /// Drain the signatures visited.
+    pub fn drain_signatures(&mut self) -> hashbrown::hash_set::Drain<'_, u64> {
+        self.signatures.drain()
+    }
+
     /// Set extra links to crawl. This could be used in conjuntion with 'website.persist_links' to extend the crawl on the next run.
     pub fn set_extra_links(
         &mut self,
@@ -829,6 +906,7 @@ impl Website {
     /// Clear all pages and links stored.
     pub fn clear(&mut self) {
         self.links_visited.clear();
+        self.signatures.clear();
         self.pages.take();
         self.extra_links.clear();
     }
@@ -1560,6 +1638,7 @@ impl Website {
 
             page_links_settings.subdomains = self.configuration.subdomains;
             page_links_settings.tld = self.configuration.tld;
+            page_links_settings.normalize = self.configuration.normalize;
 
             let mut domain_parsed = self.domain_parsed.take();
 
@@ -1642,6 +1721,10 @@ impl Website {
             }
 
             emit_log(url);
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
             self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
@@ -1749,6 +1832,10 @@ impl Website {
             }
 
             emit_log(&self.url.inner());
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
             self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
@@ -1951,6 +2038,10 @@ impl Website {
 
             emit_log(&self.url.inner());
 
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
+
             self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
                     let c = cb(*self.url.clone(), None);
@@ -2027,6 +2118,10 @@ impl Website {
                 &client,
             )
             .await;
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
             self.insert_link(match self.on_link_find_callback {
                 Some(cb) => {
@@ -2105,6 +2200,10 @@ impl Website {
                 _ => (u, None),
             };
 
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
+
             self.insert_link(link_result.0).await;
 
             if self.configuration.return_page_links {
@@ -2158,6 +2257,10 @@ impl Website {
                 Some(cb) => cb(u, None),
                 _ => (u, None),
             };
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
             self.insert_link(link_result.0).await;
 
@@ -2231,6 +2334,10 @@ impl Website {
                 Some(cb) => cb(u, None),
                 _ => (u, None),
             };
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
             self.insert_link(link_result.0).await;
 
@@ -2395,9 +2502,12 @@ impl Website {
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
-            while let Ok(res) = rx2.recv().await {
-                self.insert_link(res.get_url().into()).await;
-                p.push(res);
+            while let Ok(page) = rx2.recv().await {
+                if let Some(sid) = page.signature {
+                    self.insert_signature(sid).await;
+                }
+                self.insert_link(page.get_url().into()).await;
+                p.push(page);
             }
             self.pages.replace(p);
         }
@@ -2417,9 +2527,12 @@ impl Website {
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
-            while let Ok(res) = rx2.recv().await {
-                self.insert_link(res.get_url().into()).await;
-                p.push(res);
+            while let Ok(page) = rx2.recv().await {
+                if let Some(sid) = page.signature {
+                    self.insert_signature(sid).await;
+                }
+                self.insert_link(page.get_url().into()).await;
+                p.push(page);
             }
             self.pages.replace(p);
         }
@@ -2439,9 +2552,12 @@ impl Website {
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
-            while let Ok(res) = rx2.recv().await {
-                self.insert_link(res.get_url().into()).await;
-                p.push(res);
+            while let Ok(page) = rx2.recv().await {
+                if let Some(sid) = page.signature {
+                    self.insert_signature(sid).await;
+                }
+                self.insert_link(page.get_url().into()).await;
+                p.push(page);
             }
             self.pages.replace(p);
         }
@@ -2461,9 +2577,12 @@ impl Website {
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
-            while let Ok(res) = rx2.recv().await {
-                self.insert_link(res.get_url().into()).await;
-                p.push(res);
+            while let Ok(page) = rx2.recv().await {
+                if let Some(sid) = page.signature {
+                    self.insert_signature(sid).await;
+                }
+                self.insert_link(page.get_url().into()).await;
+                p.push(page);
             }
             self.pages.replace(p);
         }
@@ -2544,11 +2663,13 @@ impl Website {
                             self.configuration.full_resources,
                             self.configuration.subdomains,
                             self.configuration.tld,
+                            self.configuration.normalize,
                         ),
                         self.domain_parsed.clone(),
                     ));
 
-                    let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                    let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> =
+                        JoinSet::new();
 
                     // track budgeting one time.
                     let mut exceeded_budget = false;
@@ -2695,17 +2816,31 @@ impl Website {
                                                 }
                                             }
 
+                                            let signature = page.signature;
+
                                             channel_send_page(&shared.2, page, &shared.4);
+
                                             drop(permit);
 
-                                            links
+                                            (links, signature)
                                         });
                                     }
+
                                     self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                 },
                                 Some(result) = set.join_next(), if !set.is_empty() => {
                                     if let Ok(res) = result {
-                                        self.links_visited.extend_links(&mut links, res);
+                                        match res.1 {
+                                            Some(signature) => {
+                                                if self.is_signature_allowed(signature).await {
+                                                    self.insert_signature(signature).await;
+                                                    self.links_visited.extend_links(&mut links, res.0);
+                                                }
+                                            }
+                                            _ => {
+                                                self.links_visited.extend_links(&mut links, res.0);
+                                            }
+                                        }
                                     }
                                 }
                                 else => break,

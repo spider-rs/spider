@@ -185,6 +185,8 @@ pub struct Configuration {
     pub only_html: bool,
     /// The concurrency limits to apply.
     pub concurrency_limit: Option<usize>,
+    /// Normalize the html de-deplucating the content.
+    pub normalize: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -983,6 +985,12 @@ impl Configuration {
     /// Dangerously accept invalid certificates - this should be used as a last resort.
     pub fn with_danger_accept_invalid_certs(&mut self, accept_invalid_certs: bool) -> &mut Self {
         self.accept_invalid_certs = accept_invalid_certs;
+        self
+    }
+
+    /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated.
+    pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
+        self.normalize = normalize;
         self
     }
 

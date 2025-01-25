@@ -13,7 +13,7 @@ pub mod trie;
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
 
-use crate::RelativeSelectors;
+use crate::{page::STREAMING_CHUNK_SIZE, RelativeSelectors};
 use abs::parse_absolute_url;
 use auto_encoder::is_binary_file;
 use bytes::{BufMut, BytesMut};
@@ -228,6 +228,8 @@ pub struct PageResponse {
     pub waf_check: bool,
     /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
     pub bytes_transferred: Option<f64>,
+    /// The signature of the page to use for handling de-duplication.
+    pub signature: Option<u64>,
 }
 
 /// wait for event with timeout
@@ -2511,8 +2513,8 @@ pub async fn openai_request(
 ) -> crate::features::openai_common::OpenAIReturn {
     match &gpt_configs.cache {
         Some(cache) => {
-            use std::hash::{DefaultHasher, Hash, Hasher};
-            let mut s = DefaultHasher::new();
+            use std::hash::{Hash, Hasher};
+            let mut s = ahash::AHasher::default();
 
             url.hash(&mut s);
             prompt.hash(&mut s);
@@ -2988,6 +2990,80 @@ pub fn prepare_url(u: &str) -> String {
         format!("https://{}", &u[split_index..])
     } else {
         format!("https://{}", u)
+    }
+}
+
+/// normalize the html markup to prevent Maliciousness.
+pub(crate) async fn normalize_html(html: &[u8]) -> Vec<u8> {
+    use lol_html::{element, send::Settings};
+
+    let mut output = Vec::new();
+
+    let mut rewriter = HtmlRewriter::new(
+        Settings {
+            element_content_handlers: vec![
+                element!("a[href]", |el| {
+                    el.remove_attribute("href");
+                    Ok(())
+                }),
+                element!("script, style, iframe, base, noscript", |el| {
+                    el.remove();
+                    Ok(())
+                }),
+                element!("*", |el| {
+                    let mut remove_attr = vec![];
+
+                    for attr in el.attributes() {
+                        let name = attr.name();
+                        let remove =
+                            !(name.starts_with("data-") || name == "id" || name == "class");
+                        if remove {
+                            remove_attr.push(name);
+                        }
+                    }
+
+                    for name in remove_attr {
+                        el.remove_attribute(&name);
+                    }
+
+                    Ok(())
+                }),
+            ],
+            ..Settings::new_send()
+        },
+        |c: &[u8]| output.extend_from_slice(c),
+    );
+
+    let chunks = html.chunks(*STREAMING_CHUNK_SIZE);
+    let mut stream = tokio_stream::iter(chunks);
+    let mut wrote_error = false;
+
+    while let Some(chunk) = stream.next().await {
+        if rewriter.write(chunk).is_err() {
+            wrote_error = true;
+            break;
+        }
+    }
+
+    if !wrote_error {
+        let _ = rewriter.end();
+    }
+
+    output
+}
+
+/// Hash html markup.
+pub(crate) async fn hash_html(html: &[u8]) -> u64 {
+    let normalized_html = normalize_html(html).await;
+
+    if !normalized_html.is_empty() {
+        use std::hash::{Hash, Hasher};
+        let mut s = ahash::AHasher::default();
+        normalized_html.hash(&mut s);
+        let key = s.finish();
+        key
+    } else {
+        Default::default()
     }
 }
 

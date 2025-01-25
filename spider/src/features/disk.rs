@@ -103,19 +103,35 @@ impl DatabaseHandler {
                 let pool =
                     SqlitePool::connect_lazy(&db_url).expect("Failed to connect to the database");
 
-                if let Err(e) = sqlx::query(
-                    r#"
-                CREATE TABLE IF NOT EXISTS resources (
-                    id INTEGER PRIMARY KEY,
-                    url TEXT NOT NULL COLLATE NOCASE
-                );
-                CREATE INDEX IF NOT EXISTS idx_url ON resources (url COLLATE NOCASE);
-                "#,
+                let create_resources_table = sqlx::query(
+                    r#"CREATE TABLE IF NOT EXISTS resources (
+                            id INTEGER PRIMARY KEY,
+                            url TEXT NOT NULL COLLATE NOCASE
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_url ON resources (url COLLATE NOCASE);"#,
                 )
-                .execute(&pool)
-                .await
-                {
-                    log::warn!("SQLite error: {:?}", e)
+                .execute(&pool);
+
+                let create_signatures_table = sqlx::query(
+                    r#"CREATE TABLE IF NOT EXISTS signatures (
+                            id INTEGER PRIMARY KEY,
+                            url INTEGER NOT NULL
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_url ON signatures (url);"#,
+                )
+                .execute(&pool);
+
+                // Run the queries concurrently
+                let (resources_result, signatures_result) =
+                    tokio::join!(create_resources_table, create_signatures_table);
+
+                // Handle possible errors
+                if let Err(e) = resources_result {
+                    log::warn!("SQLite error creating resources table: {:?}", e);
+                }
+
+                if let Err(e) = signatures_result {
+                    log::warn!("SQLite error creating signatures table: {:?}", e);
                 }
 
                 pool
@@ -142,11 +158,47 @@ impl DatabaseHandler {
         }
     }
 
+    /// Check if a signature exists (ignore case)
+    pub async fn signature_exists(&self, pool: &SqlitePool, signature_to_check: u64) -> bool {
+        match sqlx::query("SELECT 1 FROM signatures WHERE url = ? LIMIT 1")
+            .bind(signature_to_check.to_string())
+            .fetch_optional(pool)
+            .await
+        {
+            Ok(result) => result.is_some(),
+            Err(e) => {
+                if let Some(db_err) = e.as_database_error() {
+                    emit_log(db_err.message());
+                } else {
+                    emit_log(&format!("A non-database error occurred: {:?}", e));
+                }
+                false
+            }
+        }
+    }
+
     /// Insert a new URL if it doesn't exist
-    pub async fn insert_url(&self, pool: &SqlitePool, new_url: &CaseInsensitiveString) {
+    pub async fn insert_url(&self, pool: &SqlitePool, new_url: &str) {
         if !self.url_exists(pool, new_url).await {
             if let Err(e) = sqlx::query("INSERT INTO resources (url) VALUES (?)")
-                .bind(new_url.to_string())
+                .bind(new_url)
+                .execute(pool)
+                .await
+            {
+                if let Some(db_err) = e.as_database_error() {
+                    emit_log(db_err.message());
+                } else {
+                    emit_log(&format!("A non-database error occurred: {:?}", e));
+                }
+            }
+        }
+    }
+
+    /// Insert a new signature if it doesn't exist
+    pub async fn insert_signature(&self, pool: &SqlitePool, new_signature: u64) {
+        if !self.signature_exists(pool, new_signature).await {
+            if let Err(e) = sqlx::query("INSERT INTO signatures (url) VALUES (?)")
+                .bind(new_signature.to_string())
                 .execute(pool)
                 .await
             {
@@ -238,7 +290,10 @@ impl DatabaseHandler {
 
     /// Clear the resources table.
     pub async fn clear_table(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM resources").execute(pool).await?;
+        let _ = tokio::join!(
+            sqlx::query("DELETE FROM resources").execute(pool),
+            sqlx::query("DELETE FROM signatures").execute(pool)
+        );
         Ok(())
     }
 }

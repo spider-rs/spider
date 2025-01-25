@@ -3,7 +3,9 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
-use crate::utils::{get_domain_from_url, networking_capable, PageResponse, RequestError};
+use crate::utils::{
+    get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
+};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -268,6 +270,8 @@ pub struct Page {
     pub bytes_transferred: Option<f64>,
     /// The page was blocked from crawling usual from using website::on_should_crawl_callback.
     pub blocked_crawl: bool,
+    /// The signature of the page to de-duplicate content.
+    pub signature: Option<u64>,
 }
 
 /// Represent a page visited.
@@ -309,6 +313,8 @@ pub struct Page {
     pub waf_check: bool,
     /// The page was blocked from crawling usual from using website::on_should_crawl_callback.
     pub blocked_crawl: bool,
+    /// The signature of the page to de-duplicate content.
+    pub signature: Option<u64>,
 }
 
 /// Validate link and push into the map
@@ -709,6 +715,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
         blocked_crawl: false,
+        signature: res.signature,
     }
 }
 
@@ -751,11 +758,13 @@ pub struct PageLinkBuildSettings {
     pub tld: bool,
     /// Subdomain handling resources.
     pub subdomains: bool,
+    /// De-duplication signature.
+    pub normalize: bool,
 }
 
 impl PageLinkBuildSettings {
     /// New build link settings.
-    pub fn new(ssg_build: bool, full_resources: bool) -> Self {
+    pub(crate) fn new(ssg_build: bool, full_resources: bool) -> Self {
         Self {
             ssg_build,
             full_resources,
@@ -764,12 +773,19 @@ impl PageLinkBuildSettings {
     }
 
     /// New build full link settings.
-    pub fn new_full(ssg_build: bool, full_resources: bool, subdomains: bool, tld: bool) -> Self {
+    pub(crate) fn new_full(
+        ssg_build: bool,
+        full_resources: bool,
+        subdomains: bool,
+        tld: bool,
+        normalize: bool,
+    ) -> Self {
         Self {
             ssg_build,
             full_resources,
             subdomains,
             tld,
+            normalize,
         }
     }
 }
@@ -1004,10 +1020,13 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                response
-                    .0
-                    .content
-                    .replace(Box::new(collected_bytes.freeze()));
+                let content = Box::new(collected_bytes.freeze());
+
+                if r_settings.normalize {
+                    response.0.signature.replace(hash_html(&content).await);
+                }
+
+                response.0.content.replace(content);
 
                 if r_settings.ssg_build {
                     if let Some(ssg_map) = ssg_map {
@@ -1692,14 +1711,12 @@ impl Page {
                 let html_bytes = html.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
 
-                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+                let mut stream = tokio_stream::iter(chunks);
 
                 while let Some(chunk) = stream.next().await {
-                    if let Ok(chunk) = chunk {
-                        if rewriter.write(chunk).is_err() {
-                            wrote_error = true;
-                            break;
-                        }
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        break;
                     }
                 }
 
