@@ -900,8 +900,6 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let external_domains_caseless = external_domains_caseless.clone();
-
                 let base_links_settings = if r_settings.full_resources {
                     lol_html::element!("a[href],script[src],link[href]", |el| {
                         let tag_name = el.tag_name();
