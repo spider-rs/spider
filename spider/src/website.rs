@@ -1460,7 +1460,6 @@ impl Website {
     /// Setup selectors for handling link targets.
     fn setup_selectors(&self) -> Option<RelativeSelectors> {
         setup_website_selectors(
-            self.get_url_parsed(),
             self.get_url().inner(),
             AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
         )

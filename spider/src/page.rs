@@ -3,7 +3,7 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::{convert_abs_path, convert_abs_url_base};
-use crate::utils::{PageResponse, RequestError};
+use crate::utils::{get_domain_from_url, PageResponse, RequestError};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -504,23 +504,29 @@ pub(crate) fn parent_host_match(
 
 /// html selector for valid web pages for domain.
 pub(crate) fn get_page_selectors_base(
-    u: &Url,
+    u: &str,
     subdomains: bool,
     tld: bool,
 ) -> Option<RelativeSelectors> {
-    let u = convert_abs_url_base(u);
+    let dname = get_domain_from_url(u);
+    let host_name = CompactString::from(dname);
 
-    let b = match u.host_str() {
-        Some(host) => host.to_ascii_lowercase(),
-        _ => Default::default(),
+    let scheme = if u.starts_with("https://") {
+        "https"
+    } else if u.starts_with("http://") {
+        "http"
+    } else if u.starts_with("file://") {
+        "file"
+    } else if u.starts_with("wss://") {
+        "wss"
+    } else if u.starts_with("ws://") {
+        "ws"
+    } else {
+        // default to https
+        "https"
     };
 
-    let host_name = CompactString::from(b);
-    let scheme = u.scheme();
-
     Some(if tld || subdomains {
-        let dname = domain_name(&u);
-
         let dname = if tld {
             extract_root_domain(dname)
         } else {
@@ -543,10 +549,7 @@ pub(crate) fn get_page_selectors_base(
 
 /// html selector for valid web pages for domain.
 pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
-    match Url::parse(url) {
-        Ok(host) => get_page_selectors_base(&host, subdomains, tld),
-        _ => None,
-    }
+    get_page_selectors_base(&url, subdomains, tld)
 }
 
 #[cfg(not(feature = "decentralized"))]

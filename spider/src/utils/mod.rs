@@ -2868,18 +2868,13 @@ pub async fn reset(target: &str) {
 
 /// Setup selectors for handling link targets.
 pub(crate) fn setup_website_selectors(
-    domain_parsed: &Option<Box<Url>>,
     url: &str,
     allowed: AllowedDomainTypes,
 ) -> Option<RelativeSelectors> {
-    use crate::page::{get_page_selectors, get_page_selectors_base};
     let subdomains = allowed.subdomains;
     let tld = allowed.tld;
 
-    match domain_parsed {
-        Some(u) => get_page_selectors_base(u, subdomains, tld),
-        _ => get_page_selectors(url, subdomains, tld),
-    }
+    crate::page::get_page_selectors_base(url, subdomains, tld)
 }
 
 /// Allow subdomains or tlds.
@@ -2909,7 +2904,7 @@ pub(crate) fn modify_selectors(
 ) {
     *domain_parsed = parse_absolute_url(domain);
     *url = Box::new(domain.into());
-    if let Some(s) = setup_website_selectors(domain_parsed, url.inner(), allowed) {
+    if let Some(s) = setup_website_selectors(url.inner(), allowed) {
         base.0 = s.0;
         base.1 = s.1;
         if let Some(prior_domain) = prior_domain {
