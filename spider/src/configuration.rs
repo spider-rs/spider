@@ -7,6 +7,7 @@ pub use crate::features::chrome_common::{
     WaitForIdleNetwork, WaitForSelector, WebAutomation,
 };
 pub use crate::features::openai_common::GPTConfigs;
+use crate::utils::get_domain_from_url;
 use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::time::Duration;
@@ -959,9 +960,12 @@ impl Configuration {
                         if d == "*" {
                             Some("*".into())
                         } else {
-                            match url::Url::parse(&d) {
-                                Ok(d) => Some(d.host_str().unwrap_or_default().into()),
-                                _ => None,
+                            let host = get_domain_from_url(&d);
+
+                            if !host.is_empty() {
+                                Some(host.into())
+                            } else {
+                                None
                             }
                         }
                     })

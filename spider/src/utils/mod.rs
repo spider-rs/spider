@@ -2950,6 +2950,25 @@ pub(crate) fn get_path_from_url(url: &str) -> &str {
     }
 }
 
+/// Get the domain from a url.
+pub(crate) fn get_domain_from_url(url: &str) -> &str {
+    if let Some(start_pos) = url.find("//") {
+        let pos = start_pos + 2;
+
+        if let Some(first_slash_pos) = url[pos..].find('/') {
+            &url[pos..pos + first_slash_pos]
+        } else {
+            &url[pos..]
+        }
+    } else {
+        if let Some(first_slash_pos) = url.find('/') {
+            &url[..first_slash_pos]
+        } else {
+            &url
+        }
+    }
+}
+
 #[cfg(feature = "tracing")]
 /// Spawns a new asynchronous task.
 pub(crate) fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
