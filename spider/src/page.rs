@@ -3,7 +3,7 @@ use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
-use crate::utils::{get_domain_from_url, PageResponse, RequestError};
+use crate::utils::{get_domain_from_url, networking_capable, PageResponse, RequestError};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -354,6 +354,21 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         }
     }
     None
+}
+
+/// determine a url is relative page
+pub(crate) fn relative_directory_url(href: &str) -> bool {
+    if href.starts_with("./") || href.starts_with("//") || href.starts_with("../") {
+        true
+    } else {
+        let network_capable = networking_capable(href);
+
+        if network_capable {
+            false
+        } else {
+            !href.starts_with("/")
+        }
+    }
 }
 
 /// Validate link and push into the map without extended verify.
@@ -869,11 +884,15 @@ impl Page {
 
                 // always use a base url.
                 let base = if domain_parsed.is_none() {
-                    prior_domain
+                    match Url::parse(url) {
+                        Ok(u) => Some(u),
+                        _ => None,
+                    }
                 } else {
-                    domain_parsed
-                }
-                .as_deref();
+                    domain_parsed.as_deref().cloned()
+                };
+                // original domain to match local pages.
+                let original_page = prior_domain.as_deref();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -886,10 +905,15 @@ impl Page {
                 let base_links_settings = if r_settings.full_resources {
                     lol_html::element!("a[href],script[src],link[href]", |el| {
                         let tag_name = el.tag_name();
-
                         let attribute = if tag_name == "script" { "src" } else { "href" };
 
                         if let Some(href) = el.get_attribute(attribute) {
+                            let base = if relative_directory_url(&href) {
+                                original_page
+                            } else {
+                                base.as_ref()
+                            };
+
                             push_link(
                                 &base,
                                 &href,
@@ -903,11 +927,17 @@ impl Page {
                                 links_pages,
                             );
                         }
+
                         Ok(())
                     })
                 } else {
                     lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
+                            let base = if relative_directory_url(&href) {
+                                original_page
+                            } else {
+                                base.as_ref()
+                            };
                             push_link(
                                 &base,
                                 &href,
@@ -985,7 +1015,7 @@ impl Page {
                     if let Some(ssg_map) = ssg_map {
                         if let Some(ref cell) = cell {
                             if let Some(source) = cell.get() {
-                                if let Some(url_base) = base {
+                                if let Some(ref url_base) = base {
                                     let build_ssg_path = convert_abs_path(url_base, source);
                                     let build_page =
                                         Page::new_page(build_ssg_path.as_str(), client).await;
@@ -1004,6 +1034,12 @@ impl Page {
                                             if !(last_segment.starts_with("[")
                                                 && last_segment.ends_with("]"))
                                             {
+                                                let base = if relative_directory_url(&href) {
+                                                    original_page
+                                                } else {
+                                                    base.as_ref()
+                                                };
+
                                                 push_link(
                                                     &base,
                                                     &href,
@@ -1611,9 +1647,11 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
-                let base = if base.is_some() {
-                    base.as_deref()
-                } else {
+
+                let base = base.as_deref();
+
+                // original domain to match local pages.
+                let original_page = {
                     self.set_url_parsed_direct_empty();
                     self.get_url_parsed_ref().as_ref()
                 };
@@ -1621,6 +1659,14 @@ impl Page {
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
+                            let base = if relative_directory_url(&href) {
+                                original_page
+                            } else if base.is_some() {
+                                base.as_deref()
+                            } else {
+                                original_page
+                            };
+
                             push_link(
                                 &base,
                                 &href,
@@ -1713,9 +1759,10 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let base = if base.is_some() {
-                    base.as_deref()
-                } else {
+                let base = base.as_deref();
+
+                // original domain to match local pages.
+                let original_page = {
                     self.set_url_parsed_direct_empty();
                     self.get_url_parsed_ref().as_ref()
                 };
@@ -1724,6 +1771,14 @@ impl Page {
                     element_content_handlers: vec![
                         lol_html::element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
+                                let base = if relative_directory_url(&href) {
+                                    original_page
+                                } else if base.is_some() {
+                                    base.as_deref()
+                                } else {
+                                    original_page
+                                };
+
                                 push_link(
                                     &base,
                                     &href,
@@ -1793,6 +1848,14 @@ impl Page {
 
                                 // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                    let base = if relative_directory_url(&href) {
+                                        original_page
+                                    } else if base.is_some() {
+                                        base.as_deref()
+                                    } else {
+                                        original_page
+                                    };
+
                                     push_link(
                                         &base,
                                         &href,
@@ -1900,6 +1963,7 @@ impl Page {
     ) -> HashSet<A> {
         use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
+        use chromiumoxide::error::CdpError;
         use lol_html::{doc_comments, element};
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1928,7 +1992,13 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base1 = base.clone();
+                let base = base.as_deref();
+
+                // original domain to match local pages.
+                let original_page = {
+                    self.set_url_parsed_direct_empty();
+                    self.get_url_parsed_ref().as_ref().cloned()
+                };
 
                 let rerender = AtomicBool::new(false);
 
@@ -1947,7 +2017,7 @@ impl Page {
                                             static_app = true;
                                         }
 
-                                        if let Some(ref base) = base1 {
+                                        if let Some(ref base) = base {
                                             let abs = convert_abs_path(&base, &src);
 
                                             if let Ok(mut paths) =
@@ -1968,8 +2038,16 @@ impl Page {
                         }),
                         element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
+                                let base = if relative_directory_url(&href) {
+                                    original_page.as_ref()
+                                } else if base.is_some() {
+                                    base.as_deref()
+                                } else {
+                                    original_page.as_ref()
+                                };
+
                                 push_link(
-                                    &base.as_deref(),
+                                    &base,
                                     &href,
                                     &mut inner_map,
                                     &selectors.0,
@@ -2009,14 +2087,12 @@ impl Page {
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
 
-                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+                let mut stream = tokio_stream::iter(chunks);
 
                 while let Some(chunk) = stream.next().await {
-                    if let Ok(chunk) = chunk {
-                        if let Err(_) = rewriter.write(chunk) {
-                            wrote_error = true;
-                            break;
-                        }
+                    if let Err(_) = rewriter.write(chunk) {
+                        wrote_error = true;
+                        break;
                     }
                 }
 
@@ -2085,7 +2161,7 @@ impl Page {
                             if let Some(h) = intercept_handle {
                                 let abort_handle = h.abort_handle();
                                 if let Err(elasped) =
-                                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h)
+                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
                                         .await
                                 {
                                     log::warn!("Handler timeout exceeded {elasped}");
@@ -2093,9 +2169,31 @@ impl Page {
                                 }
                             }
 
-                            if let Ok(resource) = page_resource {
-                                if let Err(_) = tx.send(resource) {
-                                    log::info!("the receiver dropped - {target_url}");
+                            match page_resource {
+                                Ok(resource) => {
+                                    if let Err(_) = tx.send(resource) {
+                                        log::info!("the receiver dropped - {target_url}");
+                                    }
+                                }
+                                Err(e) => {
+                                    let mut default_response: PageResponse = Default::default();
+
+                                    default_response.final_url = Some(target_url.clone());
+
+                                    match e {
+                                        CdpError::NotFound => {
+                                            default_response.status_code = StatusCode::NOT_FOUND;
+                                        }
+                                        CdpError::NoResponse => {
+                                            default_response.status_code =
+                                                StatusCode::REQUEST_TIMEOUT;
+                                        }
+                                        _ => (),
+                                    }
+
+                                    if let Err(_) = tx.send(default_response) {
+                                        log::info!("the receiver dropped - {target_url}");
+                                    }
                                 }
                             }
                         }
@@ -2110,7 +2208,7 @@ impl Page {
                                         Some(h) => auto_encode_bytes(&h),
                                         _ => Default::default(),
                                     },
-                                    &base,
+                                    &base.as_deref().cloned().map(Box::new),
                                 )
                                 .await;
                             map.extend(extended_map)
@@ -2172,12 +2270,12 @@ impl Page {
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
 
-                let base = if base.is_some() {
-                    base.as_deref()
-                } else {
+                let base = base.as_deref();
+
+                // original domain to match local pages.
+                let original_page = {
                     self.set_url_parsed_direct_empty();
-                    let base = self.get_url_parsed_ref().as_ref();
-                    base
+                    self.get_url_parsed_ref().as_ref().cloned()
                 };
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
@@ -2190,6 +2288,14 @@ impl Page {
                             "href"
                         };
                         if let Some(href) = el.get_attribute(attribute) {
+                            let base = if relative_directory_url(&href) {
+                                original_page.as_ref()
+                            } else if base.is_some() {
+                                base.as_deref()
+                            } else {
+                                original_page.as_ref()
+                            };
+
                             push_link(
                                 &base,
                                 &href,
@@ -2220,14 +2326,12 @@ impl Page {
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
 
-                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
+                let mut stream = tokio_stream::iter(chunks);
 
                 while let Some(chunk) = stream.next().await {
-                    if let Ok(chunk) = chunk {
-                        if rewriter.write(chunk).is_err() {
-                            wrote_error = true;
-                            break;
-                        }
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        break;
                     }
                 }
 
