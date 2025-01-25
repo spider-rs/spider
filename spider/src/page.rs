@@ -2,7 +2,7 @@ use crate::compact_str::CompactString;
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
-use crate::utils::abs::{convert_abs_path, convert_abs_url_base};
+use crate::utils::abs::convert_abs_path;
 use crate::utils::{get_domain_from_url, PageResponse, RequestError};
 use crate::CaseInsensitiveString;
 use crate::Client;

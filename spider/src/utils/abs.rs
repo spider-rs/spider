@@ -33,13 +33,6 @@ pub(crate) fn convert_abs_url(u: &mut Url) {
     }
 }
 
-/// convert abs path without url returning a new url
-pub(crate) fn convert_abs_url_base(u: &Url) -> Url {
-    let mut u = u.clone();
-    convert_abs_url(&mut u);
-    u
-}
-
 /// Parse the absolute url
 pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     match url::Url::parse(url) {

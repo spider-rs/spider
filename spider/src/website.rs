@@ -10,8 +10,8 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::{
-    emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, setup_website_selectors,
-    spawn_set, spawn_task, AllowedDomainTypes,
+    emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, networking_capable, prepare_url,
+    setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
 };
 
 use crate::utils::interner::ListBucket;
@@ -295,10 +295,10 @@ impl Website {
     /// Initialize Website object with a start link to crawl.
     pub fn new(url: &str) -> Self {
         let url = url.trim();
-        let url: Box<CaseInsensitiveString> = if url.starts_with("http") {
+        let url: Box<CaseInsensitiveString> = if networking_capable(url) {
             CaseInsensitiveString::new(&url).into()
         } else {
-            CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+            CaseInsensitiveString::new(&prepare_url(url)).into()
         };
 
         let domain_parsed: Option<Box<Url>> = parse_absolute_url(&url);
@@ -325,11 +325,13 @@ impl Website {
         } else {
             url
         };
-        let domain: Box<CaseInsensitiveString> = if url.starts_with("http") {
+
+        let domain: Box<CaseInsensitiveString> = if networking_capable(url) {
             CaseInsensitiveString::new(&url).into()
         } else {
-            CaseInsensitiveString::new(&string_concat!("https://", url)).into()
+            CaseInsensitiveString::new(&prepare_url(&url)).into()
         };
+
         self.domain_parsed = parse_absolute_url(&domain);
         self.url = domain;
         self
@@ -913,15 +915,14 @@ impl Website {
     /// Absolute base url of crawl.
     pub fn get_absolute_path(&self, domain: Option<&str>) -> Option<Url> {
         if domain.is_some() {
-            match url::Url::parse(domain.unwrap_or_default()) {
-                Ok(mut u) => {
-                    if let Ok(mut path) = u.path_segments_mut() {
+            url::Url::parse(domain.unwrap_or_default())
+                .ok()
+                .map(|mut url| {
+                    if let Ok(mut path) = url.path_segments_mut() {
                         path.clear();
                     }
-                    Some(u)
-                }
-                _ => None,
-            }
+                    url
+                })
         } else if let Some(mut d) = self.domain_parsed.as_deref().cloned() {
             if let Ok(mut path) = d.path_segments_mut() {
                 path.clear();
@@ -1526,12 +1527,9 @@ impl Website {
         let mut expanded = crate::features::glob::expand_url(&domain_name);
 
         if expanded.len() == 0 {
-            match self.get_absolute_path(Some(domain_name)) {
-                Some(u) => {
-                    expanded.push(u.as_str().into());
-                }
-                _ => (),
-            };
+            if let Some(u) = self.get_absolute_path(Some(domain_name)) {
+                expanded.push(u.as_str().into());
+            }
         };
 
         expanded

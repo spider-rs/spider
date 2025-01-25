@@ -2964,6 +2964,29 @@ pub(crate) fn get_domain_from_url(url: &str) -> &str {
     }
 }
 
+/// Determine if networking is capable for a URL.
+pub fn networking_capable(url: &str) -> bool {
+    url.starts_with("https://")
+        || url.starts_with("http://")
+        || url.starts_with("file://")
+        || url.starts_with("ftp://")
+}
+
+/// Prepare the url for parsing if it fails. Use this method if the url does not start with http or https.
+pub fn prepare_url(u: &str) -> String {
+    if let Some(index) = u.find("://") {
+        let split_index = u
+            .char_indices()
+            .nth(index + 3)
+            .map(|(i, _)| i)
+            .unwrap_or(u.len());
+
+        format!("https://{}", &u[split_index..])
+    } else {
+        format!("https://{}", u)
+    }
+}
+
 #[cfg(feature = "tracing")]
 /// Spawns a new asynchronous task.
 pub(crate) fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
