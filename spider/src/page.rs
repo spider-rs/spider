@@ -115,6 +115,8 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
     static ref SSG_CAPTURE: Regex =  Regex::new(r#""(.*?)""#).unwrap();
     static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
+    /// Unkown status code.
+    pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(599).expect("valid status code");
 }
 
 #[cfg(all(
@@ -1029,9 +1031,13 @@ impl Page {
             Err(err) => {
                 log::info!("error fetching {}", url);
                 let mut page_response = PageResponse::default();
-                if let Ok(status_code) = StatusCode::from_u16(599) {
+
+                if let Some(status_code) = err.status() {
                     page_response.status_code = status_code;
+                } else {
+                    page_response.status_code = *UNKNOWN_STATUS_ERROR;
                 }
+
                 page_response.error_for_status = Some(Err(err));
 
                 page_response

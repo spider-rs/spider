@@ -2169,12 +2169,16 @@ pub async fn fetch_page_html_chrome(
                             status_code: res.status(),
                             ..Default::default()
                         },
-                        Err(_) => {
+                        Err(err) => {
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
-                            if let Ok(status_code) = StatusCode::from_u16(599) {
+
+                            if let Some(status_code) = err.status() {
                                 page_response.status_code = status_code;
+                            } else {
+                                page_response.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
                             }
+
                             page_response
                         }
                     }
