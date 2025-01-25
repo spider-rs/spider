@@ -10,6 +10,8 @@ lazy_static! {
     static ref CLIENT: spider::Client = {
         let mut proxy_website = Website::new("proxy");
 
+        utils::connect::init_background_runtime();
+
         proxy_website.configure_http_client()
     };
 }
