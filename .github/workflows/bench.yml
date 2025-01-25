@@ -32,8 +32,8 @@ jobs:
       - name: Setup Local Web server
         run: |
           git clone https://github.com/tailwindlabs/tailwindcss.com && cd tailwindcss.com
-          yarn && yarn build
-          yarn start & true
+          npm i --force && npm run build
+          npm run start & true
       - name: Run Benchmark Compare OSS
         run: cargo bench --bench crawl
       - name: Run Benchmark Compare OSS - Features[decentralized]
