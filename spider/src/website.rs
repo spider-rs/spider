@@ -2705,7 +2705,6 @@ impl Website {
                                 },
                                 Some(result) = set.join_next(), if !set.is_empty() => {
                                     if let Ok(res) = result {
-                                        // todo: add final url catching domains to make sure we do not add extra pages.
                                         self.links_visited.extend_links(&mut links, res);
                                     }
                                 }

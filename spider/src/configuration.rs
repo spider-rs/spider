@@ -107,7 +107,7 @@ pub struct Configuration {
     #[cfg(feature = "cron")]
     /// The type of cron to run either crawl or scrape.
     pub cron_type: CronType,
-    /// The max depth to crawl for a website.
+    /// The max depth to crawl for a website. Defaults to 25 to help prevent infinite recursion.
     pub depth: usize,
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
@@ -335,6 +335,7 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
+            depth: 25,
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_secs(15))),
             only_html: true,
@@ -347,6 +348,7 @@ impl Configuration {
     pub fn new() -> Self {
         Self {
             delay: 0,
+            depth: 25,
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_secs(15))),
             chrome_intercept: RequestInterceptConfiguration::new(cfg!(
