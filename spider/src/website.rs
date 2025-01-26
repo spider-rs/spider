@@ -2857,14 +2857,13 @@ impl Website {
                             }
                         }
 
+                        self.subscription_guard();
                         self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                         if links.is_empty() && set.is_empty() {
                             break;
                         }
                     }
-
-                    self.subscription_guard();
                 }
             }
             _ => log::info!("{} - {}", self.url, INVALID_URL),
@@ -3165,14 +3164,13 @@ impl Website {
                                         }
                                     }
 
+                                    self.subscription_guard();
                                     self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                                     if links.is_empty() && set.is_empty() {
                                         break;
                                     }
                                 }
-
-                                self.subscription_guard();
 
                                 crate::features::chrome::close_browser(
                                     browser_handle,
@@ -3566,6 +3564,7 @@ impl Website {
                                 }
                             }
 
+                            self.subscription_guard();
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                             if links.is_empty() && set.is_empty() {
@@ -3573,7 +3572,6 @@ impl Website {
                             }
                         }
 
-                        self.subscription_guard();
                         crate::features::chrome::close_browser(
                             browser_handle,
                             &shared.4,
