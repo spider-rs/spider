@@ -330,32 +330,30 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 ) -> Option<Url> {
     if let Some(b) = base {
         let abs = convert_abs_path(b, href);
-        let new_page = abs != **b;
+
         if let Some(link_map) = links_pages {
-            link_map.insert(A::from(
-                (if new_page { abs.as_str() } else { href }).to_string(),
-            ));
+            link_map.insert(A::from(href.to_string()));
         }
-        if new_page {
-            let scheme = abs.scheme();
-            if scheme == "https" || scheme == "http" {
-                let host_name = abs.host_str();
-                let mut can_process = parent_host_match(
-                    host_name,
-                    base_domain,
-                    parent_host,
-                    base_input_domain,
-                    sub_matcher,
-                );
-                if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
-                    can_process = external_domains_caseless
-                        .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
-                        || external_domains_caseless
-                            .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
-                }
-                if can_process {
-                    return Some(abs);
-                }
+
+        let scheme = abs.scheme();
+
+        if scheme == "https" || scheme == "http" {
+            let host_name = abs.host_str();
+            let mut can_process = parent_host_match(
+                host_name,
+                base_domain,
+                parent_host,
+                base_input_domain,
+                sub_matcher,
+            );
+            if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
+                can_process = external_domains_caseless
+                    .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
+                    || external_domains_caseless
+                        .contains::<CaseInsensitiveString>(&CASELESS_WILD_CARD);
+            }
+            if can_process {
+                return Some(abs);
             }
         }
     }
@@ -526,11 +524,7 @@ pub(crate) fn parent_host_match(
 }
 
 /// html selector for valid web pages for domain.
-pub(crate) fn get_page_selectors_base(
-    u: &str,
-    subdomains: bool,
-    tld: bool,
-) -> Option<RelativeSelectors> {
+pub(crate) fn get_page_selectors_base(u: &str, subdomains: bool, tld: bool) -> RelativeSelectors {
     let dname = get_domain_from_url(u);
     let host_name = CompactString::from(dname);
 
@@ -549,7 +543,7 @@ pub(crate) fn get_page_selectors_base(
         "https"
     };
 
-    Some(if tld || subdomains {
+    if tld || subdomains {
         let dname = if tld {
             extract_root_domain(dname)
         } else {
@@ -567,11 +561,11 @@ pub(crate) fn get_page_selectors_base(
             smallvec::SmallVec::from([host_name, CompactString::from(scheme)]),
             CompactString::default(),
         )
-    })
+    }
 }
 
 /// html selector for valid web pages for domain.
-pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> Option<RelativeSelectors> {
+pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSelectors {
     get_page_selectors_base(&url, subdomains, tld)
 }
 
@@ -898,17 +892,16 @@ impl Page {
                     );
                 };
 
-                // always use a base url.
                 let base = if domain_parsed.is_none() {
-                    match Url::parse(url) {
-                        Ok(u) => Some(u),
-                        _ => None,
-                    }
+                    prior_domain
                 } else {
-                    domain_parsed.as_deref().cloned()
+                    domain_parsed
                 };
-                // original domain to match local pages.
-                let original_page = prior_domain.as_deref();
+
+                let original_page = match Url::parse(url) {
+                    Ok(u) => Some(u),
+                    _ => None,
+                };
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -923,9 +916,9 @@ impl Page {
 
                         if let Some(href) = el.get_attribute(attribute) {
                             let base = if relative_directory_url(&href) {
-                                original_page
+                                original_page.as_ref()
                             } else {
-                                base.as_ref()
+                                base.as_deref()
                             };
 
                             push_link(
@@ -948,9 +941,9 @@ impl Page {
                     lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
                             let base = if relative_directory_url(&href) {
-                                original_page
+                                original_page.as_ref()
                             } else {
-                                base.as_ref()
+                                base.as_deref()
                             };
                             push_link(
                                 &base,
@@ -1052,11 +1045,10 @@ impl Page {
                                                 && last_segment.ends_with("]"))
                                             {
                                                 let base = if relative_directory_url(&href) {
-                                                    original_page
+                                                    original_page.as_ref()
                                                 } else {
-                                                    base.as_ref()
+                                                    base.as_deref()
                                                 };
-
                                                 push_link(
                                                     &base,
                                                     &href,
@@ -1678,10 +1670,8 @@ impl Page {
                         if let Some(href) = el.get_attribute("href") {
                             let base = if relative_directory_url(&href) {
                                 original_page
-                            } else if base.is_some() {
-                                base.as_deref()
                             } else {
-                                original_page
+                                base.as_deref()
                             };
 
                             push_link(
@@ -1788,10 +1778,8 @@ impl Page {
                             if let Some(href) = el.get_attribute("href") {
                                 let base = if relative_directory_url(&href) {
                                     original_page
-                                } else if base.is_some() {
-                                    base.as_deref()
                                 } else {
-                                    original_page
+                                    base.as_deref()
                                 };
 
                                 push_link(
@@ -1865,10 +1853,8 @@ impl Page {
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
                                     let base = if relative_directory_url(&href) {
                                         original_page
-                                    } else if base.is_some() {
-                                        base.as_deref()
                                     } else {
-                                        original_page
+                                        base.as_deref()
                                     };
 
                                     push_link(
@@ -2055,10 +2041,8 @@ impl Page {
                             if let Some(href) = el.get_attribute("href") {
                                 let base = if relative_directory_url(&href) {
                                     original_page.as_ref()
-                                } else if base.is_some() {
-                                    base.as_deref()
                                 } else {
-                                    original_page.as_ref()
+                                    base.as_deref()
                                 };
 
                                 push_link(
@@ -2305,10 +2289,8 @@ impl Page {
                         if let Some(href) = el.get_attribute(attribute) {
                             let base = if relative_directory_url(&href) {
                                 original_page.as_ref()
-                            } else if base.is_some() {
-                                base.as_deref()
                             } else {
-                                original_page.as_ref()
+                                base.as_deref()
                             };
 
                             push_link(
@@ -2539,7 +2521,7 @@ async fn parse_links() {
     let mut page = Page::new(link_result, &client).await;
     let selector = get_page_selectors(link_result, false, false);
 
-    let links = page.links(&selector.unwrap(), &None).await;
+    let links = page.links(&selector, &None).await;
 
     assert!(
         links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),

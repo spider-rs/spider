@@ -57,8 +57,6 @@ enum LinkReturn {
 #[inline]
 /// Handle the base url return to determine 3rd party urls.
 fn handle_base(href: &str) -> LinkReturn {
-    let href = href.trim();
-
     if href.is_empty() || href == "#" || href == "javascript:void(0);" {
         return LinkReturn::EarlyReturn;
     }
@@ -117,37 +115,20 @@ pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
     if base.as_str() == href {
         return base.to_owned();
     }
-    if base.path() != "/" {
-        let mut base = base.clone();
-        convert_abs_url(&mut base);
 
-        match handle_base(href) {
-            LinkReturn::Absolute(u) => return u,
-            LinkReturn::EarlyReturn => return base.to_owned(),
-            _ => (),
-        }
+    match handle_base(href) {
+        LinkReturn::Absolute(u) => return u,
+        LinkReturn::EarlyReturn => return base.to_owned(),
+        _ => (),
+    }
 
-        match base.join(href) {
-            Ok(mut joined) => {
-                joined.set_fragment(None);
-                joined
-            }
-            Err(_) => base.to_owned(),
+    // we can swap the domains if they do not match incase of crawler redirect anti-bot
+    match base.join(href) {
+        Ok(mut joined) => {
+            joined.set_fragment(None);
+            joined
         }
-    } else {
-        match handle_base(href) {
-            LinkReturn::Absolute(u) => return u,
-            LinkReturn::EarlyReturn => return base.to_owned(),
-            _ => (),
-        }
-        // we can swap the domains if they do not match incase of crawler redirect anti-bot
-        match base.join(href) {
-            Ok(mut joined) => {
-                joined.set_fragment(None);
-                joined
-            }
-            Err(_) => base.to_owned(),
-        }
+        Err(_) => base.to_owned(),
     }
 }
 

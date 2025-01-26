@@ -52,35 +52,34 @@ async fn forward(
 
     let mut page = build("", Default::default());
 
-    let extracted = match spider::page::get_page_selectors(&url_path, subdomains, tld) {
-        Some(mut selectors) => {
-            let mut links: spider::hashbrown::HashSet<spider::CaseInsensitiveString> =
-                spider::hashbrown::HashSet::new();
+    let extracted = {
+        let mut selectors = spider::page::get_page_selectors(&url_path, subdomains, tld);
 
-            page.clone_from(
-                &spider::page::Page::new_page_streaming(
-                    &url_path,
-                    &CLIENT,
-                    false,
-                    &mut selectors,
-                    &Default::default(),
-                    &Default::default(),
-                    &mut links,
-                    None,
-                    &None,
-                    &mut None,
-                    &mut None,
-                )
-                .await,
-            );
+        let mut links: spider::hashbrown::HashSet<spider::CaseInsensitiveString> =
+            spider::hashbrown::HashSet::new();
 
-            let mut s = flexbuffers::FlexbufferSerializer::new();
+        page.clone_from(
+            &spider::page::Page::new_page_streaming(
+                &url_path,
+                &CLIENT,
+                false,
+                &mut selectors,
+                &Default::default(),
+                &Default::default(),
+                &mut links,
+                None,
+                &None,
+                &mut None,
+                &mut None,
+            )
+            .await,
+        );
 
-            let _ = links.serialize(&mut s);
+        let mut s = flexbuffers::FlexbufferSerializer::new();
 
-            s.take_buffer()
-        }
-        _ => Default::default(),
+        let _ = links.serialize(&mut s);
+
+        s.take_buffer()
     };
 
     #[cfg(feature = "headers")]

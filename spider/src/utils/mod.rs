@@ -2873,10 +2873,7 @@ pub async fn reset(target: &str) {
 }
 
 /// Setup selectors for handling link targets.
-pub(crate) fn setup_website_selectors(
-    url: &str,
-    allowed: AllowedDomainTypes,
-) -> Option<RelativeSelectors> {
+pub(crate) fn setup_website_selectors(url: &str, allowed: AllowedDomainTypes) -> RelativeSelectors {
     let subdomains = allowed.subdomains;
     let tld = allowed.tld;
 
@@ -2910,13 +2907,12 @@ pub(crate) fn modify_selectors(
 ) {
     *domain_parsed = parse_absolute_url(domain);
     *url = Box::new(domain.into());
-    if let Some(s) = setup_website_selectors(url.inner(), allowed) {
-        base.0 = s.0;
-        base.1 = s.1;
-        if let Some(prior_domain) = prior_domain {
-            if let Some(dname) = prior_domain.host_str() {
-                base.2 = dname.into();
-            }
+    let s = setup_website_selectors(url.inner(), allowed);
+    base.0 = s.0;
+    base.1 = s.1;
+    if let Some(prior_domain) = prior_domain {
+        if let Some(dname) = prior_domain.host_str() {
+            base.2 = dname.into();
         }
     }
 }
