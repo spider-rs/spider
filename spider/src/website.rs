@@ -2841,6 +2841,8 @@ impl Website {
                                                 self.links_visited.extend_links(&mut links, res.0);
                                             }
                                         }
+                                    } else {
+                                        break;
                                     }
                                 }
                                 else => break,
@@ -2923,8 +2925,11 @@ impl Website {
 
                                 self.configuration.configure_allowlist();
 
-                                let mut set: JoinSet<HashSet<CaseInsensitiveString>> =
-                                    JoinSet::new();
+                                let mut set: JoinSet<(
+                                    HashSet<CaseInsensitiveString>,
+                                    Option<u64>,
+                                )> = JoinSet::new();
+
                                 let shared = Arc::new((
                                     client.to_owned(),
                                     selectors,
@@ -3119,6 +3124,10 @@ impl Website {
 
                                                                 page.base = prev_domain;
 
+                                                                if shared.6.normalize {
+                                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                                }
+
                                                                 if let Some(cb) = on_should_crawl_callback {
                                                                     if !cb(&page) {
                                                                         page.blocked_crawl = true;
@@ -3128,14 +3137,17 @@ impl Website {
                                                                     }
                                                                 }
 
+                                                                let signature = page.signature;
+
                                                                 channel_send_page(
                                                                     &shared.2, page, &shared.4,
                                                                 );
 
-                                                                links
+                                                                (links, signature)
                                                             }
                                                             _ => Default::default(),
                                                         };
+
 
                                                         drop(permit);
 
@@ -3146,11 +3158,20 @@ impl Website {
                                                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                             }
                                             Some(result) = set.join_next(), if !set.is_empty() => {
-                                                match result {
-                                                    Ok(res) => self.links_visited.extend_links(&mut links, res),
-                                                    Err(_) => {
-                                                        break
+                                                if let Ok(res) = result {
+                                                    match res.1 {
+                                                        Some(signature) => {
+                                                            if self.is_signature_allowed(signature).await {
+                                                                self.insert_signature(signature).await;
+                                                                self.links_visited.extend_links(&mut links, res.0);
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            self.links_visited.extend_links(&mut links, res.0);
+                                                        }
                                                     }
+                                                } else{
+                                                    break
                                                 }
                                             }
                                             else => break,
@@ -3368,7 +3389,8 @@ impl Website {
                         );
                         self.configuration.configure_allowlist();
 
-                        let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
+                        let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> =
+                            JoinSet::new();
                         let semaphore = self.setup_semaphore();
 
                         let shared = Arc::new((
@@ -3523,8 +3545,11 @@ impl Website {
                                                     )
                                                     .await;
 
-                                                    page.base = prev_domain;
+                                                page.base = prev_domain;
 
+                                                if shared.5.normalize {
+                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                }
 
                                                 if let Some(cb) = on_should_crawl_callback {
                                                     if !cb(&page) {
@@ -3535,22 +3560,33 @@ impl Website {
                                                     }
                                                 }
 
+                                                let signature = page.signature;
 
                                                 channel_send_page(&shared.2, page, &shared.3);
+
                                                 drop(permit);
 
-                                                links
+                                                (links, signature)
                                             });
                                         }
 
                                         self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
                                     }
                                     Some(result) = set.join_next(), if !set.is_empty() => {
-                                        match result {
-                                            Ok(res) => self.links_visited.extend_links(&mut links, res),
-                                            Err(_) => {
-                                                break
+                                        if let Ok(res) = result {
+                                            match res.1 {
+                                                Some(signature) => {
+                                                    if self.is_signature_allowed(signature).await {
+                                                        self.insert_signature(signature).await;
+                                                        self.links_visited.extend_links(&mut links, res.0);
+                                                    }
+                                                }
+                                                _ => {
+                                                    self.links_visited.extend_links(&mut links, res.0);
+                                                }
                                             }
+                                        } else{
+                                            break
                                         }
                                     }
                                     else => break,
