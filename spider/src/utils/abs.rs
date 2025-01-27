@@ -112,6 +112,8 @@ fn handle_base(href: &str) -> LinkReturn {
 /// We always handle the urls from the base path.
 #[inline]
 pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
+    let href = href.trim();
+
     if base.as_str() == href {
         return base.to_owned();
     }
