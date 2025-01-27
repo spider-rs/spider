@@ -915,7 +915,7 @@ impl Page {
                         let attribute = if tag_name == "script" { "src" } else { "href" };
 
                         if let Some(href) = el.get_attribute(attribute) {
-                            let base = if relative_directory_url(&href) {
+                            let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page.as_ref()
                             } else {
                                 base.as_deref()
@@ -940,7 +940,7 @@ impl Page {
                 } else {
                     lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) {
+                            let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page.as_ref()
                             } else {
                                 base.as_deref()
@@ -1044,7 +1044,9 @@ impl Page {
                                             if !(last_segment.starts_with("[")
                                                 && last_segment.ends_with("]"))
                                             {
-                                                let base = if relative_directory_url(&href) {
+                                                let base = if relative_directory_url(&href)
+                                                    || base.is_none()
+                                                {
                                                     original_page.as_ref()
                                                 } else {
                                                     base.as_deref()
@@ -1668,7 +1670,7 @@ impl Page {
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![lol_html::element!(BASE_CSS_SELECTORS, |el| {
                         if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) {
+                            let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page
                             } else {
                                 base.as_deref()
@@ -1776,7 +1778,7 @@ impl Page {
                     element_content_handlers: vec![
                         lol_html::element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
                                     original_page
                                 } else {
                                     base.as_deref()
@@ -1851,7 +1853,7 @@ impl Page {
 
                                 // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
                                 if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
-                                    let base = if relative_directory_url(&href) {
+                                    let base = if relative_directory_url(&href) || base.is_none() {
                                         original_page
                                     } else {
                                         base.as_deref()
@@ -2039,7 +2041,7 @@ impl Page {
                         }),
                         element!(BASE_CSS_SELECTORS, |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
                                     original_page.as_ref()
                                 } else {
                                     base.as_deref()
@@ -2287,7 +2289,7 @@ impl Page {
                             "href"
                         };
                         if let Some(href) = el.get_attribute(attribute) {
-                            let base = if relative_directory_url(&href) {
+                            let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page.as_ref()
                             } else {
                                 base.as_deref()
@@ -2523,10 +2525,12 @@ async fn parse_links() {
 
     let links = page.links(&selector, &None).await;
 
+    let about_page = "https://choosealicense.com/about/".into();
+
     assert!(
-        links.contains::<CaseInsensitiveString>(&"https://choosealicense.com/about/".into()),
+        links.contains::<CaseInsensitiveString>(&about_page),
         "Could not find {}. Theses URLs was found {:?}",
-        page.get_url(),
+        about_page,
         &links
     );
 }
