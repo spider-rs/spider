@@ -988,7 +988,7 @@ impl Configuration {
         self
     }
 
-    /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated.
+    /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated. This may initially show the link in your links_visited or subscription calls but, the following links will not be crawled.
     pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
         self.normalize = normalize;
         self

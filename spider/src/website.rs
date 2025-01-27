@@ -1722,8 +1722,11 @@ impl Website {
 
             emit_log(url);
 
-            if let Some(sid) = page.signature {
-                self.insert_signature(sid).await;
+            if let Some(signature) = page.signature {
+                if !self.is_signature_allowed(signature).await {
+                    return Default::default();
+                }
+                self.insert_signature(signature).await;
             }
 
             self.insert_link(match self.on_link_find_callback {
@@ -4808,6 +4811,12 @@ impl Website {
     /// Block assets from loading from the network. Focus primarly on HTML documents.
     pub fn with_block_assets(&mut self, only_html: bool) -> &mut Self {
         self.configuration.with_block_assets(only_html);
+        self
+    }
+
+    /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated. This may initially show the link in your links_visited or subscription calls but, the following links will not be crawled.
+    pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
+        self.configuration.with_normalize(normalize);
         self
     }
 
