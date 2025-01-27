@@ -133,6 +133,7 @@ lazy_static! {
             _ => DEFAULT_LIMIT
         }
     };
+    static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -181,14 +182,11 @@ lazy_static! {
     };
 }
 
-lazy_static! {
-    static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
-}
-
-const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
+// const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
 
 /// the active status of the crawl.
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CrawlStatus {
     /// The crawl did not start yet.
     #[default]
@@ -217,6 +215,7 @@ pub enum CrawlStatus {
 
 /// The link activity for the crawl.
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ProcessLinkStatus {
     /// The link can process.
     #[default]
@@ -229,6 +228,7 @@ pub enum ProcessLinkStatus {
 
 /// The type of cron job to run
 #[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CronType {
     #[default]
     /// Crawl collecting links, page data, and etc.
