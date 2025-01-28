@@ -339,6 +339,7 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
 
         if scheme == "https" || scheme == "http" {
             let host_name = abs.host_str();
+
             let mut can_process = parent_host_match(
                 host_name,
                 base_domain,
@@ -346,6 +347,27 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
                 base_input_domain,
                 sub_matcher,
             );
+
+            // attempt to check if domain matches with port.
+            if !can_process
+                && host_name.is_some()
+                && abs.port().is_some()
+                && parent_host.contains(':')
+            {
+                if let Some(host) = host_name {
+                    let hname =
+                        string_concat!(host, ":", abs.port().unwrap_or_default().to_string());
+
+                    can_process = parent_host_match(
+                        Some(&hname),
+                        base_domain,
+                        parent_host,
+                        base_input_domain,
+                        sub_matcher,
+                    );
+                }
+            }
+
             if !can_process && host_name.is_some() && !external_domains_caseless.is_empty() {
                 can_process = external_domains_caseless
                     .contains::<CaseInsensitiveString>(&host_name.unwrap_or_default().into())
