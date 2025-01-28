@@ -19,7 +19,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::input::{
     MouseButton,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::page::{
-    FrameId, GetLayoutMetricsParams, GetLayoutMetricsReturns, Viewport,
+    FrameId, GetLayoutMetricsParams, GetLayoutMetricsReturns, PrintToPdfParams, Viewport,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::target::{ActivateTargetParams, SessionId, TargetId};
 use chromiumoxide_cdp::cdp::js_protocol::runtime::{
@@ -383,6 +383,7 @@ impl PageInner {
             .result)
     }
 
+    /// Take a screenshot of the page.
     pub async fn screenshot(&self, params: impl Into<ScreenshotParams>) -> Result<Vec<u8>> {
         self.activate().await?;
         let params = params.into();
@@ -435,6 +436,16 @@ impl PageInner {
         if full_page {
             self.execute(ClearDeviceMetricsOverrideParams {}).await?;
         }
+
+        Ok(utils::base64::decode(&res.data)?)
+    }
+
+    /// Convert the page to PDF.
+    pub async fn print_to_pdf(&self, params: impl Into<PrintToPdfParams>) -> Result<Vec<u8>> {
+        self.activate().await?;
+        let params = params.into();
+
+        let res = self.execute(params).await?.result;
 
         Ok(utils::base64::decode(&res.data)?)
     }

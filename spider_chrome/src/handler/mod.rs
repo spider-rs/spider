@@ -232,10 +232,11 @@ impl Handler {
                                 let event: EventTargetCreated = EventTargetCreated { target_info };
                                 self.on_target_created(event);
                                 let attach = AttachToTargetParams::new(target_id);
+
                                 let _ = self.conn.submit_command(
                                     attach.identifier(),
                                     None,
-                                    serde_json::to_value(attach).unwrap(),
+                                    serde_json::to_value(attach).unwrap_or_default(),
                                 );
                             }
 
@@ -413,13 +414,15 @@ impl Handler {
             }
         }
         let CdpEventMessage { params, method, .. } = event;
-        match params.clone() {
-            CdpEvent::TargetTargetCreated(ev) => self.on_target_created(ev),
-            CdpEvent::TargetAttachedToTarget(ev) => self.on_attached_to_target(ev),
-            CdpEvent::TargetTargetDestroyed(ev) => self.on_target_destroyed(ev),
-            CdpEvent::TargetDetachedFromTarget(ev) => self.on_detached_from_target(ev),
+
+        match params {
+            CdpEvent::TargetTargetCreated(ref ev) => self.on_target_created(ev.clone()),
+            CdpEvent::TargetAttachedToTarget(ref ev) => self.on_attached_to_target(ev.clone()),
+            CdpEvent::TargetTargetDestroyed(ref ev) => self.on_target_destroyed(ev.clone()),
+            CdpEvent::TargetDetachedFromTarget(ref ev) => self.on_detached_from_target(ev.clone()),
             _ => {}
         }
+
         chromiumoxide_cdp::consume_event!(match params {
             |ev| self.event_listeners.start_send(ev),
             |json| { let _ = self.event_listeners.try_send_custom(&method, json);}

@@ -9,7 +9,7 @@ use futures::channel::oneshot::Canceled;
 use thiserror::Error;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::Message;
-
+// use tokio::sync::oneshot::error::RecvError;
 use chromiumoxide_cdp::cdp::browser_protocol::page::FrameId;
 
 use crate::handler::frame::NavigationError;
@@ -61,6 +61,8 @@ pub enum CdpError {
     JavascriptException(Box<ExceptionDetails>),
     #[error("{0}")]
     Url(#[from] url::ParseError),
+    // #[error("{0}")]
+    // RecvError(#[from] RecvError),
 }
 impl CdpError {
     pub fn msg(msg: impl Into<String>) -> Self {

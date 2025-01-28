@@ -70,6 +70,8 @@ lazy_static::lazy_static! {
             "https://static.hotjar.com/",
             "https://matchadsrvr.yieldmo.com/track/",
             "https://sentry.io/api/",
+            "https://api2.branch.io/",
+            "https://i.clean.gg/",
             "https://prebid.media.net/",
             "https://buy.tinypass.com/",
             "https://idx.liadm.com",

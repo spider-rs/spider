@@ -1,0 +1,10 @@
+https://o55978.ingest.sentry.io/api
+https://api.atlassian.com/flags/api/v2/frontend/clientSdkKey/bxp-magnolia_web
+https://api.atlassian.com/flags/api/v2/frontend/experimentValues
+https://app.launchdarkly.com/sdk/goals/5afa3d7607a72221591aeb73
+https://events.launchdarkly.com/events/diagnostic/5afa3d7607a72221591aeb73
+https://app.launchdarkly.com/sdk/evalx/5afa3d7607a72221591aeb73/contexts/
+https://xp.atlassian.com/v1/rgstr
+https://www.atlassian.com/gateway/api/ais/available-products
+ https://www.atlassian.com/gateway/api/cookie-integrator/api/onetrust/jwt
+ingest.sentry.io/api/

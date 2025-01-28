@@ -651,6 +651,11 @@ impl Page {
         self.inner.screenshot(params).await
     }
 
+    /// Take a screenshot of the current page
+    pub async fn print_to_pdf(&self, params: impl Into<PrintToPdfParams>) -> Result<Vec<u8>> {
+        self.inner.print_to_pdf(params).await
+    }
+
     /// Save a screenshot of the page
     ///
     /// # Example save a png file of a website

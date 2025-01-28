@@ -1,0 +1,6 @@
+https://api.bounceexchange.com/bounce/
+https://lightning.bleacherreport.com/launch/
+https://sp.auth.adobe.com/entitlement/v4/AccessEnablerProxy.js
+https://cadmus.script.ac/d2uap9jskdzp2/script.js
+https://sp.auth.adobe.com/entitlement/v4/AccessEnablerProxy.html
+https://entitlement.auth.adobe.com/entitlement/v4/AccessEnabler.js

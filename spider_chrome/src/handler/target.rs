@@ -276,7 +276,7 @@ impl Target {
                     self.queued_events.push_back(TargetEvent::Request(Request {
                         method: runtime_cmd.identifier(),
                         session_id: Some(ev.session_id.clone().into()),
-                        params: serde_json::to_value(runtime_cmd).unwrap(),
+                        params: serde_json::to_value(runtime_cmd).unwrap_or_default(),
                     }));
                 }
 
@@ -288,7 +288,7 @@ impl Target {
                     self.queued_events.push_back(TargetEvent::Request(Request {
                         method: detach_command.identifier(),
                         session_id: self.session_id.clone().map(Into::into),
-                        params: serde_json::to_value(detach_command).unwrap(),
+                        params: serde_json::to_value(detach_command).unwrap_or_default(),
                     }));
                 }
             }
@@ -327,7 +327,7 @@ impl Target {
         TargetEvent::Request(Request {
             method: close_target.identifier(),
             session_id: self.session_id.clone().map(Into::into),
-            params: serde_json::to_value(close_target).unwrap(),
+            params: serde_json::to_value(close_target).unwrap_or_default(),
         })
     }
 
@@ -343,16 +343,19 @@ impl Target {
                 self.init_state = TargetInit::InitializingFrame(FrameManager::init_commands(
                     self.config.request_timeout,
                 ));
-                let params = AttachToTargetParams::builder()
+
+                if let Ok(params) = AttachToTargetParams::builder()
                     .target_id(self.target_id().clone())
                     .flatten(true)
                     .build()
-                    .unwrap();
-
-                return Some(TargetEvent::Request(Request::new(
-                    params.identifier(),
-                    serde_json::to_value(params).unwrap(),
-                )));
+                {
+                    return Some(TargetEvent::Request(Request::new(
+                        params.identifier(),
+                        serde_json::to_value(params).unwrap_or_default(),
+                    )));
+                } else {
+                    return None;
+                }
             }
             TargetInit::InitializingFrame(cmds) => {
                 self.session_id.as_ref()?;
@@ -606,6 +609,7 @@ impl Target {
             .unwrap();
         let enable_performance = performance::EnableParams::default();
         let enable_log = cdplog::EnableParams::default();
+
         CommandChain::new(
             vec![
                 (attach.identifier(), serde_json::to_value(attach).unwrap()),

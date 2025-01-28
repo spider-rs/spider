@@ -1,0 +1,3 @@
+https://atl-global.atlassian.com/js/2.219.0/xid/atl-xid.js
+https://atl-global.atlassian.com/js/atl-global.min.js
+https://xxid.atl-paas.net

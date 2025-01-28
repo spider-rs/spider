@@ -1,0 +1,12 @@
+https://sync.search.spotxchange.com/audience_id
+https://media.bleacherreport.com/video/upload/
+https://api2.branch.io/v1/open
+https://receive.wmcdp.io/v1/reg
+https://sp.auth.adobe.com/adobe-services/config/Bleacher
+https://sp.auth.adobe.com/o/client/token
+https://media.bleacherreport.com/video/upload/
+https://0c03b8bbf14bc87e6497b4f7d75ff5b4d35853b1.cws.conviva.com/0/wsg
+https://atlas.ngtv.io/v2/locate
+https://licensing.bitmovin.com/licensing
+https://live-fallback.bleacherreport.com/oam/v2/anonymous/register
+https://wmff.warnermediacdn.com/psm_2_prod_full.json?version=1

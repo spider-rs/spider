@@ -34,6 +34,14 @@ pub struct Connection<T: EventMessage> {
     _marker: PhantomData<T>,
 }
 
+lazy_static::lazy_static! {
+    /// Nagle's algorithm disabled?
+    static ref DISABLE_NAGLE: bool = match std::env::var("DISABLE_NAGLE") {
+        Ok(disable_nagle) => disable_nagle == "true",
+        _ => true
+    };
+}
+
 impl<T: EventMessage + Unpin> Connection<T> {
     pub async fn connect(debug_ws_url: impl AsRef<str>) -> Result<Self> {
         let config = WebSocketConfig {
@@ -42,9 +50,12 @@ impl<T: EventMessage + Unpin> Connection<T> {
             ..Default::default()
         };
 
-        let (ws, _) =
-            tokio_tungstenite::connect_async_with_config(debug_ws_url.as_ref(), Some(config), true)
-                .await?;
+        let (ws, _) = tokio_tungstenite::connect_async_with_config(
+            debug_ws_url.as_ref(),
+            Some(config),
+            *DISABLE_NAGLE,
+        )
+        .await?;
 
         Ok(Self {
             pending_commands: Default::default(),
@@ -139,6 +150,20 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
                     }
                     Err(err) => {
                         tracing::error!(target: "chromiumoxide::conn::raw_ws::parse_errors", msg = text, "Failed to parse raw WS message {err}");
+                        Err(err.into())
+                    }
+                };
+
+                Poll::Ready(Some(ready))
+            }
+            Some(Ok(WsMessage::Binary(mut text))) => {
+                let ready = match serde_json::from_slice::<Message<T>>(&mut text) {
+                    Ok(msg) => {
+                        tracing::trace!("Received {:?}", msg);
+                        Ok(msg)
+                    }
+                    Err(err) => {
+                        tracing::error!(target: "chromiumoxide::conn::raw_ws::parse_errors", "Failed to parse raw WS message {err}");
                         Err(err.into())
                     }
                 };
