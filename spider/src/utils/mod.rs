@@ -1090,7 +1090,6 @@ pub async fn fetch_page_html_chrome_base(
                 }
             })
             .await;
-
             match last_redirect {
                 Ok(last) => last,
                 _ => None,
@@ -2349,7 +2348,7 @@ pub async fn openai_request_base(
 
                 if let Some(ref structure) = gpt_configs.json_schema {
                     if let Some(ref schema) = structure.schema {
-                        if let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&schema) {
+                        if let Ok(mut schema) = crate::features::serde_json::from_str::<serde_json::Value>(&schema) {
                             if json_mode {
                                 // Insert the "js" property into the schema's properties. Todo: capture if the js property exist and re-word prompt to match new js property with after removal.
                                 if let Some(properties) = schema.get_mut("properties") {
