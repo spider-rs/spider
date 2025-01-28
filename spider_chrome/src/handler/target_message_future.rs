@@ -18,7 +18,6 @@ pin_project! {
         rx_request: oneshot::Receiver<T>,
         #[pin]
         target_sender: mpsc::Sender<TargetMessage>,
-
         message: Option<TargetMessage>,
     }
 }

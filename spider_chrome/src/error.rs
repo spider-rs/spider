@@ -26,6 +26,8 @@ pub enum CdpError {
     #[error("{0}")]
     Serde(#[from] serde_json::Error),
     #[error("{0}")]
+    SerdeSonic(#[from] sonic_rs::Error),
+    #[error("{0}")]
     Chrome(#[from] chromiumoxide_types::Error),
     #[error("Received no response from the chromium instance.")]
     NoResponse,
@@ -64,6 +66,7 @@ pub enum CdpError {
     // #[error("{0}")]
     // RecvError(#[from] RecvError),
 }
+
 impl CdpError {
     pub fn msg(msg: impl Into<String>) -> Self {
         CdpError::ChromeMessage(msg.into())

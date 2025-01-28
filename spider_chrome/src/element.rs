@@ -234,7 +234,13 @@ impl Element {
             .await?;
 
         if resp.result.r#type == RemoteObjectType::String {
-            let error_text = resp.result.value.unwrap().as_str().unwrap().to_string();
+            let error_text = resp
+                .result
+                .value
+                .unwrap_or_default()
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             return Err(CdpError::ScrollingFailed(error_text));
         }
         Ok(self)

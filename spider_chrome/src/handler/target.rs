@@ -612,14 +612,17 @@ impl Target {
 
         CommandChain::new(
             vec![
-                (attach.identifier(), serde_json::to_value(attach).unwrap()),
+                (
+                    attach.identifier(),
+                    serde_json::to_value(attach).unwrap_or_default(),
+                ),
                 (
                     enable_performance.identifier(),
-                    serde_json::to_value(enable_performance).unwrap(),
+                    serde_json::to_value(enable_performance).unwrap_or_default(),
                 ),
                 (
                     enable_log.identifier(),
-                    serde_json::to_value(enable_log).unwrap(),
+                    serde_json::to_value(enable_log).unwrap_or_default(),
                 ),
             ],
             timeout,
