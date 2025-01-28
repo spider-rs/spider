@@ -44,11 +44,10 @@ lazy_static::lazy_static! {
 
 impl<T: EventMessage + Unpin> Connection<T> {
     pub async fn connect(debug_ws_url: impl AsRef<str>) -> Result<Self> {
-        let config = WebSocketConfig {
-            max_message_size: None,
-            max_frame_size: None,
-            ..Default::default()
-        };
+        let mut config = WebSocketConfig::default();
+
+        config.max_message_size = None;
+        config.max_frame_size = None;
 
         let (ws, _) = tokio_tungstenite::connect_async_with_config(
             debug_ws_url.as_ref(),
@@ -149,7 +148,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
                         Ok(msg)
                     }
                     Err(err) => {
-                        tracing::error!(target: "chromiumoxide::conn::raw_ws::parse_errors", msg = text, "Failed to parse raw WS message {err}");
+                        tracing::error!(target: "chromiumoxide::conn::raw_ws::parse_errors", msg = text.to_string(), "Failed to parse raw WS message {err}");
                         Err(err.into())
                     }
                 };

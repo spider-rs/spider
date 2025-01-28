@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.27.12"
+version = "2.27.13"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -18,7 +18,7 @@ categories = ["web-programming", "api-bindings", "development-tools::testing"]
 name = "chromiumoxide"
 
 [dependencies]
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.26"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3"
 serde_json = "1"

@@ -5534,7 +5534,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5598,7 +5598,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5628,7 +5628,7 @@ dependencies = [
  "spider_chromiumoxide_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite 0.26.1",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5689,7 +5689,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "clap",
  "env_logger",
@@ -5732,7 +5732,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5755,7 +5755,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "indexmap 1.9.3",
  "serde",
@@ -5768,7 +5768,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.27.12"
+version = "2.27.13"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -6628,14 +6628,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.24.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+checksum = "be4bf6fecd69fcdede0ec680aaf474cdab988f9de6bc73d3758f0160e3b7025a"
 dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite 0.24.0",
+ "tungstenite 0.26.1",
 ]
 
 [[package]]
@@ -6878,9 +6878,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.24.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+checksum = "413083a99c579593656008130e29255e54dcaae495be556cc26888f211648c24"
 dependencies = [
  "byteorder",
  "bytes",
@@ -6890,7 +6890,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "sha1 0.10.6",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
  "utf-8",
 ]
 
