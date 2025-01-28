@@ -1,4 +1,5 @@
 use hashbrown::HashMap;
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use std::future::Future;
 use std::time::Duration;
 use std::{
@@ -41,7 +42,20 @@ use chromiumoxide_types::*;
 pub const LAUNCH_TIMEOUT: u64 = 20_000;
 
 lazy_static::lazy_static! {
-    static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
+    /// The request client to get the web socket url.
+    static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::builder()
+        .tcp_keepalive(Duration::from_secs(30))
+        .http2_keep_alive_while_idle(true)
+        .timeout(Duration::from_secs(120))
+        .default_headers({
+            let mut m = HeaderMap::new();
+
+            m.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+            m
+        })
+        .build()
+        .unwrap();
 }
 
 /// A [`Browser`] is created when chromiumoxide connects to a Chromium instance.
@@ -115,7 +129,6 @@ impl Browser {
                         )
                     },
                 )
-                .header("content-type", "application/json")
                 .send()
                 .await
             {
