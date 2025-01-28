@@ -1,14 +1,13 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
-use chromiumoxide::cdp::browser_protocol::browser::BrowserContextId;
-use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
+use chromiumoxide::cdp::browser_protocol::{
+    browser::BrowserContextId, network::CookieParam, target::CreateTargetParams,
+};
 use chromiumoxide::error::CdpError;
 use chromiumoxide::page::DISABLE_DIALOGS;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
-use reqwest::cookie::CookieStore;
-use reqwest::cookie::Jar;
+use reqwest::cookie::{CookieStore, Jar};
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -328,23 +327,19 @@ pub async fn launch_browser(
             // Spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
                 tokio::pin!(handler);
-                loop {
-                    match handler.next().await {
-                        Some(k) => {
-                            if let Err(e) = k {
-                                match e {
-                                    CdpError::LaunchExit(_, _)
-                                    | CdpError::LaunchTimeout(_)
-                                    | CdpError::LaunchIo(_, _) => {
-                                        break;
-                                    }
-                                    _ => {
-                                        continue;
-                                    }
-                                }
+
+                while let Some(k) = handler.next().await {
+                    if let Err(e) = k {
+                        match e {
+                            CdpError::LaunchExit(_, _)
+                            | CdpError::LaunchTimeout(_)
+                            | CdpError::LaunchIo(_, _) => {
+                                break;
+                            }
+                            _ => {
+                                continue;
                             }
                         }
-                        _ => break,
                     }
                 }
             });
@@ -362,20 +357,17 @@ pub async fn launch_browser(
                     }
                 }
 
-                match browser.create_browser_context(create_content).await {
-                    Ok(c) => {
-                        let _ = browser.send_new_context(c.clone()).await;
-                        let _ = context_id.insert(c);
-                        if !config.cookie_str.is_empty() {
-                            if let Some(parsed) = url_parsed {
-                                let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
-                                if let Ok(co) = cookies {
-                                    let _ = browser.set_cookies(co).await;
-                                };
+                if let Ok(c) = browser.create_browser_context(create_content).await {
+                    let _ = browser.send_new_context(c.clone()).await;
+                    let _ = context_id.insert(c);
+                    if !config.cookie_str.is_empty() {
+                        if let Some(parsed) = url_parsed {
+                            let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
+                            if let Ok(co) = cookies {
+                                let _ = browser.set_cookies(co).await;
                             };
-                        }
+                        };
                     }
-                    _ => (),
                 }
             }
 
@@ -389,37 +381,26 @@ pub async fn launch_browser(
 /// configure the browser
 pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
     let timezone_id = async {
-        match configuration.timezone_id.as_deref() {
-            Some(timezone_id) => {
-                match new_page
-                    .emulate_timezone(
-                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
-                            timezone_id,
-                        ),
-                    )
-                    .await
-                {
-                    _ => (),
-                }
-            }
-            _ => (),
+        if let Some(timezone_id) = configuration.timezone_id.as_deref() {
+            let _ = new_page
+                .emulate_timezone(
+                    chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                        timezone_id,
+                    ),
+                )
+                .await;
         }
     };
+
     let locale = async {
-        match configuration.locale.as_deref() {
-            Some(locale) => {
-                match new_page
-                    .emulate_locale(
-                        chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
-                            locale: Some(locale.into()),
-                        },
-                    )
-                    .await
-                {
-                    _ => (),
-                }
-            }
-            _ => (),
+        if let Some(locale) = configuration.locale.as_deref() {
+            let _ = new_page
+                .emulate_locale(
+                    chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                        locale: Some(locale.into()),
+                    },
+                )
+                .await;
         }
     };
 

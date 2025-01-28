@@ -13,7 +13,10 @@ pub mod trie;
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
 
-use crate::{page::STREAMING_CHUNK_SIZE, RelativeSelectors};
+use crate::{
+    page::{STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
+    RelativeSelectors,
+};
 use abs::parse_absolute_url;
 use auto_encoder::is_binary_file;
 use bytes::{BufMut, BytesMut};
@@ -562,9 +565,7 @@ pub async fn perform_chrome_http_request(
                     }
                 }
                 _ => {
-                    if let Ok(scode) = StatusCode::from_u16(599) {
-                        status_code = scode;
-                    }
+                    status_code = *UNKNOWN_STATUS_ERROR;
                 }
             };
         }
@@ -1665,9 +1666,7 @@ async fn fetch_page_html_raw_base(
         Err(_) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
-            if let Ok(status_code) = StatusCode::from_u16(599) {
-                page_response.status_code = status_code;
-            }
+            page_response.status_code = *UNKNOWN_STATUS_ERROR;
             page_response
         }
     }
@@ -1866,9 +1865,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
         Err(_) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
-            if let Ok(status_code) = StatusCode::from_u16(599) {
-                page_response.status_code = status_code;
-            }
+            page_response.status_code = *UNKNOWN_STATUS_ERROR;
             page_response
         }
     }
@@ -2024,9 +2021,7 @@ pub async fn fetch_page_html(
                         Err(_) => {
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
-                            if let Ok(status_code) = StatusCode::from_u16(599) {
-                                page_response.status_code = status_code;
-                            }
+                            page_response.status_code = *UNKNOWN_STATUS_ERROR;
                             page_response
                         }
                     }
@@ -2178,7 +2173,7 @@ pub async fn fetch_page_html_chrome(
                             if let Some(status_code) = err.status() {
                                 page_response.status_code = status_code;
                             } else {
-                                page_response.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                                page_response.status_code = *UNKNOWN_STATUS_ERROR;
                             }
 
                             page_response
