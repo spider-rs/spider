@@ -484,8 +484,8 @@ impl Website {
 
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn insert_signature(&mut self, link: CaseInsensitiveString) {
-        self.signatures.insert(link);
+    async fn insert_signature(&mut self, new_signature: u64) {
+        self.signatures.insert(new_signature);
     }
 
     /// Seed the DB and clear the Hashset. This does nothing with `disk` flag enabled.
