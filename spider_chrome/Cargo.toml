@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.27.17"
+version = "2.27.19"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -49,7 +49,7 @@ rand = "0.8"
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 hashbrown = { version = "0.15", default-features = true }
 aho-corasick = "1"
-sonic-rs = "0.3"
+sonic-rs = { version = "0.3", optional = true }
 spider_chromiumoxide_types = { path = "types", version = "0.7" }
 spider_chromiumoxide_cdp = { path = "cdp", version = "0.7" }
 spider_chromiumoxide_fetcher = { path = "fetcher", version = "0.7", default-features = false, optional = true }
@@ -69,12 +69,12 @@ phf = { version = "0.11", default-features = false }
 phf_codegen = "0.11"
 
 [features]
-default = ["bytes"]
+default = ["bytes", "simd"]
 stream = ["tokio-tungstenite/stream"]
 fetcher = []
 bytes = ["dep:bytes"]
-serde0 = []
 adblock = ["dep:adblock"]
+simd = ["dep:sonic-rs"]
 
 # Temporary features until cargo weak dependencies bug is fixed
 # See https://github.com/rust-lang/cargo/issues/10801

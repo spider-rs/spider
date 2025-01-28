@@ -26,6 +26,7 @@ pub enum CdpError {
     #[error("{0}")]
     Serde(#[from] serde_json::Error),
     #[error("{0}")]
+    #[cfg(feature = "simd")]
     SerdeSonic(#[from] sonic_rs::Error),
     #[error("{0}")]
     Chrome(#[from] chromiumoxide_types::Error),

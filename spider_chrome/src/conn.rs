@@ -142,7 +142,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
         // read from the ws
         match ready!(pin.ws.poll_next_unpin(cx)) {
             Some(Ok(WsMessage::Text(text))) => {
-                let ready = match sonic_rs::from_str::<Message<T>>(&text) {
+                let ready = match crate::serde_json::from_str::<Message<T>>(&text) {
                     Ok(msg) => {
                         tracing::trace!("Received {:?}", msg);
                         Ok(msg)
@@ -156,7 +156,7 @@ impl<T: EventMessage + Unpin> Stream for Connection<T> {
                 Poll::Ready(Some(ready))
             }
             Some(Ok(WsMessage::Binary(mut text))) => {
-                let ready = match sonic_rs::from_slice::<Message<T>>(&mut text) {
+                let ready = match crate::serde_json::from_slice::<Message<T>>(&mut text) {
                     Ok(msg) => {
                         tracing::trace!("Received {:?}", msg);
                         Ok(msg)

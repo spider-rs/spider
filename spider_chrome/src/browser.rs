@@ -134,7 +134,7 @@ impl Browser {
             {
                 Ok(req) => {
                     let connection: BrowserConnection =
-                        sonic_rs::from_slice(&req.bytes().await.unwrap_or_default())
+                        crate::serde_json::from_slice(&req.bytes().await.unwrap_or_default())
                             .unwrap_or_default();
                     if !connection.web_socket_debugger_url.is_empty() {
                         debug_ws_url = connection.web_socket_debugger_url;

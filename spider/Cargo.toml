@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.27.17"
+version = "2.27.19"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -74,6 +74,7 @@ pin-project-lite = "0.2"
 version = "2"
 path = "../spider_chrome"
 optional = true
+default-features = false
 features = [
     "bytes",
     "stream"
@@ -153,6 +154,7 @@ chrome_screenshot = ["chrome"]
 chrome_store_page = ["chrome", "serde"]
 chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
+chrome_simd = ["chrome", "spider_chrome/simd"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:rand", "chrome_intercept", "dep:aho-corasick"]
