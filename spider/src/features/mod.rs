@@ -25,7 +25,6 @@ pub mod openai_common;
 /// Spoof the refereer
 pub mod spoof_referrer;
 
-
 #[cfg(all(not(feature = "simd"), feature = "openai"))]
 pub(crate) use serde_json;
 #[cfg(all(feature = "simd", feature = "openai"))]

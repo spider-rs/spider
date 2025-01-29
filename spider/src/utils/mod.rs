@@ -1662,10 +1662,11 @@ async fn fetch_page_html_raw_base(
             handle_response_bytes(res, target_url, only_html).await
         }
         Ok(res) => setup_default_response(target_url, &res),
-        Err(_) => {
+        Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
             page_response.status_code = *UNKNOWN_STATUS_ERROR;
+            page_response.error_for_status = Some(Err(err));
             page_response
         }
     }
@@ -1861,10 +1862,11 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 ..Default::default()
             }
         }
-        Err(_) => {
+        Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
             page_response.status_code = *UNKNOWN_STATUS_ERROR;
+            page_response.error_for_status = Some(Err(err));
             page_response
         }
     }
@@ -2017,10 +2019,11 @@ pub async fn fetch_page_html(
                             status_code: res.status(),
                             ..Default::default()
                         },
-                        Err(_) => {
+                        Err(err) => {
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
                             page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                            page_response.error_for_status = Some(Err(err));
                             page_response
                         }
                     }
@@ -2174,6 +2177,8 @@ pub async fn fetch_page_html_chrome(
                             } else {
                                 page_response.status_code = *UNKNOWN_STATUS_ERROR;
                             }
+
+                            page_response.error_for_status = Some(Err(err));
 
                             page_response
                         }
@@ -2348,7 +2353,9 @@ pub async fn openai_request_base(
 
                 if let Some(ref structure) = gpt_configs.json_schema {
                     if let Some(ref schema) = structure.schema {
-                        if let Ok(mut schema) = crate::features::serde_json::from_str::<serde_json::Value>(&schema) {
+                        if let Ok(mut schema) =
+                            crate::features::serde_json::from_str::<serde_json::Value>(&schema)
+                        {
                             if json_mode {
                                 // Insert the "js" property into the schema's properties. Todo: capture if the js property exist and re-word prompt to match new js property with after removal.
                                 if let Some(properties) = schema.get_mut("properties") {
@@ -2433,14 +2440,11 @@ pub async fn openai_request_base(
                                 Ok(mut response) => {
                                     let mut choice = response.choices.first_mut();
 
-                                    match response.usage.take() {
-                                        Some(usage) => {
-                                            tokens_used.prompt_tokens = usage.prompt_tokens;
-                                            tokens_used.completion_tokens = usage.completion_tokens;
-                                            tokens_used.total_tokens = usage.total_tokens;
-                                        }
-                                        _ => (),
-                                    };
+                                    if let Some(usage) = response.usage.take() {
+                                        tokens_used.prompt_tokens = usage.prompt_tokens;
+                                        tokens_used.completion_tokens = usage.completion_tokens;
+                                        tokens_used.total_tokens = usage.total_tokens;
+                                    }
 
                                     match choice.as_mut() {
                                         Some(c) => match c.message.content.take() {

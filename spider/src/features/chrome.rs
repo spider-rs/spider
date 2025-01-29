@@ -313,16 +313,16 @@ pub async fn launch_browser(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
 )> {
-    use chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams;
-    use chromiumoxide::error::CdpError;
+    use chromiumoxide::{
+        cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
+    };
+
     let browser_configuration = setup_browser_configuration(&config).await;
-    let mut context_id = None;
 
     match browser_configuration {
         Some(c) => {
             let (mut browser, handler) = c;
-
-            context_id.clone_from(&handler.default_browser_context().id().cloned());
+            let mut context_id = handler.default_browser_context().id().cloned();
 
             // Spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
