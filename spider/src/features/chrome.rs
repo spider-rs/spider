@@ -353,7 +353,13 @@ pub async fn launch_browser(
                         if p.starts_with("http://localhost") {
                             create_content.proxy_bypass_list = Some("<-loopback>".into());
                         }
-                        create_content.proxy_server = Some(p.into());
+                        if p.starts_with("socks://") {
+                            // default to http socks protocol does not work for chrome.
+                            create_content.proxy_server =
+                                Some(p.replacen("socks://", "http://", 1));
+                        } else {
+                            create_content.proxy_server = Some(p.into());
+                        }
                     }
                 }
 
