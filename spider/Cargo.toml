@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.27.23"
+version = "2.27.24"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -59,7 +59,7 @@ auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
 string-interner = { version = "0.18", default-features = false, features = ["std", "inline-more", "backends"], optional = true }
 httpdate = { version = "1", optional = true }
-rand = { version = "0.8", optional = true }
+rand = { version = "0.9", optional = true }
 serde_regex = { version = "1", optional = true }
 statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1", optional = true }

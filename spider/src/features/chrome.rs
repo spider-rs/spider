@@ -354,7 +354,7 @@ pub async fn launch_browser(
                             create_content.proxy_bypass_list = Some("<-loopback>".into());
                         }
                         if p.starts_with("socks://") {
-                            // default to http socks protocol does not work for chrome.
+                            // default to http socks since protocol does not work for chrome.
                             create_content.proxy_server =
                                 Some(p.replacen("socks://", "http://", 1));
                         } else {
