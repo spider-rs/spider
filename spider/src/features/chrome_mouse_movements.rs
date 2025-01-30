@@ -105,19 +105,19 @@ impl BezierMouse {
         let complexity = usize::max(4, complexity);
         let mut control_points = vec![(start_x, start_y)];
 
-        let mut rng = SmallRng::from_entropy();
+        let mut rng = SmallRng::from_os_rng();
 
         for _ in 0..complexity - 2 {
-            let cx = rng.gen_range(start_x..=end_x);
-            let cy = rng.gen_range(start_y..=end_y);
+            let cx = rng.random_range(start_x..=end_x);
+            let cy = rng.random_range(start_y..=end_y);
             control_points.push((cx, cy));
         }
 
         control_points.push((end_x, end_y));
 
         for i in 1..control_points.len() - 1 {
-            control_points[i].0 += rng.gen_range(-(randomness * 100.0)..=(randomness * 100.0));
-            control_points[i].1 += rng.gen_range(-(randomness * 100.0)..=(randomness * 100.0));
+            control_points[i].0 += rng.random_range(-(randomness * 100.0)..=(randomness * 100.0));
+            control_points[i].1 += rng.random_range(-(randomness * 100.0)..=(randomness * 100.0));
         }
 
         let num_steps = (duration * 60.0) as usize;
@@ -153,8 +153,8 @@ impl BezierMouse {
     ) -> Vec<(f64, f64)> {
         let start_x = 0.0;
         let start_y = 0.0;
-        let end_x = SmallRng::from_entropy().gen_range(0.0..=viewport_width);
-        let end_y = SmallRng::from_entropy().gen_range(0.0..=viewport_height);
+        let end_x = SmallRng::from_os_rng().random_range(0.0..=viewport_width);
+        let end_y = SmallRng::from_os_rng().random_range(0.0..=viewport_height);
 
         Self::generate_bezier_mouse_movements(start_x, start_y, end_x, end_y, 1.0, 4, 1.0)
     }
@@ -192,12 +192,12 @@ impl GaussianMouse {
     ///
     /// A vector representing the cumulative sum of random values.
     fn random_walk(length: usize, stddev: f64) -> Vec<f64> {
-        let mut rng = SmallRng::from_entropy();
+        let mut rng = SmallRng::from_os_rng();
         let mut walk = Vec::with_capacity(length);
         let mut current = 0.0;
 
         for _ in 0..length {
-            let step: f64 = rng.gen::<f64>().copysign(stddev);
+            let step: f64 = rng.random::<f64>().copysign(stddev);
             current += step;
             walk.push(current);
         }
@@ -319,9 +319,9 @@ impl GaussianMouse {
         let human_std_y = (end_y - start_y) as f64 / 6.0;
         let morphed_y = Self::morph_distribution(&smooth_y, human_mean_y, human_std_y);
 
-        let mut rng = rand::thread_rng();
-        let control_x = rng.gen_range(start_x..=end_x) as f64;
-        let control_y = rng.gen_range(start_y..=end_y) as f64;
+        let mut rng = rand::rng();
+        let control_x = rng.random_range(start_x..=end_x) as f64;
+        let control_y = rng.random_range(start_y..=end_y) as f64;
 
         let t_values: Vec<f64> = (0..num_points)
             .map(|i| i as f64 / num_points as f64)
@@ -382,9 +382,9 @@ impl GaussianMouse {
     ) -> Vec<(f64, f64)> {
         let start_x = 0.0;
         let start_y = 0.0;
-        let mut rng = rand::thread_rng();
-        let end_x = rng.gen_range(0.0..=viewport_width);
-        let end_y = rng.gen_range(0.0..=viewport_height);
+        let mut rng = rand::rng();
+        let end_x = rng.random_range(0.0..=viewport_width);
+        let end_y = rng.random_range(0.0..=viewport_height);
 
         Self::generate_gaussian_mouse_movements(start_x, start_y, end_x, end_y, 1.0, 2.0, 1.0)
     }
