@@ -38,6 +38,7 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     match url::Url::parse(url) {
         Ok(mut u) => {
             convert_abs_url(&mut u);
+            u.set_query(None);
             Some(Box::new(u))
         }
         _ => None,
