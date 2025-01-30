@@ -1,6 +1,6 @@
 use crate::features::chrome_common::Viewport;
-use rand::distributions::{Distribution, WeightedIndex};
-use rand::prelude::SliceRandom;
+use rand::distr::{weighted::WeightedIndex, Distribution};
+use rand::prelude::IndexedRandom;
 use rand::Rng;
 
 /// Represents different types of devices for viewport simulation.
@@ -41,22 +41,22 @@ pub enum DeviceType {
 
 /// Randomize viewport dimensions based on device type
 pub fn randomize_viewport(device: &DeviceType) -> Viewport {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     match device {
         DeviceType::Mobile => {
-            let width = rng.gen_range(320..=480);
-            let height = rng.gen_range(480..=800);
+            let width = rng.random_range(320..=480);
+            let height = rng.random_range(480..=800);
             Viewport::new(width, height)
         }
         DeviceType::Tablet => {
-            let width = rng.gen_range(600..=800);
-            let height = rng.gen_range(800..=1200);
+            let width = rng.random_range(600..=800);
+            let height = rng.random_range(800..=1200);
             Viewport::new(width, height)
         }
         DeviceType::Desktop => {
-            let width = rng.gen_range(1024..=1920);
-            let height = rng.gen_range(768..=1080);
+            let width = rng.random_range(1024..=1920);
+            let height = rng.random_range(768..=1080);
             Viewport::new(width, height)
         }
     }
@@ -64,7 +64,7 @@ pub fn randomize_viewport(device: &DeviceType) -> Viewport {
 
 /// Get a random viewport by selecting a random device type first. The weights are aligned in favor of desktop.
 pub fn get_random_viewport() -> Viewport {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let device_types = [DeviceType::Mobile, DeviceType::Tablet, DeviceType::Desktop];
 
     randomize_viewport(if let Ok(dist) = WeightedIndex::new(&[1, 1, 3]) {
