@@ -123,7 +123,6 @@ lazy_static! {
 
 #[cfg(all(
     not(feature = "decentralized"),
-    not(feature = "full_resources"),
     feature = "smart"
 ))]
 lazy_static! {
