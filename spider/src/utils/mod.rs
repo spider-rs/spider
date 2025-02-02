@@ -364,6 +364,10 @@ pub async fn create_output_path(
 
 #[cfg(feature = "chrome")]
 /// Wait for page events.
+/// 1. First wait for idle networks.
+/// 2. Wait for selectors.
+/// 3. Wait for the dom element to finish updated.
+/// 4. Wait for hard delay.
 pub async fn page_wait(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
@@ -398,12 +402,10 @@ pub async fn page_wait(
             }
         };
 
-        tokio::join!(
-            wait_for_idle_network,
-            wait_for_selector,
-            wait_for_dom,
-            wait_for_delay
-        );
+        wait_for_idle_network.await;
+        wait_for_selector.await;
+        wait_for_dom.await;
+        wait_for_delay.await;
     }
 }
 
@@ -604,144 +606,129 @@ pub async fn run_openai_request(
     mut page_response: &mut PageResponse,
     ok: bool,
 ) {
-    match &openai_config {
-        Some(gpt_configs) => {
-            let gpt_configs = match gpt_configs.prompt_url_map {
-                Some(ref h) => {
-                    let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
+    if let Some(gpt_configs) = openai_config {
+        let gpt_configs = match gpt_configs.prompt_url_map {
+            Some(ref h) => {
+                let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
 
-                    if !c.is_some() && gpt_configs.paths_map {
-                        h.get::<case_insensitive_string::CaseInsensitiveString>(
-                            &get_path_from_url(&source).into(),
-                        )
-                    } else {
-                        c
+                if !c.is_some() && gpt_configs.paths_map {
+                    h.get::<case_insensitive_string::CaseInsensitiveString>(
+                        &get_path_from_url(&source).into(),
+                    )
+                } else {
+                    c
+                }
+            }
+            _ => Some(gpt_configs),
+        };
+
+        if let Some(gpt_configs) = gpt_configs {
+            let mut prompts = gpt_configs.prompt.clone();
+
+            while let Some(prompt) = prompts.next() {
+                let gpt_results = if !gpt_configs.model.is_empty() && ok {
+                    openai_request(
+                        gpt_configs,
+                        match page_response.content.as_ref() {
+                            Some(html) => auto_encoder::auto_encode_bytes(html),
+                            _ => Default::default(),
+                        },
+                        &source,
+                        &prompt,
+                    )
+                    .await
+                } else {
+                    Default::default()
+                };
+
+                let js_script = gpt_results.response;
+                let tokens_used = gpt_results.usage;
+                let gpt_error = gpt_results.error;
+
+                // set the credits used for the request
+                handle_openai_credits(&mut page_response, tokens_used);
+
+                let json_res = if gpt_configs.extra_ai_data {
+                    match handle_ai_data(&js_script) {
+                        Some(jr) => jr,
+                        _ => {
+                            let mut jr = JsonResponse::default();
+                            jr.error = Some("An issue occured with serialization.".into());
+
+                            jr
+                        }
+                    }
+                } else {
+                    let mut x = JsonResponse::default();
+                    x.js = js_script;
+                    x
+                };
+
+                // perform the js script on the page.
+                if !json_res.js.is_empty() {
+                    let html: Option<Box<bytes::Bytes>> = match page
+                        .evaluate_function(string_concat!(
+                            "async function() { ",
+                            json_res.js,
+                            "; return document.documentElement.outerHTML; }"
+                        ))
+                        .await
+                    {
+                        Ok(h) => match h.into_value() {
+                            Ok(hh) => Some(hh),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+
+                    if html.is_some() {
+                        page_wait(&page, &wait_for).await;
+                        if json_res.js.len() <= 400 && json_res.js.contains("window.location") {
+                            if let Ok(b) = page.content_bytes().await {
+                                page_response.content = Some(b.into());
+                            }
+                        } else {
+                            page_response.content = html;
+                        }
                     }
                 }
-                _ => Some(gpt_configs),
-            };
 
-            match gpt_configs {
-                Some(gpt_configs) => {
-                    let mut prompts = gpt_configs.prompt.clone();
+                // attach the data to the page
+                if gpt_configs.extra_ai_data {
+                    let screenshot_bytes = if gpt_configs.screenshot && !json_res.js.is_empty() {
+                        let format = chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
 
-                    while let Some(prompt) = prompts.next() {
-                        let gpt_results = if !gpt_configs.model.is_empty() && ok {
-                            openai_request(
-                                gpt_configs,
-                                match page_response.content.as_ref() {
-                                    Some(html) => auto_encoder::auto_encode_bytes(html),
-                                    _ => Default::default(),
-                                },
-                                &source,
-                                &prompt,
-                            )
-                            .await
-                        } else {
-                            Default::default()
-                        };
+                        let screenshot_configs = chromiumoxide::page::ScreenshotParams::builder()
+                            .format(format)
+                            .full_page(true)
+                            .quality(45)
+                            .omit_background(false);
 
-                        let js_script = gpt_results.response;
-                        let tokens_used = gpt_results.usage;
-                        let gpt_error = gpt_results.error;
-
-                        // set the credits used for the request
-                        handle_openai_credits(&mut page_response, tokens_used);
-
-                        let json_res = if gpt_configs.extra_ai_data {
-                            match handle_ai_data(&js_script) {
-                                Some(jr) => jr,
-                                _ => {
-                                    let mut jr = JsonResponse::default();
-                                    jr.error = Some("An issue occured with serialization.".into());
-
-                                    jr
-                                }
+                        match page.screenshot(screenshot_configs.build()).await {
+                            Ok(b) => {
+                                log::debug!("took screenshot: {:?}", source);
+                                Some(b)
                             }
-                        } else {
-                            let mut x = JsonResponse::default();
-                            x.js = js_script;
-                            x
-                        };
-
-                        // perform the js script on the page.
-                        if !json_res.js.is_empty() {
-                            let html: Option<Box<bytes::Bytes>> = match page
-                                .evaluate_function(string_concat!(
-                                    "async function() { ",
-                                    json_res.js,
-                                    "; return document.documentElement.outerHTML; }"
-                                ))
-                                .await
-                            {
-                                Ok(h) => match h.into_value() {
-                                    Ok(hh) => Some(hh),
-                                    _ => None,
-                                },
-                                _ => None,
-                            };
-
-                            if html.is_some() {
-                                page_wait(&page, &wait_for).await;
-                                if json_res.js.len() <= 400
-                                    && json_res.js.contains("window.location")
-                                {
-                                    if let Ok(b) = page.content_bytes().await {
-                                        page_response.content = Some(b.into());
-                                    }
-                                } else {
-                                    page_response.content = html;
-                                }
-                            }
-                        }
-
-                        // attach the data to the page
-                        if gpt_configs.extra_ai_data {
-                            let screenshot_bytes = if gpt_configs.screenshot
-                                && !json_res.js.is_empty()
-                            {
-                                let format = chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
-
-                                let screenshot_configs =
-                                    chromiumoxide::page::ScreenshotParams::builder()
-                                        .format(format)
-                                        .full_page(true)
-                                        .quality(45)
-                                        .omit_background(false);
-
-                                match page.screenshot(screenshot_configs.build()).await {
-                                    Ok(b) => {
-                                        log::debug!("took screenshot: {:?}", source);
-                                        Some(b)
-                                    }
-                                    Err(e) => {
-                                        log::error!(
-                                            "failed to take screenshot: {:?} - {:?}",
-                                            e,
-                                            source
-                                        );
-                                        None
-                                    }
-                                }
-                            } else {
+                            Err(e) => {
+                                log::error!("failed to take screenshot: {:?} - {:?}", e, source);
                                 None
-                            };
-
-                            handle_extra_ai_data(
-                                page_response,
-                                &prompt,
-                                json_res,
-                                screenshot_bytes,
-                                gpt_error,
-                            );
+                            }
                         }
-                    }
+                    } else {
+                        None
+                    };
+
+                    handle_extra_ai_data(
+                        page_response,
+                        &prompt,
+                        json_res,
+                        screenshot_bytes,
+                        gpt_error,
+                    );
                 }
-                _ => (),
             }
         }
-        _ => (),
-    };
+    }
 }
 
 /// Represents an HTTP version
