@@ -121,10 +121,7 @@ lazy_static! {
     pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(599).expect("valid status code");
 }
 
-#[cfg(all(
-    not(feature = "decentralized"),
-    feature = "smart"
-))]
+#[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 lazy_static! {
     static ref DOM_WATCH_METHODS: aho_corasick::AhoCorasick = {
         let patterns = &[

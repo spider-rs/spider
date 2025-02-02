@@ -43,18 +43,23 @@ lazy_static! {
         "d3",
         "lodash",
         "ajax",
+        "application",
         "app",              // Covers general app scripts like app.js
         "main",
         "index",
         "bundle",
         "vendor",
+        "runtime",
+        "polyfill",
+        "scripts",
         "/wp-content/js/",  // Covers Wordpress content
         // Verified 3rd parties for request
         "https://m.stripe.network/",
         "https://challenges.cloudflare.com/",
         "https://js.stripe.com/",
         "https://cdn.prod.website-files.com/", // webflow cdn scripts
-        "https://cdnjs.cloudflare.com/"        // cloudflare cdn scripts
+        "https://cdnjs.cloudflare.com/",        // cloudflare cdn scripts
+        "https://code.jquery.com/jquery-"
     ];
 
     /// Determine if a script should be rendered in the browser by name.
@@ -279,6 +284,7 @@ impl NetworkManager {
 
                         if url.len() > base_path_index {
                             let new_url: &str = &url[base_path_index..];
+
                             ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(new_url);
 
                             // ignore assets we do not need for frameworks
