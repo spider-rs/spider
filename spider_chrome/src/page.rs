@@ -528,6 +528,12 @@ impl Page {
         Element::new(Arc::clone(&self.inner), node_id).await
     }
 
+    /// Returns the outer HTML of the page.
+    pub async fn outer_html(&self) -> Result<String> {
+        let root = self.get_document().await?.node_id;
+        self.inner.outer_html( root).await
+    }
+
     /// Return all `Element`s in the document that match the given selector
     pub async fn find_elements(&self, selector: impl Into<String>) -> Result<Vec<Element>> {
         let root = self.get_document().await?.node_id;
@@ -1278,25 +1284,15 @@ impl Page {
         self.wait_for_navigation().await
     }
 
-    /// Returns the HTML content of the page
+    /// Returns the HTML content of the page.
     pub async fn content(&self) -> Result<String> {
-        Ok(self
-            .evaluate(
-                "{let retVal = ''; if (document.doctype) { return new XMLSerializer().serializeToString(document.doctype); } if (document.documentElement) { retVal += document.documentElement.outerHTML; } retVal }",
-            )
-            .await?
-            .into_value()?)
+        Ok(self.outer_html().await?)
     }
 
     #[cfg(feature = "bytes")]
     /// Returns the HTML content of the page
     pub async fn content_bytes(&self) -> Result<bytes::Bytes> {
-        Ok(self
-            .evaluate(
-                "{let retVal = ''; if (document.doctype) { retVal = new XMLSerializer().serializeToString(document.doctype); } if (document.documentElement) { retVal += document.documentElement.outerHTML; } retVal }",
-            )
-            .await?
-            .into_value()?)
+        Ok(self.outer_html().await?.into())
     }
 
     /// Returns source for the script with given id.

@@ -7,8 +7,7 @@ use futures::{SinkExt, StreamExt};
 
 use chromiumoxide_cdp::cdp::browser_protocol::browser::{GetVersionParams, GetVersionReturns};
 use chromiumoxide_cdp::cdp::browser_protocol::dom::{
-    DiscardSearchResultsParams, GetSearchResultsParams, NodeId, PerformSearchParams,
-    QuerySelectorAllParams, QuerySelectorParams, Rgba,
+    DiscardSearchResultsParams, GetOuterHtmlParams, GetSearchResultsParams, NodeId, PerformSearchParams, QuerySelectorAllParams, QuerySelectorParams, Rgba
 };
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     ClearDeviceMetricsOverrideParams, SetDefaultBackgroundColorOverrideParams,
@@ -124,6 +123,17 @@ impl PageInner {
             .execute(QuerySelectorParams::new(node, selector))
             .await?
             .node_id)
+    }
+
+    /// Returns the outer html of the page.
+    pub async fn outer_html(&self, node: NodeId) -> Result<String> {
+        let mut cmd = GetOuterHtmlParams::default();
+        cmd.node_id = Some(node);
+
+        Ok(self
+            .execute(cmd)
+            .await?
+            .outer_html.to_string())
     }
 
     /// Activates (focuses) the target.

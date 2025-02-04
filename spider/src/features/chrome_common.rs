@@ -575,11 +575,8 @@ impl WebAutomation {
             }
             WebAutomation::WaitForAndClick(selector) => {
                 wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
-                match page.find_element(selector).await {
-                    Ok(ele) => {
-                        let _ = ele.click().await;
-                    }
-                    _ => (),
+                if let Ok(ele) = page.find_element(selector).await {
+                    let _ = ele.click().await;
                 }
             }
             WebAutomation::ScrollX(px) => {

@@ -1,4 +1,4 @@
-//! `cargo run --example chrome_remote --features="chrome chrome_intercept"`
+//! cargo run --example chrome_remote --features="chrome chrome_intercept"
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
