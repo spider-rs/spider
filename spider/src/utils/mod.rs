@@ -349,11 +349,8 @@ pub async fn create_output_path(
 
     let b = base.join(&out);
 
-    match b.parent() {
-        Some(p) => {
-            let _ = tokio::fs::create_dir_all(&p).await;
-        }
-        _ => (),
+    if let Some(p) = b.parent() {
+        let _ = tokio::fs::create_dir_all(&p).await;
     }
 
     b.display().to_string()
@@ -896,7 +893,10 @@ pub async fn put_hybrid_cache(
 
 /// Subtract the duration with overflow handling.
 #[cfg(feature = "chrome")]
-fn sub_duration(base_timeout: Duration, elapsed: Duration) -> Duration {
+fn sub_duration(
+    base_timeout: std::time::Duration,
+    elapsed: std::time::Duration,
+) -> std::time::Duration {
     match base_timeout.checked_sub(elapsed) {
         Some(remaining_time) => remaining_time,
         None => Default::default(),
@@ -982,9 +982,17 @@ pub async fn cache_chrome_response(
 ) {
 }
 
+/// 5 mins in ms
+pub(crate) const FIVE_MINUTES: u32 = 300000;
+
 /// Max page timeout for events.
 #[cfg(feature = "chrome")]
-const MAX_PAGE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(60);
+const MAX_PAGE_TIMEOUT: tokio::time::Duration =
+    tokio::time::Duration::from_millis(FIVE_MINUTES as u64);
+/// Half of the max timeout
+#[cfg(feature = "chrome")]
+const HALF_MAX_PAGE_TIMEOUT: tokio::time::Duration =
+    tokio::time::Duration::from_millis(FIVE_MINUTES as u64 / 2);
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -1003,8 +1011,6 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    use std::ops::Div;
-
     use tokio::time::Instant;
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -1141,7 +1147,7 @@ pub async fn fetch_page_html_chrome_base(
             })
             .await
             {
-                log::warn!("mouse movement timeout exceeded {elasped}");
+                log::warn!("eval scripts timeout exceeded {elasped}");
             }
         }
 
@@ -1225,7 +1231,7 @@ pub async fn fetch_page_html_chrome_base(
 
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
-            MAX_PAGE_TIMEOUT.div(2),
+            HALF_MAX_PAGE_TIMEOUT,
             page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
         )
         .await;

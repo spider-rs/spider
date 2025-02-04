@@ -506,7 +506,7 @@ pub(crate) fn generate_wait_for_dom_js_code_with_selector(
     timeout: u32,
     selector: Option<&str>,
 ) -> String {
-    let clamped_timeout = if timeout > 60000 { 60000 } else { timeout };
+    let clamped_timeout = timeout.min(crate::utils::FIVE_MINUTES);
     let query_selector = selector.unwrap_or("body");
 
     format!(
@@ -622,7 +622,7 @@ impl WebAutomation {
 
 /// Set a dynamic time to scroll.
 pub fn set_dynamic_scroll(timeout: u32) -> String {
-    let timeout = timeout.min(60000);
+    let timeout = timeout.min(crate::utils::FIVE_MINUTES);
     let s = string_concat!(
         r###"document.addEventListener('DOMContentLoaded',e=>{let t=null,o=null,n="###,
         timeout.to_string(),
