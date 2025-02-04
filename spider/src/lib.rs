@@ -13,7 +13,7 @@
 //!
 //! - [`crawl`]: start concurrently crawling a site. Can be used to send each page (including URL
 //!   and HTML) to a subscriber for processing, or just to gather links.
-//! 
+//!
 //! - [`scrape`]: like `crawl`, but saves the HTML raw strings to parse after scraping is complete.
 //!
 //! [`crawl`]: website/struct.Website.html#method.crawl

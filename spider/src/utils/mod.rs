@@ -998,6 +998,8 @@ pub async fn fetch_page_html_chrome_base(
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use std::ops::Div;
+
+    use tokio::time::Instant;
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let listener = page
@@ -1007,13 +1009,11 @@ pub async fn fetch_page_html_chrome_base(
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
         let mut total = 0.0;
-
         if let Ok(mut listener) = listener {
             while let Some(event) = listener.next().await {
                 total += event.encoded_data_length;
             }
         }
-
         total
     });
 
@@ -1050,27 +1050,30 @@ pub async fn fetch_page_html_chrome_base(
         Ok(())
     };
 
-    let request_timeout = tokio::time::timeout(
-        match request_timeout {
-            Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
-            _ => MAX_PAGE_TIMEOUT,
-        },
-        page_navigation,
-    )
-    .await;
+    let mut base_timeout = match request_timeout {
+        Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
+        _ => MAX_PAGE_TIMEOUT,
+    };
 
-    let timeout_error = if let Err(elasped) = request_timeout {
+    let start_time = Instant::now();
+
+    let request_timeout = tokio::time::timeout(base_timeout, page_navigation).await;
+
+    base_timeout -= start_time.elapsed();
+
+    // check if timeout is elasped.
+    let timeout_elasped = if let Err(elasped) = request_timeout {
         Some(elasped)
     } else {
         None
     };
 
-    let mut page_response = if timeout_error.is_none()
+    let mut page_response = if timeout_elasped.is_none()
         && chrome_http_req_res.status_code.is_success()
     {
         // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
         let final_url = if wait_for_navigation {
-            let last_redirect = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
+            let last_redirect = tokio::time::timeout(base_timeout, async {
                 match page.wait_for_navigation_response().await {
                     Ok(u) => get_last_redirect(&source, &u, &page).await,
                     _ => None,
@@ -1086,18 +1089,18 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         if chrome_http_req_res.waf_check {
-            if let Err(elasped) = tokio::time::timeout(
-                tokio::time::Duration::from_secs(4),
-                perform_smart_mouse_movement(&page, &viewport),
-            )
-            .await
+            base_timeout -= start_time.elapsed();
+            if let Err(elasped) =
+                tokio::time::timeout(base_timeout, perform_smart_mouse_movement(&page, &viewport))
+                    .await
             {
                 log::warn!("mouse movement timeout exceeded {elasped}");
             }
         }
 
-        if let Err(elasped) =
-            tokio::time::timeout(MAX_PAGE_TIMEOUT, page_wait(&page, &wait_for)).await
+        base_timeout -= start_time.elapsed();
+
+        if let Err(elasped) = tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
         {
             log::warn!("max wait for timeout {elasped}");
         }
@@ -1114,7 +1117,9 @@ pub async fn fetch_page_html_chrome_base(
                 source.to_string()
             };
 
-            if let Err(elasped) = tokio::time::timeout(MAX_PAGE_TIMEOUT, async {
+            base_timeout -= start_time.elapsed();
+
+            if let Err(elasped) = tokio::time::timeout(base_timeout, async {
                 tokio::join!(
                     crate::features::chrome_common::eval_execution_scripts(
                         &page,
@@ -1182,9 +1187,10 @@ pub async fn fetch_page_html_chrome_base(
         }
         page_response.status_code = chrome_http_req_res.status_code;
         page_response.waf_check = chrome_http_req_res.waf_check;
+
         if !page_set {
             let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(10),
+                tokio::time::Duration::from_secs(2),
                 cache_chrome_response(&source, &page_response, chrome_http_req_res),
             )
             .await;
@@ -1197,7 +1203,7 @@ pub async fn fetch_page_html_chrome_base(
         page_response.status_code = chrome_http_req_res.status_code;
         page_response.waf_check = chrome_http_req_res.waf_check;
 
-        if let Some(_elasped) = timeout_error {
+        if let Some(_elasped) = timeout_elasped {
             page_response.status_code = StatusCode::REQUEST_TIMEOUT;
         }
 
