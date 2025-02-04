@@ -531,7 +531,7 @@ impl Page {
     /// Returns the outer HTML of the page.
     pub async fn outer_html(&self) -> Result<String> {
         let root = self.get_document().await?.node_id;
-        self.inner.outer_html( root).await
+        self.inner.outer_html(root).await
     }
 
     /// Return all `Element`s in the document that match the given selector

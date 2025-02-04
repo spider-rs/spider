@@ -241,28 +241,25 @@ pub async fn wait_for_event<T>(page: &chromiumoxide::Page, timeout: Option<core:
 where
     T: chromiumoxide::cdp::IntoEventKind + Unpin + std::fmt::Debug,
 {
-    match page.event_listener::<T>().await {
-        Ok(mut events) => {
-            let wait_until = async {
-                loop {
-                    let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
-                    tokio::pin!(sleep);
-                    tokio::select! {
-                        _ = &mut sleep => break,
-                        v = events.next() => {
-                            if !v.is_none () {
-                                break;
-                            }
+    if let Ok(mut events) = page.event_listener::<T>().await {
+        let wait_until = async {
+            loop {
+                let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep => break,
+                    v = events.next() => {
+                        if !v.is_none () {
+                            break;
                         }
                     }
                 }
-            };
-            match timeout {
-                Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
-                _ => wait_until.await,
             }
+        };
+        match timeout {
+            Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+            _ => wait_until.await,
         }
-        _ => (),
     }
 }
 
@@ -897,6 +894,15 @@ pub async fn put_hybrid_cache(
 ) {
 }
 
+/// Subtract the duration with overflow handling.
+#[cfg(feature = "chrome")]
+fn sub_duration(base_timeout: Duration, elapsed: Duration) -> Duration {
+    match base_timeout.checked_sub(elapsed) {
+        Some(remaining_time) => remaining_time,
+        None => Default::default(),
+    }
+}
+
 /// Get the initial page headers of the page with navigation.
 #[cfg(feature = "chrome")]
 async fn navigate(
@@ -1059,7 +1065,7 @@ pub async fn fetch_page_html_chrome_base(
 
     let request_timeout = tokio::time::timeout(base_timeout, page_navigation).await;
 
-    base_timeout -= start_time.elapsed();
+    base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
     // check if timeout is elasped.
     let timeout_elasped = if let Err(elasped) = request_timeout {
@@ -1089,7 +1095,7 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         if chrome_http_req_res.waf_check {
-            base_timeout -= start_time.elapsed();
+            base_timeout = sub_duration(base_timeout, start_time.elapsed());
             if let Err(elasped) =
                 tokio::time::timeout(base_timeout, perform_smart_mouse_movement(&page, &viewport))
                     .await
@@ -1098,7 +1104,7 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        base_timeout -= start_time.elapsed();
+        base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
         if let Err(elasped) = tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
         {
@@ -1117,7 +1123,7 @@ pub async fn fetch_page_html_chrome_base(
                 source.to_string()
             };
 
-            base_timeout -= start_time.elapsed();
+            base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
             if let Err(elasped) = tokio::time::timeout(base_timeout, async {
                 tokio::join!(
