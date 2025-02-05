@@ -100,6 +100,8 @@ pub const HIDE_WEBDRIVER: &str =
     "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
 pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
 pub const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
+/// The outer HTML of a webpage.
+const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
 
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
@@ -573,12 +575,7 @@ impl Page {
     /// Describes node given its id
     pub async fn describe_node(&self, node_id: NodeId) -> Result<Node> {
         let resp = self
-            .execute(
-                DescribeNodeParams::builder()
-                    .node_id(node_id)
-                    .depth(-1)
-                    .build(),
-            )
+            .execute(DescribeNodeParams::builder().node_id(node_id).build())
             .await?;
         Ok(resp.result.node)
     }
@@ -1298,12 +1295,18 @@ impl Page {
 
     /// Returns the HTML content of the page.
     pub async fn content(&self) -> Result<String> {
-        Ok(self.outer_html().await?)
+        Ok(self.evaluate(OUTER_HTML).await?.into_value()?)
     }
 
     #[cfg(feature = "bytes")]
     /// Returns the HTML content of the page
     pub async fn content_bytes(&self) -> Result<bytes::Bytes> {
+        Ok(self.evaluate(OUTER_HTML).await?.into_value()?)
+    }
+
+    #[cfg(feature = "bytes")]
+    /// Returns the HTML outer html of the page
+    pub async fn outer_html_bytes(&self) -> Result<bytes::Bytes> {
         Ok(self.outer_html().await?.into())
     }
 
