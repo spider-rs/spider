@@ -514,7 +514,12 @@ impl Page {
     /// # Note: This does not return the actual HTML document of the page. To
     /// retrieve the HTML content of the page see `Page::content`.
     pub async fn get_document(&self) -> Result<Node> {
-        let resp = self.execute(GetDocumentParams::default()).await?;
+        let mut cmd = GetDocumentParams::default();
+        cmd.depth = Some(-1);
+        cmd.pierce = Some(true);
+
+        let resp = self.execute(cmd).await?;
+
         Ok(resp.result.root)
     }
 
@@ -530,8 +535,15 @@ impl Page {
 
     /// Returns the outer HTML of the page.
     pub async fn outer_html(&self) -> Result<String> {
-        let root = self.get_document().await?.node_id;
-        self.inner.outer_html(root).await
+        let root = self.get_document().await?;
+        let element = Element::new(Arc::clone(&self.inner), root.node_id).await?;
+        self.inner
+            .outer_html(
+                element.remote_object_id,
+                element.node_id,
+                element.backend_node_id,
+            )
+            .await
     }
 
     /// Return all `Element`s in the document that match the given selector
@@ -564,7 +576,7 @@ impl Page {
             .execute(
                 DescribeNodeParams::builder()
                     .node_id(node_id)
-                    .depth(100)
+                    .depth(-1)
                     .build(),
             )
             .await?;

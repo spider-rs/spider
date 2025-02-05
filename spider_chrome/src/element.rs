@@ -41,7 +41,8 @@ impl Element {
             .execute(
                 DescribeNodeParams::builder()
                     .node_id(node_id)
-                    .depth(100)
+                    .depth(-1)
+                    .pierce(true)
                     .build(),
             )
             .await?
@@ -61,6 +62,7 @@ impl Element {
             .object
             .object_id
             .ok_or_else(|| CdpError::msg(format!("No object Id found for {node_id:?}")))?;
+
         Ok(Self {
             remote_object_id,
             backend_node_id,

@@ -1,4 +1,4 @@
-//! `cargo run --example chrome --features chrome`
+//! cargo run --example chrome --features chrome
 
 extern crate spider;
 use spider::features::chrome_common::RequestInterceptConfiguration;

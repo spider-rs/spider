@@ -7,7 +7,7 @@ use futures::{SinkExt, StreamExt};
 
 use chromiumoxide_cdp::cdp::browser_protocol::browser::{GetVersionParams, GetVersionReturns};
 use chromiumoxide_cdp::cdp::browser_protocol::dom::{
-    DiscardSearchResultsParams, GetOuterHtmlParams, GetSearchResultsParams, NodeId,
+    BackendNodeId, DiscardSearchResultsParams, GetOuterHtmlParams, GetSearchResultsParams, NodeId,
     PerformSearchParams, QuerySelectorAllParams, QuerySelectorParams, Rgba,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
@@ -127,9 +127,17 @@ impl PageInner {
     }
 
     /// Returns the outer html of the page.
-    pub async fn outer_html(&self, node: NodeId) -> Result<String> {
+    pub async fn outer_html(
+        &self,
+        object_id: RemoteObjectId,
+        node_id: NodeId,
+        backend_node_id: BackendNodeId,
+    ) -> Result<String> {
         let mut cmd = GetOuterHtmlParams::default();
-        cmd.node_id = Some(node);
+
+        cmd.backend_node_id = Some(backend_node_id);
+        cmd.node_id = Some(node_id);
+        cmd.object_id = Some(object_id);
 
         Ok(self.execute(cmd).await?.outer_html.to_string())
     }
