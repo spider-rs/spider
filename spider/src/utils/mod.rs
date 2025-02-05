@@ -1172,8 +1172,15 @@ pub async fn fetch_page_html_chrome_base(
 
         let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
+        base_timeout = sub_duration(base_timeout, start_time.elapsed());
+
+        let _ = tokio::time::timeout(
+            base_timeout.max(tokio::time::Duration::from_secs(5)),
+            set_page_response_cookies(&mut page_response, &page),
+        )
+        .await;
+
         set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
-        set_page_response_cookies(&mut page_response, &page).await;
 
         if openai_config.is_some() {
             run_openai_request(
