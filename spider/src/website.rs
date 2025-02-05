@@ -333,6 +333,12 @@ impl Website {
         self
     }
 
+    /// Set the direct url of the website to re-use configuration and data without parsing the domain.
+    pub fn set_url_only(&mut self, url: &str) -> &mut Self {
+        self.url = CaseInsensitiveString::new(&url).into();
+        self
+    }
+
     /// Get the target id for a crawl. This takes the crawl ID and the url and concats it without delimiters.
     pub fn target_id(&self) -> String {
         string_concat!(self.crawl_id, self.url.inner())
