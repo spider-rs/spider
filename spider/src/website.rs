@@ -2651,7 +2651,6 @@ impl Website {
 
             self.configuration.configure_allowlist();
 
-
             let semaphore = self.setup_semaphore();
 
             let shared = Arc::new((
