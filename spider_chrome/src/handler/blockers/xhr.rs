@@ -69,6 +69,7 @@ lazy_static::lazy_static! {
             "https://api-2-0.spot.im/v1.0.0/",
             "https://static.hotjar.com/",
             "https://matchadsrvr.yieldmo.com/track/",
+            "https://translate.googleapis.com/element/log",
             "https://sentry.io/api/",
             "https://api2.branch.io/",
             "https://i.clean.gg/",
