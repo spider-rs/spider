@@ -1,11 +1,11 @@
-use scraper::{ElementRef, Html, Selector};
-use lazy_static::lazy_static;
-use tokio_stream::StreamExt;
-use log::{self, warn};
 use hashbrown::{hash_map::Entry, HashMap};
+use lazy_static::lazy_static;
+use log::{self, warn};
+use scraper::{ElementRef, Html, Selector};
 use std::{fmt::Debug, hash::Hash};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
+use tokio_stream::StreamExt;
 
 /// The type of selectors that can be used to query.
 #[derive(Default, Debug, Clone)]
@@ -255,9 +255,7 @@ where
 
 /// Build valid css selectors for extracting. The hashmap takes items with the key for the object key and the value is the css selector.
 #[cfg(not(feature = "indexset"))]
-pub fn build_selectors<K, V>(
-    selectors: HashMap<K, hashbrown::HashSet<V>>,
-) -> DocumentSelectors<K>
+pub fn build_selectors<K, V>(selectors: HashMap<K, hashbrown::HashSet<V>>) -> DocumentSelectors<K>
 where
     K: AsRef<str> + Eq + Hash + Clone + Debug,
     V: AsRef<str> + Debug + AsRef<str>,

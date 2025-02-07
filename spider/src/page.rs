@@ -2772,7 +2772,7 @@ pub fn get_html_encoded(html: &Option<Box<Bytes>>, label: &str) -> String {
 
 #[cfg(not(feature = "encoding"))]
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
-pub fn get_html_encoded(html: &Option<Bytes>, _label: &str) -> String {
+pub fn get_html_encoded(html: &Option<Box<Bytes>>, _label: &str) -> String {
     match html {
         Some(b) => String::from_utf8_lossy(b).to_string(),
         _ => Default::default(),

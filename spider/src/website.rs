@@ -397,7 +397,7 @@ impl Website {
 
     /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn is_allowed_signature_disk(&self, _signature_to_check: &str) -> bool {
+    async fn is_allowed_signature_disk(&self, _signature_to_check: u64) -> bool {
         true
     }
 
@@ -2650,7 +2650,6 @@ impl Website {
             links.extend(self._crawl_establish(client, &mut selector, false).await);
 
             self.configuration.configure_allowlist();
-
 
             let semaphore = self.setup_semaphore();
 
