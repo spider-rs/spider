@@ -1011,6 +1011,8 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use std::time::Duration;
+
     use tokio::time::Instant;
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -1085,13 +1087,14 @@ pub async fn fetch_page_html_chrome_base(
     {
         // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
         let final_url = if wait_for_navigation {
-            let last_redirect = tokio::time::timeout(base_timeout, async {
-                match page.wait_for_navigation_response().await {
-                    Ok(u) => get_last_redirect(&source, &u, &page).await,
-                    _ => None,
-                }
-            })
-            .await;
+            let last_redirect =
+                tokio::time::timeout(base_timeout.max(Duration::from_secs(15)), async {
+                    match page.wait_for_navigation_response().await {
+                        Ok(u) => get_last_redirect(&source, &u, &page).await,
+                        _ => None,
+                    }
+                })
+                .await;
             match last_redirect {
                 Ok(last) => last,
                 _ => None,
@@ -1110,11 +1113,13 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        base_timeout = sub_duration(base_timeout, start_time.elapsed());
-
-        if let Err(elasped) = tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
-        {
-            log::warn!("max wait for timeout {elasped}");
+        if wait_for.is_some() {
+            base_timeout = sub_duration(base_timeout, start_time.elapsed());
+            if let Err(elasped) =
+                tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
+            {
+                log::warn!("max wait for timeout {elasped}");
+            }
         }
 
         if execution_scripts.is_some() || automation_scripts.is_some() {
@@ -1209,7 +1214,7 @@ pub async fn fetch_page_html_chrome_base(
 
         if !page_set {
             let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(2),
+                base_timeout.max(Duration::from_secs(2)),
                 cache_chrome_response(&source, &page_response, chrome_http_req_res),
             )
             .await;
@@ -1238,7 +1243,7 @@ pub async fn fetch_page_html_chrome_base(
 
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
-            HALF_MAX_PAGE_TIMEOUT,
+            base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
             page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
         )
         .await;
