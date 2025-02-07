@@ -1,6 +1,6 @@
 [package]
 name = "spider_transformations"
-version = "2.27.43"
+version = "2.27.44"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -33,6 +33,7 @@ spider_scraper = "0.1"
 [dependencies.spider]
 version = "2"
 path = "../spider"
+default-features = false
 
 [dev-dependencies]
 maud = "0.26"

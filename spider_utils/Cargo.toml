@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.27.43"
+version = "2.27.44"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -19,18 +19,21 @@ sxd-document = "0.3"
 sxd-xpath = "0.4"
 serde = { version = "1", optional = true, features = ["derive"] }
 spider_scraper = "0.1"
-
-[dependencies.spider]
-version = "2"
-path = "../spider"
+lazy_static = "1"
+tokio-stream = "0.1"
+hashbrown = { version = "0.15", default-features = true }
+log = "0.4"
 
 [dependencies.spider_transformations]
 version = "2"
 path = "../spider_transformations"
 optional = true
 
+[dev-dependencies]
+tokio = { version = "1", features = ["full"]}
+
 [features]
 default = []
 indexset = ["indexmap"]
-serde = ["dep:serde", "indexmap/serde", "spider/serde"]
+serde = ["dep:serde", "indexmap/serde"]
 transformations = ["dep:spider_transformations"]

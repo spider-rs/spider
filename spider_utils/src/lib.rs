@@ -1,11 +1,8 @@
 use scraper::{ElementRef, Html, Selector};
-use spider::lazy_static::lazy_static;
-use spider::tokio_stream::StreamExt;
-use spider::utils::log;
-use spider::{
-    hashbrown::{hash_map::Entry, HashMap},
-    tokio,
-};
+use lazy_static::lazy_static;
+use tokio_stream::StreamExt;
+use log::{self, warn};
+use hashbrown::{hash_map::Entry, HashMap};
 use std::{fmt::Debug, hash::Hash};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
@@ -49,7 +46,7 @@ where
     let mut map: CSSQueryMap = HashMap::new();
 
     if !selectors.css.is_empty() {
-        let mut stream = spider::tokio_stream::iter(&selectors.css);
+        let mut stream = tokio_stream::iter(&selectors.css);
         let fragment = Box::new(Html::parse_document(html));
 
         while let Some(selector) = stream.next().await {
@@ -220,8 +217,8 @@ where
                     if is_valid_xpath(selector_str.as_ref()) {
                         selectors_vec_xpath.push(selector_str.as_ref().to_string())
                     } else {
-                        log(
-                            "",
+                        warn!(
+                            "{}",
                             format!(
                                 "Failed to parse selector '{}': {:?}",
                                 selector_str.as_ref(),
@@ -259,13 +256,13 @@ where
 /// Build valid css selectors for extracting. The hashmap takes items with the key for the object key and the value is the css selector.
 #[cfg(not(feature = "indexset"))]
 pub fn build_selectors<K, V>(
-    selectors: HashMap<K, spider::hashbrown::HashSet<V>>,
+    selectors: HashMap<K, hashbrown::HashSet<V>>,
 ) -> DocumentSelectors<K>
 where
     K: AsRef<str> + Eq + Hash + Clone + Debug,
     V: AsRef<str> + Debug + AsRef<str>,
 {
-    build_selectors_base::<K, V, spider::hashbrown::HashSet<V>>(selectors)
+    build_selectors_base::<K, V, hashbrown::HashSet<V>>(selectors)
 }
 
 /// Build valid css selectors for extracting. The hashmap takes items with the key for the object key and the value is the css selector.
@@ -279,7 +276,7 @@ where
 }
 
 #[cfg(not(feature = "indexset"))]
-pub type QueryCSSSelectSet<'a> = spider::hashbrown::HashSet<&'a str>;
+pub type QueryCSSSelectSet<'a> = hashbrown::HashSet<&'a str>;
 #[cfg(feature = "indexset")]
 pub type QueryCSSSelectSet<'a> = indexmap::IndexSet<&'a str>;
 #[cfg(not(feature = "indexset"))]
@@ -287,6 +284,7 @@ pub type QueryCSSMap<'a> = HashMap<&'a str, QueryCSSSelectSet<'a>>;
 #[cfg(feature = "indexset")]
 pub type QueryCSSMap<'a> = HashMap<&'a str, QueryCSSSelectSet<'a>>;
 
+#[cfg(test)]
 #[tokio::test]
 async fn test_css_query_select_map_streamed() {
     let map = QueryCSSMap::from([("list", QueryCSSSelectSet::from([".list", ".sub-list"]))]);
@@ -311,6 +309,7 @@ fn test_css_query_select_map() {
     assert!(!data.is_empty(), "CSS extraction failed",);
 }
 
+#[cfg(test)]
 #[tokio::test]
 async fn test_css_query_select_map_streamed_multi_join() {
     let map = QueryCSSMap::from([("list", QueryCSSSelectSet::from([".list", ".sub-list"]))]);
@@ -328,6 +327,7 @@ async fn test_css_query_select_map_streamed_multi_join() {
     assert!(!data.is_empty(), "CSS extraction failed");
 }
 
+#[cfg(test)]
 #[tokio::test]
 async fn test_xpath_query_select_map_streamed() {
     let map = QueryCSSMap::from([(
