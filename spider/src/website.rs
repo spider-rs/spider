@@ -2638,10 +2638,10 @@ impl Website {
         } else {
             let on_link_find_callback = self.on_link_find_callback;
             let on_should_crawl_callback = self.on_should_crawl_callback;
-
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
             let only_html = self.configuration.only_html && !full_resources;
+            let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
             let (mut interval, throttle) = self.setup_crawl();
 
@@ -2651,7 +2651,6 @@ impl Website {
 
             self.configuration.configure_allowlist();
 
-            let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
             let semaphore = self.setup_semaphore();
 
