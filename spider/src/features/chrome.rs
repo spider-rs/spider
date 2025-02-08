@@ -352,18 +352,38 @@ pub async fn launch_browser(
                     let use_plain_http = proxies.len() >= 2;
 
                     for p in proxies.iter() {
-                        if p.starts_with("http://localhost") {
-                            create_content.proxy_bypass_list = Some("<-loopback>".into());
-                        }
-                        // pick the socks:// proxy over http if found.
-                        if p.starts_with("socks://") {
-                            create_content.proxy_server =
-                                Some(p.replacen("socks://", "http://", 1).into());
-                            // pref this connection
-                            if use_plain_http {
+                        if !p.is_empty() {
+                            // pick the socks:// proxy over http if found.
+                            if p.starts_with("socks://") {
+                                create_content.proxy_server =
+                                    Some(p.replacen("socks://", "http://", 1).into());
+                                // pref this connection
+                                if use_plain_http {
+                                    break;
+                                }
+                            }
+
+                            if p.starts_with("http://localhost") {
+                                create_content.proxy_bypass_list = Some("<-loopback>".into());
+                            }
+
+                            if p.starts_with("force_chrome_http://") {
+                                create_content.proxy_server =
+                                    Some(p.replacen("force_chrome_http://", "http://", 1).into());
                                 break;
                             }
-                        } else {
+                            if p.starts_with("force_chrome_https://") {
+                                create_content.proxy_server =
+                                    Some(p.replacen("force_chrome_https://", "https://", 1).into());
+                                break;
+                            }
+                            if p.starts_with("force_chrome_socks5://") {
+                                create_content.proxy_server = Some(
+                                    p.replacen("force_chrome_socks5://", "socks5://", 1).into(),
+                                );
+                                break;
+                            }
+
                             create_content.proxy_server = Some(p.into());
                         }
                     }

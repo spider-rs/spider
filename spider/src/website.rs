@@ -1189,6 +1189,35 @@ impl Website {
                 let replace_plain_socks = proxies.len() == 1 && linux;
 
                 for proxie in proxies.iter() {
+                    if proxie.starts_with("force_req_http://") {
+                        if let Ok(proxy) =
+                            reqwest::Proxy::all(&proxie.replacen("force_req_http://", "http://", 1))
+                        {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+                    if proxie.starts_with("force_req_https://") {
+                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
+                            "force_req_https://",
+                            "https://",
+                            1,
+                        )) {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+                    if proxie.starts_with("force_req_socks5://") {
+                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
+                            "force_req_socks5://",
+                            "socks5://",
+                            1,
+                        )) {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+
                     let socks = proxie.starts_with("socks://");
 
                     // we can skip it and use another proxy from the list.
@@ -1280,6 +1309,36 @@ impl Website {
                 let replace_plain_socks = proxies.len() == 1 && linux;
 
                 for proxie in proxies.iter() {
+                    // special force proxy conditions. We should map the configs instead later.
+                    if proxie.starts_with("force_req_http://") {
+                        if let Ok(proxy) =
+                            reqwest::Proxy::all(&proxie.replacen("force_req_http://", "http://", 1))
+                        {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+                    if proxie.starts_with("force_req_https://") {
+                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
+                            "force_req_https://",
+                            "https://",
+                            1,
+                        )) {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+                    if proxie.starts_with("force_req_socks5://") {
+                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
+                            "force_req_socks5://",
+                            "socks5://",
+                            1,
+                        )) {
+                            client = client.proxy(proxy);
+                        }
+                        break;
+                    }
+
                     let socks = proxie.starts_with("socks://");
 
                     // we can skip it and use another proxy from the list.
