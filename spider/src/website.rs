@@ -1184,11 +1184,32 @@ impl Website {
 
         let client = match &self.configuration.proxies {
             Some(proxies) => {
+                let linux = cfg!(target_os = "linux");
+                let ignore_plain_socks = proxies.len() >= 2 && linux;
+                let replace_plain_socks = proxies.len() == 1 && linux;
+
                 for proxie in proxies.iter() {
-                    if let Ok(proxy) = reqwest::Proxy::all(proxie) {
-                        client = client.proxy(proxy);
+                    let socks = proxie.starts_with("socks://");
+
+                    // we can skip it and use another proxy from the list.
+                    if ignore_plain_socks && socks {
+                        continue;
+                    }
+
+                    // use HTTP instead as reqwest does not support the protocol on linux.
+                    if replace_plain_socks && socks {
+                        if let Ok(proxy) =
+                            reqwest::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                        {
+                            client = client.proxy(proxy);
+                        }
+                    } else {
+                        if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                            client = client.proxy(proxy);
+                        }
                     }
                 }
+
                 client
             }
             _ => client,
@@ -1254,11 +1275,32 @@ impl Website {
 
         let client = match &self.configuration.proxies {
             Some(proxies) => {
+                let linux = cfg!(target_os = "linux");
+                let ignore_plain_socks = proxies.len() >= 2 && linux;
+                let replace_plain_socks = proxies.len() == 1 && linux;
+
                 for proxie in proxies.iter() {
-                    if let Ok(proxy) = reqwest::Proxy::all(proxie) {
-                        client = client.proxy(proxy);
+                    let socks = proxie.starts_with("socks://");
+
+                    // we can skip it and use another proxy from the list.
+                    if ignore_plain_socks && socks {
+                        continue;
+                    }
+
+                    // use HTTP instead as reqwest does not support the protocol on linux.
+                    if replace_plain_socks && socks {
+                        if let Ok(proxy) =
+                            reqwest::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                        {
+                            client = client.proxy(proxy);
+                        }
+                    } else {
+                        if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                            client = client.proxy(proxy);
+                        }
                     }
                 }
+
                 client
             }
             _ => client,

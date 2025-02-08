@@ -348,15 +348,21 @@ pub async fn launch_browser(
                 let mut create_content = CreateBrowserContextParams::default();
                 create_content.dispose_on_detach = Some(true);
 
-                if let Some(ref p) = config.proxies {
-                    if let Some(p) = p.get(0) {
+                if let Some(ref proxies) = config.proxies {
+                    let use_plain_http = proxies.len() >= 2;
+
+                    for p in proxies.iter() {
                         if p.starts_with("http://localhost") {
                             create_content.proxy_bypass_list = Some("<-loopback>".into());
                         }
+                        // pick the socks:// proxy over http if found.
                         if p.starts_with("socks://") {
-                            // default to http socks since protocol does not work for chrome.
                             create_content.proxy_server =
-                                Some(p.replacen("socks://", "http://", 1));
+                                Some(p.replacen("socks://", "http://", 1).into());
+                            // pref this connection
+                            if use_plain_http {
+                                break;
+                            }
                         } else {
                             create_content.proxy_server = Some(p.into());
                         }

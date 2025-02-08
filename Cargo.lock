@@ -943,9 +943,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.12"
+version = "1.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "755717a7de9ec452bf7f3f1a3099085deabd7f2962b861dae91ecd7a365903d2"
+checksum = "c7777341816418c02e033934a09f20dc0ccaf65a5201ef8a450ae0105a573fda"
 dependencies = [
  "jobserver",
  "libc",
@@ -2450,9 +2450,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hickory-proto"
-version = "0.24.2"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "447afdcdb8afb9d0a852af6dc65d9b285ce720ed7a59e42a8bf2e931c67bc1b5"
+checksum = "2ad3d6d98c648ed628df039541a5577bee1a7c83e9e16fe3dbedeea4cdfeb971"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -2474,9 +2474,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-resolver"
-version = "0.24.2"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2e2aba9c389ce5267d31cf1e4dace82390ae276b0b364ea55630b1fa1b44b4"
+checksum = "dcf287bde7b776e85d7188e6e5db7cf410a2f9531fe82817eb87feed034c8d14"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -5588,7 +5588,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5653,7 +5653,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5744,7 +5744,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "clap",
  "env_logger",
@@ -5787,7 +5787,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5810,7 +5810,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -5827,7 +5827,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.27.48"
+version = "2.27.49"
 dependencies = [
  "env_logger",
  "lazy_static",
