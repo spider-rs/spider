@@ -1144,10 +1144,8 @@ impl Website {
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
     fn configure_http_client_builder(&mut self) -> crate::ClientBuilder {
-        use reqwest::header::HeaderMap;
-
         let policy = self.setup_redirect_policy();
-        let mut headers: HeaderMap = HeaderMap::new();
+        let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
@@ -1189,35 +1187,11 @@ impl Website {
                 let replace_plain_socks = proxies.len() == 1 && linux;
 
                 for proxie in proxies.iter() {
-                    if proxie.starts_with("force_req_http://") {
-                        if let Ok(proxy) =
-                            reqwest::Proxy::all(&proxie.replacen("force_req_http://", "http://", 1))
-                        {
-                            client = client.proxy(proxy);
-                        }
-                        break;
-                    }
-                    if proxie.starts_with("force_req_https://") {
-                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
-                            "force_req_https://",
-                            "https://",
-                            1,
-                        )) {
-                            client = client.proxy(proxy);
-                        }
-                        break;
-                    }
-                    if proxie.starts_with("force_req_socks5://") {
-                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
-                            "force_req_socks5://",
-                            "socks5://",
-                            1,
-                        )) {
-                            client = client.proxy(proxy);
-                        }
-                        break;
+                    if proxie.ignore == crate::configuration::ProxyIgnore::Http {
+                        continue;
                     }
 
+                    let proxie = &proxie.addr;
                     let socks = proxie.starts_with("socks://");
 
                     // we can skip it and use another proxy from the list.
@@ -1309,35 +1283,10 @@ impl Website {
                 let replace_plain_socks = proxies.len() == 1 && linux;
 
                 for proxie in proxies.iter() {
-                    // special force proxy conditions. We should map the configs instead later.
-                    if proxie.starts_with("force_req_http://") {
-                        if let Ok(proxy) =
-                            reqwest::Proxy::all(&proxie.replacen("force_req_http://", "http://", 1))
-                        {
-                            client = client.proxy(proxy);
-                        }
-                        break;
+                    if proxie.ignore == crate::configuration::ProxyIgnore::Http {
+                        continue;
                     }
-                    if proxie.starts_with("force_req_https://") {
-                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
-                            "force_req_https://",
-                            "https://",
-                            1,
-                        )) {
-                            client = client.proxy(proxy);
-                        }
-                        break;
-                    }
-                    if proxie.starts_with("force_req_socks5://") {
-                        if let Ok(proxy) = reqwest::Proxy::all(&proxie.replacen(
-                            "force_req_socks5://",
-                            "socks5://",
-                            1,
-                        )) {
-                            client = client.proxy(proxy);
-                        }
-                        break;
-                    }
+                    let proxie = &proxie.addr;
 
                     let socks = proxie.starts_with("socks://");
 
@@ -4610,6 +4559,15 @@ impl Website {
     /// Use proxies for request.
     pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
         self.configuration.with_proxies(proxies);
+        self
+    }
+
+    /// Use proxies for request with control between chrome and http.
+    pub fn with_proxies_direct(
+        &mut self,
+        proxies: Option<Box<Vec<crate::configuration::RequestProxy>>>,
+    ) -> &mut Self {
+        self.configuration.with_proxies_direct(proxies);
         self
     }
 

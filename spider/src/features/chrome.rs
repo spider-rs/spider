@@ -68,7 +68,7 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
-    proxies: &Option<Box<Vec<string_concat::String>>>,
+    proxies: &Option<Box<Vec<crate::configuration::RequestProxy>>>,
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
@@ -97,8 +97,20 @@ pub fn get_browser_config(
     let builder = match proxies {
         Some(proxies) => {
             let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+            let base_proxies = proxies
+                .iter()
+                .filter_map(|p| {
+                    if p.ignore == crate::configuration::ProxyIgnore::Chrome {
+                        None
+                    } else {
+                        Some(p.addr.to_owned())
+                    }
+                })
+                .collect::<Vec<String>>();
 
-            chrome_args.push(string_concat!(r#"--proxy-server="#, proxies.join(";")));
+            if !base_proxies.is_empty() {
+                chrome_args.push(string_concat!(r#"--proxy-server="#, base_proxies.join(";")));
+            }
 
             builder.args(chrome_args)
         }
@@ -125,7 +137,7 @@ pub fn get_browser_config(
 /// get chrome configuration headful
 #[cfg(feature = "chrome_headed")]
 pub fn get_browser_config(
-    proxies: &Option<Box<Vec<string_concat::String>>>,
+    proxies: &Option<Box<Vec<crate::configuration::RequestProxy>>>,
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
@@ -351,40 +363,29 @@ pub async fn launch_browser(
                 if let Some(ref proxies) = config.proxies {
                     let use_plain_http = proxies.len() >= 2;
 
-                    for p in proxies.iter() {
-                        if !p.is_empty() {
+                    for proxie in proxies.iter() {
+                        if proxie.ignore == crate::configuration::ProxyIgnore::Chrome {
+                            continue;
+                        }
+
+                        let proxie = &proxie.addr;
+
+                        if !proxie.is_empty() {
                             // pick the socks:// proxy over http if found.
-                            if p.starts_with("socks://") {
+                            if proxie.starts_with("socks://") {
                                 create_content.proxy_server =
-                                    Some(p.replacen("socks://", "http://", 1).into());
+                                    Some(proxie.replacen("socks://", "http://", 1).into());
                                 // pref this connection
                                 if use_plain_http {
                                     break;
                                 }
                             }
 
-                            if p.starts_with("http://localhost") {
+                            if proxie.starts_with("http://localhost") {
                                 create_content.proxy_bypass_list = Some("<-loopback>".into());
                             }
 
-                            if p.starts_with("force_chrome_http://") {
-                                create_content.proxy_server =
-                                    Some(p.replacen("force_chrome_http://", "http://", 1).into());
-                                break;
-                            }
-                            if p.starts_with("force_chrome_https://") {
-                                create_content.proxy_server =
-                                    Some(p.replacen("force_chrome_https://", "https://", 1).into());
-                                break;
-                            }
-                            if p.starts_with("force_chrome_socks5://") {
-                                create_content.proxy_server = Some(
-                                    p.replacen("force_chrome_socks5://", "socks5://", 1).into(),
-                                );
-                                break;
-                            }
-
-                            create_content.proxy_server = Some(p.into());
+                            create_content.proxy_server = Some(proxie.into());
                         }
                     }
                 }

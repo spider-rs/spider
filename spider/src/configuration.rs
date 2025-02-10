@@ -44,6 +44,29 @@ pub type AllowList = Box<regex::RegexSet>;
 #[cfg_attr(not(feature = "regex"), derive(PartialEq, Eq))]
 pub struct AllowListSet(pub AllowList);
 
+/// Determine allow proxy
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ProxyIgnore {
+    /// Chrome proxy.
+    Chrome,
+    /// HTTP proxy.
+    Http,
+    #[default]
+    /// Do not ignore
+    No,
+}
+
+/// The networking proxy to use.
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RequestProxy {
+    /// The proxy address.
+    pub addr: String,
+    /// Ignore the proxy when running a request type.
+    pub ignore: ProxyIgnore,
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -85,7 +108,7 @@ pub struct Configuration {
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
     pub http2_prior_knowledge: bool,
     /// Use proxy list for performing network request.
-    pub proxies: Option<Box<Vec<String>>>,
+    pub proxies: Option<Box<Vec<RequestProxy>>>,
     /// Headers to include with request.
     pub headers: Option<Box<SerializableHeaderMap>>,
     #[cfg(feature = "sitemap")]
@@ -564,10 +587,22 @@ impl Configuration {
 
     /// Use proxies for request.
     pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
-        match proxies {
-            Some(p) => self.proxies = Some(p.into()),
-            _ => self.proxies = None,
-        };
+        self.proxies = proxies.map(|p| {
+            Box::new(
+                p.iter()
+                    .map(|addr| RequestProxy {
+                        addr: addr.to_owned(),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<RequestProxy>>(),
+            )
+        });
+        self
+    }
+
+    /// Use proxies for request with control between chrome and http.
+    pub fn with_proxies_direct(&mut self, proxies: Option<Box<Vec<RequestProxy>>>) -> &mut Self {
+        self.proxies = proxies;
         self
     }
 
