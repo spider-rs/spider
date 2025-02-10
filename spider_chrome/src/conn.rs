@@ -40,14 +40,21 @@ lazy_static::lazy_static! {
         Ok(disable_nagle) => disable_nagle == "true",
         _ => true
     };
+    /// Websocket config defaults
+    static ref WEBSOCKET_DEFAULTS: bool = match std::env::var("WEBSOCKET_DEFAULTS") {
+        Ok(d) => d == "true",
+        _ => false
+    };
 }
 
 impl<T: EventMessage + Unpin> Connection<T> {
     pub async fn connect(debug_ws_url: impl AsRef<str>) -> Result<Self> {
         let mut config = WebSocketConfig::default();
 
-        config.max_message_size = None;
-        config.max_frame_size = None;
+        if *WEBSOCKET_DEFAULTS == false {
+            config.max_message_size = None;
+            config.max_frame_size = None;
+        }
 
         let (ws, _) = tokio_tungstenite::connect_async_with_config(
             debug_ws_url.as_ref(),
