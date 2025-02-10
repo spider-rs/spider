@@ -2126,6 +2126,7 @@ impl Website {
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
             }
+
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
                     None

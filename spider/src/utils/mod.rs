@@ -1000,8 +1000,8 @@ pub async fn fetch_page_html_chrome_base(
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use std::time::Duration;
-
     use tokio::time::Instant;
+
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
     let listener = page
@@ -1024,26 +1024,33 @@ pub async fn fetch_page_html_chrome_base(
             // used for smart mode re-rendering direct assigning html
             if content {
                 if let Ok(frame) = page.mainframe().await {
-                    let _ = page
+                    if let Err(e) = page
                         .execute(
                             chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
                                 frame_id: frame.unwrap_or_default(),
                                 html: source.to_string(),
                             },
                         )
-                        .await;
+                        .await
+                    {
+                        log::info!("{:?}", e);
+                    }
 
                     // perform extra navigate to trigger page actions.
                     if let Some(u) = url_target {
                         if u.starts_with("http") {
-                            let _ = page
+                            if let Err(e) = page
                                 .evaluate(format!(r#"window.location = "{}";"#, u))
-                                .await;
+                                .await
+                            {
+                                log::info!("{:?}", e);
+                            }
                         }
                     }
                 }
             } else {
                 if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
+                    log::info!("{:?}", e);
                     return Err(e);
                 };
             }
