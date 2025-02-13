@@ -1,4 +1,4 @@
-//! `cargo run --example url_glob --features glob`
+//! cargo run --example url_glob --features glob
 extern crate spider;
 
 use spider::tokio;

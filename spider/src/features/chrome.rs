@@ -468,7 +468,8 @@ pub(crate) async fn attempt_navigation(
     viewport: &Option<crate::features::chrome_common::Viewport>,
 ) -> Result<Page, CdpError> {
     let mut cdp_params = CreateTargetParams::new(url);
-    cdp_params.background = Some(browser_context_id.is_some());
+
+    cdp_params.background = Some(browser_context_id.is_some()); // not supported headless-shell
     cdp_params.browser_context_id.clone_from(browser_context_id);
     cdp_params.url = url.into();
     cdp_params.for_tab = Some(false);

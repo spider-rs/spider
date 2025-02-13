@@ -1670,6 +1670,7 @@ impl Website {
     }
 
     /// Expand links for crawl.
+    #[cfg(not(feature = "glob"))]
     async fn _crawl_establish(
         &mut self,
         client: &Client,
@@ -1831,7 +1832,11 @@ impl Website {
     }
 
     /// Expand links for crawl.
-    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        feature = "chrome",
+        not(feature = "glob")
+    ))]
     async fn crawl_establish(
         &mut self,
         client: &Client,
@@ -1943,66 +1948,364 @@ impl Website {
         }
     }
 
-    /// fetch the page with chrome
-    #[cfg(all(
-        not(feature = "glob"),
-        not(feature = "decentralized"),
-        feature = "smart"
-    ))]
-    async fn render_chrome_page(
-        config: &Configuration,
+    /// Expand links for crawl.
+    #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
+    async fn crawl_establish(
+        &mut self,
         client: &Client,
-        browser: &Arc<chromiumoxide::Browser>,
-        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
-        page: &mut Page,
-        url: &str,
-    ) {
-        if let Ok(chrome_page) = crate::features::chrome::attempt_navigation(
-            "about:blank",
-            &browser,
-            &config.request_timeout,
-            &context_id,
-            &config.viewport,
-        )
-        .await
+        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        http_worker: bool,
+    ) -> HashSet<CaseInsensitiveString> {
+        // base_domain name passed here is for primary url determination and not subdomain.tld placement
+        let links: HashSet<CaseInsensitiveString> = if self
+            .is_allowed_default(&self.get_base_link())
+            .eq(&ProcessLinkStatus::Allowed)
         {
-            crate::features::chrome::setup_chrome_events(&chrome_page, &config).await;
-            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                &chrome_page,
-                config.chrome_intercept.enabled,
-                &config.auth_challenge_response,
-                config.chrome_intercept.block_visuals,
-                &url,
-            )
-            .await;
+            let link = self.url.inner();
 
-            let next_page = Page::new(
-                &url,
+            let mut page = Page::new(
+                &if http_worker && link.starts_with("https") {
+                    link.replacen("https", "http", 1)
+                } else {
+                    link.to_string()
+                },
                 &client,
-                &chrome_page,
-                &config.wait_for,
-                &config.screenshot,
-                false, // we use the initial about:blank page.
-                &config.openai_config,
-                &config.execution_scripts,
-                &config.automation_scripts,
-                &config.viewport,
-                &config.request_timeout,
             )
             .await;
 
-            page.clone_from(&next_page);
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
 
-            if let Some(h) = intercept_handle {
-                let abort_handle = h.abort_handle();
-                if let Err(elasped) =
-                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
-                {
-                    log::warn!("Handler timeout exceeded {elasped}");
-                    abort_handle.abort();
+            self.insert_link(match self.on_link_find_callback {
+                Some(cb) => {
+                    let c = cb(*self.url.to_owned(), None);
+
+                    c.0
                 }
+                _ => *self.url.to_owned(),
+            })
+            .await;
+
+            self.initial_status_code = page.status_code;
+
+            if page.status_code == reqwest::StatusCode::FORBIDDEN {
+                self.status = CrawlStatus::Blocked;
+            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                self.status = CrawlStatus::RateLimited;
+            } else if page.status_code.is_server_error() {
+                self.status = CrawlStatus::ServerError;
+            }
+
+            // todo: pass full links to the worker to return.
+            if self.configuration.return_page_links {
+                page.page_links = Some(page.links.clone().into());
+            }
+
+            let links = HashSet::from(page.links.clone());
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
+
+            links
+        } else {
+            HashSet::new()
+        };
+
+        links
+    }
+
+    /// Expand links for crawl.
+    #[cfg(all(feature = "glob", feature = "decentralized"))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
+        http_worker: bool,
+    ) -> HashSet<CaseInsensitiveString> {
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let expanded = self.get_expanded_links(&self.url.inner().as_str());
+        self.configuration.configure_allowlist();
+
+        for link in expanded {
+            let allowed = self.is_allowed(&link);
+
+            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                break;
+            }
+            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                continue;
+            }
+
+            let mut page = Page::new(
+                &if http_worker && link.as_ref().starts_with("https") {
+                    link.inner().replacen("https", "http", 1).to_string()
+                } else {
+                    link.inner().to_string()
+                },
+                &client,
+            )
+            .await;
+
+            let u = page.get_url();
+            let u = if u.is_empty() { link } else { u.into() };
+
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u, None),
+                _ => (u, None),
+            };
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
+
+            self.insert_link(link_result.0).await;
+
+            if self.configuration.return_page_links {
+                page.page_links = Some(Default::default());
+            }
+
+            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+            let page_links = HashSet::from(page.links);
+
+            links.extend(page_links);
+        }
+
+        links
+    }
+
+    /// Expand links for crawl.
+    #[cfg(all(feature = "glob", feature = "chrome", not(feature = "decentralized")))]
+    async fn crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &mut RelativeSelectors,
+        _: bool,
+        page: &chromiumoxide::Page,
+    ) -> HashSet<CaseInsensitiveString> {
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let expanded = self.get_expanded_links(&self.url.inner().as_str());
+        self.configuration.configure_allowlist();
+
+        for link in expanded {
+            let allowed = self.is_allowed(&link);
+
+            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                break;
+            }
+            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                continue;
+            }
+
+            let mut page = Page::new(
+                &link.inner().as_str(),
+                &client,
+                &page,
+                &self.configuration.wait_for,
+                &self.configuration.screenshot,
+                false, // we use the initial about:blank page.
+                &self.configuration.openai_config,
+                &self.configuration.execution_scripts,
+                &self.configuration.automation_scripts,
+                &self.configuration.viewport,
+                &self.configuration.request_timeout,
+            )
+            .await;
+            let u = page.get_url();
+            let u = if u.is_empty() { link } else { u.into() };
+
+            let link_result = match self.on_link_find_callback {
+                Some(cb) => cb(u, None),
+                _ => (u, None),
+            };
+
+            if let Some(sid) = page.signature {
+                self.insert_signature(sid).await;
+            }
+
+            self.insert_link(link_result.0).await;
+
+            if self.configuration.return_page_links {
+                page.page_links = Some(Default::default());
+                let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
+
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+
+                links.extend(next_links);
+            } else {
+                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
+                let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
+
+                links.extend(next_links);
             }
         }
+
+        links
+    }
+
+    /// Expand links for crawl.
+    #[cfg(feature = "glob")]
+    async fn _crawl_establish(
+        &mut self,
+        client: &Client,
+        base: &mut RelativeSelectors,
+        _: bool,
+    ) -> HashSet<CaseInsensitiveString> {
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let domain_name = self.url.inner();
+        let expanded = self.get_expanded_links(&domain_name.as_str());
+
+        self.configuration.configure_allowlist();
+
+        for url in expanded {
+            if self
+                .is_allowed_default(url.inner())
+                .eq(&ProcessLinkStatus::Allowed)
+            {
+                let mut links_ssg = links.clone();
+                let mut links_pages = if self.configuration.return_page_links {
+                    Some(links.clone())
+                } else {
+                    None
+                };
+                let mut page_links_settings =
+                    PageLinkBuildSettings::new(true, self.configuration.full_resources);
+
+                page_links_settings.subdomains = self.configuration.subdomains;
+                page_links_settings.tld = self.configuration.tld;
+                page_links_settings.normalize = self.configuration.normalize;
+
+                let mut domain_parsed = self.domain_parsed.take();
+
+                let mut page = Page::new_page_streaming(
+                    &url,
+                    client,
+                    false,
+                    base,
+                    &self.configuration.external_domains_caseless,
+                    &page_links_settings,
+                    &mut links,
+                    Some(&mut links_ssg),
+                    &mut domain_parsed, // original domain
+                    &mut self.domain_parsed,
+                    &mut links_pages,
+                )
+                .await;
+
+                if self.domain_parsed.is_none() {
+                    if let Some(mut domain_parsed) = domain_parsed.take() {
+                        convert_abs_url(&mut domain_parsed);
+                        self.domain_parsed.replace(domain_parsed);
+                    }
+                }
+
+                let mut retry_count = self.configuration.retry;
+                let domains_caseless = &self.configuration.external_domains_caseless;
+
+                while page.should_retry && retry_count > 0 {
+                    retry_count -= 1;
+                    if let Some(timeout) = page.get_timeout() {
+                        tokio::time::sleep(timeout).await;
+                    }
+
+                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                        let mut domain_parsed_clone = self.domain_parsed.clone();
+
+                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                            page.clone_from(
+                                &Page::new_page_streaming(
+                                    &url,
+                                    client,
+                                    false,
+                                    base,
+                                    domains_caseless,
+                                    &page_links_settings,
+                                    &mut links,
+                                    Some(&mut links_ssg),
+                                    &mut domain_parsed,
+                                    &mut domain_parsed_clone,
+                                    &mut links_pages,
+                                )
+                                .await,
+                            );
+                        })
+                        .await
+                        {
+                            log::info!("backoff gateway timeout exceeded {elasped}");
+                        }
+
+                        self.domain_parsed = domain_parsed_clone;
+                    } else {
+                        page.clone_from(
+                            &Page::new_page_streaming(
+                                &url,
+                                client,
+                                false,
+                                base,
+                                &self.configuration.external_domains_caseless,
+                                &page_links_settings,
+                                &mut links,
+                                Some(&mut links_ssg),
+                                &mut domain_parsed,
+                                &mut self.domain_parsed,
+                                &mut links_pages,
+                            )
+                            .await,
+                        );
+                    }
+                }
+
+                emit_log(&url);
+
+                if let Some(signature) = page.signature {
+                    if !self.is_signature_allowed(signature).await {
+                        return Default::default();
+                    }
+                    self.insert_signature(signature).await;
+                }
+
+                self.insert_link(match self.on_link_find_callback {
+                    Some(cb) => {
+                        let c = cb(*self.url.clone(), None);
+                        c.0
+                    }
+                    _ => *self.url.clone(),
+                })
+                .await;
+
+                if page.is_empty() {
+                    self.status = CrawlStatus::Empty;
+                }
+
+                if self.configuration.return_page_links {
+                    page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                }
+
+                links.extend(links_ssg);
+
+                self.initial_status_code = page.status_code;
+
+                if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
+                    self.status = CrawlStatus::Blocked;
+                } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    self.status = CrawlStatus::RateLimited;
+                } else if page.status_code.is_server_error() {
+                    self.status = CrawlStatus::ServerError;
+                }
+
+                if let Some(cb) = self.on_should_crawl_callback {
+                    if !cb(&page) {
+                        page.blocked_crawl = true;
+                        channel_send_page(&self.channel, page, &self.channel_guard);
+                        return Default::default();
+                    }
+                }
+
+                channel_send_page(&self.channel, page, &self.channel_guard);
+            }
+        }
+
+        links
     }
 
     /// Expand links for crawl.
@@ -2153,267 +2456,66 @@ impl Website {
         links
     }
 
-    /// Expand links for crawl.
-    #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
-    async fn crawl_establish(
-        &mut self,
-        client: &Client,
-        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        http_worker: bool,
-    ) -> HashSet<CaseInsensitiveString> {
-        // base_domain name passed here is for primary url determination and not subdomain.tld placement
-        let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(&self.get_base_link())
-            .eq(&ProcessLinkStatus::Allowed)
-        {
-            let link = self.url.inner();
-
-            let mut page = Page::new(
-                &if http_worker && link.starts_with("https") {
-                    link.replacen("https", "http", 1)
-                } else {
-                    link.to_string()
-                },
-                &client,
-            )
-            .await;
-
-            if let Some(sid) = page.signature {
-                self.insert_signature(sid).await;
-            }
-
-            self.insert_link(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.url.to_owned(), None);
-
-                    c.0
-                }
-                _ => *self.url.to_owned(),
-            })
-            .await;
-
-            self.initial_status_code = page.status_code;
-
-            if page.status_code == reqwest::StatusCode::FORBIDDEN {
-                self.status = CrawlStatus::Blocked;
-            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                self.status = CrawlStatus::RateLimited;
-            } else if page.status_code.is_server_error() {
-                self.status = CrawlStatus::ServerError;
-            }
-
-            // todo: pass full links to the worker to return.
-            if self.configuration.return_page_links {
-                page.page_links = Some(page.links.clone().into());
-            }
-
-            let links = HashSet::from(page.links.clone());
-
-            channel_send_page(&self.channel, page, &self.channel_guard);
-
-            links
-        } else {
-            HashSet::new()
-        };
-
-        links
-    }
-
-    /// Expand links for crawl.
-    #[cfg(all(feature = "glob", feature = "decentralized"))]
-    async fn crawl_establish(
-        &mut self,
-        client: &Client,
-        _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        http_worker: bool,
-    ) -> HashSet<CaseInsensitiveString> {
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let expanded = self.get_expanded_links(&self.url.inner().as_str());
-        self.configuration.configure_allowlist();
-
-        for link in expanded {
-            let allowed = self.is_allowed(&link);
-
-            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                break;
-            }
-            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
-                continue;
-            }
-
-            let mut page = Page::new(
-                &if http_worker && link.as_ref().starts_with("https") {
-                    link.inner().replacen("https", "http", 1).to_string()
-                } else {
-                    link.inner().to_string()
-                },
-                &client,
-            )
-            .await;
-
-            let u = page.get_url();
-            let u = if u.is_empty() { link } else { u.into() };
-
-            let link_result = match self.on_link_find_callback {
-                Some(cb) => cb(u, None),
-                _ => (u, None),
-            };
-
-            if let Some(sid) = page.signature {
-                self.insert_signature(sid).await;
-            }
-
-            self.insert_link(link_result.0).await;
-
-            if self.configuration.return_page_links {
-                page.page_links = Some(Default::default());
-            }
-
-            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-            let page_links = HashSet::from(page.links);
-
-            links.extend(page_links);
-        }
-
-        links
-    }
-
-    /// Expand links for crawl.
-    #[cfg(all(feature = "glob", feature = "chrome", not(feature = "decentralized")))]
-    async fn crawl_establish(
-        &mut self,
-        client: &Client,
-        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        _: bool,
-        page: &chromiumoxide::Page,
-    ) -> HashSet<CaseInsensitiveString> {
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let expanded = self.get_expanded_links(&self.url.inner().as_str());
-        self.configuration.configure_allowlist();
-
-        for link in expanded {
-            let allowed = self.is_allowed(&link);
-
-            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                break;
-            }
-            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
-                continue;
-            }
-
-            let mut page = Page::new(
-                &link.inner().as_str(),
-                &client,
-                &page,
-                &self.configuration.wait_for,
-            )
-            .await;
-            let u = page.get_url();
-            let u = if u.is_empty() { link } else { u.into() };
-
-            let link_result = match self.on_link_find_callback {
-                Some(cb) => cb(u, None),
-                _ => (u, None),
-            };
-
-            if let Some(sid) = page.signature {
-                self.insert_signature(sid).await;
-            }
-
-            self.insert_link(link_result.0).await;
-
-            if self.configuration.return_page_links {
-                page.page_links = Some(Default::default());
-                let next_links = HashSet::from(page.links(&base).await);
-
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-                links.extend(next_links);
-            } else {
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-                let next_links = HashSet::from(page.links(&base).await);
-
-                links.extend(next_links);
-            }
-        }
-
-        links
-    }
-
-    /// Expand links for crawl.
+    /// fetch the page with chrome
     #[cfg(all(
-        feature = "glob",
-        not(feature = "chrome"),
-        not(feature = "decentralized")
+        not(feature = "glob"),
+        not(feature = "decentralized"),
+        feature = "smart"
     ))]
-    async fn crawl_establish(
-        &mut self,
+    async fn render_chrome_page(
+        config: &Configuration,
         client: &Client,
-        base: &mut (CompactString, smallvec::SmallVec<[CompactString; 2]>),
-        _: bool,
-    ) -> HashSet<CaseInsensitiveString> {
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let domain_name = self.url.inner();
-        let expanded = self.get_expanded_links(&domain_name.as_str());
+        browser: &Arc<chromiumoxide::Browser>,
+        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+        page: &mut Page,
+        url: &str,
+    ) {
+        if let Ok(chrome_page) = crate::features::chrome::attempt_navigation(
+            "about:blank",
+            &browser,
+            &config.request_timeout,
+            &context_id,
+            &config.viewport,
+        )
+        .await
+        {
+            crate::features::chrome::setup_chrome_events(&chrome_page, &config).await;
+            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                &chrome_page,
+                config.chrome_intercept.enabled,
+                &config.auth_challenge_response,
+                config.chrome_intercept.block_visuals,
+                &url,
+            )
+            .await;
 
-        self.configuration.configure_allowlist();
+            let next_page = Page::new(
+                &url,
+                &client,
+                &chrome_page,
+                &config.wait_for,
+                &config.screenshot,
+                false, // we use the initial about:blank page.
+                &config.openai_config,
+                &config.execution_scripts,
+                &config.automation_scripts,
+                &config.viewport,
+                &config.request_timeout,
+            )
+            .await;
 
-        for link in expanded {
-            let allowed = self.is_allowed(&link);
+            page.clone_from(&next_page);
 
-            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                break;
-            }
-
-            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
-                continue;
-            }
-
-            let mut page = Page::new(&link.inner(), &client).await;
-
-            if let Some(ref domain) = page.final_redirect_destination {
-                let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
-                let prior_domain = self.domain_parsed.take();
-                self.domain_parsed = parse_absolute_url(&domain);
-                self.url = domain;
-                let s = self.setup_selectors();
-                base.0 = s.0;
-                base.1 = s.1;
-                if let Some(pd) = prior_domain {
-                    if let Some(domain_name) = pd.host_str() {
-                        base.2 = domain_name.into();
-                    }
+            if let Some(h) = intercept_handle {
+                let abort_handle = h.abort_handle();
+                if let Err(elasped) =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                {
+                    log::warn!("Handler timeout exceeded {elasped}");
+                    abort_handle.abort();
                 }
             }
-
-            let u = page.get_url().into();
-            let link_result = match self.on_link_find_callback {
-                Some(cb) => cb(u, None),
-                _ => (u, None),
-            };
-
-            if let Some(sid) = page.signature {
-                self.insert_signature(sid).await;
-            }
-
-            self.insert_link(link_result.0).await;
-
-            if !page.is_empty() {
-                if self.configuration.return_page_links {
-                    page.page_links = Some(Default::default());
-                }
-                let page_links = HashSet::from(page.links(&base).await);
-
-                links.extend(page_links);
-            } else {
-                self.status = CrawlStatus::Empty;
-            };
-
-            channel_send_page(&self.channel, page, &self.channel_guard);
         }
-
-        links
     }
 
     /// Set the crawl status depending on crawl state. The crawl that only changes if the state is Start or Active.
