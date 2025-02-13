@@ -3662,7 +3662,7 @@ impl Website {
             _ => {
                 log::info!("Chrome initialization failed. Switching to HTTP mode as a fallback strategy to maintain service availability.");
                 self.crawl_concurrent_raw(&client, &handle).await;
-            },
+            }
         }
     }
 

@@ -271,8 +271,8 @@ pub async fn setup_browser_configuration(
             let max_retries = 3;
             let mut browser = None;
 
-            // Attempt reconnections for instances that may be on load balancers (LBs) 
-            // experiencing shutdowns or degradation. This logic implements a retry 
+            // Attempt reconnections for instances that may be on load balancers (LBs)
+            // experiencing shutdowns or degradation. This logic implements a retry
             // mechanism to improve robustness by allowing multiple attempts to establish.
             while attempts <= max_retries {
                 match Browser::connect_with_config(&*v, create_handler_config(&config)).await {

@@ -63,6 +63,35 @@ macro_rules! advance_state {
     }};
 }
 
+lazy_static::lazy_static! {
+    /// Initial start command params.
+    static ref INIT_COMMANDS_PARAMS: Vec<(chromiumoxide_types::MethodId, serde_json::Value)> = {
+        let attach = SetAutoAttachParams::builder()
+            .flatten(true)
+            .auto_attach(true)
+            .wait_for_debugger_on_start(true)
+            .build()
+            .unwrap();
+        let enable_performance = performance::EnableParams::default();
+        let enable_log = cdplog::EnableParams::default();
+
+        vec![
+                (
+                    attach.identifier(),
+                    serde_json::to_value(attach).unwrap_or_default(),
+                ),
+                (
+                    enable_performance.identifier(),
+                    serde_json::to_value(enable_performance).unwrap_or_default(),
+                ),
+                (
+                    enable_log.identifier(),
+                    serde_json::to_value(enable_log).unwrap_or_default(),
+                )
+            ]
+    };
+}
+
 #[derive(Debug)]
 pub struct Target {
     /// Info about this target as returned from the chromium instance
@@ -601,32 +630,7 @@ impl Target {
     }
 
     pub(crate) fn page_init_commands(timeout: Duration) -> CommandChain {
-        let attach = SetAutoAttachParams::builder()
-            .flatten(true)
-            .auto_attach(true)
-            .wait_for_debugger_on_start(true)
-            .build()
-            .unwrap();
-        let enable_performance = performance::EnableParams::default();
-        let enable_log = cdplog::EnableParams::default();
-
-        CommandChain::new(
-            vec![
-                (
-                    attach.identifier(),
-                    serde_json::to_value(attach).unwrap_or_default(),
-                ),
-                (
-                    enable_performance.identifier(),
-                    serde_json::to_value(enable_performance).unwrap_or_default(),
-                ),
-                (
-                    enable_log.identifier(),
-                    serde_json::to_value(enable_log).unwrap_or_default(),
-                ),
-            ],
-            timeout,
-        )
+        CommandChain::new(INIT_COMMANDS_PARAMS.clone(), timeout)
     }
 }
 
