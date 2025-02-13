@@ -3254,12 +3254,11 @@ impl Website {
                             &mut context_id,
                         )
                         .await;
-
                         log::error!("{}", err)
                     }
                 }
             }
-            _ => log::info!("Chrome failed to start."),
+            _ => log::info!("Chrome initialization failed."),
         }
     }
 
@@ -3660,7 +3659,10 @@ impl Website {
                     .await;
                 }
             }
-            _ => log::info!("Chrome failed to start."),
+            _ => {
+                log::info!("Chrome initialization failed. Switching to HTTP mode as a fallback strategy to maintain service availability.");
+                self.crawl_concurrent_raw(&client, &handle).await;
+            },
         }
     }
 
