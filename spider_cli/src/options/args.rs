@@ -4,6 +4,7 @@ use clap::Parser;
 /// program to crawl a website and gather valid web urls.
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
+#[command(arg_required_else_help = true)]
 pub struct Cli {
     /// Build main sub commands
     #[clap(subcommand)]
