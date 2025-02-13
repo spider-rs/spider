@@ -65,21 +65,13 @@ If you need something else, the `Page::execute` function allows for writing your
 
 ### Add chromiumoxide to your project
 
-`chromiumoxide` comes with support for the [`async-std`](https://github.com/async-rs/async-std) and [`tokio`](https://github.com/tokio-rs/tokio) runtime. 
-
-By default `chromiumoxide` is configured with `async-std`.
-
-Use `chromiumoxide` with the `async-std` runtime:
+`chromiumoxide` comes with support for [`tokio`](https://github.com/tokio-rs/tokio) runtime. 
 
 ```toml
-chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", branch = "main"}
+spider_chrome = { version = "2", default-features = false }
 ```
 
-```toml
-chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", default-features = false, branch = "main"}
-```
-
-This configuration is made possible primarily by the websocket crate of choice: [`async-tungstenite`](https://github.com/sdroege/async-tungstenite).
+This configuration is made possible primarily by the websocket crate of choice: [`tokio-tungstenite`](https://github.com/snapview/tokio-tungstenite/tree/master).
 
 ## Generated Code
 

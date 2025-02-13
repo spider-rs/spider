@@ -266,13 +266,33 @@ pub async fn setup_browser_configuration(
     };
 
     match chrome_connection {
-        Some(v) => match Browser::connect_with_config(&*v, create_handler_config(&config)).await {
-            Ok(browser) => Some(browser),
-            Err(err) => {
-                log::error!("{:?}", err);
-                None
+        Some(v) => {
+            let mut attempts = 0;
+            let max_retries = 3;
+            let mut browser = None;
+
+            // Attempt reconnections for instances that may be on load balancers (LBs) 
+            // experiencing shutdowns or degradation. This logic implements a retry 
+            // mechanism to improve robustness by allowing multiple attempts to establish.
+            while attempts <= max_retries {
+                match Browser::connect_with_config(&*v, create_handler_config(&config)).await {
+                    Ok(b) => {
+                        browser = Some(b);
+                        break;
+                    }
+                    Err(err) => {
+                        log::error!("{:?}", err);
+                        attempts += 1;
+                        if attempts > max_retries {
+                            log::error!("Exceeded maximum retry attempts");
+                            break;
+                        }
+                    }
+                }
             }
-        },
+
+            browser
+        }
         _ => match get_browser_config(
             &proxies,
             config.chrome_intercept.enabled,
@@ -333,13 +353,11 @@ pub async fn launch_browser(
 
     match browser_configuration {
         Some(c) => {
-            let (mut browser, handler) = c;
+            let (mut browser, mut handler) = c;
             let mut context_id = handler.default_browser_context().id().cloned();
 
             // Spawn a new task that continuously polls the handler
             let handle = tokio::task::spawn(async move {
-                tokio::pin!(handler);
-
                 while let Some(k) = handler.next().await {
                     if let Err(e) = k {
                         match e {
@@ -406,7 +424,6 @@ pub async fn launch_browser(
 
             Some((browser, handle, context_id))
         }
-
         _ => None,
     }
 }
