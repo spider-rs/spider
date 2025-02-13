@@ -132,15 +132,18 @@ impl Target {
         let request_timeout = config.request_timeout;
         let mut network_manager = NetworkManager::new(config.ignore_https_errors, request_timeout);
 
-        network_manager.set_cache_enabled(config.cache_enabled);
+        if !config.cache_enabled {
+            network_manager.set_cache_enabled(false);
+        }
+
+        if !config.service_worker_enabled {
+            network_manager.set_service_worker_enabled(true);
+        }
+
         network_manager.set_request_interception(config.request_intercept);
 
         if let Some(ref headers) = config.extra_headers {
             network_manager.set_extra_headers(headers.clone());
-        }
-
-        if !config.service_worker_enabled {
-            network_manager.set_service_worker_enabled(config.service_worker_enabled);
         }
 
         network_manager.ignore_visuals = config.ignore_visuals;

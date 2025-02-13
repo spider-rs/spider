@@ -134,6 +134,7 @@ pub struct NetworkManager {
     user_cache_disabled: bool,
     attempted_authentications: HashSet<RequestId>,
     credentials: Option<Credentials>,
+    // unused atm for remote connections, needs to be used for self launches.
     user_request_interception_enabled: bool,
     protocol_request_interception_enabled: bool,
     offline: bool,
@@ -257,6 +258,7 @@ impl NetworkManager {
         if enabled == self.protocol_request_interception_enabled {
             return;
         }
+
         self.update_protocol_cache_disabled();
 
         if enabled {
