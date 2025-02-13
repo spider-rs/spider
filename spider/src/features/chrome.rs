@@ -206,6 +206,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         },
         request_intercept: config.chrome_intercept.enabled,
         cache_enabled: config.cache,
+        service_worker_enabled: config.service_worker_enabled,
         viewport: match config.viewport {
             Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
                 v.to_owned(),

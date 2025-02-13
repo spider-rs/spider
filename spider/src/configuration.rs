@@ -137,19 +137,22 @@ pub struct Configuration {
     /// Cache the page following HTTP caching rules.
     #[cfg(any(feature = "cache_request", feature = "chrome"))]
     pub cache: bool,
+    /// Enable or disable service workers. Disabled by default.
+    #[cfg(feature = "chrome")]
+    pub service_worker_enabled: bool,
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Configure the viewport for chrome. This does nothing without the flag `chrome` enabled.
+    /// Configure the viewport for chrome.
     #[cfg(feature = "chrome")]
     pub viewport: Option<Viewport>,
-    /// Overrides default host system timezone with the specified one. This does nothing without the flag `chrome` enabled.
+    /// Overrides default host system timezone with the specified one.
     #[cfg(feature = "chrome")]
     pub timezone_id: Option<Box<String>>,
-    /// Overrides default host system locale with the specified one. This does nothing without the flag `chrome` enabled.
+    /// Overrides default host system locale with the specified one.
     #[cfg(feature = "chrome")]
     pub locale: Option<Box<String>>,
-    /// Set a custom script to eval on each new document. This does nothing without the flag `chrome` enabled.
+    /// Set a custom script to eval on each new document.
     #[cfg(feature = "chrome")]
     pub evaluate_on_new_document: Option<Box<String>>,
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
@@ -176,7 +179,7 @@ pub struct Configuration {
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
     pub openai_config: Option<GPTConfigs>,
-    /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
+    /// Setup fingerprint ID on each document.
     #[cfg(feature = "chrome")]
     pub fingerprint: bool,
     /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
@@ -749,6 +752,19 @@ impl Configuration {
     #[cfg(not(feature = "cache_request"))]
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_service_worker_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.service_worker_enabled = enabled;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_service_worker_enabled(&mut self, _enabled: bool) -> &mut Self {
         self
     }
 

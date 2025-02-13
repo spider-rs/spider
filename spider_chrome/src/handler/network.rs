@@ -12,15 +12,19 @@ use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
 use aho_corasick::AhoCorasick;
 use case_insensitive_string::CaseInsensitiveString;
-use chromiumoxide_cdp::cdp::browser_protocol::fetch::{
-    self, AuthChallengeResponse, AuthChallengeResponseResponse, ContinueRequestParams,
-    ContinueWithAuthParams, DisableParams, EventAuthRequired, EventRequestPaused, RequestPattern,
-};
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
     EmulateNetworkConditionsParams, EventLoadingFailed, EventLoadingFinished,
     EventRequestServedFromCache, EventRequestWillBeSent, EventResponseReceived, Headers,
     InterceptionId, RequestId, ResourceType, Response, SetCacheDisabledParams,
     SetExtraHttpHeadersParams,
+};
+use chromiumoxide_cdp::cdp::browser_protocol::{
+    fetch::{
+        self, AuthChallengeResponse, AuthChallengeResponseResponse, ContinueRequestParams,
+        ContinueWithAuthParams, DisableParams, EventAuthRequired, EventRequestPaused,
+        RequestPattern,
+    },
+    network::SetBypassServiceWorkerParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::{
     network::EnableParams, security::SetIgnoreCertificateErrorsParams,
@@ -220,6 +224,10 @@ impl NetworkManager {
         if let Ok(headers) = serde_json::to_value(&self.extra_headers) {
             self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
         }
+    }
+
+    pub fn set_service_worker_enabled(&mut self, bypass: bool) {
+        self.push_cdp_request(SetBypassServiceWorkerParams::new(bypass));
     }
 
     pub fn set_request_interception(&mut self, enabled: bool) {
@@ -478,6 +486,7 @@ impl NetworkManager {
                             event.resource_type,
                             event.request.url
                         );
+
                         self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
                     }
                 }

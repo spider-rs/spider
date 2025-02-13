@@ -1,7 +1,7 @@
 use crate::CaseInsensitiveString;
 
 lazy_static! {
-    static ref RE: Regex = {
+    static ref RE: regex::Regex = {
         unsafe {
             regex::Regex::new(
                 r"(?x)

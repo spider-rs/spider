@@ -139,6 +139,10 @@ impl Target {
             network_manager.set_extra_headers(headers.clone());
         }
 
+        if !config.service_worker_enabled {
+            network_manager.set_service_worker_enabled(config.service_worker_enabled);
+        }
+
         network_manager.ignore_visuals = config.ignore_visuals;
         network_manager.block_javascript = config.ignore_javascript;
         network_manager.block_analytics = config.ignore_analytics;
@@ -647,6 +651,7 @@ pub struct TargetConfig {
     pub ignore_analytics: bool,
     pub ignore_stylesheets: bool,
     pub only_html: bool,
+    pub service_worker_enabled: bool,
     pub extra_headers: Option<std::collections::HashMap<String, String>>,
     pub intercept_manager: NetworkInterceptManager,
 }
@@ -659,6 +664,7 @@ impl Default for TargetConfig {
             viewport: Default::default(),
             request_intercept: false,
             cache_enabled: true,
+            service_worker_enabled: true,
             ignore_javascript: false,
             ignore_visuals: false,
             ignore_stylesheets: false,

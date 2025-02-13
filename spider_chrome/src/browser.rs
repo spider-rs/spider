@@ -228,6 +228,7 @@ impl Browser {
             ignore_ads: config.ignore_ads,
             extra_headers: config.extra_headers.clone(),
             only_html: config.only_html,
+            service_worker_enabled: config.service_worker_enabled,
             created_first_target: false,
             intercept_manager: config.intercept_manager,
         };
@@ -693,6 +694,8 @@ pub struct BrowserConfig {
 
     /// Whether to enable cache.
     pub cache_enabled: bool,
+    /// Whether to enable/disable service workers.
+    pub service_worker_enabled: bool,
 
     /// Whether to ignore visuals when request interception is enabled.
     pub ignore_visuals: bool,
@@ -732,6 +735,7 @@ pub struct BrowserConfigBuilder {
     disable_default_args: bool,
     request_intercept: bool,
     cache_enabled: bool,
+    service_worker_enabled: bool,
     ignore_visuals: bool,
     ignore_ads: bool,
     ignore_javascript: bool,
@@ -780,6 +784,7 @@ impl Default for BrowserConfigBuilder {
             ignore_stylesheets: false,
             only_html: false,
             extra_headers: Default::default(),
+            service_worker_enabled: true,
             intercept_manager: NetworkInterceptManager::UNKNOWN,
         }
     }
@@ -936,6 +941,12 @@ impl BrowserConfigBuilder {
         self.cache_enabled = false;
         self
     }
+
+    pub fn set_service_worker_enabled(mut self, bypass: bool) -> Self {
+        self.service_worker_enabled = bypass;
+        self
+    }
+
     pub fn set_extra_headers(
         mut self,
         headers: Option<std::collections::HashMap<String, String>>,
@@ -976,6 +987,7 @@ impl BrowserConfigBuilder {
             extra_headers: self.extra_headers,
             only_html: self.only_html,
             intercept_manager: self.intercept_manager,
+            service_worker_enabled: self.service_worker_enabled,
         })
     }
 }

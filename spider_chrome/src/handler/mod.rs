@@ -462,6 +462,7 @@ impl Handler {
                 viewport: self.config.viewport.clone(),
                 request_intercept: self.config.request_intercept,
                 cache_enabled: self.config.cache_enabled,
+                service_worker_enabled: self.config.service_worker_enabled,
                 ignore_visuals: self.config.ignore_visuals,
                 ignore_stylesheets: self.config.ignore_stylesheets,
                 ignore_javascript: self.config.ignore_javascript,
@@ -698,6 +699,8 @@ pub struct HandlerConfig {
     pub request_intercept: bool,
     /// Whether to enable cache
     pub cache_enabled: bool,
+    /// Whether to enable Service Workers
+    pub service_worker_enabled: bool,
     /// Whether to ignore visuals.
     pub ignore_visuals: bool,
     /// Whether to ignore stylesheets.
@@ -727,6 +730,7 @@ impl Default for HandlerConfig {
             request_timeout: Duration::from_millis(REQUEST_TIMEOUT),
             request_intercept: false,
             cache_enabled: true,
+            service_worker_enabled: true,
             ignore_visuals: false,
             ignore_stylesheets: false,
             ignore_ads: false,

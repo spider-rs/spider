@@ -1919,7 +1919,7 @@ impl Website {
 
             self.initial_status_code = page.status_code;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
@@ -2119,7 +2119,7 @@ impl Website {
 
             self.initial_status_code = page.status_code;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.len() == 0 {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
@@ -4708,6 +4708,12 @@ impl Website {
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);
+        self
+    }
+
+    /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_service_worker_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.configuration.with_service_worker_enabled(enabled);
         self
     }
 
