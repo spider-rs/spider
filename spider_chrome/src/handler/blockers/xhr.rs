@@ -105,6 +105,7 @@ lazy_static::lazy_static! {
             "https://rtb.openx.net/openrtbb/prebidjs",
             "https://beacon.taboola.com/",
             "https://collector.ex.co/main/events",
+            "https://www.youtube-nocookie.com/youtubei/v1/log_event?",
             "https://hb.emxdgt.com/",
             "https://token.rubiconproject.com/",
             "https://prebid-server.rubiconproject.com",
