@@ -2659,6 +2659,7 @@ impl Website {
 
         spawn_task("crawl", async move {
             w.crawl().await;
+            w.unsubscribe();
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
@@ -2709,6 +2710,7 @@ impl Website {
 
         spawn_task("crawl_smart", async move {
             w.crawl_smart().await;
+            w.unsubscribe();
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
@@ -2734,6 +2736,7 @@ impl Website {
 
         spawn_task("crawl_sitemap", async move {
             w.crawl_sitemap().await;
+            w.unsubscribe();
         });
 
         if let Some(mut p) = self.pages.as_mut().cloned() {
