@@ -15,7 +15,7 @@ async fn main() {
         .write_style_or("RUST_LOG_STYLE", "always");
 
     env_logger::init_from_env(env);
-    let target = "https://jeffmendez.com";
+    let target = "https://spider.cloud";
     let mut website: Website = Website::new(target);
     website.configuration.respect_robots_txt = true;
     website.configuration.delay = 15; // Defaults to 250 ms

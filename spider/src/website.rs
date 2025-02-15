@@ -2657,21 +2657,24 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        spawn_task("crawl", async move {
+        let crawl = async move {
             w.crawl().await;
             w.unsubscribe();
-        });
+        };
 
-        if let Some(mut p) = self.pages.as_mut().cloned() {
+        let sub = async move {
             while let Ok(page) = rx2.recv().await {
                 if let Some(sid) = page.signature {
                     self.insert_signature(sid).await;
                 }
                 self.insert_link(page.get_url().into()).await;
-                p.push(page);
+                if let Some(p) = self.pages.as_mut() {
+                    p.push(page);
+                }
             }
-            self.pages.replace(p);
-        }
+        };
+
+        tokio::join!(sub, crawl);
     }
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
@@ -2682,21 +2685,24 @@ impl Website {
         if self.pages.is_none() {
             self.pages = Some(Box::new(Vec::new()));
         }
-
-        spawn_task("crawl_raw", async move {
+        let crawl = async move {
             w.crawl_raw().await;
-        });
+            w.unsubscribe();
+        };
 
-        if let Some(mut p) = self.pages.as_mut().cloned() {
+        let sub = async move {
             while let Ok(page) = rx2.recv().await {
                 if let Some(sid) = page.signature {
                     self.insert_signature(sid).await;
                 }
                 self.insert_link(page.get_url().into()).await;
-                p.push(page);
+                if let Some(p) = self.pages.as_mut() {
+                    p.push(page);
+                }
             }
-            self.pages.replace(p);
-        }
+        };
+
+        tokio::join!(sub, crawl);
     }
 
     /// Start to scrape website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
@@ -2708,21 +2714,24 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        spawn_task("crawl_smart", async move {
+        let crawl = async move {
             w.crawl_smart().await;
             w.unsubscribe();
-        });
+        };
 
-        if let Some(mut p) = self.pages.as_mut().cloned() {
+        let sub = async move {
             while let Ok(page) = rx2.recv().await {
                 if let Some(sid) = page.signature {
                     self.insert_signature(sid).await;
                 }
                 self.insert_link(page.get_url().into()).await;
-                p.push(page);
+                if let Some(p) = self.pages.as_mut() {
+                    p.push(page);
+                }
             }
-            self.pages.replace(p);
-        }
+        };
+
+        tokio::join!(sub, crawl);
     }
 
     /// Start to scrape website sitemap with async concurrency. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `sitemap` flag enabled.
@@ -2734,21 +2743,24 @@ impl Website {
             self.pages = Some(Box::new(Vec::new()));
         }
 
-        spawn_task("crawl_sitemap", async move {
+        let crawl = async move {
             w.crawl_sitemap().await;
             w.unsubscribe();
-        });
+        };
 
-        if let Some(mut p) = self.pages.as_mut().cloned() {
+        let sub = async move {
             while let Ok(page) = rx2.recv().await {
                 if let Some(sid) = page.signature {
                     self.insert_signature(sid).await;
                 }
                 self.insert_link(page.get_url().into()).await;
-                p.push(page);
+                if let Some(p) = self.pages.as_mut() {
+                    p.push(page);
+                }
             }
-            self.pages.replace(p);
-        }
+        };
+
+        tokio::join!(sub, crawl);
     }
 
     /// Dequeue the links to a set
