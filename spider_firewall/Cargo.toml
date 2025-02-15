@@ -1,0 +1,22 @@
+[package]
+name = "spider_firewall"
+version = "2.28.0"
+authors = [
+    "j-mendez <jeff@spider.cloud>"
+]
+description = "Firewall to use for Spider Web Crawler."
+repository = "https://github.com/spider-rs/spider"
+readme = "README.md"
+keywords = ["crawler", "spider"]
+categories = ["web-programming", "command-line-utilities"]
+license = "MIT"
+documentation = "https://docs.rs/spider_firewall"
+edition = "2018"
+
+[dependencies]
+phf = "0.11"
+
+[build-dependencies]
+phf = "0.11"
+phf_codegen = "0.11"
+reqwest = {version = "0.12", features = ["blocking"]}

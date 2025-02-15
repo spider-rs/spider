@@ -197,6 +197,8 @@ pub enum CrawlStatus {
     Active,
     /// The crawl blocked from network ratelimit, firewall, etc.
     Blocked,
+    /// Crawl blocked from spider firewall.
+    FirewallBlocked,
     /// The crawl failed from a server error.
     ServerError,
     /// The crawl was rate limited.
@@ -304,10 +306,17 @@ impl Website {
         };
 
         let domain_parsed: Option<Box<Url>> = parse_absolute_url(&url);
+        let mut status = CrawlStatus::Start;
+
+        if let Some(ref u) = domain_parsed {
+            if crate::utils::abs::block_website(&u) {
+                status = CrawlStatus::FirewallBlocked;
+            }
+        }
 
         Self {
             configuration: Configuration::new().into(),
-            status: CrawlStatus::Start,
+            status,
             domain_parsed,
             url,
             ..Default::default()
@@ -2544,35 +2553,39 @@ impl Website {
 
     /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent(&client, &handle).await;
-        self.sitemap_crawl_chain(&client, &handle, false).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            self.start();
+            let (client, handle) = self.setup().await;
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.crawl_concurrent(&client, &handle).await;
+            self.sitemap_crawl_chain(&client, &handle, false).await;
+            self.set_crawl_status();
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+            self.client.replace(client);
         }
-        self.client.replace(client);
     }
 
     /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` flag enabled.
     pub async fn crawl_sitemap(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.sitemap_crawl(&client, &handle, false).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            self.start();
+            let (client, handle) = self.setup().await;
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.sitemap_crawl(&client, &handle, false).await;
+            self.set_crawl_status();
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+            self.client.replace(client);
         }
-        self.client.replace(client);
     }
 
     /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` and the `chrome` flag enabled.
@@ -2582,18 +2595,20 @@ impl Website {
         not(feature = "decentralized")
     ))]
     pub async fn crawl_sitemap_chrome(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.sitemap_crawl_chrome(&client, &handle, false).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            self.start();
+            let (client, handle) = self.setup().await;
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.sitemap_crawl_chrome(&client, &handle, false).await;
+            self.set_crawl_status();
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+            self.client.replace(client);
         }
-        self.client.replace(client);
     }
 
     #[cfg(all(feature = "decentralized", feature = "smart"))]
@@ -2611,18 +2626,20 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent_smart(&client, &handle).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            self.start();
+            let (client, handle) = self.setup().await;
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.crawl_concurrent_smart(&client, &handle).await;
+            self.set_crawl_status();
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+            self.client.replace(client);
         }
-        self.client.replace(client);
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
@@ -2633,134 +2650,144 @@ impl Website {
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the `chrome` feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
-        self.start();
-        let (client, handle) = self.setup().await;
-        let (handle, join_handle) = match handle {
-            Some(h) => (Some(h.0), Some(h.1)),
-            _ => (None, None),
-        };
-        self.crawl_concurrent_raw(&client, &handle).await;
-        self.sitemap_crawl_chain(&client, &handle, false).await;
-        self.set_crawl_status();
-        if let Some(h) = join_handle {
-            h.abort()
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            self.start();
+            let (client, handle) = self.setup().await;
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.crawl_concurrent_raw(&client, &handle).await;
+            self.sitemap_crawl_chain(&client, &handle, false).await;
+            self.set_crawl_status();
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+            self.client.replace(client);
         }
-        self.client.replace(client);
     }
 
     /// Start to scrape/download website with async concurrency.
     pub async fn scrape(&mut self) {
-        let mut w = self.clone();
-        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let mut w = self.clone();
+            let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
-        if self.pages.is_none() {
-            self.pages = Some(Box::new(Vec::new()));
-        }
-
-        let crawl = async move {
-            w.crawl().await;
-            w.unsubscribe();
-        };
-
-        let sub = async move {
-            while let Ok(page) = rx2.recv().await {
-                if let Some(sid) = page.signature {
-                    self.insert_signature(sid).await;
-                }
-                self.insert_link(page.get_url().into()).await;
-                if let Some(p) = self.pages.as_mut() {
-                    p.push(page);
-                }
+            if self.pages.is_none() {
+                self.pages = Some(Box::new(Vec::new()));
             }
-        };
 
-        tokio::join!(sub, crawl);
+            let crawl = async move {
+                w.crawl().await;
+                w.unsubscribe();
+            };
+
+            let sub = async move {
+                while let Ok(page) = rx2.recv().await {
+                    if let Some(sid) = page.signature {
+                        self.insert_signature(sid).await;
+                    }
+                    self.insert_link(page.get_url().into()).await;
+                    if let Some(p) = self.pages.as_mut() {
+                        p.push(page);
+                    }
+                }
+            };
+
+            tokio::join!(sub, crawl);
+        }
     }
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the "chrome" feature and defaulting to the basic implementation.
     pub async fn scrape_raw(&mut self) {
-        let mut w = self.clone();
-        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let mut w = self.clone();
+            let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
-        if self.pages.is_none() {
-            self.pages = Some(Box::new(Vec::new()));
-        }
-        let crawl = async move {
-            w.crawl_raw().await;
-            w.unsubscribe();
-        };
-
-        let sub = async move {
-            while let Ok(page) = rx2.recv().await {
-                if let Some(sid) = page.signature {
-                    self.insert_signature(sid).await;
-                }
-                self.insert_link(page.get_url().into()).await;
-                if let Some(p) = self.pages.as_mut() {
-                    p.push(page);
-                }
+            if self.pages.is_none() {
+                self.pages = Some(Box::new(Vec::new()));
             }
-        };
+            let crawl = async move {
+                w.crawl_raw().await;
+                w.unsubscribe();
+            };
 
-        tokio::join!(sub, crawl);
+            let sub = async move {
+                while let Ok(page) = rx2.recv().await {
+                    if let Some(sid) = page.signature {
+                        self.insert_signature(sid).await;
+                    }
+                    self.insert_link(page.get_url().into()).await;
+                    if let Some(p) = self.pages.as_mut() {
+                        p.push(page);
+                    }
+                }
+            };
+
+            tokio::join!(sub, crawl);
+        }
     }
 
     /// Start to scrape website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn scrape_smart(&mut self) {
-        let mut w = self.clone();
-        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let mut w = self.clone();
+            let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
-        if self.pages.is_none() {
-            self.pages = Some(Box::new(Vec::new()));
-        }
-
-        let crawl = async move {
-            w.crawl_smart().await;
-            w.unsubscribe();
-        };
-
-        let sub = async move {
-            while let Ok(page) = rx2.recv().await {
-                if let Some(sid) = page.signature {
-                    self.insert_signature(sid).await;
-                }
-                self.insert_link(page.get_url().into()).await;
-                if let Some(p) = self.pages.as_mut() {
-                    p.push(page);
-                }
+            if self.pages.is_none() {
+                self.pages = Some(Box::new(Vec::new()));
             }
-        };
 
-        tokio::join!(sub, crawl);
+            let crawl = async move {
+                w.crawl_smart().await;
+                w.unsubscribe();
+            };
+
+            let sub = async move {
+                while let Ok(page) = rx2.recv().await {
+                    if let Some(sid) = page.signature {
+                        self.insert_signature(sid).await;
+                    }
+                    self.insert_link(page.get_url().into()).await;
+                    if let Some(p) = self.pages.as_mut() {
+                        p.push(page);
+                    }
+                }
+            };
+
+            tokio::join!(sub, crawl);
+        }
     }
 
     /// Start to scrape website sitemap with async concurrency. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `sitemap` flag enabled.
     pub async fn scrape_sitemap(&mut self) {
-        let mut w = self.clone();
-        let mut rx2 = w.subscribe(0).expect("receiver enabled");
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let mut w = self.clone();
+            let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
-        if self.pages.is_none() {
-            self.pages = Some(Box::new(Vec::new()));
-        }
-
-        let crawl = async move {
-            w.crawl_sitemap().await;
-            w.unsubscribe();
-        };
-
-        let sub = async move {
-            while let Ok(page) = rx2.recv().await {
-                if let Some(sid) = page.signature {
-                    self.insert_signature(sid).await;
-                }
-                self.insert_link(page.get_url().into()).await;
-                if let Some(p) = self.pages.as_mut() {
-                    p.push(page);
-                }
+            if self.pages.is_none() {
+                self.pages = Some(Box::new(Vec::new()));
             }
-        };
 
-        tokio::join!(sub, crawl);
+            let crawl = async move {
+                w.crawl_sitemap().await;
+                w.unsubscribe();
+            };
+
+            let sub = async move {
+                while let Ok(page) = rx2.recv().await {
+                    if let Some(sid) = page.signature {
+                        self.insert_signature(sid).await;
+                    }
+                    self.insert_link(page.get_url().into()).await;
+                    if let Some(p) = self.pages.as_mut() {
+                        p.push(page);
+                    }
+                }
+            };
+
+            tokio::join!(sub, crawl);
+        }
     }
 
     /// Dequeue the links to a set

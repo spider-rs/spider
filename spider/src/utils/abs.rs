@@ -45,6 +45,26 @@ pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     }
 }
 
+/// Firewall protection. This does nothing without the [firewall] flag.
+#[cfg(feature = "firewall")]
+pub(crate) fn block_website(u: &Url) -> bool {
+    let mut blocked = false;
+
+    if let Some(host) = u.host_str() {
+        if spider_firewall::is_bad_website_url(&host) {
+            blocked = true;
+        }
+    }
+
+    blocked
+}
+
+/// Firewall protection. This does nothing without the [firewall] flag.
+#[cfg(not(feature = "firewall"))]
+pub(crate) fn block_website(_u: &Url) -> bool {
+    false
+}
+
 /// Return handling for the links
 enum LinkReturn {
     /// Early return

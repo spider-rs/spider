@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.27.66"
+version = "2.28.0"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -80,6 +80,12 @@ features = [
     "bytes",
     "stream"
 ]
+
+[dependencies.spider_firewall]
+version = "2"
+path = "../spider_firewall"
+optional = true
+default-features = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.4", optional = true }
@@ -183,6 +189,7 @@ string_interner_string_backend = ["dep:string-interner"]
 string_interner_bucket_backend = ["dep:string-interner"]
 page_error_status_details = []
 simd = ["dep:sonic-rs"]
+firewall = ["dep:spider_firewall"]
 
 # Allows full concurrency.
 cowboy = []
@@ -194,4 +201,3 @@ inline-more = []
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
-
