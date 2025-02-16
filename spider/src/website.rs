@@ -3073,12 +3073,12 @@ impl Website {
         self.start();
 
         match self.setup_browser().await {
-            Some((browser, browser_handle, mut context_id)) => {
+            Some(mut b) => {
                 match attempt_navigation(
                     "about:blank",
-                    &browser,
+                    &b.browser.0,
                     &self.configuration.request_timeout,
-                    &context_id,
+                    &b.browser.2,
                     &self.configuration.viewport,
                 )
                 .await
@@ -3097,14 +3097,9 @@ impl Website {
                             self.crawl_establish(&client, &mut selectors, false, &new_page)
                                 .await;
                             self.subscription_guard();
-                            crate::features::chrome::close_browser(
-                                browser_handle,
-                                &browser,
-                                &mut context_id,
-                            )
-                            .await;
+                            b.dispose().await;
                         } else {
-                            let semaphore = self.setup_semaphore();
+                            let semaphore: Arc<Semaphore> = self.setup_semaphore();
                             let (mut interval, throttle) = self.setup_crawl();
 
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
@@ -3130,10 +3125,10 @@ impl Website {
                                 self.channel.clone(),
                                 self.configuration.external_domains_caseless.clone(),
                                 self.channel_guard.clone(),
-                                browser,
+                                b.browser.0.clone(),
                                 self.configuration.clone(),
                                 self.url.inner().to_string(),
-                                context_id.clone(),
+                                b.browser.2.clone(),
                                 self.domain_parsed.clone(),
                             ));
 
@@ -3384,26 +3379,16 @@ impl Website {
                                 }
                             }
 
-                            crate::features::chrome::close_browser(
-                                browser_handle,
-                                &shared.5,
-                                &mut context_id,
-                            )
-                            .await;
+                            b.dispose().await;
                         }
                     }
                     Err(err) => {
-                        crate::features::chrome::close_browser(
-                            browser_handle,
-                            &browser,
-                            &mut context_id,
-                        )
-                        .await;
+                        b.dispose().await;
                         log::error!("{}", err)
                     }
                 }
             }
-            _ => log::info!("Chrome initialization failed."),
+            _ => log::error!("Chrome initialization failed."),
         }
     }
 
@@ -3529,7 +3514,7 @@ impl Website {
     async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         match self.setup_browser().await {
-            Some((browser, browser_handle, mut context_id)) => {
+            Some(mut b) => {
                 let mut selectors = self.setup_selectors();
 
                 if match self.configuration.inner_budget {
@@ -3544,17 +3529,12 @@ impl Website {
                         &client,
                         &mut selectors,
                         false,
-                        &browser,
-                        &context_id,
+                        &b.browser.0,
+                        &b.browser.2,
                     )
                     .await;
                     self.subscription_guard();
-                    crate::features::chrome::close_browser(
-                        browser_handle,
-                        &browser,
-                        &mut context_id,
-                    )
-                    .await;
+                    b.dispose().await;
                 } else {
                     let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
@@ -3571,8 +3551,8 @@ impl Website {
                             &client,
                             &mut selectors,
                             false,
-                            &browser,
-                            &context_id,
+                            &b.browser.0,
+                            &b.browser.2,
                         )
                         .await,
                     );
@@ -3587,9 +3567,9 @@ impl Website {
                         selectors,
                         self.channel.clone(),
                         self.channel_guard.clone(),
-                        browser,
+                        b.browser.0.clone(),
                         self.configuration.clone(),
-                        context_id.clone(),
+                        b.browser.2.clone(),
                         self.domain_parsed.clone(),
                     ));
 
@@ -3796,12 +3776,7 @@ impl Website {
                         }
                     }
 
-                    crate::features::chrome::close_browser(
-                        browser_handle,
-                        &shared.4,
-                        &mut context_id,
-                    )
-                    .await;
+                    b.dispose().await;
                 }
             }
             _ => {
@@ -4055,7 +4030,7 @@ impl Website {
         use sitemap::structs::Location;
 
         let selectors = self.setup_selectors();
-        if let Some((browser, browser_handle, mut context_id)) = self.setup_browser().await {
+        if let Some(mut b) = self.setup_browser().await {
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
             let domain = self.url.inner().as_str();
             self.domain_parsed = parse_absolute_url(&domain);
@@ -4090,10 +4065,10 @@ impl Website {
             let shared = Arc::new((
                 self.channel.clone(),
                 self.channel_guard.clone(),
-                browser,
+                b.browser.0.clone(),
                 self.configuration.clone(),
                 self.url.inner().to_string(),
-                context_id.clone(),
+                b.browser.2.clone(),
                 selectors,
                 domain_parsed_ref,
             ));
@@ -4365,8 +4340,7 @@ impl Website {
                 }
             }
 
-            crate::features::chrome::close_browser(browser_handle, &shared.2, &mut context_id)
-                .await;
+            b.dispose().await;
         }
     }
 
@@ -4615,20 +4589,17 @@ impl Website {
 
     /// Launch or connect to browser with setup
     #[cfg(feature = "chrome")]
-    pub async fn setup_browser(
+    pub(crate) async fn setup_browser(
         &mut self,
-    ) -> Option<(
-        Arc<chromiumoxide::Browser>,
-        tokio::task::JoinHandle<()>,
-        Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
-    )> {
+    ) -> Option<crate::features::chrome::BrowserController> {
         match crate::features::chrome::launch_browser(&self.configuration, self.get_url_parsed())
             .await
         {
             Some((browser, browser_handle, context_id)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
+                let b = (browser, Some(browser_handle), context_id);
 
-                Some((browser, browser_handle, context_id))
+                Some(crate::features::chrome::BrowserController::new(b))
             }
             _ => None,
         }

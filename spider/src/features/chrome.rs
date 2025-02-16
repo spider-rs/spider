@@ -650,6 +650,75 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     }
 }
 
+pub(crate) type BrowserControl = (
+    std::sync::Arc<chromiumoxide::Browser>,
+    Option<tokio::task::JoinHandle<()>>,
+    Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+);
+
+/// Create the browser controller to auto drop connections.
+pub(crate) struct BrowserController {
+    /// The browser.
+    pub browser: BrowserControl,
+    /// Closed browser.
+    pub closed: bool,
+}
+
+impl BrowserController {
+    /// A new browser controller.
+    pub(crate) fn new(browser: BrowserControl) -> Self {
+        BrowserController {
+            browser,
+            closed: false,
+        }
+    }
+    /// Dispose the browser context.
+    pub(crate) async fn dispose_browser_context(
+        browser: &Browser,
+        id: chromiumoxide::cdp::browser_protocol::browser::BrowserContextId,
+    ) {
+        if let Err(er) = browser.dispose_browser_context(id).await {
+            log::error!("Close Browser Error: {}", er.to_string())
+        }
+    }
+
+    /// Dispose the browser context and join handler.
+    pub(crate) async fn dispose(&mut self) {
+        if !self.closed {
+            // assume close will always happen.
+            self.closed = true;
+            if let Some(id) = self.browser.2.take() {
+                if let Some(handler) = self.browser.1.take() {
+                    BrowserController::dispose_browser_context(&self.browser.0, id).await;
+                    if !handler.is_finished() {
+                        handler.abort();
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Drop for BrowserController {
+    fn drop(&mut self) {
+        if !self.closed {
+            if let Some(id) = self.browser.2.take() {
+                let browser = self.browser.0.clone();
+
+                if let Some(handler) = self.browser.1.take() {
+                    // on linux and windows we need to clean up the context.
+                    tokio::spawn(async move {
+                        BrowserController::dispose_browser_context(&browser, id).await;
+                        if !handler.is_finished() {
+                            handler.abort();
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// static chrome arguments to start
 #[cfg(all(feature = "chrome_cpu", feature = "real_browser"))]
 pub static CHROME_ARGS: [&'static str; 27] = [
