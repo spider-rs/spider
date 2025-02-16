@@ -3105,18 +3105,19 @@ impl Website {
                             .await;
                         } else {
                             let semaphore = self.setup_semaphore();
+                            let (mut interval, throttle) = self.setup_crawl();
 
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                             let mut links: HashSet<CaseInsensitiveString> =
                                 self.drain_extra_links().collect();
 
-                            let (mut interval, throttle) = self.setup_crawl();
-
                             links.extend(
                                 self.crawl_establish(&client, &mut selectors, false, &new_page)
                                     .await,
                             );
+
+                            drop(new_page);
 
                             self.configuration.configure_allowlist();
 
