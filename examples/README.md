@@ -12,6 +12,10 @@ Subscribe to realtime changes [Subscribe](./subscribe.rs).
 
 - `cargo run --example subscribe`
 
+Subscribe to realtime changes [Subscribe](./subscribe_multiple.rs).
+
+- `cargo run --example subscribe_multiple`
+
 Live handle index mutation example [Callback](./callback.rs).
 
 - `cargo run --example callback`
