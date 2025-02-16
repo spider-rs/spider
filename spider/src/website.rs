@@ -2425,9 +2425,12 @@ impl Website {
             let links = if !page_links.is_empty() {
                 page_links
             } else {
-                self.status = CrawlStatus::Empty;
                 Default::default()
             };
+
+            if page.is_empty() {
+                self.status = CrawlStatus::Empty;
+            }
 
             self.initial_status_code = page.status_code;
 
