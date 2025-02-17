@@ -353,6 +353,17 @@ impl Website {
         string_concat!(self.crawl_id, self.url.inner())
     }
 
+    /// Single page request.
+    fn single_page(&self) -> bool {
+        match self.configuration.inner_budget {
+            Some(ref b) => match b.get(&*WILD_CARD_PATH) {
+                Some(b) => b.eq(&1),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub fn setup_disk(&mut self) {
@@ -1857,9 +1868,10 @@ impl Website {
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
-            crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration).await;
-
-            let intercept_handle = self.setup_chrome_interception(&chrome_page).await;
+            let (_, intercept_handle) = tokio::join!(
+                crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration),
+                self.setup_chrome_interception(&chrome_page)
+            );
 
             let mut page = Page::new(
                 &self.url.inner(),
@@ -1930,6 +1942,15 @@ impl Website {
                 self.status = CrawlStatus::Empty;
                 Default::default()
             };
+
+            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                if final_redirect_destination == "chrome-error://chromewebdata/"
+                    && page.status_code.is_success()
+                    && self.configuration.proxies.is_some()
+                {
+                    page.error_status = Some("Invalid proxy configuration.".into());
+                }
+            }
 
             self.initial_status_code = page.status_code;
 
@@ -2824,13 +2845,7 @@ impl Website {
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         let mut selector = self.setup_selectors();
-        if match self.configuration.inner_budget {
-            Some(ref b) => match b.get(&*WILD_CARD_PATH) {
-                Some(b) => b.eq(&1),
-                _ => false,
-            },
-            _ => false,
-        } {
+        if self.single_page() {
             self.status = CrawlStatus::Active;
             self._crawl_establish(client, &mut selector, false).await;
         } else {
@@ -3088,17 +3103,15 @@ impl Website {
                 {
                     Ok(new_page) => {
                         let mut selectors = self.setup_selectors();
+                        self.status = CrawlStatus::Active;
 
-                        if match self.configuration.inner_budget {
-                            Some(ref b) => match b.get(&*WILD_CARD_PATH) {
-                                Some(b) => b.eq(&1),
-                                _ => false,
-                            },
-                            _ => false,
-                        } {
-                            self.status = CrawlStatus::Active;
-                            self.crawl_establish(&client, &mut selectors, false, &new_page)
-                                .await;
+                        let base_links = self
+                            .crawl_establish(&client, &mut selectors, false, &new_page)
+                            .await;
+
+                        drop(new_page);
+
+                        if self.single_page() {
                             self.subscription_guard();
                             b.dispose().await;
                         } else {
@@ -3110,12 +3123,7 @@ impl Website {
                             let mut links: HashSet<CaseInsensitiveString> =
                                 self.drain_extra_links().collect();
 
-                            links.extend(
-                                self.crawl_establish(&client, &mut selectors, false, &new_page)
-                                    .await,
-                            );
-
-                            drop(new_page);
+                            links.extend(base_links);
 
                             self.configuration.configure_allowlist();
 
@@ -3520,13 +3528,7 @@ impl Website {
             Some(mut b) => {
                 let mut selectors = self.setup_selectors();
 
-                if match self.configuration.inner_budget {
-                    Some(ref b) => match b.get(&*WILD_CARD_PATH) {
-                        Some(b) => b.eq(&1),
-                        _ => false,
-                    },
-                    _ => false,
-                } {
+                if self.single_page() {
                     self.status = CrawlStatus::Active;
                     self.crawl_establish_smart(
                         &client,
@@ -4032,8 +4034,8 @@ impl Website {
         use sitemap::reader::{SiteMapEntity, SiteMapReader};
         use sitemap::structs::Location;
 
-        let selectors = self.setup_selectors();
         if let Some(mut b) = self.setup_browser().await {
+            let selectors = self.setup_selectors();
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
             let domain = self.url.inner().as_str();
             self.domain_parsed = parse_absolute_url(&domain);

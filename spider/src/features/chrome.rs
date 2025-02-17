@@ -269,7 +269,7 @@ pub async fn setup_browser_configuration(
     match chrome_connection {
         Some(v) => {
             let mut attempts = 0;
-            let max_retries = 3;
+            let max_retries = 10;
             let mut browser = None;
 
             // Attempt reconnections for instances that may be on load balancers (LBs)
