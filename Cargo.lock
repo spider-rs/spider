@@ -1056,9 +1056,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.29"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acebd8ad879283633b343856142139f2da2317c96b05b4dd6181c61e2480184"
+checksum = "92b7b18d71fad5313a1e320fa9897994228ce274b60faa4d694fe0ea89cd9e6d"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1066,9 +1066,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.29"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ba32cbda51c7e1dfd49acc1457ba1a7dec5b64fe360e828acb13ca8dc9c2f9"
+checksum = "a35db2071778a7344791a4fb4f95308b5673d219dee3ae348b86642574ecc90c"
 dependencies = [
  "anstream",
  "anstyle",
@@ -5588,7 +5588,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5654,7 +5654,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5684,7 +5684,7 @@ dependencies = [
  "spider_chromiumoxide_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.26.1",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5745,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "clap",
  "env_logger",
@@ -5770,11 +5770,16 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.28.4"
+version = "2.28.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04c4aa0ccc6f14c5e0636037ae63f53305c85480c858aa1d11a8ef3a22bd5a82"
 dependencies = [
+ "hashbrown 0.15.2",
  "phf 0.11.3",
  "phf_codegen 0.11.3",
  "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5797,7 +5802,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5820,7 +5825,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -5837,7 +5842,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.28.4"
+version = "2.28.6"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -6386,9 +6391,9 @@ checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
 name = "tempfile"
-version = "3.17.0"
+version = "3.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a40f762a77d2afa88c2d919489e390a12bdd261ed568e60cfa7e48d4e20f0d33"
+checksum = "22e5a0acb1f3f55f65cc4a866c361b2fb2a0ff6366785ae6fbb5f85df07ba230"
 dependencies = [
  "cfg-if",
  "fastrand 2.3.0",
@@ -6697,14 +6702,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be4bf6fecd69fcdede0ec680aaf474cdab988f9de6bc73d3758f0160e3b7025a"
+checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
 dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite 0.26.1",
+ "tungstenite 0.26.2",
 ]
 
 [[package]]
@@ -6947,17 +6952,16 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413083a99c579593656008130e29255e54dcaae495be556cc26888f211648c24"
+checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
 dependencies = [
- "byteorder",
  "bytes",
  "data-encoding",
  "http 1.2.0",
  "httparse",
  "log",
- "rand 0.8.5",
+ "rand 0.9.0",
  "sha1 0.10.6",
  "thiserror 2.0.11",
  "utf-8",
@@ -6971,9 +6975,9 @@ checksum = "a9b2228007eba4120145f785df0f6c92ea538f5a3635a612ecf4e334c8c1446d"
 
 [[package]]
 name = "typenum"
-version = "1.17.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
+checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
 name = "ua_generator"
@@ -7126,9 +7130,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.13.1"
+version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ced87ca4be083373936a67f8de945faa23b6b42384bd5b64434850802c6dccd0"
+checksum = "8c1f41ffb7cf259f1ecc2876861a17e7142e63ead296f671f81f6ae85903e0d6"
 dependencies = [
  "getrandom 0.3.1",
 ]

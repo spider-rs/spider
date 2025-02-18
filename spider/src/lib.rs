@@ -75,7 +75,6 @@
 //! - `disk_aws`: Enables SQLite hybrid disk storage to balance memory usage with aws_tls.
 //! - `balance`: Enables balancing the CPU and memory to scale more efficiently.
 //! - `regex`: Enables blacklisting paths with regx
-//! - `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 //! - `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](https://docs.rs/crate/spider_worker/latest) startup before crawls.
 //! - `sync`: Subscribe to changes for Page data processing async.
 //! - `control`: Enables the ability to pause, start, and shutdown crawls on demand.

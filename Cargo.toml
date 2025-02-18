@@ -6,7 +6,6 @@ members = [
     "spider_utils",
     "spider_transformations",
     "spider_chrome",
-    "spider_firewall",
     # internal
     "examples",
     "benches"]

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.28.4"
+version = "2.28.6"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -83,7 +83,6 @@ features = [
 
 [dependencies.spider_firewall]
 version = "2"
-path = "../spider_firewall"
 optional = true
 default-features = false
 
