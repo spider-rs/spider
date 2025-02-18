@@ -1009,6 +1009,12 @@ impl Website {
         &self.status
     }
 
+    /// Reset the active crawl status to bypass websites that are blocked.
+    pub fn reset_status(&mut self) -> &CrawlStatus {
+        self.status = CrawlStatus::Start;
+        &self.status
+    }
+
     /// Set the crawl status to persist between the run.
     /// Example crawling a sitemap and all links after - website.crawl_sitemap().await.persist_links().crawl().await
     pub fn persist_links(&mut self) -> &mut Self {
