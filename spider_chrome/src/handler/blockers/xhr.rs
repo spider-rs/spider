@@ -110,6 +110,7 @@ lazy_static::lazy_static! {
             "https://token.rubiconproject.com/",
             "https://prebid-server.rubiconproject.com",
             "https://targeting.unrulymedia.com/unruly_prebid",
+            "https://bf16218erm.bf.dynatrace.com/",
             "https://prebid.adnxs.com/",
             "https://doh.cq0.co/resolve",
             "https://cdn.segment.",
