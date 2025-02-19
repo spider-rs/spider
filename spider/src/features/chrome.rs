@@ -706,8 +706,6 @@ impl Drop for BrowserController {
     fn drop(&mut self) {
         if !self.closed {
             if let Some(id) = self.browser.2.take() {
-                let browser = self.browser.0.clone();
-
                 if let Some(handler) = self.browser.1.take() {
                     if !handler.is_finished() {
                         handler.abort();

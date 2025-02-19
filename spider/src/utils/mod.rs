@@ -19,7 +19,7 @@ use crate::{
 };
 use abs::parse_absolute_url;
 use auto_encoder::is_binary_file;
-use bytes::{BufMut, BytesMut};
+use bytes::BufMut;
 use case_insensitive_string::CaseInsensitiveString;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
@@ -1510,7 +1510,7 @@ pub async fn handle_response_bytes(
 
     if !block_streaming(&res, only_html) {
         let mut stream = res.bytes_stream();
-        let mut data: BytesMut = BytesMut::new();
+        let mut data = Vec::new();
         let mut first_bytes = true;
 
         while let Some(item) = stream.next().await {
@@ -1560,7 +1560,7 @@ pub async fn handle_response_bytes_writer<'h, O>(
     target_url: &str,
     only_html: bool,
     rewriter: &mut HtmlRewriter<'h, O>,
-    collected_bytes: &mut BytesMut,
+    collected_bytes: &mut Vec<u8>,
 ) -> (PageResponse, bool)
 where
     O: OutputSink + Send + 'static,
@@ -1585,7 +1585,6 @@ where
 
     if !block_streaming(&res, only_html) {
         let mut stream = res.bytes_stream();
-        // let mut data: BytesMut = BytesMut::new();
         let mut first_bytes = true;
         let mut data_len = 0;
 
@@ -1758,7 +1757,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
     use crate::bytes::BufMut;
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use bytes::BytesMut;
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     match client.get(target_url).send().await {
@@ -1778,7 +1776,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             #[cfg(feature = "remote_addr")]
             let remote_addr = res.remote_addr();
             let mut stream = res.bytes_stream();
-            let mut data: BytesMut = BytesMut::new();
+            let mut data = Vec::new();
             let mut file: Option<tokio::fs::File> = None;
             let mut file_path = String::new();
 
@@ -1840,13 +1838,9 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                         }
                     }
 
-                    let mut b = BytesMut::with_capacity(buffer.capacity());
-
-                    b.extend_from_slice(&buffer);
-
-                    b.freeze().into()
+                    Box::new(buffer.into())
                 } else {
-                    data.freeze().into()
+                    Box::new(data.into())
                 }),
                 status_code,
                 final_url: rd,
@@ -1930,7 +1924,6 @@ pub async fn fetch_page_html(
                     );
 
                     use crate::bytes::BufMut;
-                    use bytes::BytesMut;
 
                     match client.get(target_url).send().await {
                         Ok(res) if res.status().is_success() => {
@@ -1939,7 +1932,7 @@ pub async fn fetch_page_html(
                             let cookies = get_cookies(&res);
                             let status_code = res.status();
                             let mut stream = res.bytes_stream();
-                            let mut data: BytesMut = BytesMut::new();
+                            let mut data = Vec::new();
 
                             let mut file: Option<tokio::fs::File> = None;
                             let mut file_path = String::new();
@@ -2008,13 +2001,9 @@ pub async fn fetch_page_html(
                                         }
                                     }
 
-                                    let mut b = BytesMut::with_capacity(buffer.capacity());
-
-                                    b.extend_from_slice(&buffer);
-
-                                    b.freeze().into()
+                                    Box::new(buffer.into())
                                 } else {
-                                    data.freeze().into()
+                                    Box::new(data.into())
                                 }),
                                 status_code,
                                 ..Default::default()
@@ -2128,7 +2117,6 @@ pub async fn fetch_page_html_chrome(
                     );
 
                     use crate::bytes::BufMut;
-                    use bytes::BytesMut;
 
                     match client.get(target_url).send().await {
                         Ok(res) if res.status().is_success() => {
@@ -2139,7 +2127,7 @@ pub async fn fetch_page_html_chrome(
                             let cookies = get_cookies(&res);
                             let status_code = res.status();
                             let mut stream = res.bytes_stream();
-                            let mut data: BytesMut = BytesMut::new();
+                            let mut data = Vec::new();
 
                             while let Some(item) = stream.next().await {
                                 match item {

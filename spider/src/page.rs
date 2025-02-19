@@ -1006,9 +1006,9 @@ impl Page {
 
                 let mut collected_bytes = match res.content_length() {
                     Some(cap) if cap <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                        bytes::BytesMut::with_capacity(cap as usize)
+                        Vec::with_capacity(cap as usize)
                     }
-                    _ => bytes::BytesMut::new(),
+                    _ => Vec::new(),
                 };
 
                 let mut response = handle_response_bytes_writer(
@@ -1026,13 +1026,17 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let content = Box::new(collected_bytes.freeze());
-
                 if r_settings.normalize {
-                    response.0.signature.replace(hash_html(&content).await);
+                    response
+                        .0
+                        .signature
+                        .replace(hash_html(&collected_bytes).await);
                 }
 
-                response.0.content.replace(content);
+                response
+                    .0
+                    .content
+                    .replace(Box::new(Bytes::from(collected_bytes)));
 
                 if r_settings.ssg_build {
                     if let Some(ssg_map) = ssg_map {
