@@ -2410,9 +2410,9 @@ impl Website {
                 }
             }
 
-            let page_links: HashSet<CaseInsensitiveString> = page
-                .smart_links(&base, &self.configuration, &self.domain_parsed, &browser)
-                .await;
+            let (page_links, bytes_transferred): (HashSet<CaseInsensitiveString>, Option<f64>) =
+                page.smart_links(&base, &self.configuration, &self.domain_parsed, &browser)
+                    .await;
 
             if let Some(ref domain) = page.final_redirect_destination {
                 let prior_domain = self.domain_parsed.take();
@@ -2447,6 +2447,8 @@ impl Website {
             } else {
                 Default::default()
             };
+
+            page.bytes_transferred = bytes_transferred;
 
             self.initial_status_code = page.status_code;
 
@@ -3705,13 +3707,14 @@ impl Website {
                                         page.page_links = Some(Default::default());
                                     }
 
-                                    let links = page
+                                    let (links, bytes_transferred ) = page
                                         .smart_links(
                                             &shared.1, &shared.4, &shared.5, &shared.6,
                                         )
                                         .await;
 
                                     page.base = prev_domain;
+                                    page.bytes_transferred = bytes_transferred;
 
                                     if shared.4.normalize {
                                         page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);

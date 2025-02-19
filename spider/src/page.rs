@@ -1975,13 +1975,14 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
-    ) -> HashSet<A> {
+    ) -> (HashSet<A>, Option<f64>) {
         use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
         use lol_html::{doc_comments, element};
         use std::sync::atomic::{AtomicBool, Ordering};
 
+        let mut bytes_transferred: Option<f64> = None;
         let mut map = HashSet::new();
         let mut inner_map: HashSet<A> = map.clone();
         let mut links_pages = if self.page_links.is_some() {
@@ -2238,6 +2239,9 @@ impl Page {
                                     &base1.as_deref().cloned().map(Box::new),
                                 )
                                 .await;
+
+                            bytes_transferred = v.bytes_transferred;
+
                             map.extend(extended_map)
                         }
                         Err(e) => {
@@ -2262,7 +2266,7 @@ impl Page {
             );
         }
 
-        map
+        (map, bytes_transferred)
     }
 
     /// Find all the links as a stream using string resource validation.
@@ -2278,17 +2282,17 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
-        browser: &std::sync::Arc<chromiumoxide::Browser>,
         configuration: &crate::configuration::Configuration,
-        context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
         base: &Option<Box<Url>>,
-    ) -> HashSet<A> {
+        browser: &crate::features::chrome::OnceBrowser,
+    ) -> (HashSet<A>, Option<f64>) {
         use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
         use lol_html::{doc_comments, element};
         use std::sync::atomic::{AtomicBool, Ordering};
 
+        let mut bytes_transferred: Option<f64> = None;
         let mut map = HashSet::new();
         let mut inner_map: HashSet<A> = map.clone();
         let mut links_pages = if self.page_links.is_some() {
@@ -2314,7 +2318,7 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base = base.as_deref();
+                let base1 = base.as_deref();
 
                 // original domain to match local pages.
                 let original_page = {
@@ -2339,7 +2343,7 @@ impl Page {
                                             static_app = true;
                                         }
 
-                                        if let Some(ref base) = base {
+                                        if let Some(ref base) = base1 {
                                             let abs = convert_abs_path(&base, &src);
 
                                             if let Ok(mut paths) =
@@ -2436,93 +2440,107 @@ impl Page {
                 }
 
                 if rerender {
-                    // we should re-use the html content instead with events.
-                    let browser = browser.to_owned();
-                    let configuration = configuration.clone();
-                    let target_url = self.url.clone();
-                    let context_id = context_id.clone();
-                    let parent_host = parent_host.clone();
-
-                    spawn_task("page_render_fetch", async move {
-                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
-                            "about:blank",
-                            &browser,
-                            &configuration.request_timeout,
-                            &context_id,
-                            &configuration.viewport,
-                        )
+                    if let Some(browser_controller) = browser
+                        .get_or_init(|| {
+                            crate::website::Website::setup_browser_base(&configuration, &base)
+                        })
                         .await
-                        {
-                            let intercept_handle =
-                                crate::features::chrome::setup_chrome_interception_base(
+                    {
+                        let browser = browser_controller.browser.0.clone();
+                        let browser_id = browser_controller.browser.2.clone();
+                        let configuration = configuration.clone();
+                        // we should re-use the html content instead with events.
+                        let target_url = self.url.clone();
+                        // let context_id = context_id.clone();
+                        let parent_host = parent_host.clone();
+
+                        spawn_task("page_render_fetch", async move {
+                            if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                                "about:blank",
+                                &browser,
+                                &configuration.request_timeout,
+                                &browser_id,
+                                &configuration.viewport,
+                            )
+                            .await
+                            {
+                                let intercept_handle =
+                                    crate::features::chrome::setup_chrome_interception_base(
+                                        &new_page,
+                                        configuration.chrome_intercept.enabled,
+                                        &configuration.auth_challenge_response,
+                                        configuration.chrome_intercept.block_visuals,
+                                        &parent_host,
+                                    )
+                                    .await;
+
+                                crate::features::chrome::setup_chrome_events(
                                     &new_page,
-                                    configuration.chrome_intercept.enabled,
-                                    &configuration.auth_challenge_response,
-                                    configuration.chrome_intercept.block_visuals,
-                                    &parent_host,
+                                    &configuration,
                                 )
                                 .await;
 
-                            crate::features::chrome::setup_chrome_events(&new_page, &configuration)
+                                let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                    &html_resource,
+                                    &new_page,
+                                    true,
+                                    true,
+                                    &configuration.wait_for,
+                                    &configuration.screenshot,
+                                    false,
+                                    &configuration.openai_config,
+                                    Some(&target_url),
+                                    &configuration.execution_scripts,
+                                    &configuration.automation_scripts,
+                                    &configuration.viewport,
+                                    &configuration.request_timeout,
+                                )
                                 .await;
 
-                            let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                &html_resource,
-                                &new_page,
-                                true,
-                                true,
-                                &configuration.wait_for,
-                                &configuration.screenshot,
-                                false,
-                                &configuration.openai_config,
-                                Some(&target_url),
-                                &configuration.execution_scripts,
-                                &configuration.automation_scripts,
-                                &configuration.viewport,
-                                &configuration.request_timeout,
-                            )
-                            .await;
-
-                            if let Some(h) = intercept_handle {
-                                let abort_handle = h.abort_handle();
-                                if let Err(elasped) =
-                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
-                                        .await
-                                {
-                                    log::warn!("Handler timeout exceeded {elasped}");
-                                    abort_handle.abort();
-                                }
-                            }
-
-                            match page_resource {
-                                Ok(resource) => {
-                                    if let Err(_) = tx.send(resource) {
-                                        log::info!("the receiver dropped - {target_url}");
+                                if let Some(h) = intercept_handle {
+                                    let abort_handle = h.abort_handle();
+                                    if let Err(elasped) = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(15),
+                                        h,
+                                    )
+                                    .await
+                                    {
+                                        log::warn!("Handler timeout exceeded {elasped}");
+                                        abort_handle.abort();
                                     }
                                 }
-                                Err(e) => {
-                                    let mut default_response: PageResponse = Default::default();
 
-                                    default_response.final_url = Some(target_url.clone());
-
-                                    match e {
-                                        CdpError::NotFound => {
-                                            default_response.status_code = StatusCode::NOT_FOUND;
+                                match page_resource {
+                                    Ok(resource) => {
+                                        if let Err(_) = tx.send(resource) {
+                                            log::info!("the receiver dropped - {target_url}");
                                         }
-                                        CdpError::NoResponse => {
-                                            default_response.status_code =
-                                                StatusCode::REQUEST_TIMEOUT;
-                                        }
-                                        _ => (),
                                     }
+                                    Err(e) => {
+                                        let mut default_response: PageResponse = Default::default();
 
-                                    if let Err(_) = tx.send(default_response) {
-                                        log::info!("the receiver dropped - {target_url}");
+                                        default_response.final_url = Some(target_url.clone());
+
+                                        match e {
+                                            CdpError::NotFound => {
+                                                default_response.status_code =
+                                                    StatusCode::NOT_FOUND;
+                                            }
+                                            CdpError::NoResponse => {
+                                                default_response.status_code =
+                                                    StatusCode::REQUEST_TIMEOUT;
+                                            }
+                                            _ => (),
+                                        }
+
+                                        if let Err(_) = tx.send(default_response) {
+                                            log::info!("the receiver dropped - {target_url}");
+                                        }
                                     }
                                 }
                             }
-                        }
-                    });
+                        });
+                    }
 
                     match rx.await {
                         Ok(v) => {
@@ -2536,6 +2554,8 @@ impl Page {
                                     &base.as_deref().cloned().map(Box::new),
                                 )
                                 .await;
+
+                            bytes_transferred = v.bytes_transferred;
                             map.extend(extended_map)
                         }
                         Err(e) => {
@@ -2560,7 +2580,7 @@ impl Page {
             );
         }
 
-        map
+        (map, bytes_transferred)
     }
 
     /// Find the links as a stream using string resource validation
@@ -2741,7 +2761,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         page: &crate::features::chrome::OnceBrowser,
-    ) -> HashSet<CaseInsensitiveString> {
+    ) -> (HashSet<CaseInsensitiveString>, Option<f64>) {
         match self.html.is_some() {
             false => Default::default(),
             true => {
