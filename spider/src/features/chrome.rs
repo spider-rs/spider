@@ -692,7 +692,7 @@ impl BrowserController {
             self.closed = true;
             if let Some(id) = self.browser.2.take() {
                 if let Some(handler) = self.browser.1.take() {
-                    BrowserController::dispose_browser_context(&self.browser.0, id).await;
+                    // BrowserController::dispose_browser_context(&self.browser.0, id).await;
                     if !handler.is_finished() {
                         handler.abort();
                     }
@@ -709,13 +709,9 @@ impl Drop for BrowserController {
                 let browser = self.browser.0.clone();
 
                 if let Some(handler) = self.browser.1.take() {
-                    // on linux and windows we need to clean up the context.
-                    tokio::spawn(async move {
-                        BrowserController::dispose_browser_context(&browser, id).await;
-                        if !handler.is_finished() {
-                            handler.abort();
-                        }
-                    });
+                    if !handler.is_finished() {
+                        handler.abort();
+                    }
                 }
             }
         }
