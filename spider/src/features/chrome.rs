@@ -656,6 +656,9 @@ pub(crate) type BrowserControl = (
     Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
 );
 
+/// Once cell browser
+pub(crate) type OnceBrowser = tokio::sync::OnceCell<Option<BrowserController>>;
+
 /// Create the browser controller to auto drop connections.
 pub(crate) struct BrowserController {
     /// The browser.
