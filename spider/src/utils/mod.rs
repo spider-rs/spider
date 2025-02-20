@@ -2617,7 +2617,7 @@ pub fn clean_html_base(html: &str) -> String {
 }
 
 /// Make sure the base tag exist on the page.
-#[cfg(feature = "smart")]
+#[cfg(feature = "chrome")]
 pub async fn rewrite_base_tag(html: &str, base_url: &Option<&str>) -> String {
     use lol_html::{element, html_content::ContentType};
     use std::sync::OnceLock;

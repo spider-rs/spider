@@ -643,6 +643,11 @@ fn get_error_status_base(
                 if !*should_retry && should_attempt_retry(&er) {
                     *should_retry = true;
                 }
+                if let Some(status_code) = er.status() {
+                    if status_code.is_client_error() {
+                        *should_retry = true;
+                    }
+                }
                 Some(er)
             }
         },

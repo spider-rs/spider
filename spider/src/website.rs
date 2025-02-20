@@ -2372,6 +2372,8 @@ impl Website {
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
                 }
+                let client_error = page.status_code.is_client_error();
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         if retry_count.is_power_of_two() {
@@ -2394,7 +2396,7 @@ impl Website {
                         log::warn!("backoff timeout {elasped}");
                     }
                 } else {
-                    if retry_count.is_power_of_two() {
+                    if retry_count.is_power_of_two() || client_error {
                         Website::render_chrome_page(
                             &self.configuration,
                             client,
