@@ -1071,27 +1071,27 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
+    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    let final_url = if wait_for_navigation {
+        let last_redirect =
+            tokio::time::timeout(base_timeout.max(Duration::from_secs(15)), async {
+                match page.wait_for_navigation_response().await {
+                    Ok(u) => get_last_redirect(&source, &u, &page).await,
+                    _ => None,
+                }
+            })
+            .await;
+        match last_redirect {
+            Ok(last) => last,
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let mut page_response = if timeout_elasped.is_none()
         && chrome_http_req_res.status_code.is_success()
     {
-        // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-        let final_url = if wait_for_navigation {
-            let last_redirect =
-                tokio::time::timeout(base_timeout.max(Duration::from_secs(15)), async {
-                    match page.wait_for_navigation_response().await {
-                        Ok(u) => get_last_redirect(&source, &u, &page).await,
-                        _ => None,
-                    }
-                })
-                .await;
-            match last_redirect {
-                Ok(last) => last,
-                _ => None,
-            }
-        } else {
-            None
-        };
-
         if chrome_http_req_res.waf_check {
             base_timeout = sub_duration(base_timeout, start_time.elapsed());
             if let Err(elasped) =
@@ -1214,7 +1214,16 @@ pub async fn fetch_page_html_chrome_base(
 
         page_response
     } else {
-        let mut page_response = PageResponse::default();
+        let res = match page.content_bytes().await {
+            Ok(b) => Box::new(b),
+            _ => Default::default(),
+        };
+        let mut page_response = set_page_response(false, res, &mut chrome_http_req_res, final_url);
+        let _ = tokio::time::timeout(
+            base_timeout.max(tokio::time::Duration::from_secs(2)),
+            set_page_response_cookies(&mut page_response, &page),
+        )
+        .await;
         set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
         page_response.status_code = chrome_http_req_res.status_code;
         page_response.waf_check = chrome_http_req_res.waf_check;
