@@ -501,14 +501,9 @@ pub(crate) async fn attempt_navigation(
 /// close the browser and open handles
 pub async fn close_browser(
     browser_handle: JoinHandle<()>,
-    browser: &Browser,
-    context_id: &mut Option<BrowserContextId>,
+    _browser: &Browser,
+    _context_id: &mut Option<BrowserContextId>,
 ) {
-    if let Some(id) = context_id.take() {
-        if let Err(er) = browser.dispose_browser_context(id).await {
-            log::error!("Close Browser Error: {}", er.to_string())
-        }
-    }
     if !browser_handle.is_finished() {
         browser_handle.abort();
     }
@@ -657,6 +652,7 @@ pub(crate) type BrowserControl = (
 );
 
 /// Once cell browser
+#[cfg(feature = "smart")]
 pub(crate) type OnceBrowser = tokio::sync::OnceCell<Option<BrowserController>>;
 
 /// Create the browser controller to auto drop connections.
@@ -690,12 +686,10 @@ impl BrowserController {
         if !self.closed {
             // assume close will always happen.
             self.closed = true;
-            if let Some(id) = self.browser.2.take() {
-                if let Some(handler) = self.browser.1.take() {
-                    // BrowserController::dispose_browser_context(&self.browser.0, id).await;
-                    if !handler.is_finished() {
-                        handler.abort();
-                    }
+            self.browser.2 = None;
+            if let Some(handler) = self.browser.1.take() {
+                if !handler.is_finished() {
+                    handler.abort();
                 }
             }
         }
@@ -705,11 +699,10 @@ impl BrowserController {
 impl Drop for BrowserController {
     fn drop(&mut self) {
         if !self.closed {
-            if let Some(id) = self.browser.2.take() {
-                if let Some(handler) = self.browser.1.take() {
-                    if !handler.is_finished() {
-                        handler.abort();
-                    }
+            self.browser.2 = None;
+            if let Some(handler) = self.browser.1.take() {
+                if !handler.is_finished() {
+                    handler.abort();
                 }
             }
         }

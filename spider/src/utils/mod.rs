@@ -31,8 +31,10 @@ use url::Url;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
+use crate::page::{MAX_PRE_ALLOCATED_HTML_PAGE_SIZE, MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE};
 use crate::tokio_stream::StreamExt;
 use crate::Client;
+
 #[cfg(feature = "cache_chrome_hybrid")]
 use http_cache_semantics::{RequestLike, ResponseLike};
 
@@ -123,6 +125,16 @@ lazy_static! {
     };
 }
 
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+lazy_static! {
+    static ref CF_END: &'static [u8; 62] =
+        b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
+    static ref CF_END2: &'static [u8; 72] =
+        b"Performance &amp; security by Cloudflare</div></div></div></body></html>";
+    static ref CF_HEAD: &'static [u8; 34] = b"<html><head>\n    <style global=\"\">";
+    static ref CF_MOCK_FRAME: &'static [u8; 137] = b"<iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>";
+}
+
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
@@ -130,14 +142,6 @@ async fn cf_handle(
     page: &chromiumoxide::Page,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     use crate::configuration::{WaitFor, WaitForDelay, WaitForIdleNetwork};
-    lazy_static! {
-        static ref CF_END: &'static [u8; 62] =
-            b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
-        static ref CF_END2: &'static [u8; 72] =
-            b"Performance &amp; security by Cloudflare</div></div></div></body></html>";
-        static ref CF_HEAD: &'static [u8; 34] = b"<html><head>\n    <style global=\"\">";
-        static ref CF_MOCK_FRAME: &'static [u8; 137] = b"<iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>";
-    };
 
     let cf = CF_END.as_ref();
     let cf2 = CF_END2.as_ref();
@@ -1024,28 +1028,18 @@ pub async fn fetch_page_html_chrome_base(
             // used for smart mode re-rendering direct assigning html
             if content {
                 if let Ok(frame) = page.mainframe().await {
+                    let html = rewrite_base_tag(&source, &url_target).await;
+
                     if let Err(e) = page
                         .execute(
                             chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
                                 frame_id: frame.unwrap_or_default(),
-                                html: source.to_string(),
+                                html,
                             },
                         )
                         .await
                     {
                         log::info!("{:?}", e);
-                    }
-
-                    // perform extra navigate to trigger page actions.
-                    if let Some(u) = url_target {
-                        if u.starts_with("http") {
-                            if let Err(e) = page
-                                .evaluate(format!(r#"window.location = "{}";"#, u))
-                                .await
-                            {
-                                log::info!("{:?}", e);
-                            }
-                        }
                     }
                 }
             } else {
@@ -1157,11 +1151,14 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         if cfg!(feature = "real_browser") {
-            let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(10),
-                cf_handle(&mut res, &page),
-            )
-            .await;
+            // we can skip this check after a set bytes
+            if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(10),
+                    cf_handle(&mut res, &page),
+                )
+                .await;
+            }
         };
 
         let ok = res.len() > 0;
@@ -1209,7 +1206,7 @@ pub async fn fetch_page_html_chrome_base(
 
         if !page_set {
             let _ = tokio::time::timeout(
-                base_timeout.max(Duration::from_secs(2)),
+                base_timeout.max(Duration::from_secs(1)),
                 cache_chrome_response(&source, &page_response, chrome_http_req_res),
             )
             .await;
@@ -1509,8 +1506,13 @@ pub async fn handle_response_bytes(
     let mut content: Option<Box<bytes::Bytes>> = None;
 
     if !block_streaming(&res, only_html) {
+        let mut data = match res.content_length() {
+            Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
+                Vec::with_capacity(cap.max(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE) as usize)
+            }
+            _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
+        };
         let mut stream = res.bytes_stream();
-        let mut data = Vec::new();
         let mut first_bytes = true;
 
         while let Some(item) = stream.next().await {
@@ -2611,6 +2613,131 @@ pub fn clean_html_base(html: &str) -> String {
     ) {
         Ok(r) => r,
         _ => html.into(),
+    }
+}
+
+/// Make sure the base tag exist on the page.
+#[cfg(feature = "smart")]
+pub async fn rewrite_base_tag(html: &str, base_url: &Option<&str>) -> String {
+    use lol_html::{element, html_content::ContentType};
+    use std::sync::OnceLock;
+
+    if html.is_empty() {
+        return Default::default();
+    }
+
+    let base_tag_inserted = OnceLock::new();
+    let already_present = OnceLock::new();
+
+    let base_url_len = base_url.map(|s| s.len());
+
+    let rewriter_settings: lol_html::Settings<'_, '_, lol_html::send::SendHandlerTypes> =
+        lol_html::send::Settings {
+            element_content_handlers: vec![
+                // Handler for <base> to mark if it is present with href
+                element!("base", {
+                    |el| {
+                        // check base tags that do not exist yet.
+                        if base_tag_inserted.get().is_none() {
+                            // Check if a <base> with href already exists
+                            if let Some(attr) = el.get_attribute("href") {
+                                let valid_http =
+                                    attr.starts_with("http://") || attr.starts_with("https://");
+
+                                // we can validate if the domain is the same if not to remove it.
+                                if valid_http {
+                                    let _ = base_tag_inserted.set(true);
+                                    let _ = already_present.set(true);
+                                } else {
+                                    el.remove();
+                                }
+                            } else {
+                                el.remove();
+                            }
+                        }
+
+                        Ok(())
+                    }
+                }),
+                // Handler for <head> to insert <base> tag if not present
+                element!("head", {
+                    |el: &mut lol_html::send::Element| {
+                        if let Some(handlers) = el.end_tag_handlers() {
+                            let base_tag_inserted = base_tag_inserted.clone();
+                            let base_url =
+                                format!(r#"<base href="{}">"#, base_url.unwrap_or_default());
+
+                            handlers.push(Box::new(move |end| {
+                                if base_tag_inserted.get().is_none() {
+                                    let _ = base_tag_inserted.set(true);
+                                    end.before(&base_url, ContentType::Html);
+                                }
+                                Ok(())
+                            }))
+                        }
+                        Ok(())
+                    }
+                }),
+                // Handler for html if <head> not present to insert <head><base></head> tag if not present
+                element!("html", {
+                    |el: &mut lol_html::send::Element| {
+                        if let Some(handlers) = el.end_tag_handlers() {
+                            let base_tag_inserted = base_tag_inserted.clone();
+                            let base_url = format!(
+                                r#"<head><base href="{}"></head>"#,
+                                base_url.unwrap_or_default()
+                            );
+
+                            handlers.push(Box::new(move |end| {
+                                if base_tag_inserted.get().is_none() {
+                                    let _ = base_tag_inserted.set(true);
+                                    end.before(&base_url, ContentType::Html);
+                                }
+                                Ok(())
+                            }))
+                        }
+                        Ok(())
+                    }
+                }),
+            ],
+            ..lol_html::send::Settings::new_for_handler_types()
+        };
+
+    let mut buffer = Vec::with_capacity(
+        html.len()
+            + match base_url_len {
+                Some(l) => l + 29,
+                _ => 0,
+            },
+    );
+
+    let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |c: &[u8]| {
+        buffer.extend_from_slice(c);
+    });
+
+    let mut stream = tokio_stream::iter(html.as_bytes().chunks(*STREAMING_CHUNK_SIZE));
+
+    let mut wrote_error = false;
+
+    while let Some(chunk) = stream.next().await {
+        // early exist
+        if already_present.get().is_some() {
+            break;
+        }
+        if rewriter.write(chunk).is_err() {
+            wrote_error = true;
+            break;
+        }
+    }
+
+    if !wrote_error {
+        let _ = rewriter.end();
+    }
+
+    if already_present.get().is_some() {
+        html.to_string()
+    } else {
+        auto_encoder::auto_encode_bytes(&buffer)
     }
 }
 

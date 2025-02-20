@@ -27,7 +27,10 @@ use tokio_stream::StreamExt;
 use url::Url;
 
 /// Allocate up to 16kb upfront for small pages.
-const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
+pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
+/// Allocate up to 16kb upfront for small pages.
+pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE: usize =
+    MAX_PRE_ALLOCATED_HTML_PAGE_SIZE as usize;
 
 /// Base css selector to use for getting valid web pages.
 const BASE_CSS_SELECTORS: &str = concat!(
@@ -1005,10 +1008,10 @@ impl Page {
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let mut collected_bytes = match res.content_length() {
-                    Some(cap) if cap <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                        Vec::with_capacity(cap as usize)
+                    Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
+                        Vec::with_capacity(cap.max(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE) as usize)
                     }
-                    _ => Vec::new(),
+                    _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
                 };
 
                 let mut response = handle_response_bytes_writer(
@@ -1027,16 +1030,16 @@ impl Page {
                 }
 
                 if r_settings.normalize {
-                    response
-                        .0
-                        .signature
-                        .replace(hash_html(&collected_bytes).await);
+                    response.0.signature = Some(hash_html(&collected_bytes).await);
                 }
 
-                response
-                    .0
-                    .content
-                    .replace(Box::new(Bytes::from(collected_bytes)));
+                let response_bytes = Box::new(Bytes::from(collected_bytes));
+
+                response.0.content = if response_bytes.is_empty() {
+                    None
+                } else {
+                    Some(response_bytes)
+                };
 
                 if r_settings.ssg_build {
                     if let Some(ssg_map) = ssg_map {
@@ -2140,7 +2143,6 @@ impl Page {
                         let configuration = configuration.clone();
                         // we should re-use the html content instead with events.
                         let target_url = self.url.clone();
-                        // let context_id = context_id.clone();
                         let parent_host = parent_host.clone();
 
                         spawn_task("page_render_fetch", async move {
@@ -2153,21 +2155,19 @@ impl Page {
                             )
                             .await
                             {
-                                let intercept_handle =
+                                let (intercept_handle, _) = tokio::join!(
                                     crate::features::chrome::setup_chrome_interception_base(
                                         &new_page,
                                         configuration.chrome_intercept.enabled,
                                         &configuration.auth_challenge_response,
                                         configuration.chrome_intercept.block_visuals,
                                         &parent_host,
+                                    ),
+                                    crate::features::chrome::setup_chrome_events(
+                                        &new_page,
+                                        &configuration,
                                     )
-                                    .await;
-
-                                crate::features::chrome::setup_chrome_events(
-                                    &new_page,
-                                    &configuration,
-                                )
-                                .await;
+                                );
 
                                 let page_resource = crate::utils::fetch_page_html_chrome_base(
                                     &html_resource,

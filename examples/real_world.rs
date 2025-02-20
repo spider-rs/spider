@@ -44,7 +44,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 
     let (links, _) = tokio::join!(
         async move {
-            website.crawl().await;
+            website.crawl_smart().await;
             website.unsubscribe();
             website.get_all_links_visited().await
         },
