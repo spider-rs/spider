@@ -340,13 +340,14 @@ impl NetworkManager {
     }
 
     /// Determine if the request should be skipped.
-    fn skip_xhr(&self, skip_networking: bool, event: &EventRequestPaused) -> bool {
+    fn skip_xhr(
+        &self,
+        skip_networking: bool,
+        event: &EventRequestPaused,
+        network_event: bool,
+    ) -> bool {
         // XHR check
-        if !skip_networking
-            && (event.resource_type == ResourceType::Xhr
-                || event.resource_type == ResourceType::WebSocket
-                || event.resource_type == ResourceType::Fetch)
-        {
+        if !skip_networking && network_event {
             let request_url = event.request.url.as_str();
 
             // check if part of ignore scripts.
@@ -396,6 +397,8 @@ impl NetworkManager {
 
     #[cfg(not(feature = "adblock"))]
     pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
+        use super::blockers::block_websites::block_website;
+
         if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
             self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
         } else {
@@ -452,8 +455,12 @@ impl NetworkManager {
                         skip_networking
                     };
 
+                    let network_event = event.resource_type == ResourceType::Xhr
+                        || event.resource_type == ResourceType::WebSocket
+                        || event.resource_type == ResourceType::Fetch;
+
                     // XHR check
-                    let skip_networking = self.skip_xhr(skip_networking, &event);
+                    let skip_networking = self.skip_xhr(skip_networking, &event, network_event);
 
                     // custom interception layer.
                     let skip_networking = if !skip_networking
@@ -469,6 +476,13 @@ impl NetworkManager {
                     } else {
                         skip_networking
                     };
+
+                    let skip_networking =
+                        if !skip_networking && (javascript_resource || network_event) {
+                            block_website(&event.request.url)
+                        } else {
+                            skip_networking
+                        };
 
                     if skip_networking {
                         tracing::debug!(
@@ -562,8 +576,12 @@ impl NetworkManager {
                         skip_networking
                     };
 
+                    let network_event = event.resource_type == ResourceType::Xhr
+                        || event.resource_type == ResourceType::WebSocket
+                        || event.resource_type == ResourceType::Fetch;
+
                     // XHR check
-                    let skip_networking = self.skip_xhr(skip_networking, &event);
+                    let skip_networking = self.skip_xhr(skip_networking, &event, network_event);
 
                     // custom interception layer.
                     let skip_networking = if !skip_networking
@@ -579,6 +597,13 @@ impl NetworkManager {
                     } else {
                         skip_networking
                     };
+
+                    let skip_networking =
+                        if !skip_networking && (javascript_resource || network_event) {
+                            block_website(&event.request.url)
+                        } else {
+                            skip_networking
+                        };
 
                     if skip_networking {
                         let fullfill_params =

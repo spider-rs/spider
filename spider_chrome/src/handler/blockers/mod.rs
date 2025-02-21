@@ -1,5 +1,7 @@
 /// adblock patterns
 pub mod adblock_patterns;
+/// Block websites from spider_firwall list
+pub mod block_websites;
 /// interception manager
 pub mod intercept_manager;
 /// script blockers

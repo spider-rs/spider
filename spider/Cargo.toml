@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.30.6"
+version = "2.30.7"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -84,7 +84,6 @@ features = [
 [dependencies.spider_firewall]
 version = "2"
 optional = true
-default-features = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.4", optional = true }
@@ -188,7 +187,7 @@ string_interner_string_backend = ["dep:string-interner"]
 string_interner_bucket_backend = ["dep:string-interner"]
 page_error_status_details = []
 simd = ["dep:sonic-rs"]
-firewall = ["dep:spider_firewall"]
+firewall = ["dep:spider_firewall", "spider_chrome/firewall"]
 
 # Allows full concurrency.
 cowboy = []

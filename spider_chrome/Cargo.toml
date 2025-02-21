@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.30.6"
+version = "2.30.7"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -57,6 +57,10 @@ spider_chromiumoxide_fetcher = { path = "fetcher", version = "0.7", default-feat
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
+[dependencies.spider_firewall]
+version = "2"
+optional = true
+
 [dev-dependencies]
 quote = "1"
 proc-macro2 = "1"
@@ -75,6 +79,7 @@ fetcher = []
 bytes = ["dep:bytes"]
 adblock = ["dep:adblock"]
 simd = ["dep:sonic-rs"]
+firewall = ["dep:spider_firewall"]
 
 # Temporary features until cargo weak dependencies bug is fixed
 # See https://github.com/rust-lang/cargo/issues/10801
