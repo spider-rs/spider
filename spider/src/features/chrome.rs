@@ -11,6 +11,11 @@ use reqwest::cookie::{CookieStore, Jar};
 use tokio::task::JoinHandle;
 use url::Url;
 
+lazy_static! {
+    /// Enable loopback for proxy.
+    static ref LOOP_BACK_PROXY: bool = std::env::var("LOOP_BACK_PROXY").unwrap_or_default() == "true";
+}
+
 /// parse a cookie into a jar
 pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieParam>, String> {
     let jar = Jar::default();
@@ -400,7 +405,7 @@ pub async fn launch_browser(
                                 }
                             }
 
-                            if proxie.starts_with("http://localhost") {
+                            if *LOOP_BACK_PROXY && proxie.starts_with("http://localhost") {
                                 create_content.proxy_bypass_list = Some("<-loopback>".into());
                             }
 
