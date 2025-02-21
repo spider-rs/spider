@@ -690,6 +690,7 @@ impl BrowserController {
             if let Some(id) = self.browser.2.take() {
                 if let Some(handler) = self.browser.1.take() {
                     let _ = self.browser.0.quit_incognito_context_base(id).await;
+                    handler.abort();
                 }
             }
         }
@@ -705,6 +706,7 @@ impl Drop for BrowserController {
                     let browser = self.browser.0.to_owned();
                     tokio::task::spawn(async move {
                         let _ = browser.quit_incognito_context_base(id).await;
+                        handler.abort();
                     });
                 }
             }
