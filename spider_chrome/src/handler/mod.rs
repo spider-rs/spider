@@ -686,13 +686,15 @@ impl Stream for Handler {
                             CdpError::Ws(ref ws_error) => match ws_error {
                                 Error::AlreadyClosed => {
                                     pin.closing = true;
-                                    return Poll::Ready(None);
+                                    dispose = true;
+                                    break;
                                 }
                                 Error::Protocol(detail)
                                     if detail == &ProtocolError::ResetWithoutClosingHandshake =>
                                 {
                                     pin.closing = true;
-                                    return Poll::Ready(None);
+                                    dispose = true;
+                                    break;
                                 }
                                 _ => {}
                             },
