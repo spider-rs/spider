@@ -363,12 +363,11 @@ pub async fn launch_browser(
             let mut context_id = handler.default_browser_context().id().cloned();
 
             // Spawn a new task that continuously polls the handler
+            // we might need a select with closing in case handler stalls.
             let handle = tokio::task::spawn(async move {
                 while let Some(k) = handler.next().await {
                     if let Err(e) = k {
                         match e {
-                            // Ws(Protocol(ResetWithoutClosingHandshake))
-                            // Ws(AlreadyClosed)
                             CdpError::Ws(_)
                             | CdpError::LaunchExit(_, _)
                             | CdpError::LaunchTimeout(_)
@@ -697,10 +696,9 @@ impl BrowserController {
         if !self.closed {
             // assume close will always happen.
             self.closed = true;
-            self.browser.2 = None;
-            if let Some(handler) = self.browser.1.take() {
-                if !handler.is_finished() {
-                    handler.abort();
+            if let Some(id) = self.browser.2.take() {
+                if let Some(handler) = self.browser.1.take() {
+                    BrowserController::dispose_browser_context(&self.browser.0, id).await;
                 }
             }
         }
@@ -710,11 +708,11 @@ impl BrowserController {
 impl Drop for BrowserController {
     fn drop(&mut self) {
         if !self.closed {
-            self.browser.2 = None;
-            if let Some(handler) = self.browser.1.take() {
-                if !handler.is_finished() {
-                    handler.abort();
-                }
+            if let Some(id) = self.browser.2.take() {
+                let b = self.browser.0.to_owned();
+                tokio::task::spawn(async move {
+                    BrowserController::dispose_browser_context(&b, id).await;
+                });
             }
         }
     }
