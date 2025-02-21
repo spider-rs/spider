@@ -367,7 +367,10 @@ pub async fn launch_browser(
                 while let Some(k) = handler.next().await {
                     if let Err(e) = k {
                         match e {
-                            CdpError::LaunchExit(_, _)
+                            // Ws(Protocol(ResetWithoutClosingHandshake))
+                            // Ws(AlreadyClosed)
+                            CdpError::Ws(_)
+                            | CdpError::LaunchExit(_, _)
                             | CdpError::LaunchTimeout(_)
                             | CdpError::LaunchIo(_, _) => {
                                 break;
@@ -426,6 +429,8 @@ pub async fn launch_browser(
                             };
                         };
                     }
+                } else {
+                    handle.abort();
                 }
             }
 

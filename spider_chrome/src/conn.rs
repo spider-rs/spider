@@ -6,6 +6,7 @@ use std::task::ready;
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 use futures::{SinkExt, StreamExt};
+use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{tungstenite::protocol::WebSocketConfig, WebSocketStream};
