@@ -681,15 +681,6 @@ impl BrowserController {
             closed: false,
         }
     }
-    /// Dispose the browser context.
-    pub(crate) async fn dispose_browser_context(
-        browser: &Browser,
-        id: chromiumoxide::cdp::browser_protocol::browser::BrowserContextId,
-    ) {
-        if let Err(er) = browser.dispose_browser_context(id).await {
-            log::error!("Close Browser Error: {}", er.to_string())
-        }
-    }
 
     /// Dispose the browser context and join handler.
     pub(crate) async fn dispose(&mut self) {
@@ -698,7 +689,7 @@ impl BrowserController {
             self.closed = true;
             if let Some(id) = self.browser.2.take() {
                 if let Some(handler) = self.browser.1.take() {
-                    BrowserController::dispose_browser_context(&self.browser.0, id).await;
+                    let _ = self.browser.0.quit_incognito_context_base(id).await;
                 }
             }
         }
@@ -708,11 +699,14 @@ impl BrowserController {
 impl Drop for BrowserController {
     fn drop(&mut self) {
         if !self.closed {
+            self.closed = true;
             if let Some(id) = self.browser.2.take() {
-                let b = self.browser.0.to_owned();
-                tokio::task::spawn(async move {
-                    BrowserController::dispose_browser_context(&b, id).await;
-                });
+                if let Some(handler) = self.browser.1.take() {
+                    let browser = self.browser.0.to_owned();
+                    tokio::task::spawn(async move {
+                        let _ = browser.quit_incognito_context_base(id).await;
+                    });
+                }
             }
         }
     }

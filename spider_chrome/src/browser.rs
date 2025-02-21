@@ -61,7 +61,7 @@ lazy_static::lazy_static! {
 pub struct Browser {
     /// The `Sender` to send messages to the connection handler that drives the
     /// websocket
-    sender: Sender<HandlerMessage>,
+    pub(crate) sender: Sender<HandlerMessage>,
     /// How the spawned chromium instance was configured, if any
     config: Option<BrowserConfig>,
     /// The spawned chromium instance
@@ -271,7 +271,7 @@ impl Browser {
     /// spawned instance exit, to avoid "zombie" processes ([`Browser::wait`],
     /// [`Browser::wait_sync`], [`Browser::try_wait`]).
     /// [`Browser::drop`] waits automatically if needed.
-    pub async fn close(&mut self) -> Result<CloseReturns> {
+    pub async fn close(&self) -> Result<CloseReturns> {
         let (tx, rx) = oneshot_channel();
 
         self.sender
@@ -375,13 +375,29 @@ impl Browser {
     ///
     /// # Note This will also dispose all pages that were running within the
     /// incognito context.
+    pub async fn quit_incognito_context_base(
+        &self,
+        browser_context_id: BrowserContextId,
+    ) -> Result<&Self> {
+        self.dispose_browser_context(browser_context_id.clone())
+            .await?;
+        self.sender
+            .clone()
+            .send(HandlerMessage::DisposeContext(BrowserContext::from(
+                browser_context_id,
+            )))
+            .await?;
+        Ok(self)
+    }
+
+    /// If a incognito session was created with
+    /// `Browser::start_incognito_context` this disposes this context.
+    ///
+    /// # Note This will also dispose all pages that were running within the
+    /// incognito context.
     pub async fn quit_incognito_context(&mut self) -> Result<&mut Self> {
         if let Some(id) = self.browser_context.take() {
-            self.dispose_browser_context(id.clone()).await?;
-            self.sender
-                .clone()
-                .send(HandlerMessage::DisposeContext(BrowserContext::from(id)))
-                .await?;
+            let _ = self.quit_incognito_context_base(id).await;
         }
         Ok(self)
     }
