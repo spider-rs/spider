@@ -5310,7 +5310,7 @@ impl ChannelGuard {
             while self
                 .0
                  .2
-                .compare_exchange_weak(old, 0, Ordering::Relaxed, Ordering::Relaxed)
+                .compare_exchange_weak(old, 0, Ordering::Acquire, Ordering::Relaxed)
                 .is_err()
             {
                 tokio::task::yield_now().await;
@@ -5327,12 +5327,12 @@ impl ChannelGuard {
     /// Increment the guard channel completions.
     // rename on next major since logic is now flow-controlled.
     pub fn inc(&mut self) {
-        self.0 .2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.0 .2.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
     /// Increment a guard channel completions.
     pub(crate) fn inc_guard(guard: &AtomicUsize) {
-        guard.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        guard.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 }
 

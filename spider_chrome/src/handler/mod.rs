@@ -575,6 +575,8 @@ impl Stream for Handler {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let pin = self.get_mut();
 
+        let mut dispose = false;
+
         loop {
             let now = Instant::now();
             // temporary pinning of the browser receiver should be safe as we are pinning
@@ -612,6 +614,8 @@ impl Stream for Handler {
                     }
                     HandlerMessage::DisposeContext(ctx) => {
                         pin.browser_contexts.remove(&ctx);
+                        pin.closing = true;
+                        dispose = true;
                     }
                     HandlerMessage::GetPage(target_id, tx) => {
                         let page = pin
@@ -703,6 +707,10 @@ impl Stream for Handler {
             if pin.evict_command_timeout.poll_ready(cx) {
                 // evict all commands that timed out
                 pin.evict_timed_out_commands(now);
+            }
+
+            if dispose {
+                return Poll::Ready(None);
             }
 
             if done {
