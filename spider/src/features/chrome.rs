@@ -406,7 +406,8 @@ pub async fn launch_browser(
                             }
 
                             if *LOOP_BACK_PROXY && proxie.starts_with("http://localhost") {
-                                create_content.proxy_bypass_list = Some("<-loopback>".into());
+                                create_content.proxy_bypass_list =
+                                    Some("<-loopback>;about:blank".into());
                             }
 
                             create_content.proxy_server = Some(proxie.into());
