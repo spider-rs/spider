@@ -2,6 +2,8 @@ use crate::handler::blockers::intercept_manager::NetworkInterceptManager;
 use hashbrown::{HashMap, HashSet};
 use std::pin::Pin;
 use std::time::{Duration, Instant};
+use tokio_tungstenite::tungstenite::error::ProtocolError;
+use tokio_tungstenite::tungstenite::Error;
 
 use fnv::FnvHashMap;
 use futures::channel::mpsc::Receiver;
@@ -87,6 +89,24 @@ pub struct Handler {
     closing: bool,
 }
 
+lazy_static::lazy_static! {
+    /// Set the discovery ID target.
+    static ref DISCOVER_ID: (std::borrow::Cow<'static, str>, serde_json::Value) = {
+        let discover = SetDiscoverTargetsParams::new(true);
+        (discover.identifier(), serde_json::to_value(discover).expect("valid discover target params"))
+    };
+    /// Targets params id.
+    static ref TARGET_PARAMS_ID: (std::borrow::Cow<'static, str>, serde_json::Value) = {
+        let msg = GetTargetsParams { filter: None };
+        (msg.identifier(), serde_json::to_value(msg).expect("valid paramtarget"))
+    };
+    /// Set the close targets.
+    static ref CLOSE_PARAMS_ID: (std::borrow::Cow<'static, str>, serde_json::Value) = {
+        let close_msg = CloseParams::default();
+        (close_msg.identifier(), serde_json::to_value(close_msg).expect("valid close params"))
+    };
+}
+
 impl Handler {
     /// Create a new `Handler` that drives the connection and listens for
     /// messages on the receiver `rx`.
@@ -95,12 +115,8 @@ impl Handler {
         rx: Receiver<HandlerMessage>,
         config: HandlerConfig,
     ) -> Self {
-        let discover = SetDiscoverTargetsParams::new(true);
-        let discover_id = discover.identifier();
-
-        if let Ok(params) = serde_json::to_value(discover) {
-            let _ = conn.submit_command(discover_id, None, params);
-        }
+        let discover = DISCOVER_ID.clone();
+        let _ = conn.submit_command(discover.0, None, discover.1);
 
         let browser_contexts = config
             .context_ids
@@ -304,14 +320,11 @@ impl Handler {
     }
 
     fn submit_fetch_targets(&mut self, tx: OneshotSender<Result<Vec<TargetInfo>>>, now: Instant) {
-        let msg = GetTargetsParams { filter: None };
-        let method = msg.identifier();
+        let msg = TARGET_PARAMS_ID.clone();
 
-        if let Ok(params) = serde_json::to_value(msg) {
-            if let Ok(call_id) = self.conn.submit_command(method.clone(), None, params) {
-                self.pending_commands
-                    .insert(call_id, (PendingRequest::GetTargets(tx), method, now));
-            }
+        if let Ok(call_id) = self.conn.submit_command(msg.0.clone(), None, msg.1) {
+            self.pending_commands
+                .insert(call_id, (PendingRequest::GetTargets(tx), msg.0, now));
         }
     }
 
@@ -329,16 +342,16 @@ impl Handler {
     }
 
     fn submit_close(&mut self, tx: OneshotSender<Result<CloseReturns>>, now: Instant) {
-        let close_msg = CloseParams::default();
-        let method = close_msg.identifier();
+        let close_msg = CLOSE_PARAMS_ID.clone();
 
-        if let Ok(call_id) = self.conn.submit_command(
-            method.clone(),
-            None,
-            serde_json::to_value(close_msg).unwrap(),
-        ) {
-            self.pending_commands
-                .insert(call_id, (PendingRequest::CloseBrowser(tx), method, now));
+        if let Ok(call_id) = self
+            .conn
+            .submit_command(close_msg.0.clone(), None, close_msg.1)
+        {
+            self.pending_commands.insert(
+                call_id,
+                (PendingRequest::CloseBrowser(tx), close_msg.0, now),
+            );
         }
     }
 
@@ -665,6 +678,22 @@ impl Stream for Handler {
                     }
                     Err(err) => {
                         tracing::error!("WS Connection error: {:?}", err);
+                        match err {
+                            CdpError::Ws(ref ws_error) => match ws_error {
+                                Error::AlreadyClosed => {
+                                    pin.closing = true;
+                                    return Poll::Ready(None);
+                                }
+                                Error::Protocol(detail)
+                                    if detail == &ProtocolError::ResetWithoutClosingHandshake =>
+                                {
+                                    pin.closing = true;
+                                    return Poll::Ready(None);
+                                }
+                                _ => {}
+                            },
+                            _ => {}
+                        };
                         return Poll::Ready(Some(Err(err)));
                     }
                 }

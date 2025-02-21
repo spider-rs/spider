@@ -44,9 +44,7 @@ pub const LAUNCH_TIMEOUT: u64 = 20_000;
 lazy_static::lazy_static! {
     /// The request client to get the web socket url.
     static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::builder()
-        .tcp_keepalive(Duration::from_secs(30))
-        .http2_keep_alive_while_idle(true)
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(60))
         .default_headers({
             let mut m = HeaderMap::new();
 
