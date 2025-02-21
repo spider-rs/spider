@@ -3079,7 +3079,7 @@ impl Website {
                     }
                 }
 
-                self.subscription_guard();
+                self.subscription_guard().await;
                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                 if links.is_empty() && set.is_empty() {
@@ -3118,7 +3118,7 @@ impl Website {
                         drop(new_page);
 
                         if self.single_page() {
-                            self.subscription_guard();
+                            self.subscription_guard().await;
                             b.dispose().await;
                         } else {
                             let semaphore: Arc<Semaphore> = self.setup_semaphore();
@@ -3388,7 +3388,7 @@ impl Website {
                                     }
                                 }
 
-                                self.subscription_guard();
+                                self.subscription_guard().await;
                                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                                 if links.is_empty() && set.is_empty() {
@@ -3541,7 +3541,7 @@ impl Website {
         ) = self.setup_selectors();
 
         if self.single_page() {
-            self.subscription_guard();
+            self.subscription_guard().await;
             self.crawl_establish_smart(&client, &mut selectors, &browser)
                 .await;
         } else {
@@ -3771,7 +3771,7 @@ impl Website {
                     }
                 }
 
-                self.subscription_guard();
+                self.subscription_guard().await;
                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                 if links.is_empty() && set.is_empty() {
@@ -4572,11 +4572,11 @@ impl Website {
     }
 
     /// Guard the channel from closing until all subscription events complete.
-    fn subscription_guard(&self) {
+    async fn subscription_guard(&self) {
         if let Some(channel) = &self.channel {
             if !channel.1.is_empty() {
                 if let Some(ref guard_counter) = self.channel_guard {
-                    guard_counter.lock()
+                    guard_counter.lock().await
                 }
             }
         }
@@ -5291,26 +5291,32 @@ fn channel_send_page(
 
 /// Guard a channel from closing until all concurrent operations are done.
 #[derive(Debug, Clone)]
-pub struct ChannelGuard(Arc<(AtomicBool, AtomicUsize)>);
+pub struct ChannelGuard(Arc<(AtomicBool, AtomicUsize, AtomicUsize)>);
 
 impl ChannelGuard {
     /// Create a new channel guard. The tuple has the guard control and the counter.
     pub(crate) fn new() -> ChannelGuard {
-        ChannelGuard(Arc::new((AtomicBool::new(true), AtomicUsize::new(0))))
+        ChannelGuard(Arc::new((
+            AtomicBool::new(true),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        )))
     }
     /// Lock the channel until complete. This is only used for when storing the chrome page outside.
-    pub(crate) fn lock(&self) {
+    pub(crate) async fn lock(&self) {
         if self.0 .0.load(Ordering::Relaxed) {
+            let old = self.0 .1.load(Ordering::Relaxed);
+
             while self
                 .0
-                 .1
-                .compare_exchange_weak(0, 0, Ordering::Acquire, Ordering::Relaxed)
+                 .2
+                .compare_exchange_weak(old, 0, Ordering::Relaxed, Ordering::Relaxed)
                 .is_err()
             {
-                std::hint::spin_loop();
+                tokio::task::yield_now().await;
             }
+            std::sync::atomic::fence(Ordering::Acquire);
         }
-        std::sync::atomic::fence(Ordering::Acquire);
     }
 
     /// Set the guard control manually. If this is set to false the loop will not enter.
@@ -5321,12 +5327,12 @@ impl ChannelGuard {
     /// Increment the guard channel completions.
     // rename on next major since logic is now flow-controlled.
     pub fn inc(&mut self) {
-        self.0 .1.fetch_sub(1, std::sync::atomic::Ordering::Release);
+        self.0 .2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Increment a guard channel completions.
     pub(crate) fn inc_guard(guard: &AtomicUsize) {
-        guard.fetch_add(1, std::sync::atomic::Ordering::Release);
+        guard.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
