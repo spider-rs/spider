@@ -687,9 +687,13 @@ impl BrowserController {
         if !self.closed {
             // assume close will always happen.
             self.closed = true;
-            self.browser.2 = None;
-            if let Some(handler) = self.browser.1.take() {
-                handler.abort();
+            if let Some(id) = self.browser.2.take() {
+                if let Some(handler) = self.browser.1.take() {
+                    // we have to quit the context until https://chromedevtools.github.io/devtools-protocol/tot/Target/#method-createBrowserContext
+                    // disposeOnDetach comes out of Experimental.
+                    let _ = self.browser.0.quit_incognito_context_base(id).await;
+                    handler.abort();
+                }
             }
         }
     }
@@ -699,9 +703,14 @@ impl Drop for BrowserController {
     fn drop(&mut self) {
         if !self.closed {
             self.closed = true;
-            self.browser.2 = None;
-            if let Some(handler) = self.browser.1.take() {
-                handler.abort();
+            if let Some(id) = self.browser.2.take() {
+                if let Some(handler) = self.browser.1.take() {
+                    let browser = self.browser.0.to_owned();
+                    tokio::task::spawn(async move {
+                        let _ = browser.quit_incognito_context_base(id).await;
+                        handler.abort();
+                    });
+                }
             }
         }
     }
