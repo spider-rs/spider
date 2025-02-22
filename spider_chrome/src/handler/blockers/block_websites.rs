@@ -1,7 +1,7 @@
 /// Firewall protection. This does nothing without the [firewall] flag.
 #[cfg(feature = "firewall")]
 pub(crate) fn block_website(u: &str) -> bool {
-    spider_firewall::is_bad_website_url_clean(&host)
+    spider_firewall::is_bad_website_url_clean(&u)
 }
 
 /// Firewall protection. This does nothing without the [firewall] flag.
