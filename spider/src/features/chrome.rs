@@ -409,7 +409,8 @@ pub async fn launch_browser(
 
                             if *LOOP_BACK_PROXY && proxie.starts_with("http://localhost") {
                                 create_content.proxy_bypass_list =
-                                    Some("<-loopback>;about:blank".into());
+                                    // https://source.chromium.org/chromium/chromium/src/+/main:net/proxy_resolution/proxy_bypass_rules.cc
+                                    Some("<-loopback>;localhost;[::1]".into());
                             }
 
                             create_content.proxy_server = Some(proxie.into());
