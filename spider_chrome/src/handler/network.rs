@@ -56,6 +56,9 @@ lazy_static! {
         "runtime",
         "polyfill",
         "scripts",
+        "es2015.",
+        "es2020.",
+        "webpack",
         "/wp-content/js/",  // Covers Wordpress content
         // Verified 3rd parties for request
         "https://m.stripe.network/",
