@@ -90,6 +90,13 @@ lazy_static::lazy_static! {
                 )
             ]
     };
+
+    /// Attach to target commands
+    static ref ATTACH_TARGET: (chromiumoxide_types::MethodId, serde_json::Value) = {
+        let runtime_cmd = RunIfWaitingForDebuggerParams::default();
+
+        (runtime_cmd.identifier(), serde_json::to_value(runtime_cmd).unwrap_or_default())
+    };
 }
 
 #[derive(Debug)]
@@ -257,20 +264,17 @@ impl Target {
         if let Some(cmds) = self.init_state.commands_mut() {
             cmds.received_response(method);
         }
-        #[allow(clippy::single_match)] // allow for now
-        match method {
-            GetFrameTreeParams::IDENTIFIER => {
-                if let Some(resp) = resp
-                    .result
-                    .and_then(|val| GetFrameTreeParams::response_from_value(val).ok())
-                {
-                    self.frame_manager.on_frame_tree(resp.frame_tree);
-                }
+
+        if let GetFrameTreeParams::IDENTIFIER = method {
+            if let Some(resp) = resp
+                .result
+                .and_then(|val| GetFrameTreeParams::response_from_value(val).ok())
+            {
+                self.frame_manager.on_frame_tree(resp.frame_tree);
             }
-            // requests originated from the network manager all return an empty response, hence they
-            // can be ignored here
-            _ => {}
         }
+        // requests originated from the network manager all return an empty response, hence they
+        // can be ignored here
     }
 
     pub fn on_event(&mut self, event: CdpEventMessage) {
@@ -307,12 +311,12 @@ impl Target {
             // `Target` events
             CdpEvent::TargetAttachedToTarget(ev) => {
                 if ev.waiting_for_debugger {
-                    let runtime_cmd = RunIfWaitingForDebuggerParams::default();
+                    let runtime_cmd = ATTACH_TARGET.clone();
 
                     self.queued_events.push_back(TargetEvent::Request(Request {
-                        method: runtime_cmd.identifier(),
+                        method: runtime_cmd.0,
                         session_id: Some(ev.session_id.clone().into()),
-                        params: serde_json::to_value(runtime_cmd).unwrap_or_default(),
+                        params: runtime_cmd.1,
                     }));
                 }
 

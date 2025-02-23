@@ -63,6 +63,8 @@ lazy_static! {
         // Verified 3rd parties for request
         "https://m.stripe.network/",
         "https://challenges.cloudflare.com/",
+        "https://www.google.com/recaptcha/api.js",
+        "https://google.com/recaptcha/api.js",
         "https://js.stripe.com/",
         "https://cdn.prod.website-files.com/", // webflow cdn scripts
         "https://cdnjs.cloudflare.com/",        // cloudflare cdn scripts
@@ -76,7 +78,7 @@ lazy_static! {
     pub static ref JS_FRAMEWORK_PATH: phf::Set<&'static str> = {
         phf::phf_set! {
             // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
-            "_next/static/", "_astro/",
+            "_next/static/", "_astro/", "_app/immutable"
         }
     };
 
@@ -123,6 +125,40 @@ lazy_static! {
     /// Case insenstive css matching
     pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
 
+
+    /// The command chain.
+    pub static ref INIT_CHAIN:Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
+        let enable = EnableParams::default();
+
+        if let Ok(c) = serde_json::to_value(&enable) {
+            vec![(enable.identifier(), c)]
+        } else {
+            vec![]
+        }
+    };
+
+    /// The command chain with https ignore.
+    pub static ref INIT_CHAIN_IGNORE_HTTP_ERRORS:Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
+        let enable = EnableParams::default();
+        let mut v = vec![];
+        if let Ok(c) = serde_json::to_value(&enable) {
+            v.push((enable.identifier(), c));
+        }
+        let ignore = SetIgnoreCertificateErrorsParams::new(true);
+        if let Ok(ignored) = serde_json::to_value(&ignore) {
+            v.push((ignore.identifier(), ignored));
+        }
+
+        v
+    };
+
+    /// Enable the fetch intercept command
+    pub static ref ENABLE_FETCH: chromiumoxide_cdp::cdp::browser_protocol::fetch::EnableParams = {
+        fetch::EnableParams::builder()
+        .handle_auth_requests(true)
+        .pattern(RequestPattern::builder().url_pattern("*").build())
+        .build()
+    };
 }
 
 #[derive(Debug)]
@@ -155,6 +191,10 @@ pub struct NetworkManager {
     pub only_html: bool,
     /// The custom intercept handle logic to run on the website.
     pub intercept_manager: NetworkInterceptManager,
+    /// Track the amount of times the document reloaded.
+    pub document_reload_tracker: u8,
+    /// The initial target domain.
+    pub document_target_domain: String,
 }
 
 impl NetworkManager {
@@ -179,27 +219,16 @@ impl NetworkManager {
             block_analytics: true,
             only_html: false,
             intercept_manager: NetworkInterceptManager::UNKNOWN,
+            document_reload_tracker: 0,
+            document_target_domain: String::new(),
         }
     }
 
     pub fn init_commands(&self) -> CommandChain {
-        let enable = EnableParams::default();
-        let mut v = vec![];
-
-        if let Ok(c) = serde_json::to_value(&enable) {
-            v.push((enable.identifier(), c));
-        }
-
         let cmds = if self.ignore_httpserrors {
-            let ignore = SetIgnoreCertificateErrorsParams::new(true);
-
-            if let Ok(ignored) = serde_json::to_value(&ignore) {
-                v.push((ignore.identifier(), ignored));
-            }
-
-            v
+            INIT_CHAIN_IGNORE_HTTP_ERRORS.clone()
         } else {
-            v
+            INIT_CHAIN.clone()
         };
 
         CommandChain::new(cmds, self.request_timeout)
@@ -265,12 +294,7 @@ impl NetworkManager {
         self.update_protocol_cache_disabled();
 
         if enabled {
-            self.push_cdp_request(
-                fetch::EnableParams::builder()
-                    .handle_auth_requests(true)
-                    .pattern(RequestPattern::builder().url_pattern("*").build())
-                    .build(),
-            )
+            self.push_cdp_request(ENABLE_FETCH.clone())
         } else {
             self.push_cdp_request(DisableParams::default())
         }
@@ -413,14 +437,27 @@ impl NetworkManager {
                 } else {
                     let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
+
                     let skip_networking = event.resource_type == ResourceType::Other
                         || event.resource_type == ResourceType::Manifest
                         || event.resource_type == ResourceType::CspViolationReport
                         || event.resource_type == ResourceType::Ping
-                        || event.resource_type == ResourceType::Prefetch;
+                        || event.resource_type == ResourceType::Prefetch
+                        || self.document_reload_tracker >= 3;
+
                     let network_resource = event.resource_type == ResourceType::Xhr
                         || event.resource_type == ResourceType::Fetch
                         || event.resource_type == ResourceType::WebSocket;
+
+                    let document_resource = event.resource_type == ResourceType::Document;
+
+                    if document_resource {
+                        if self.document_target_domain == current_url {
+                            // this will prevent the domain from looping (3 times is enough).
+                            self.document_reload_tracker += 1;
+                        }
+                        self.document_target_domain = event.request.url.clone();
+                    }
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -440,7 +477,7 @@ impl NetworkManager {
 
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
-                        && (javascript_resource || event.resource_type == ResourceType::Document)
+                        && (javascript_resource || document_resource)
                     {
                         ignore_script_embedded(current_url)
                     } else {
@@ -458,18 +495,12 @@ impl NetworkManager {
                         skip_networking
                     };
 
-                    let network_event = event.resource_type == ResourceType::Xhr
-                        || event.resource_type == ResourceType::WebSocket
-                        || event.resource_type == ResourceType::Fetch;
-
                     // XHR check
-                    let skip_networking = self.skip_xhr(skip_networking, &event, network_event);
+                    let skip_networking = self.skip_xhr(skip_networking, &event, network_resource);
 
                     // custom interception layer.
                     let skip_networking = if !skip_networking
-                        && (javascript_resource
-                            || network_resource
-                            || event.resource_type == ResourceType::Document)
+                        && (javascript_resource || network_resource || document_resource)
                     {
                         self.intercept_manager.intercept_detection(
                             &event.request.url,
@@ -481,7 +512,7 @@ impl NetworkManager {
                     };
 
                     let skip_networking =
-                        if !skip_networking && (javascript_resource || network_event) {
+                        if !skip_networking && (javascript_resource || network_resource) {
                             block_website(&event.request.url)
                         } else {
                             skip_networking
@@ -532,10 +563,20 @@ impl NetworkManager {
                         || event.resource_type == ResourceType::Manifest
                         || event.resource_type == ResourceType::CspViolationReport
                         || event.resource_type == ResourceType::Ping
-                        || event.resource_type == ResourceType::Prefetch;
+                        || event.resource_type == ResourceType::Prefetch
+                        || self.document_reload_tracker >= 3;
                     let network_resource = event.resource_type == ResourceType::Xhr
                         || event.resource_type == ResourceType::Fetch
                         || event.resource_type == ResourceType::WebSocket;
+                    let document_resource = event.resource_type == ResourceType::Document;
+
+                    if document_resource {
+                        if self.document_target_domain == current_url {
+                            // this will prevent the domain from looping (3 times is enough).
+                            self.document_reload_tracker += 1;
+                        }
+                        self.document_target_domain = event.request.url.clone();
+                    }
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -561,7 +602,7 @@ impl NetworkManager {
 
                     let skip_networking = if !skip_networking
                         && (self.only_html || self.ignore_visuals)
-                        && (javascript_resource || event.resource_type == ResourceType::Document)
+                        && (javascript_resource || document_resource)
                     {
                         ignore_script_embedded(current_url)
                     } else {
@@ -579,18 +620,12 @@ impl NetworkManager {
                         skip_networking
                     };
 
-                    let network_event = event.resource_type == ResourceType::Xhr
-                        || event.resource_type == ResourceType::WebSocket
-                        || event.resource_type == ResourceType::Fetch;
-
                     // XHR check
-                    let skip_networking = self.skip_xhr(skip_networking, &event, network_event);
+                    let skip_networking = self.skip_xhr(skip_networking, &event, network_resource);
 
                     // custom interception layer.
                     let skip_networking = if !skip_networking
-                        && (javascript_resource
-                            || network_resource
-                            || event.resource_type == ResourceType::Document)
+                        && (javascript_resource || network_resource || document_resource)
                     {
                         self.intercept_manager.intercept_detection(
                             &event.request.url,
@@ -602,7 +637,7 @@ impl NetworkManager {
                     };
 
                     let skip_networking =
-                        if !skip_networking && (javascript_resource || network_event) {
+                        if !skip_networking && (javascript_resource || network_resource) {
                             block_website(&event.request.url)
                         } else {
                             skip_networking
