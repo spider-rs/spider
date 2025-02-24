@@ -1822,10 +1822,6 @@ impl Website {
             })
             .await;
 
-            if page.is_empty() {
-                self.status = CrawlStatus::Empty;
-            }
-
             if self.configuration.return_page_links {
                 page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
             }
@@ -1834,12 +1830,14 @@ impl Website {
 
             self.initial_status_code = page.status_code;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
+            if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
+            } else if page.is_empty() {
+                self.status = CrawlStatus::Empty;
             }
 
             if let Some(cb) = self.on_should_crawl_callback {
@@ -1946,7 +1944,6 @@ impl Website {
             let links = if !page.is_empty() {
                 page.links_ssg(&base, &client, &self.domain_parsed).await
             } else {
-                self.status = CrawlStatus::Empty;
                 Default::default()
             };
 
@@ -1967,6 +1964,8 @@ impl Website {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
+            } else if page.is_empty() {
+                self.status = CrawlStatus::Empty;
             }
 
             if let Some(cb) = self.on_should_crawl_callback {
@@ -2032,6 +2031,8 @@ impl Website {
                 self.status = CrawlStatus::RateLimited;
             } else if page.status_code.is_server_error() {
                 self.status = CrawlStatus::ServerError;
+            } else if page.is_empty() {
+                self.status = CrawlStatus::Empty;
             }
 
             // todo: pass full links to the worker to return.
@@ -2310,10 +2311,6 @@ impl Website {
                 })
                 .await;
 
-                if page.is_empty() {
-                    self.status = CrawlStatus::Empty;
-                }
-
                 if self.configuration.return_page_links {
                     page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
                 }
@@ -2328,6 +2325,8 @@ impl Website {
                     self.status = CrawlStatus::RateLimited;
                 } else if page.status_code.is_server_error() {
                     self.status = CrawlStatus::ServerError;
+                } else if page.is_empty() {
+                    self.status = CrawlStatus::Empty;
                 }
 
                 if let Some(cb) = self.on_should_crawl_callback {
