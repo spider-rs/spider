@@ -73,7 +73,7 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
-    proxies: &Option<Box<Vec<crate::configuration::RequestProxy>>>,
+    proxies: &Option<Vec<crate::configuration::RequestProxy>>,
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
@@ -142,7 +142,7 @@ pub fn get_browser_config(
 /// get chrome configuration headful
 #[cfg(feature = "chrome_headed")]
 pub fn get_browser_config(
-    proxies: &Option<Box<Vec<crate::configuration::RequestProxy>>>,
+    proxies: &Option<Vec<crate::configuration::RequestProxy>>,
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,

@@ -262,7 +262,7 @@ pub struct Website {
     /// Extra links to crawl.
     extra_links: Box<HashSet<CaseInsensitiveString>>,
     /// Pages visited.
-    pages: Option<Box<Vec<Page>>>,
+    pages: Option<Vec<Page>>,
     /// Robot.txt parser.
     robot_file_parser: Option<Box<RobotFileParser>>,
     /// Base url of the crawl.
@@ -944,7 +944,7 @@ impl Website {
     }
 
     /// Page getter.
-    pub fn get_pages(&self) -> Option<&Box<Vec<Page>>> {
+    pub fn get_pages(&self) -> Option<&Vec<Page>> {
         self.pages.as_ref()
     }
 
@@ -2703,7 +2703,7 @@ impl Website {
             let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
             if self.pages.is_none() {
-                self.pages = Some(Box::new(Vec::new()));
+                self.pages = Some(Vec::new());
             }
 
             let crawl = async move {
@@ -2734,7 +2734,7 @@ impl Website {
             let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
             if self.pages.is_none() {
-                self.pages = Some(Box::new(Vec::new()));
+                self.pages = Some(Vec::new());
             }
             let crawl = async move {
                 w.crawl_raw().await;
@@ -2764,7 +2764,7 @@ impl Website {
             let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
             if self.pages.is_none() {
-                self.pages = Some(Box::new(Vec::new()));
+                self.pages = Some(Vec::new());
             }
 
             let crawl = async move {
@@ -2795,7 +2795,7 @@ impl Website {
             let mut rx2 = w.subscribe(0).expect("receiver enabled");
 
             if self.pages.is_none() {
-                self.pages = Some(Box::new(Vec::new()));
+                self.pages = Some(Vec::new());
             }
 
             let crawl = async move {
@@ -4685,7 +4685,7 @@ impl Website {
     /// Use proxies for request with control between chrome and http.
     pub fn with_proxies_direct(
         &mut self,
-        proxies: Option<Box<Vec<crate::configuration::RequestProxy>>>,
+        proxies: Option<Vec<crate::configuration::RequestProxy>>,
     ) -> &mut Self {
         self.configuration.with_proxies_direct(proxies);
         self
@@ -5507,9 +5507,9 @@ async fn crawl_invalid() {
 #[tokio::test]
 async fn not_crawl_blacklist() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.blacklist_url = Some(Box::new(Vec::from([CompactString::from(
+    website.configuration.blacklist_url = Some(Vec::from([CompactString::from(
         "https://choosealicense.com/licenses/",
-    )])));
+    )]));
 
     website.crawl().await;
     assert!(

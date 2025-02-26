@@ -33,7 +33,7 @@ pub enum RedirectPolicy {
 
 #[cfg(not(feature = "regex"))]
 /// Allow list normal matching paths.
-pub type AllowList = Box<Vec<CompactString>>;
+pub type AllowList = Vec<CompactString>;
 
 #[cfg(feature = "regex")]
 /// Allow list regex.
@@ -96,9 +96,9 @@ pub struct Configuration {
     /// Preserve the HTTP host header from being included.
     pub preserve_host_header: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
-    pub blacklist_url: Option<Box<Vec<CompactString>>>,
+    pub blacklist_url: Option<Vec<CompactString>>,
     /// List of pages to only crawl. [optional: regex pattern matching]
-    pub whitelist_url: Option<Box<Vec<CompactString>>>,
+    pub whitelist_url: Option<Vec<CompactString>>,
     /// User-Agent for request.
     pub user_agent: Option<Box<CompactString>>,
     /// Polite crawling delay in milli seconds.
@@ -108,7 +108,7 @@ pub struct Configuration {
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
     pub http2_prior_knowledge: bool,
     /// Use proxy list for performing network request.
-    pub proxies: Option<Box<Vec<RequestProxy>>>,
+    pub proxies: Option<Vec<RequestProxy>>,
     /// Headers to include with request.
     pub headers: Option<Box<SerializableHeaderMap>>,
     #[cfg(feature = "sitemap")]
@@ -401,7 +401,7 @@ impl Configuration {
 
     #[cfg(not(feature = "regex"))]
     /// Handle the blacklist options.
-    pub fn get_blacklist(&self) -> Box<Vec<CompactString>> {
+    pub fn get_blacklist(&self) -> AllowList {
         match &self.blacklist_url {
             Some(blacklist) => blacklist.to_owned(),
             _ => Default::default(),
@@ -453,7 +453,7 @@ impl Configuration {
 
     #[cfg(not(feature = "regex"))]
     /// Handle the whitelist options.
-    pub fn get_whitelist(&self) -> Box<Vec<CompactString>> {
+    pub fn get_whitelist(&self) -> AllowList {
         match &self.whitelist_url {
             Some(whitelist) => whitelist.to_owned(),
             _ => Default::default(),
@@ -591,20 +591,18 @@ impl Configuration {
     /// Use proxies for request.
     pub fn with_proxies(&mut self, proxies: Option<Vec<String>>) -> &mut Self {
         self.proxies = proxies.map(|p| {
-            Box::new(
-                p.iter()
-                    .map(|addr| RequestProxy {
-                        addr: addr.to_owned(),
-                        ..Default::default()
-                    })
-                    .collect::<Vec<RequestProxy>>(),
-            )
+            p.iter()
+                .map(|addr| RequestProxy {
+                    addr: addr.to_owned(),
+                    ..Default::default()
+                })
+                .collect::<Vec<RequestProxy>>()
         });
         self
     }
 
     /// Use proxies for request with control between chrome and http.
-    pub fn with_proxies_direct(&mut self, proxies: Option<Box<Vec<RequestProxy>>>) -> &mut Self {
+    pub fn with_proxies_direct(&mut self, proxies: Option<Vec<RequestProxy>>) -> &mut Self {
         self.proxies = proxies;
         self
     }
@@ -621,7 +619,7 @@ impl Configuration {
         Vec<CompactString>: From<Vec<T>>,
     {
         match blacklist_url {
-            Some(p) => self.blacklist_url = Some(Box::new(p.into())),
+            Some(p) => self.blacklist_url = Some(p.into()),
             _ => self.blacklist_url = None,
         };
         self
@@ -633,7 +631,7 @@ impl Configuration {
         Vec<CompactString>: From<Vec<T>>,
     {
         match whitelist_url {
-            Some(p) => self.whitelist_url = Some(Box::new(p.into())),
+            Some(p) => self.whitelist_url = Some(p.into()),
             _ => self.whitelist_url = None,
         };
         self
