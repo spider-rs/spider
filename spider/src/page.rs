@@ -2224,7 +2224,7 @@ impl Page {
                                                 default_response.status_code =
                                                     StatusCode::GATEWAY_TIMEOUT;
                                             }
-                                            CdpError::LaunchTimeout => {
+                                            CdpError::LaunchTimeout(_) => {
                                                 default_response.status_code =
                                                     StatusCode::REQUEST_TIMEOUT;
                                             }
@@ -2543,7 +2543,7 @@ impl Page {
                                                 default_response.status_code =
                                                     StatusCode::GATEWAY_TIMEOUT;
                                             }
-                                            CdpError::LaunchTimeout => {
+                                            CdpError::LaunchTimeout(_) => {
                                                 default_response.status_code =
                                                     StatusCode::REQUEST_TIMEOUT;
                                             }
