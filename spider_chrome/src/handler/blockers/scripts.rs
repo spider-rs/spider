@@ -7,8 +7,8 @@ lazy_static::lazy_static! {
         let patterns = [
             "https://www.googletagservices.com/tag/",
             "https://js.hs-analytics.net/analytics/",
-            "https://www.googletagmanager.com/gtag",
-            "https://www.googletagmanager.com/gtm.js",
+            "https://www.googletagmanager.com/",
+            "https://googletagmanager.com/",
             "https://cm.g.doubleclick.net/",
             "https://ads.pubmatic.com/AdServer/",
             "https://js.hsadspixel.net",
@@ -20,8 +20,11 @@ lazy_static::lazy_static! {
             "https://googleads.g.doubleclick.net",
             "https://www.google-analytics.com",
             "https://www.googleanalytics.com",
+            "https://cdn-cookieyes.com/client_data/",
             "https://iabusprivacy.pmc.com/geo-info.js",
+            "https://support.webtasy.com/scripts/track_visit.php",
             "https://cookie-cdn.cookiepro.com/consent",
+            "https://a.omappapi.com/app/js/api.min.js",
             "https://static.hotjar.com/",
             "https://load.sumome.com/",
             "https://websdk.appsflyer.com/",
@@ -32,7 +35,7 @@ lazy_static::lazy_static! {
             "https://consentcdn.cookiebot.com/",
             "https://plausible.io/api/event",
             "https://sentry.io/api/",
-            "https://cdn.onesignal.com",
+            "https://cdn.onesignal.com/",
             "https://cdn.cookielaw.org/",
             "https://static.doubleclick.net",
             "https://tools.luckyorange.com/",
@@ -55,10 +58,13 @@ lazy_static::lazy_static! {
             "https://js.hsforms.net/forms/embed/v2.js",
             "https://static.parastorage.com/services/wix-thunderbolt/dist/",
             "https://static.parastorage.com/services/tag-manager-client/",
+            "https://cdn.consentmanager.net/",
             "https://static.parastorage.com/services/form-app/",
             "https://www.datadoghq-browser-agent.com/",
+            "https://b.delivery.consentmanager.net/delivery/",
             "https://tvem.cdn.turner.com/v2/",
             "https://image6.pubmatic.com/AdServer/",
+            "https://www.digistore24.com/track/AFFILIATE/",
             "https://i.cdn.turner.com/ads/adfuel/",
             "https://featureassets.org",
             "https://cdn.rudderlabs.com",
@@ -129,7 +135,7 @@ lazy_static::lazy_static! {
             "https://verifi.podscribe.com/",
             "https://script.crazyegg.com/",
             "https://d34r8q7sht0t9k.cloudfront.net/tag.js",
-            "https://pagead2.googlesyndication.com/tag/js/gpt.js",
+            "https://pagead2.googlesyndication.com/",
             "https://a.klaviyo.com/onsite/track-analytics",
             "https://apps.bazaarvoice.com/analytics/bv-analytics.js",
             "https://mab.chartbeat.com/mab_strategy/",
@@ -154,6 +160,9 @@ lazy_static::lazy_static! {
             "https://cdn.corvidae.ai/pixel.min.js",
             "https://app.popt.in/pixel.js",
             "https://js-agent.newrelic.com",
+            "https://d7d3cf2e81d293050033-3dfc0615b0fd7b49143049256703bfce.ssl.cf1.rackcdn.com/stf.js",
+            "https://geo.privacymanager.io/",
+            "https://script.dotmetrics.net/",
             "//d2wy8f7a9ursnm.cloudfront.net/v8/bugsnag.min.js",
             ".siteintercept.qualtrics.com",
             ".sharethis.com",
@@ -185,7 +194,6 @@ lazy_static::lazy_static! {
             "https://static-tracking.",
             // exp testin
             // used for possible location outside
-            "https://geo.privacymanager.io/",
             // "https://www.recaptcha.net/recaptcha/",
             // "https://www.google.com/recaptcha/",
             // "https://www.gstatic.com/recaptcha/",
@@ -214,7 +222,6 @@ lazy_static::lazy_static! {
             "https://player.twitch.tv/",           // Twitch video player embeds
             "https://maps.googleapis.com/maps/", // Google map embeds
             "https://www.youtube.com/player_api", // Youtube player.
-            "https://www.googletagmanager.com/ns.html", // Google tag manager.
             "https://consentcdn.cookiebot.com", // Cookie bot
             "https://www.youtube.com/iframe_api", // Youtube iframes.
             "https://f.vimeocdn.com", // Vimeo EMBEDDINGS

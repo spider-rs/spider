@@ -1893,6 +1893,79 @@ impl Website {
             )
             .await;
 
+            let mut retry_count = self.configuration.retry;
+
+            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                if final_redirect_destination == "chrome-error://chromewebdata/"
+                    && page.status_code.is_success()
+                    && page.is_empty()
+                    && self.configuration.proxies.is_some()
+                {
+                    page.error_status = Some("Invalid proxy configuration.".into());
+                    page.should_retry = true;
+                    page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                }
+            }
+
+            while page.should_retry && retry_count > 0 {
+                retry_count -= 1;
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
+                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        let next_page = Page::new(
+                            &self.url.inner(),
+                            &client,
+                            &chrome_page,
+                            &self.configuration.wait_for,
+                            &self.configuration.screenshot,
+                            false, // we use the initial about:blank page.
+                            &self.configuration.openai_config,
+                            &self.configuration.execution_scripts,
+                            &self.configuration.automation_scripts,
+                            &self.configuration.viewport,
+                            &self.configuration.request_timeout,
+                        )
+                        .await;
+                        page.clone_from(&next_page);
+                    })
+                    .await
+                    {
+                        log::warn!("backoff timeout {elasped}");
+                    }
+                } else {
+                    let next_page = Page::new(
+                        &self.url.inner(),
+                        &client,
+                        &chrome_page,
+                        &self.configuration.wait_for,
+                        &self.configuration.screenshot,
+                        false, // we use the initial about:blank page.
+                        &self.configuration.openai_config,
+                        &self.configuration.execution_scripts,
+                        &self.configuration.automation_scripts,
+                        &self.configuration.viewport,
+                        &self.configuration.request_timeout,
+                    )
+                    .await;
+                    page.clone_from(&next_page);
+                }
+
+                // check the page again for final.
+                if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                    if final_redirect_destination == "chrome-error://chromewebdata/"
+                        && page.status_code.is_success()
+                        && page.is_empty()
+                        && self.configuration.proxies.is_some()
+                    {
+                        page.error_status = Some("Invalid proxy configuration.".into());
+                        page.should_retry = true;
+                        page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                    }
+                }
+            }
+
             if let Some(h) = intercept_handle {
                 let abort_handle = h.abort_handle();
                 if let Err(elasped) =
@@ -1946,15 +2019,6 @@ impl Website {
             } else {
                 Default::default()
             };
-
-            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
-                if final_redirect_destination == "chrome-error://chromewebdata/"
-                    && page.status_code.is_success()
-                    && self.configuration.proxies.is_some()
-                {
-                    page.error_status = Some("Invalid proxy configuration.".into());
-                }
-            }
 
             self.initial_status_code = page.status_code;
 
