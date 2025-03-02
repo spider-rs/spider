@@ -3136,7 +3136,7 @@ impl Website {
                     if links.is_empty() && set.is_empty() || exceeded_budget {
                         // await for all tasks to complete.
                         if exceeded_budget {
-                            set.shutdown().await;
+                            while set.join_next().await.is_some() {}
                         }
                         break 'outer;
                     }
@@ -3445,7 +3445,7 @@ impl Website {
 
                                     if links.is_empty() && set.is_empty() || exceeded_budget {
                                         if exceeded_budget {
-                                            set.shutdown().await;
+                                            while set.join_next().await.is_some() {}
                                         }
                                         break 'outer;
                                     }
@@ -3828,7 +3828,7 @@ impl Website {
 
                     if links.is_empty() && set.is_empty() || exceeded_budget {
                         if exceeded_budget {
-                            set.shutdown().await;
+                            while set.join_next().await.is_some() {}
                         }
                         break 'outer;
                     }
