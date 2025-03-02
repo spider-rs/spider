@@ -179,7 +179,18 @@ pub fn get_browser_config(
 
     let builder = match proxies {
         Some(proxies) => {
-            chrome_args.push(string_concat!(r#"--proxy-server="#, proxies.join(";")));
+            let base_proxies = proxies
+                .iter()
+                .filter_map(|p| {
+                    if p.ignore == crate::configuration::ProxyIgnore::Chrome {
+                        None
+                    } else {
+                        Some(p.addr.to_owned())
+                    }
+                })
+                .collect::<Vec<String>>();
+
+            chrome_args.push(string_concat!(r#"--proxy-server="#, base_proxies.join(";")));
 
             builder.args(chrome_args)
         }
