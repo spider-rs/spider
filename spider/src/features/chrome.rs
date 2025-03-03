@@ -1,5 +1,8 @@
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use chromiumoxide::cdp::browser_protocol::browser::{
+    SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
+};
 use chromiumoxide::cdp::browser_protocol::{
     browser::BrowserContextId, network::CookieParam, target::CreateTargetParams,
 };
@@ -439,6 +442,19 @@ pub async fn launch_browser(
                                 let _ = browser.set_cookies(co).await;
                             };
                         };
+                    }
+
+                    if let Some(id) = &browser.browser_context.id {
+                        let cmd = SetDownloadBehaviorParamsBuilder::default();
+
+                        if let Ok(cmd) = cmd
+                            .behavior(SetDownloadBehaviorBehavior::Deny)
+                            .events_enabled(false)
+                            .browser_context_id(id.clone())
+                            .build()
+                        {
+                            let _ = browser.execute(cmd).await;
+                        }
                     }
                 } else {
                     handle.abort();

@@ -315,6 +315,7 @@ impl FrameManager {
                     },
                 )));
             }
+
             if let Some(frame) = self.frames.get(&watcher.frame_id) {
                 if let Some(nav) = self.check_lifecycle_complete(&watcher, frame) {
                     // request is complete if the frame's lifecycle is complete = frame received all
@@ -343,8 +344,8 @@ impl FrameManager {
 
     /// Entrypoint for page navigation
     pub fn goto(&mut self, req: FrameRequestedNavigation) {
-        if let Some(frame_id) = self.main_frame.clone() {
-            self.navigate_frame(frame_id, req);
+        if let Some(frame_id) = &self.main_frame {
+            self.navigate_frame(frame_id.clone(), req);
         }
     }
 
@@ -352,8 +353,10 @@ impl FrameManager {
     pub fn navigate_frame(&mut self, frame_id: FrameId, mut req: FrameRequestedNavigation) {
         let loader_id = self.frames.get(&frame_id).and_then(|f| f.loader_id.clone());
         let watcher = NavigationWatcher::until_page_load(req.id, frame_id.clone(), loader_id);
+
         // insert the frame_id in the request if not present
         req.set_frame_id(frame_id);
+
         self.pending_navigations.push_back((req, watcher))
     }
 

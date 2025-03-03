@@ -492,7 +492,8 @@ pub async fn perform_chrome_http_request(
     let mut waf_check = false;
     let mut status_code = StatusCode::OK;
     let mut method = String::from("GET");
-    let mut response_headers = std::collections::HashMap::default();
+    let mut response_headers: std::collections::HashMap<String, String> =
+        std::collections::HashMap::default();
     let mut request_headers = std::collections::HashMap::default();
     let mut protocol = String::from("http/1.1");
 
@@ -1003,24 +1004,63 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use chromiumoxide::{
+        cdp::browser_protocol::network::{EventLoadingFailed, ResourceType},
+        error::CdpError,
+    };
     use std::time::Duration;
-    use tokio::time::Instant;
+    use tokio::{sync::oneshot, time::Instant};
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
-    let listener = page
-        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>()
-        .await;
+    // the base networking timeout to prevent any hard hangs.
+    let mut base_timeout = match request_timeout {
+        Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
+        _ => MAX_PAGE_TIMEOUT,
+    };
+
+    let (event_loading_listener, cancel_listener) = tokio::join!(
+        page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
+        ),
+        page.event_listener::<EventLoadingFailed>()
+    );
+
+    let (tx, rx) = oneshot::channel::<bool>();
 
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
-        let mut total = 0.0;
-        if let Ok(mut listener) = listener {
-            while let Some(event) = listener.next().await {
-                total += event.encoded_data_length;
+        let f1 = async {
+            let mut total = 0.0;
+            if let Ok(mut listener) = event_loading_listener {
+                while let Some(event) = listener.next().await {
+                    total += event.encoded_data_length;
+                }
             }
-        }
-        total
+            total
+        };
+        let f2 = async {
+            if let Ok(mut listener) = cancel_listener {
+                let mut net_aborted = false;
+
+                while let Some(event) = listener.next().await {
+                    if event.r#type == ResourceType::Document
+                        && event.error_text == "net::ERR_ABORTED"
+                        && event.canceled.unwrap_or_default()
+                    {
+                        net_aborted = true;
+                        break;
+                    }
+                }
+
+                if net_aborted {
+                    let _ = tx.send(true);
+                }
+            }
+        };
+
+        let (t1, _) = tokio::join!(f1, f2);
+
+        t1
     });
 
     let page_navigation = async {
@@ -1053,14 +1093,19 @@ pub async fn fetch_page_html_chrome_base(
         Ok(())
     };
 
-    let mut base_timeout = match request_timeout {
-        Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
-        _ => MAX_PAGE_TIMEOUT,
-    };
-
     let start_time = Instant::now();
 
-    let request_timeout = tokio::time::timeout(base_timeout, page_navigation).await;
+    let mut request_cancelled = false;
+
+    let request_timeout = tokio::select! {
+        v = tokio::time::timeout(base_timeout, page_navigation) => {
+            v.map_err(|_| CdpError::Timeout)
+        }
+        _ = rx => {
+            request_cancelled = true;
+            Ok(Ok(()))
+        }
+    };
 
     base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
@@ -1072,7 +1117,7 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation {
+    let final_url = if wait_for_navigation && !request_cancelled {
         let last_redirect =
             tokio::time::timeout(base_timeout.max(Duration::from_secs(15)), async {
                 match page.wait_for_navigation_response().await {
@@ -1091,6 +1136,7 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut page_response = if timeout_elasped.is_none()
         && chrome_http_req_res.status_code.is_success()
+        && !request_cancelled
     {
         if chrome_http_req_res.waf_check {
             base_timeout = sub_duration(base_timeout, start_time.elapsed());

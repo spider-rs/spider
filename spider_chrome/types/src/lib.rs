@@ -241,7 +241,7 @@ impl std::error::Error for Error {}
 
 /// Represents a binary type as defined in the CDP protocol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Binary(String);
+pub struct Binary(pub String);
 
 impl AsRef<str> for Binary {
     fn as_ref(&self) -> &str {

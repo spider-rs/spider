@@ -393,6 +393,7 @@ impl Page {
     /// This resolves directly after the requested URL is fully loaded.
     pub async fn goto(&self, params: impl Into<NavigateParams>) -> Result<&Self> {
         let res = self.execute(params.into()).await?;
+
         if let Some(err) = res.result.error_text {
             return Err(CdpError::ChromeMessage(err));
         }

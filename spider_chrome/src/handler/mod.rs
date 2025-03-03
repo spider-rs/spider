@@ -34,7 +34,7 @@ use crate::handler::viewport::Viewport;
 use crate::page::Page;
 
 /// Standard timeout in MS
-pub const REQUEST_TIMEOUT: u64 = 60_000;
+pub const REQUEST_TIMEOUT: u64 = 30_000;
 
 pub mod blockers;
 pub mod browser;
@@ -357,11 +357,12 @@ impl Handler {
 
     /// Process a message received by the target's page via channel
     fn on_target_message(&mut self, target: &mut Target, msg: CommandMessage, now: Instant) {
-        // if let some
         if msg.is_navigation() {
             let (req, tx) = msg.split();
             let id = self.next_navigation_id();
+
             target.goto(FrameRequestedNavigation::new(id, req));
+
             self.navigations.insert(
                 id,
                 NavigationRequest::Navigate(NavigationInProgress::new(tx)),
