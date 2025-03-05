@@ -53,6 +53,10 @@ pub(crate) type RequestError = reqwest::Error;
 #[cfg(feature = "cache_request")]
 pub(crate) type RequestError = reqwest_middleware::Error;
 
+/// The wait for duration timeouts.
+#[cfg(feature = "chrome")]
+const WAIT_TIMEOUTS: [u64; 6] = [0, 20, 50, 100, 100, 500];
+
 /// Ignore the content types.
 pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
     "application/pdf",
@@ -247,17 +251,22 @@ where
 {
     if let Ok(mut events) = page.event_listener::<T>().await {
         let wait_until = async {
+            let mut index = 0;
+
             loop {
-                let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
-                tokio::pin!(sleep);
+                let current_timeout = WAIT_TIMEOUTS[index];
+                let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
+
                 tokio::select! {
-                    _ = &mut sleep => break,
+                    _ = sleep => (),
                     v = events.next() => {
                         if !v.is_none () {
                             break;
                         }
                     }
                 }
+
+                index = (index + 1) % WAIT_TIMEOUTS.len();
             }
         };
         match timeout {
@@ -275,17 +284,22 @@ pub async fn wait_for_selector(
     selector: &str,
 ) {
     let wait_until = async {
+        let mut index = 0;
+
         loop {
-            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(50));
-            tokio::pin!(sleep);
+            let current_timeout = WAIT_TIMEOUTS[index];
+            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
+
             tokio::select! {
-                _ = &mut sleep => (),
-                v = page.find_element(selector) => {
+                _ = sleep => (),
+                v = page.find_elements(selector) => {
                     if v.is_ok() {
-                        break
+                        break;
                     }
                 }
             }
+
+            index = (index + 1) % WAIT_TIMEOUTS.len();
         }
     };
     match timeout {
@@ -311,12 +325,14 @@ pub async fn wait_for_dom(
     );
 
     let wait_until = async {
+        let mut index = 0;
+
         loop {
-            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(50));
-            tokio::pin!(sleep);
+            let current_timeout = WAIT_TIMEOUTS[index];
+            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
 
             tokio::select! {
-                _ = &mut sleep => (),
+                _ = sleep => (),
                 v = page
                 .evaluate(
                     script.clone(),
@@ -326,6 +342,8 @@ pub async fn wait_for_dom(
                     }
                 }
             }
+
+            index = (index + 1) % WAIT_TIMEOUTS.len();
         }
     };
 
