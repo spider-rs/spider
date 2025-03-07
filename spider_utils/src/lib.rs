@@ -9,6 +9,7 @@ use tokio_stream::StreamExt;
 
 /// The type of selectors that can be used to query.
 #[derive(Default, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DocumentSelectors<K> {
     /// CSS Selectors.
     pub css: HashMap<K, Vec<Selector>>,
@@ -23,6 +24,7 @@ pub use spider_transformations;
 type CSSQueryMap = HashMap<String, Vec<String>>;
 
 lazy_static! {
+    /// Xpath factory.
     static ref XPATH_FACTORY: sxd_xpath::Factory = sxd_xpath::Factory::new();
 }
 
