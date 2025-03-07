@@ -1189,7 +1189,7 @@ impl Page {
         match crate::utils::fetch_page_and_headers(&url, &client).await {
             FetchPageResult::Success(headers, page_content) => {
                 let links = match page_content {
-                    Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+                    Some(b) => match flexbuffers::Reader::get_root(b) {
                         Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
                             Ok(link) => link,
                             _ => Default::default(),
@@ -1218,10 +1218,9 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn new_links_only(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
-        use bytes::Buf;
 
         let links = match crate::utils::fetch_page(&url, &client).await {
-            Some(b) => match flexbuffers::Reader::get_root(b.chunk()) {
+            Some(b) => match flexbuffers::Reader::get_root(b.as_slice()) {
                 Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
                     Ok(link) => link,
                     _ => Default::default(),
@@ -1490,13 +1489,13 @@ impl Page {
 
     /// Parsed URL getter for page.
     #[cfg(feature = "decentralized")]
-    pub fn get_url_parsed(&mut self) -> &Option<Url> {
+    pub fn get_url_parsed(&self) -> &Option<Url> {
         &None
     }
 
     /// Parsed URL getter for page.
     #[cfg(feature = "decentralized")]
-    pub fn get_url_parsed_ref(&mut self) -> &Option<Url> {
+    pub fn get_url_parsed_ref(&self) -> &Option<Url> {
         &None
     }
 

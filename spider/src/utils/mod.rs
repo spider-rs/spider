@@ -1772,7 +1772,7 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
 pub async fn fetch_page(target_url: &str, client: &Client) -> Option<Vec<u8>> {
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => match res.bytes().await {
-            Ok(text) => Some(text),
+            Ok(text) => Some(text.into()),
             Err(_) => {
                 log("- error fetching {}", &target_url);
                 None
