@@ -10,7 +10,6 @@ use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
-use bytes::Bytes;
 use hashbrown::HashSet;
 use lol_html::AsciiCompatibleEncoding;
 use regex::bytes::Regex;
@@ -218,7 +217,7 @@ pub struct AIResults {
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Box<Bytes>>,
+    html: Option<Box<Vec<u8>>>,
     /// Base absolute url for page.
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
@@ -278,7 +277,7 @@ pub struct Page {
 #[derive(Debug, Clone, Default)]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Box<Bytes>>,
+    html: Option<Box<Vec<u8>>>,
     #[cfg(feature = "headers")]
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
@@ -587,7 +586,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSel
 
 #[cfg(not(feature = "decentralized"))]
 /// Is the resource valid?
-pub fn validate_empty(content: &Option<Box<Bytes>>, is_success: bool) -> bool {
+pub fn validate_empty(content: &Option<Box<Vec<u8>>>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
             !(content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
@@ -1038,7 +1037,7 @@ impl Page {
                     response.0.signature = Some(hash_html(&collected_bytes).await);
                 }
 
-                let response_bytes = Box::new(Bytes::from(collected_bytes));
+                let response_bytes = Box::new(collected_bytes);
 
                 response.0.content = if response_bytes.is_empty() {
                     None
@@ -1442,7 +1441,7 @@ impl Page {
     }
 
     /// Set the html directly of the page
-    pub fn set_html_bytes(&mut self, html: Option<Bytes>) {
+    pub fn set_html_bytes(&mut self, html: Option<Vec<u8>>) {
         self.html = html.map(Box::new);
     }
 
@@ -1520,7 +1519,7 @@ impl Page {
     }
 
     /// Html getter for bytes on the page.
-    pub fn get_bytes(&self) -> Option<&Bytes> {
+    pub fn get_bytes(&self) -> Option<&Vec<u8>> {
         self.html.as_deref()
     }
 
@@ -2805,13 +2804,13 @@ impl Page {
 }
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
-pub fn encode_bytes(html: &Bytes, label: &str) -> String {
+pub fn encode_bytes(html: &Vec<u8>, label: &str) -> String {
     auto_encoder::encode_bytes(html, label)
 }
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 #[cfg(feature = "encoding")]
-pub fn get_html_encoded(html: &Option<Box<Bytes>>, label: &str) -> String {
+pub fn get_html_encoded(html: &Option<Box<Vec<u8>>>, label: &str) -> String {
     match html.as_ref() {
         Some(html) => encode_bytes(html, label),
         _ => Default::default(),
@@ -2820,7 +2819,7 @@ pub fn get_html_encoded(html: &Option<Box<Bytes>>, label: &str) -> String {
 
 #[cfg(not(feature = "encoding"))]
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
-pub fn get_html_encoded(html: &Option<Box<Bytes>>, _label: &str) -> String {
+pub fn get_html_encoded(html: &Option<Box<Vec<u8>>>, _label: &str) -> String {
     match html {
         Some(b) => String::from_utf8_lossy(b).to_string(),
         _ => Default::default(),

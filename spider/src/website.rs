@@ -4550,7 +4550,7 @@ impl Website {
         &mut self,
         client: &Client,
         handle: &Option<Arc<AtomicI8>>,
-        b: bytes::Bytes,
+        b: Vec<u8>,
         mut interval: &mut Interval,
         exceeded_budget: &mut bool,
         tx: &tokio::sync::mpsc::Sender<Page>,

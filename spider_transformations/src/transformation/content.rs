@@ -5,7 +5,6 @@ use phf::phf_set;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use spider::auto_encoder::is_binary_file;
-use spider::bytes::Bytes;
 use spider::lazy_static::lazy_static;
 use spider::page::Page;
 use spider::url::Url;
@@ -528,7 +527,7 @@ pub fn transform_content_to_bytes(
     encoding: &Option<String>,
     selector_config: &Option<SelectorConfiguration>,
     ignore_tags: &Option<Vec<String>>,
-) -> Bytes {
+) -> Vec<u8> {
     if is_binary_file(res.get_html_bytes_u8()) {
         let b = res.get_bytes();
         if let Some(b) = b {
@@ -539,6 +538,6 @@ pub fn transform_content_to_bytes(
     } else {
         let content = transform_content(res, c, encoding, selector_config, ignore_tags);
         let b = content.as_bytes();
-        Bytes::copy_from_slice(b)
+        b.to_vec()
     }
 }

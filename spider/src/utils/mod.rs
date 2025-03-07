@@ -142,7 +142,7 @@ lazy_static! {
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
-    b: &mut bytes::Bytes,
+    b: &mut Vec<u8>,
     page: &chromiumoxide::Page,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     use crate::configuration::{WaitFor, WaitForDelay, WaitForIdleNetwork};
@@ -200,7 +200,7 @@ async fn cf_handle(
 /// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
 async fn cf_handle(
-    _b: &mut bytes::Bytes,
+    _b: &mut Vec<u8>,
     _page: &chromiumoxide::Page,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     Ok(())
@@ -210,7 +210,7 @@ async fn cf_handle(
 #[derive(Debug, Default)]
 pub struct PageResponse {
     /// The page response resource.
-    pub content: Option<Box<bytes::Bytes>>,
+    pub content: Option<Box<Vec<u8>>>,
     #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
@@ -671,7 +671,7 @@ pub async fn run_openai_request(
 
                 // perform the js script on the page.
                 if !json_res.js.is_empty() {
-                    let html: Option<Box<bytes::Bytes>> = match page
+                    let html: Option<Box<Vec<u8>>> = match page
                         .evaluate_function(string_concat!(
                             "async function() { ",
                             json_res.js,
@@ -1209,7 +1209,7 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        let mut res: Box<bytes::Bytes> = match page.content_bytes().await {
+        let mut res: Box<Vec<u8>> = match page.content_bytes().await {
             Ok(b) => b.into(),
             _ => Default::default(),
         };
@@ -1325,7 +1325,7 @@ pub async fn fetch_page_html_chrome_base(
 #[cfg(feature = "chrome")]
 fn set_page_response(
     ok: bool,
-    res: Box<bytes::Bytes>,
+    res: Box<Vec<u8>>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     final_url: Option<String>,
 ) -> PageResponse {
@@ -1576,7 +1576,7 @@ pub async fn handle_response_bytes(
     let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
 
-    let mut content: Option<Box<bytes::Bytes>> = None;
+    let mut content: Option<Box<Vec<u8>>> = None;
 
     if !block_streaming(&res, only_html) {
         let mut data = match res.content_length() {
@@ -1655,7 +1655,6 @@ where
     let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
 
-    // let mut content: Option<Box<bytes::Bytes>> = None;
     let mut rewrite_error = false;
 
     if !block_streaming(&res, only_html) {
@@ -1770,7 +1769,7 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
 
 /// Perform a network request to a resource extracting all content as text.
 #[cfg(feature = "decentralized")]
-pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Bytes> {
+pub async fn fetch_page(target_url: &str, client: &Client) -> Option<Vec<u8>> {
     match client.get(target_url).send().await {
         Ok(res) if res.status().is_success() => match res.bytes().await {
             Ok(text) => Some(text),
@@ -1791,7 +1790,7 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<bytes::Byte
 /// Fetch a page with the headers returned.
 pub enum FetchPageResult {
     /// Success extracting contents of the page
-    Success(reqwest::header::HeaderMap, Option<bytes::Bytes>),
+    Success(reqwest::header::HeaderMap, Option<Vec<u8>>),
     /// No success extracting content
     NoSuccess(reqwest::header::HeaderMap),
     /// A network error occured.
