@@ -33,6 +33,16 @@ impl EvaluationResult {
             .ok_or_else(|| serde::de::Error::custom("No value found"))?;
         serde_json::from_value(value)
     }
+
+    /// Attempts to deserialize the value into as bytes.
+    pub fn into_bytes(self) -> serde_json::Result<Vec<u8>> {
+        let value = self
+            .inner
+            .value
+            .ok_or_else(|| serde::de::Error::custom("No value found"))?;
+
+        Ok(value.as_str().unwrap_or_default().into())
+    }
 }
 
 #[derive(Debug, Clone)]
