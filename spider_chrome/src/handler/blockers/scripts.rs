@@ -154,6 +154,7 @@ lazy_static::lazy_static! {
             "https://ads.pubmatic.com/AdServer/js/",
             "https://widgets.outbrain.com/nanoWidget/externals/obPixelFrame/obPixelFrame.js",
             "https://widgets.outbrain.com/external/externals/intentiq.js",
+            "https://applets.ebxcdn.com/ebx.js",
             "https://cdn.fuseplatform.net/publift/tags/",
             "https://tag.rmp.rakuten.com/",
             "https://analytics-api.",
