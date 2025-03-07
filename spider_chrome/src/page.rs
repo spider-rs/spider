@@ -1301,13 +1301,13 @@ impl Page {
 
     #[cfg(feature = "bytes")]
     /// Returns the HTML content of the page
-    pub async fn content_bytes(&self) -> Result<bytes::Bytes> {
-        Ok(self.evaluate(OUTER_HTML).await?.into_value()?)
+    pub async fn content_bytes(&self) -> Result<Vec<u8>> {
+        Ok(self.evaluate(OUTER_HTML).await?.into_value_bytes()?)
     }
 
     #[cfg(feature = "bytes")]
     /// Returns the HTML outer html of the page
-    pub async fn outer_html_bytes(&self) -> Result<bytes::Bytes> {
+    pub async fn outer_html_bytes(&self) -> Result<Vec<u8>> {
         Ok(self.outer_html().await?.into())
     }
 
