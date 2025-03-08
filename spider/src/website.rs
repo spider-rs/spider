@@ -14,8 +14,10 @@ use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
 use crate::utils::{
     emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, networking_capable, prepare_url,
-    setup_website_selectors, spawn_set, spawn_task, AllowedDomainTypes,
+    setup_website_selectors, spawn_set, AllowedDomainTypes,
 };
+#[cfg(any(feature = "sitemap", feature = "control"))]
+use crate::utils::spawn_task;
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -292,8 +294,10 @@ pub struct Website {
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
     #[cfg(feature = "disk")]
-    /// The disk handler to use
+    /// The disk handler to use.
     sqlite: DatabaseHandler,
+    /// Was the setup already configured for sync sendable thread use?
+    send_configured: bool,
 }
 
 impl Website {
@@ -2697,6 +2701,32 @@ impl Website {
         self.start();
         self.setup().await;
         self.configuration.configure_allowlist();
+        self.send_configured = true;
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Initiates the website crawling http process concurrently with the ability to send it across threads for subscriptions.
+    /// Ensure that `website.configure_setup()` has been called before executing this function.
+    /// It checks the status to ensure it is not firewall-blocked before proceeding with concurrent crawling.
+    /// You can pass in a manual url in order to setup a new crawl directly with pre-configurations ready.
+    pub async fn crawl_raw_send(&self, url: Option<&str>) {
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let (client, handle) = (
+                match &self.client {
+                    Some(c) => c.to_owned(),
+                    _ => self.configure_http_client(),
+                },
+                self.configure_handler(),
+            );
+            let (handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self.crawl_concurrent_raw_send(&client, &handle, &url).await;
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+        }
     }
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
@@ -3496,6 +3526,284 @@ impl Website {
         }
     }
 
+    /// Start to crawl website concurrently using chrome with the ability to send it across threads for subscriptions.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn crawl_concurrent_raw_send(
+        &self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+        url: &Option<&str>,
+    ) -> Website {
+        let mut selector: (
+            CompactString,
+            smallvec::SmallVec<[CompactString; 2]>,
+            CompactString,
+        ) = self.setup_selectors();
+
+        let mut website = self.clone();
+
+        if let Some(u) = url {
+            match &website.domain_parsed {
+                Some(domain_url) => {
+                    if domain_url.as_str().starts_with(u) {
+                        website.set_url_only(u);
+                    } else {
+                        website.set_url(u);
+                    }
+                }
+                _ => {
+                    website.set_url(u);
+                }
+            }
+        }
+
+        if !website.send_configured {
+            website.configure_setup().await;
+        }
+
+        if self.single_page() {
+            website._crawl_establish(client, &mut selector, false).await;
+            website
+        } else {
+            let on_link_find_callback = self.on_link_find_callback;
+            let on_should_crawl_callback = self.on_should_crawl_callback;
+            let full_resources = self.configuration.full_resources;
+            let return_page_links = self.configuration.return_page_links;
+            let only_html = self.configuration.only_html && !full_resources;
+            let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
+            let (mut interval, throttle) = self.setup_crawl();
+
+            let mut links: HashSet<CaseInsensitiveString> = website.drain_extra_links().collect();
+
+            links.extend(website._crawl_establish(client, &mut selector, false).await);
+
+            let semaphore = self.setup_semaphore();
+
+            let shared = Arc::new((
+                client.to_owned(),
+                selector,
+                self.channel.clone(),
+                self.configuration.external_domains_caseless.clone(),
+                self.channel_guard.clone(),
+                self.configuration.retry,
+                self.configuration.full_resources,
+                PageLinkBuildSettings::new_full(
+                    false,
+                    self.configuration.full_resources,
+                    self.configuration.subdomains,
+                    self.configuration.tld,
+                    self.configuration.normalize,
+                ),
+                self.domain_parsed.clone(),
+            ));
+
+            let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
+
+            // track budgeting one time.
+            let mut exceeded_budget = false;
+            let concurrency = throttle.is_zero();
+
+            website
+                .dequeue(&mut q, &mut links, &mut exceeded_budget)
+                .await;
+
+            if !concurrency && !links.is_empty() {
+                tokio::time::sleep(*throttle).await;
+            }
+
+            'outer: loop {
+                let mut stream =
+                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+
+                loop {
+                    if !concurrency {
+                        tokio::time::sleep(*throttle).await;
+                    }
+
+                    let semaphore =
+                        get_semaphore(&semaphore, !self.configuration.shared_queue).await;
+
+                    tokio::select! {
+                        biased;
+                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                            if !self.handle_process(handle, &mut interval, async {
+                                emit_log_shutdown(link.inner());
+                                let permits = set.len();
+                                set.shutdown().await;
+                                semaphore.add_permits(permits);
+                            }).await {
+                                break 'outer;
+                            }
+                            let allowed = website.is_allowed(&link);
+
+                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                exceeded_budget = true;
+                                break;
+                            }
+
+                            if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                                continue;
+                            }
+
+                            emit_log(link.inner());
+
+                            website.insert_link(link.clone()).await;
+
+                            if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                                let shared = shared.clone();
+
+                                spawn_set("page_fetch", &mut set, async move {
+                                    let link_result = match on_link_find_callback {
+                                        Some(cb) => cb(link, None),
+                                        _ => (link, None),
+                                    };
+
+                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                    let mut links_pages = if return_page_links {
+                                        Some(links.clone())
+                                    } else {
+                                        None
+                                    };
+                                    let mut relative_selectors = shared.1.clone();
+                                    let mut r_settings = shared.7;
+                                    r_settings.ssg_build = true;
+                                    let target_url = link_result.0.as_ref();
+                                    let external_domains_caseless = &shared.3;
+                                    let client = &shared.0;
+
+                                    let mut domain_parsed = None;
+
+                                    let mut page = Page::new_page_streaming(
+                                        target_url,
+                                        client, only_html,
+                                        &mut relative_selectors,
+                                        external_domains_caseless,
+                                        &r_settings,
+                                        &mut links,
+                                        None,
+                                        &shared.8,
+                                        &mut domain_parsed,
+                                        &mut links_pages).await;
+
+                                    let mut retry_count = shared.5;
+
+                                    while page.should_retry && retry_count > 0 {
+                                        retry_count -= 1;
+
+                                        if let Some(timeout) = page.get_timeout() {
+                                            tokio::time::sleep(timeout).await;
+                                        }
+
+                                        if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                            if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                let mut domain_parsed = None;
+                                                let next_page = Page::new_page_streaming(
+                                                    target_url,
+                                                    client, only_html,
+                                                    &mut relative_selectors.clone(),
+                                                    external_domains_caseless,
+                                                    &r_settings,
+                                                    &mut links,
+                                                    None,
+                                                    &shared.8,
+                                                    &mut domain_parsed,
+                                                    &mut links_pages).await;
+
+                                                page.clone_from(&next_page);
+
+                                            }).await
+                                        {
+                                            log::warn!("Handler timeout exceeded {elasped}");
+                                        }
+
+                                        } else {
+                                            page.clone_from(&Page::new_page_streaming(
+                                                target_url,
+                                                client,
+                                                only_html,
+                                                &mut relative_selectors.clone(),
+                                                external_domains_caseless,
+                                                &r_settings,
+                                                &mut links,
+                                                None,
+                                                &shared.8,
+                                                &mut domain_parsed,
+                                                &mut links_pages).await);
+                                        }
+                                    }
+
+                                    if return_page_links {
+                                        page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                                    }
+
+                                    if let Some(cb) = on_should_crawl_callback {
+                                        if !cb(&page) {
+                                            page.blocked_crawl = true;
+                                            channel_send_page(&shared.2, page, &shared.4);
+                                            drop(permit);
+                                            return Default::default()
+                                        }
+                                    }
+
+                                    let signature = page.signature;
+
+                                    channel_send_page(&shared.2, page, &shared.4);
+
+                                    drop(permit);
+
+                                    (links, signature)
+                                });
+                            }
+
+                            website.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+                        },
+                        Some(result) = set.join_next(), if !set.is_empty() => {
+                            if let Ok(res) = result {
+                                match res.1 {
+                                    Some(signature) => {
+                                        if website.is_signature_allowed(signature).await {
+                                            website.insert_signature(signature).await;
+                                            website.links_visited.extend_links(&mut links, res.0);
+                                        }
+                                    }
+                                    _ => {
+                                        website.links_visited.extend_links(&mut links, res.0);
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        else => break,
+                    }
+
+                    website
+                        .dequeue(&mut q, &mut links, &mut exceeded_budget)
+                        .await;
+
+                    if links.is_empty() && set.is_empty() || exceeded_budget {
+                        // await for all tasks to complete.
+                        if exceeded_budget {
+                            while set.join_next().await.is_some() {}
+                        }
+                        break 'outer;
+                    }
+                }
+
+                website.subscription_guard().await;
+                website
+                    .dequeue(&mut q, &mut links, &mut exceeded_budget)
+                    .await;
+
+                if links.is_empty() && set.is_empty() {
+                    break;
+                }
+            }
+            website
+        }
+    }
+
     /// Start to crawl website concurrently with the ability to send it across threads for subscriptions.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -3504,7 +3812,7 @@ impl Website {
         client: &Client,
         handle: &Option<Arc<AtomicI8>>,
         url: &Option<&str>,
-    ) {
+    ) -> Website {
         use crate::features::chrome::attempt_navigation;
 
         match self.setup_browser().await {
@@ -3523,7 +3831,22 @@ impl Website {
                         let mut website = self.to_owned();
 
                         if let Some(u) = url {
-                            website.set_url(u);
+                            match &website.domain_parsed {
+                                Some(domain_url) => {
+                                    if domain_url.as_str().starts_with(u) {
+                                        website.set_url_only(u);
+                                    } else {
+                                        website.set_url(u);
+                                    }
+                                }
+                                _ => {
+                                    website.set_url(u);
+                                }
+                            }
+                        }                
+
+                        if !website.send_configured {
+                            website.configure_setup().await;
                         }
 
                         let base_links = website
@@ -3533,8 +3856,9 @@ impl Website {
                         drop(new_page);
 
                         if self.single_page() {
-                            self.subscription_guard().await;
+                            website.subscription_guard().await;
                             b.dispose().await;
+                            website
                         } else {
                             let semaphore: Arc<Semaphore> = self.setup_semaphore();
                             let (mut interval, throttle) = self.setup_crawl();
@@ -3570,7 +3894,9 @@ impl Website {
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
 
-                            // self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+                            website
+                                .dequeue(&mut q, &mut links, &mut exceeded_budget)
+                                .await;
 
                             if !concurrency && !links.is_empty() {
                                 tokio::time::sleep(*throttle).await;
@@ -3777,7 +4103,7 @@ impl Website {
                                             if let Ok(res) = result {
                                                 match res.1 {
                                                     Some(signature) => {
-                                                        if self.is_signature_allowed(signature).await {
+                                                        if website.is_signature_allowed(signature).await {
                                                             website.insert_signature(signature).await;
                                                             website.links_visited.extend_links(&mut links, res.0);
                                                         }
@@ -3801,7 +4127,7 @@ impl Website {
                                     }
                                 }
 
-                                self.subscription_guard().await;
+                                website.subscription_guard().await;
                                 website
                                     .dequeue(&mut q, &mut links, &mut exceeded_budget)
                                     .await;
@@ -3812,15 +4138,20 @@ impl Website {
                             }
 
                             b.dispose().await;
+                            website
                         }
                     }
                     Err(err) => {
                         b.dispose().await;
-                        log::error!("{}", err)
+                        log::error!("{}", err);
+                        self.clone()
                     }
                 }
             }
-            _ => log::error!("Chrome initialization failed."),
+            _ => {
+                log::error!("Chrome initialization failed.");
+                self.clone()
+            }
         }
     }
 
