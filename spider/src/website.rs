@@ -2044,6 +2044,164 @@ impl Website {
     }
 
     /// Expand links for crawl.
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
+    async fn crawl_establish_chrome_one(
+        &self,
+        client: &Client,
+        base: &mut RelativeSelectors,
+        url: &Option<&str>,
+        chrome_page: &chromiumoxide::Page,
+    ) -> HashSet<CaseInsensitiveString> {
+        if self
+            .is_allowed_default(&self.get_base_link())
+            .eq(&ProcessLinkStatus::Allowed)
+        {
+            let (_, intercept_handle) = tokio::join!(
+                crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration),
+                self.setup_chrome_interception(&chrome_page)
+            );
+
+            let mut page = Page::new(
+                url.unwrap_or(&self.url.inner()),
+                &client,
+                &chrome_page,
+                &self.configuration.wait_for,
+                &self.configuration.screenshot,
+                false, // we use the initial about:blank page.
+                &self.configuration.openai_config,
+                &self.configuration.execution_scripts,
+                &self.configuration.automation_scripts,
+                &self.configuration.viewport,
+                &self.configuration.request_timeout,
+            )
+            .await;
+
+            let mut retry_count = self.configuration.retry;
+
+            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                if final_redirect_destination == "chrome-error://chromewebdata/"
+                    && page.status_code.is_success()
+                    && page.is_empty()
+                    && self.configuration.proxies.is_some()
+                {
+                    page.error_status = Some("Invalid proxy configuration.".into());
+                    page.should_retry = true;
+                    page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                }
+            }
+
+            while page.should_retry && retry_count > 0 {
+                retry_count -= 1;
+                if let Some(timeout) = page.get_timeout() {
+                    tokio::time::sleep(timeout).await;
+                }
+                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        let next_page = Page::new(
+                            &self.url.inner(),
+                            &client,
+                            &chrome_page,
+                            &self.configuration.wait_for,
+                            &self.configuration.screenshot,
+                            false, // we use the initial about:blank page.
+                            &self.configuration.openai_config,
+                            &self.configuration.execution_scripts,
+                            &self.configuration.automation_scripts,
+                            &self.configuration.viewport,
+                            &self.configuration.request_timeout,
+                        )
+                        .await;
+                        page.clone_from(&next_page);
+                    })
+                    .await
+                    {
+                        log::warn!("backoff timeout {elasped}");
+                    }
+                } else {
+                    let next_page = Page::new(
+                        &self.url.inner(),
+                        &client,
+                        &chrome_page,
+                        &self.configuration.wait_for,
+                        &self.configuration.screenshot,
+                        false, // we use the initial about:blank page.
+                        &self.configuration.openai_config,
+                        &self.configuration.execution_scripts,
+                        &self.configuration.automation_scripts,
+                        &self.configuration.viewport,
+                        &self.configuration.request_timeout,
+                    )
+                    .await;
+                    page.clone_from(&next_page);
+                }
+
+                // check the page again for final.
+                if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                    if final_redirect_destination == "chrome-error://chromewebdata/"
+                        && page.status_code.is_success()
+                        && page.is_empty()
+                        && self.configuration.proxies.is_some()
+                    {
+                        page.error_status = Some("Invalid proxy configuration.".into());
+                        page.should_retry = true;
+                        page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                    }
+                }
+            }
+
+            if let Some(h) = intercept_handle {
+                let abort_handle = h.abort_handle();
+                if let Err(elasped) =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                {
+                    log::warn!("Handler timeout exceeded {elasped}");
+                    abort_handle.abort();
+                }
+            }
+
+            if let Some(ref domain) = page.final_redirect_destination {
+                let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
+                let s = self.setup_selectors();
+
+                base.0 = s.0;
+                base.1 = s.1;
+
+                if let Some(pdname) = parse_absolute_url(&domain) {
+                    if let Some(dname) = pdname.host_str() {
+                        base.2 = dname.into();
+                    }
+                }
+            }
+
+            emit_log(&self.url.inner());
+
+            if self.configuration.return_page_links && page.page_links.is_none() {
+                page.page_links = Some(Box::new(Default::default()));
+            }
+
+            let links = if !page.is_empty() {
+                page.links_ssg(&base, &client, &self.domain_parsed).await
+            } else {
+                Default::default()
+            };
+
+            if let Some(cb) = self.on_should_crawl_callback {
+                if !cb(&page) {
+                    page.blocked_crawl = true;
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return Default::default();
+                }
+            }
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
+
+            links
+        } else {
+            HashSet::new()
+        }
+    }
+
+    /// Expand links for crawl.
     #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
     async fn crawl_establish(
         &mut self,
@@ -2745,8 +2903,7 @@ impl Website {
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     /// Initiates the website crawling process concurrently with the ability to send it across threads for subscriptions.
-    /// Ensure that `website.configure_setup()` has been called before executing this function.
-    /// It checks the status to ensure it is not firewall-blocked before proceeding with concurrent crawling.
+    /// Use `website.configure_setup().await` before executing this function to re-use the initial setup.
     /// You can pass in a manual url in order to setup a new crawl directly with pre-configurations ready.
     pub async fn crawl_chrome_send(&self, url: Option<&str>) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
@@ -2762,6 +2919,28 @@ impl Website {
                 _ => (None, None),
             };
             self.crawl_concurrent_send(&client, &handle, &url).await;
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+        }
+    }
+
+    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+    /// Initiates a single fetch for one page with the ability to send it across threads for subscriptions.
+    pub async fn fetch_chrome(&self, url: Option<&str>) {
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let (client, handle) = (
+                match &self.client {
+                    Some(c) => c.to_owned(),
+                    _ => self.configure_http_client(),
+                },
+                self.configure_handler(),
+            );
+            let (_handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self._fetch_chrome(&client, &url).await;
             if let Some(h) = join_handle {
                 h.abort()
             }
@@ -4165,6 +4344,42 @@ impl Website {
             _ => {
                 log::error!("Chrome initialization failed.");
                 self.clone()
+            }
+        }
+    }
+
+    /// Start to crawl website concurrently with the ability to send it across threads for subscriptions for one page.
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn _fetch_chrome(&self, client: &Client, url: &Option<&str>) {
+        use crate::features::chrome::attempt_navigation;
+
+        match self.setup_browser().await {
+            Some(mut b) => {
+                match attempt_navigation(
+                    "about:blank",
+                    &b.browser.0,
+                    &self.configuration.request_timeout,
+                    &b.browser.2,
+                    &self.configuration.viewport,
+                )
+                .await
+                {
+                    Ok(new_page) => {
+                        let mut selectors = self.setup_selectors();
+                        self.crawl_establish_chrome_one(&client, &mut selectors, url, &new_page)
+                            .await;
+                        self.subscription_guard().await;
+                        b.dispose().await;
+                    }
+                    Err(err) => {
+                        b.dispose().await;
+                        log::error!("{}", err);
+                    }
+                }
+            }
+            _ => {
+                log::error!("Chrome initialization failed.");
             }
         }
     }
