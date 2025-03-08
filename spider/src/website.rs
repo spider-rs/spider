@@ -1576,10 +1576,8 @@ impl Website {
             let handle = c.clone();
             let target_id = self.target_id();
 
-            let c_lock = CONTROLLER.clone();
-
             let join_handle = spawn_task("control_handler", async move {
-                let mut l = c_lock.read().await.1.to_owned();
+                let mut l = CONTROLLER.read().await.1.to_owned();
 
                 while l.changed().await.is_ok() {
                     let n = &*l.borrow();
