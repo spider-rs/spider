@@ -12,12 +12,12 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
+#[cfg(any(feature = "sitemap", feature = "control"))]
+use crate::utils::spawn_task;
 use crate::utils::{
     emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, networking_capable, prepare_url,
     setup_website_selectors, spawn_set, AllowedDomainTypes,
 };
-#[cfg(any(feature = "sitemap", feature = "control"))]
-use crate::utils::spawn_task;
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -1059,7 +1059,7 @@ impl Website {
     }
 
     /// configure the robots parser on initial crawl attempt and run.
-    pub async fn configure_robots_parser(&mut self, client: Client) -> Client {
+    pub async fn configure_robots_parser(&mut self, client: &Client) {
         if self.configuration.respect_robots_txt {
             let robot_file_parser = self
                 .robot_file_parser
@@ -1087,8 +1087,6 @@ impl Website {
                 }
             }
         }
-
-        client
     }
 
     /// Setup strict a strict redirect policy for request. All redirects need to match the host.
@@ -1639,25 +1637,28 @@ impl Website {
         )
     }
 
-    /// Setup config for crawl.
-    async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+    /// Base configuration setup.
+    fn setup_base(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
         self.setup_disk();
         crate::utils::connect::init_background_runtime();
-
-        if self.status != CrawlStatus::Active {
-            self.clear_all().await;
-        }
 
         let client = match self.client.take() {
             Some(client) => client,
             _ => self.configure_http_client(),
         };
 
-        (
-            self.configure_robots_parser(client).await,
-            self.configure_handler(),
-        )
+        (client, self.configure_handler())
+    }
+
+    /// Setup config for crawl.
+    async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+        let setup = self.setup_base();
+        if self.status != CrawlStatus::Active {
+            self.clear_all().await;
+        }
+        self.configure_robots_parser(&setup.0).await;
+        setup
     }
 
     /// Setup shared concurrent configs.
@@ -2700,6 +2701,16 @@ impl Website {
         self.status = CrawlStatus::Active;
         self.start();
         self.setup().await;
+        self.configuration.configure_allowlist();
+        self.send_configured = true;
+    }
+
+    /// Configures the website crawling process for concurrent execution with the ability to send it across threads for subscriptions without robot protection.
+    /// You can manually call `website.configure_robots_parser` after.
+    pub fn configure_setup_norobots(&mut self) {
+        self.status = CrawlStatus::Active;
+        self.start();
+        self.setup_base();
         self.configuration.configure_allowlist();
         self.send_configured = true;
     }
@@ -3843,7 +3854,7 @@ impl Website {
                                     website.set_url(u);
                                 }
                             }
-                        }                
+                        }
 
                         if !website.send_configured {
                             website.configure_setup().await;
@@ -6291,7 +6302,7 @@ async fn test_respect_robots_txt() {
     let (client, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
         website.setup().await;
 
-    website.configure_robots_parser(client).await;
+    website.configure_robots_parser(&client).await;
 
     assert_eq!(website.configuration.delay, 0);
 
@@ -6306,7 +6317,7 @@ async fn test_respect_robots_txt() {
 
     let (client_second, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
         website_second.setup().await;
-    website_second.configure_robots_parser(client_second).await;
+    website_second.configure_robots_parser(&client_second).await;
 
     assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 
@@ -6316,7 +6327,7 @@ async fn test_respect_robots_txt() {
     let (client_third, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
         website_third.setup().await;
 
-    website_third.configure_robots_parser(client_third).await;
+    website_third.configure_robots_parser(&client_third).await;
 
     assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
 }
