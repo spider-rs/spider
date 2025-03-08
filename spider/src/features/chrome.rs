@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::{
@@ -7,6 +9,7 @@ use chromiumoxide::cdp::browser_protocol::{
     browser::BrowserContextId, network::CookieParam, target::CreateTargetParams,
 };
 use chromiumoxide::error::CdpError;
+use chromiumoxide::handler::REQUEST_TIMEOUT;
 use chromiumoxide::page::DISABLE_DIALOGS;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
@@ -86,7 +89,7 @@ pub fn get_browser_config(
         .disable_default_args()
         .request_timeout(match request_timeout.as_ref() {
             Some(timeout) => **timeout,
-            _ => Default::default(),
+            _ => Duration::from_millis(REQUEST_TIMEOUT),
         });
 
     let builder = if cache_enabled {
@@ -156,7 +159,7 @@ pub fn get_browser_config(
         .no_sandbox()
         .request_timeout(match request_timeout.as_ref() {
             Some(timeout) => **timeout,
-            _ => Default::default(),
+            _ => Duration::from_millis(REQUEST_TIMEOUT),
         })
         .with_head();
 
@@ -221,7 +224,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
     HandlerConfig {
         request_timeout: match config.request_timeout.as_ref() {
             Some(timeout) => **timeout,
-            _ => Default::default(),
+            _ => Duration::from_millis(REQUEST_TIMEOUT),
         },
         request_intercept: config.chrome_intercept.enabled,
         cache_enabled: config.cache,
@@ -716,10 +719,10 @@ impl BrowserController {
             // assume close will always happen.
             self.closed = true;
             if let Some(id) = self.browser.2.take() {
+                let _ = self.browser.0.quit_incognito_context_base(id).await;
                 if let Some(handler) = self.browser.1.take() {
                     // we have to quit the context until https://chromedevtools.github.io/devtools-protocol/tot/Target/#method-createBrowserContext
                     // disposeOnDetach comes out of Experimental.
-                    let _ = self.browser.0.quit_incognito_context_base(id).await;
                     handler.abort();
                 }
             }
