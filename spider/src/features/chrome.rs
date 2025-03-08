@@ -697,7 +697,7 @@ pub(crate) type BrowserControl = (
 pub(crate) type OnceBrowser = tokio::sync::OnceCell<Option<BrowserController>>;
 
 /// Create the browser controller to auto drop connections.
-pub(crate) struct BrowserController {
+pub struct BrowserController {
     /// The browser.
     pub browser: BrowserControl,
     /// Closed browser.
@@ -712,9 +712,8 @@ impl BrowserController {
             closed: false,
         }
     }
-
     /// Dispose the browser context and join handler.
-    pub(crate) async fn dispose(&mut self) {
+    pub async fn dispose(&mut self) {
         if !self.closed {
             // assume close will always happen.
             self.closed = true;

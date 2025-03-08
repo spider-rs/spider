@@ -2926,7 +2926,7 @@ impl Website {
     }
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-    /// Initiates a single fetch for one page with the ability to send it across threads for subscriptions.
+    /// Initiates a single fetch with chrome for one page with the ability to send it across threads for subscriptions.
     pub async fn fetch_chrome(&self, url: Option<&str>) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             let (client, handle) = (
@@ -2941,6 +2941,32 @@ impl Website {
                 _ => (None, None),
             };
             self._fetch_chrome(&client, &url).await;
+            if let Some(h) = join_handle {
+                h.abort()
+            }
+        }
+    }
+
+    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+    /// Initiates a single fetch with chrome without closing the browser for one page with the ability to send it across threads for subscriptions.
+    pub async fn fetch_chrome_peristed(
+        &self,
+        url: Option<&str>,
+        browser: &crate::features::chrome::BrowserController,
+    ) {
+        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+            let (client, handle) = (
+                match &self.client {
+                    Some(c) => c.to_owned(),
+                    _ => self.configure_http_client(),
+                },
+                self.configure_handler(),
+            );
+            let (_handle, join_handle) = match handle {
+                Some(h) => (Some(h.0), Some(h.1)),
+                _ => (None, None),
+            };
+            self._fetch_chrome_persisted(&client, &url, &browser).await;
             if let Some(h) = join_handle {
                 h.abort()
             }
@@ -4384,6 +4410,37 @@ impl Website {
         }
     }
 
+    /// Start to crawl website concurrently with the ability to send it across threads for subscriptions for one page.
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn _fetch_chrome_persisted(
+        &self,
+        client: &Client,
+        url: &Option<&str>,
+        b: &crate::features::chrome::BrowserController,
+    ) {
+        use crate::features::chrome::attempt_navigation;
+        match attempt_navigation(
+            "about:blank",
+            &b.browser.0,
+            &self.configuration.request_timeout,
+            &b.browser.2,
+            &self.configuration.viewport,
+        )
+        .await
+        {
+            Ok(new_page) => {
+                let mut selectors = self.setup_selectors();
+                self.crawl_establish_chrome_one(&client, &mut selectors, url, &new_page)
+                    .await;
+                self.subscription_guard().await;
+            }
+            Err(err) => {
+                log::error!("{}", err);
+            }
+        }
+    }
+
     /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
     async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
@@ -5574,9 +5631,9 @@ impl Website {
         }
     }
 
-    /// Launch or connect to browser with setup
+    /// Launch or connect to browser with setup.
     #[cfg(feature = "chrome")]
-    pub(crate) async fn setup_browser(&self) -> Option<crate::features::chrome::BrowserController> {
+    pub async fn setup_browser(&self) -> Option<crate::features::chrome::BrowserController> {
         Website::setup_browser_base(&self.configuration, self.get_url_parsed()).await
     }
 
