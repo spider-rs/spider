@@ -257,6 +257,14 @@ pub enum CronType {
 pub struct Website {
     /// Configuration properties for website.
     pub configuration: Box<Configuration>,
+    /// The callback when a link is found.
+    pub on_link_find_callback: Option<
+        fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
+    >,
+    /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
+    pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
+    /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
+    pub crawl_id: Box<String>,
     /// All URLs visited.
     links_visited: Box<ListBucket>,
     /// All signatures.
@@ -271,12 +279,6 @@ pub struct Website {
     url: Box<CaseInsensitiveString>,
     /// The domain url parsed.
     domain_parsed: Option<Box<Url>>,
-    /// The callback when a link is found.
-    pub on_link_find_callback: Option<
-        fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-    >,
-    /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
-    pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
     /// Subscribe and broadcast changes.
     channel: Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)>,
     /// Guard counter for channel handling. This prevents things like the browser from closing after the crawl so that subscriptions can finalize events.
@@ -287,8 +289,6 @@ pub struct Website {
     status: CrawlStatus,
     /// The initial status code of the first request.
     initial_status_code: StatusCode,
-    /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
-    pub crawl_id: Box<String>,
     /// The website was manually stopped.
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
@@ -1568,34 +1568,39 @@ impl Website {
     #[cfg(feature = "control")]
     fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
         use crate::utils::{Handler, CONTROLLER};
-        let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
-        let handle = c.clone();
-        let target_id = self.target_id();
 
-        let c_lock = CONTROLLER.clone();
+        if self.configuration.no_control_thread {
+            None
+        } else {
+            let c: Arc<AtomicI8> = Arc::new(AtomicI8::new(0));
+            let handle = c.clone();
+            let target_id = self.target_id();
 
-        let join_handle = spawn_task("control_handler", async move {
-            let mut l = c_lock.read().await.1.to_owned();
+            let c_lock = CONTROLLER.clone();
 
-            while l.changed().await.is_ok() {
-                let n = &*l.borrow();
-                let (target, rest) = n;
+            let join_handle = spawn_task("control_handler", async move {
+                let mut l = c_lock.read().await.1.to_owned();
 
-                if target_id.eq_ignore_ascii_case(&target) {
-                    if rest == &Handler::Resume {
-                        c.store(0, Ordering::Relaxed);
-                    }
-                    if rest == &Handler::Pause {
-                        c.store(1, Ordering::Relaxed);
-                    }
-                    if rest == &Handler::Shutdown {
-                        c.store(2, Ordering::Relaxed);
+                while l.changed().await.is_ok() {
+                    let n = &*l.borrow();
+                    let (target, rest) = n;
+
+                    if target_id.eq_ignore_ascii_case(&target) {
+                        if rest == &Handler::Resume {
+                            c.store(0, Ordering::Relaxed);
+                        }
+                        if rest == &Handler::Pause {
+                            c.store(1, Ordering::Relaxed);
+                        }
+                        if rest == &Handler::Shutdown {
+                            c.store(2, Ordering::Relaxed);
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        Some((handle, join_handle))
+            Some((handle, join_handle))
+        }
     }
 
     #[cfg(not(feature = "control"))]
@@ -5478,6 +5483,12 @@ impl Website {
     /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
     pub fn with_retry(&mut self, retry: u8) -> &mut Self {
         self.configuration.with_retry(retry);
+        self
+    }
+
+    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the [control] flag enabled.
+    pub fn with_no_control_thread(&mut self, no_control_thread: bool) -> &mut Self {
+        self.configuration.with_no_control_thread(no_control_thread);
         self
     }
 

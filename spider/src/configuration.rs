@@ -197,6 +197,8 @@ pub struct Configuration {
     pub return_page_links: bool,
     /// Retry count to attempt to swap proxies etc.
     pub retry: u8,
+    /// Skip spawning a control thread that can pause, start, and shutdown the crawl.
+    pub no_control_thread: bool,
     /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
     #[cfg(feature = "chrome")]
     pub chrome_intercept: RequestInterceptConfiguration,
@@ -778,6 +780,12 @@ impl Configuration {
     /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
     pub fn with_retry(&mut self, retry: u8) -> &mut Self {
         self.retry = retry;
+        self
+    }
+
+    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the [control] flag enabled.
+    pub fn with_no_control_thread(&mut self, no_control_thread: bool) -> &mut Self {
+        self.no_control_thread = no_control_thread;
         self
     }
 
