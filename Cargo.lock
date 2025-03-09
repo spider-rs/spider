@@ -5666,7 +5666,6 @@ dependencies = [
  "strum",
  "sysinfo",
  "tiktoken-rs",
- "tikv-jemallocator",
  "tokio",
  "tokio-stream",
  "tokio-uring",
@@ -5778,6 +5777,7 @@ dependencies = [
  "quote",
  "serde_json",
  "spider",
+ "tikv-jemallocator",
 ]
 
 [[package]]

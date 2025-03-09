@@ -89,9 +89,6 @@ optional = true
 tokio-uring = { version = "0.4", optional = true }
 libc = "0.2"
 
-[target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
-tikv-jemallocator = { version = "0.6", optional = true }
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = [
     "macros",
@@ -132,7 +129,6 @@ balance = ["dep:sysinfo"]
 regex = []
 glob = [ "dep:itertools"]
 ua_generator = ["dep:ua_generator"]
-jemalloc = ["tikv-jemallocator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []

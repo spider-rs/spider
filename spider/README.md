@@ -102,7 +102,6 @@ spider = { version = "2", features = ["regex", "ua_generator"] }
 1. `disk_native_tls`: Enables SQLite hybrid disk storage to balance memory usage with native tls.
 1. `disk_aws`: Enables SQLite hybrid disk storage to balance memory usage with aws_tls. 
 1. `balance`: Enables balancing the CPU and memory to scale more efficiently. 
-1. `jemalloc`: Enables the [jemalloc](https://github.com/jemalloc/jemalloc) memory backend.
 1. `decentralized`: Enables decentralized processing of IO, requires the [spider_worker](../spider_worker/README.md) startup before crawls.
 1. `sync`: Subscribe to changes for Page data processing async. [Enabled by default]
 1. `control`: Enables the ability to pause, start, and shutdown crawls on demand.

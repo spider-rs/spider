@@ -111,17 +111,6 @@
 //! Additional learning resources include:
 //!
 //! - [Spider Repository Examples](https://github.com/spider-rs/spider/tree/main/examples)
-
-// performance reasons jemalloc memory backend for dedicated work and large crawls
-#[cfg(all(
-    not(windows),
-    not(target_os = "android"),
-    not(target_env = "musl"),
-    feature = "jemalloc"
-))]
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
 pub extern crate bytes;
 pub extern crate case_insensitive_string;
 pub extern crate hashbrown;
