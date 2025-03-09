@@ -43,7 +43,7 @@ pub(crate) async fn canonicalize_except_snap(path: PathBuf) -> std::io::Result<P
     })
 }
 
-pub(crate) mod base64 {
+pub mod base64 {
     use base64::engine::general_purpose::STANDARD;
     use base64::{DecodeError, Engine};
 

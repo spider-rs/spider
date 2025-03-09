@@ -1022,8 +1022,12 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES};
     use chromiumoxide::{
-        cdp::browser_protocol::network::{EventLoadingFailed, ResourceType},
+        cdp::browser_protocol::{
+            fetch::GetResponseBodyParams,
+            network::{EventLoadingFailed, EventResponseReceived, RequestId, ResourceType},
+        },
         error::CdpError,
     };
     use std::time::Duration;
@@ -1037,13 +1041,29 @@ pub async fn fetch_page_html_chrome_base(
         _ => MAX_PAGE_TIMEOUT,
     };
 
-    let (event_loading_listener, cancel_listener) = tokio::join!(
+    let asset = is_asset_url(url_target.unwrap_or(source));
+
+    let (event_loading_listener, cancel_listener, received_listener) = tokio::join!(
         page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
         ),
-        page.event_listener::<EventLoadingFailed>()
+        page.event_listener::<EventLoadingFailed>(),
+        async {
+            if asset {
+                page.event_listener::<EventResponseReceived>().await
+            } else {
+                Err(CdpError::NotFound)
+            }
+        }
     );
 
     let (tx, rx) = oneshot::channel::<bool>();
+    let (tx1, rx1) = if asset {
+        let c = oneshot::channel::<Option<RequestId>>();
+
+        (Some(c.0), Some(c.1))
+    } else {
+        (None, None)
+    };
 
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
@@ -1076,7 +1096,33 @@ pub async fn fetch_page_html_chrome_base(
             }
         };
 
-        let (t1, _) = tokio::join!(f1, f2);
+        let f3 = async {
+            if asset {
+                if let Ok(mut listener) = received_listener {
+                    let mut file_received = None;
+                    let mut intial_request = false;
+                    let mut allow_download = false;
+
+                    while let Some(event) = listener.next().await {
+                        if !intial_request && event.r#type == ResourceType::Document {
+                            allow_download =
+                                DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
+                        }
+                        if event.r#type == ResourceType::Media && allow_download {
+                            file_received.replace(event.request_id.clone());
+                        }
+                        intial_request = true;
+                    }
+                    if let Some(tx1) = tx1 {
+                        if file_received.is_some() {
+                            let _ = tx1.send(file_received);
+                        }
+                    }
+                }
+            }
+        };
+
+        let (t1, _, _file) = tokio::join!(f1, f2, f3);
 
         t1
     });
@@ -1114,14 +1160,34 @@ pub async fn fetch_page_html_chrome_base(
     let start_time = Instant::now();
 
     let mut request_cancelled = false;
+    let mut request_id: Option<RequestId> = None;
 
-    let request_timeout = tokio::select! {
-        v = tokio::time::timeout(base_timeout, page_navigation) => {
-            v.map_err(|_| CdpError::Timeout)
+    let request_timeout = if let Some(rx1) = rx1 {
+        tokio::select! {
+            v = tokio::time::timeout(base_timeout, page_navigation) => {
+                v.map_err(|_| CdpError::Timeout)
+            }
+            _ = rx => {
+                request_cancelled = true;
+                Ok(Ok(()))
+            }
+            rid = rx1 => {
+                request_cancelled = true;
+                if let Ok(id) = rid {
+                    request_id = id;
+                }
+                Ok(Ok(()))
+            }
         }
-        _ = rx => {
-            request_cancelled = true;
-            Ok(Ok(()))
+    } else {
+        tokio::select! {
+            v = tokio::time::timeout(base_timeout, page_navigation) => {
+                v.map_err(|_| CdpError::Timeout)
+            }
+            _ = rx => {
+                request_cancelled = true;
+                Ok(Ok(()))
+            }
         }
     };
 
@@ -1209,9 +1275,25 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        let mut res: Box<Vec<u8>> = match page.content_bytes().await {
-            Ok(b) => b.into(),
-            _ => Default::default(),
+        let mut res: Box<Vec<u8>> = if request_id.is_some() {
+            let params = GetResponseBodyParams::new(request_id.unwrap_or_default());
+
+            if let Ok(command_response) = page.execute(params).await {
+                let body_response = command_response;
+
+                if body_response.base64_encoded {
+                    chromiumoxide::utils::base64::decode(&body_response.body)?.into()
+                } else {
+                    body_response.body.as_bytes().to_vec().into()
+                }
+            } else {
+                Default::default()
+            }
+        } else {
+            match page.content_bytes().await {
+                Ok(b) => b.into(),
+                _ => Default::default(),
+            }
         };
 
         if cfg!(feature = "real_browser") {
@@ -1298,6 +1380,14 @@ pub async fn fetch_page_html_chrome_base(
 
         page_response
     };
+
+    if content {
+        if let Some(final_url) = &page_response.final_url {
+            if final_url == "about:blank" {
+                page_response.final_url = None;
+            }
+        }
+    }
 
     // run initial handling hidden anchors
     // if let Ok(new_links) = page.evaluate(crate::features::chrome::ANCHOR_EVENTS).await {

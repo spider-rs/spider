@@ -96,7 +96,7 @@ pub mod keys;
 pub mod layout;
 pub mod listeners;
 pub mod page;
-pub(crate) mod utils;
+pub mod utils;
 
 pub type ArcHttpRequest = Option<Arc<HttpRequest>>;
 

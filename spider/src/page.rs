@@ -1,5 +1,4 @@
 use crate::compact_str::CompactString;
-
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
@@ -12,6 +11,7 @@ use crate::RelativeSelectors;
 use auto_encoder::auto_encode_bytes;
 use hashbrown::HashSet;
 use lol_html::AsciiCompatibleEncoding;
+use phf::phf_set;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
 use tokio::time::Duration;
@@ -145,6 +145,26 @@ lazy_static! {
 }
 
 lazy_static! {
+    /// Downloadable media types.
+    pub(crate) static ref DOWNLOADABLE_MEDIA_TYPES: phf::Set<&'static str> = phf_set! {
+        "audio/mpeg",    // mp3
+        "audio/wav",     // wav
+        "audio/ogg",     // ogg
+        "audio/flac",    // flac
+        "audio/aac",     // aac
+        "video/mp4",     // mp4
+        "video/webm",    // webm
+        "video/ogg",     // ogv
+        "video/x-matroska",    // mkv
+        "application/ogg",     // ogx for Ogg
+        "application/octet-stream", // general binary data, often used for downloads
+        "application/zip",     // zip archives
+        "application/x-rar-compressed", // rar archives
+        "application/x-7z-compressed",   // 7z archives
+        "application/x-tar",   // tar archives
+        "application/pdf"     // pdf
+    };
+
     /// Visual assets to ignore.
     pub(crate) static ref IGNORE_ASSETS: HashSet<CaseInsensitiveString> = {
         let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(62);
@@ -456,6 +476,17 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
             map.insert(abs.as_str().to_string().into());
         }
     }
+}
+
+/// Determine if a url is an asset.
+pub(crate) fn is_asset_url(url: &str) -> bool {
+    let mut asset = false;
+    if let Some(position) = url.rfind('.') {
+        if url.len() - position >= 3 {
+            asset = IGNORE_ASSETS.contains::<CaseInsensitiveString>(&url[position + 1..].into());
+        }
+    }
+    asset
 }
 
 /// Validate link and push into the map checking if asset
