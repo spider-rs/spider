@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.33.0"
+version = "2.33.1"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -43,7 +43,7 @@ async_job = { version = "0.1", optional = true }
 reqwest-middleware = { version = "0.4", optional = true,  default-features = false }
 http-cache-reqwest = { version = "0.15", optional = true, default-features = false }
 const_format = { version = "0.2", optional = true }
-async-openai = { version = "0.27", optional = true }
+async-openai = { version = "0.28", optional = true }
 tiktoken-rs = { version = "0.6", optional = true }
 lol_html = { version = "2" }
 serde_json = { version = "1", optional = true }
