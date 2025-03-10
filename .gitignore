@@ -7,3 +7,5 @@ storage
 http-cacache
 release.sh
 spider_transformations/example.pdf
+result
+result-*

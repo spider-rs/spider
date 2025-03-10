@@ -11,7 +11,7 @@ const TARGET: &str = "https://www.microsoft.com/";
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let (mut browser, mut handler) =
+    let (browser, mut handler) =
         chromiumoxide::Browser::launch(BrowserConfig::builder().with_head().build().unwrap())
             .await
             .expect("failed to launch browser");

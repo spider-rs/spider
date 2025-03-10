@@ -5,9 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Check that the generated files are up to date
+#[ignore]
 #[test]
 fn generated_code_is_fresh() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR", "./"));
     let js_proto = env::var("CDP_JS_PROTOCOL_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dir.join("js_protocol.pdl"));

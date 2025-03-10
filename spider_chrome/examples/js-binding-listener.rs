@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let (mut browser, mut handler) =
+    let (browser, mut handler) =
         Browser::launch(BrowserConfig::builder().with_head().build()?).await?;
 
     let handle = tokio::task::spawn(async move {

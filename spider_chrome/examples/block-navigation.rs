@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Spawn browser
-    let (mut browser, mut handler) = Browser::launch(
+    let (browser, mut handler) = Browser::launch(
         BrowserConfig::builder()
             .enable_request_intercept()
             .disable_cache()
