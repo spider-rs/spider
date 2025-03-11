@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.33.1"
+version = "2.33.2"
 authors = [
     "j-mendez <jeff@spider.cloud>"
 ]
@@ -40,8 +40,8 @@ cron = { version = "0.15", optional = true }
 async-trait = { version = "0.1", optional = true }
 strum = { version = "0.26", features = ["derive"] }
 async_job = { version = "0.1", optional = true }
-reqwest-middleware = { version = "0.4", optional = true,  default-features = false }
-http-cache-reqwest = { version = "0.15", optional = true, default-features = false }
+reqwest-middleware-fork = { version = "0.4", optional = true,  default-features = false }
+http-cache-reqwest-fork = { version = "0.15", optional = true, default-features = false }
 const_format = { version = "0.2", optional = true }
 async-openai = { version = "0.28", optional = true }
 tiktoken-rs = { version = "0.6", optional = true }
@@ -141,9 +141,9 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-cache_request = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
-cache = ["cache_request", "http-cache-reqwest/manager-cacache"]
-cache_mem = ["cache_request", "http-cache-reqwest/manager-moka"]
+cache_request = ["dep:reqwest-middleware-fork", "dep:http-cache-reqwest-fork"]
+cache = ["cache_request", "http-cache-reqwest-fork/manager-cacache"]
+cache_mem = ["cache_request", "http-cache-reqwest-fork/manager-moka"]
 cache_openai = ["dep:moka"]
 cache_chrome_hybrid = ["cache_request", "cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
 cache_chrome_hybrid_mem = ["cache_request", "cache_mem", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
