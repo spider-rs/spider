@@ -99,6 +99,7 @@ lazy_static::lazy_static! {
             "https://conf.config-security.com/model",
             "https://pagead2.googlesyndication.com/",
             "https://sumome.com/api/load/",
+            "https://ogads-pa.googleapis.com/",
             "https://public-api.wordpress.com/geo/",
             "https://events.api.secureserver.net/",
             "https://csp.secureserver.net/eventbus",
