@@ -12,8 +12,6 @@ use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
-#[cfg(any(feature = "sitemap", feature = "control"))]
-use crate::utils::spawn_task;
 use crate::utils::{
     emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, networking_capable, prepare_url,
     setup_website_selectors, spawn_set, AllowedDomainTypes,
@@ -1576,7 +1574,7 @@ impl Website {
             let handle = c.clone();
             let target_id = self.target_id();
 
-            let join_handle = spawn_task("control_handler", async move {
+            let join_handle = crate::utils::spawn_task("control_handler", async move {
                 let mut l = CONTROLLER.read().await.1.to_owned();
 
                 while l.changed().await.is_ok() {
@@ -4913,7 +4911,7 @@ impl Website {
 
                 let shared = shared.clone();
 
-                let handles = spawn_task("page_fetch", async move {
+                let handles = crate::utils::spawn_task("page_fetch", async move {
                     let mut pages = Vec::new();
 
                     while let Some(mut page) = rx.recv().await {
@@ -5128,7 +5126,7 @@ impl Website {
 
                     let shared_1 = shared.clone();
 
-                    let handles = spawn_task("page_fetch", async move {
+                    let handles = crate::utils::spawn_task("page_fetch", async move {
                         let mut pages = Vec::new();
 
                         while let Some(mut page) = rx.recv().await {
@@ -5207,7 +5205,7 @@ impl Website {
 
                                                                 let shared = shared.clone();
 
-                                                                spawn_task(
+                                                                crate::utils::spawn_task(
                                                                     "page_fetch",
                                                                     async move {
                                                                         match attempt_navigation(
@@ -5557,7 +5555,7 @@ impl Website {
                             let client = client.clone();
                             let tx = tx.clone();
 
-                            spawn_task("page_fetch", async move {
+                            crate::utils::spawn_task("page_fetch", async move {
                                 let mut page = Page::new_page(&link.inner(), &client).await;
 
                                 let mut retry_count = retry;

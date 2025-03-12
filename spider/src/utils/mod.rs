@@ -3364,6 +3364,7 @@ where
 }
 
 #[cfg(not(feature = "tracing"))]
+#[allow(unused)]
 /// Spawns a new asynchronous task.
 pub(crate) fn spawn_task<F>(_task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
 where

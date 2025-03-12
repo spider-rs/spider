@@ -2,10 +2,7 @@
 // a problem with the iframe workaround is that it will always fail to load the page
 // and goto will cause a timeout.
 
-use std::time::Duration;
-
 use chromiumoxide::handler::HandlerConfig;
-use chromiumoxide_cdp::cdp::browser_protocol::target::CreateBrowserContextParams;
 use futures::StreamExt;
 
 #[tokio::main]
@@ -29,13 +26,6 @@ async fn main() {
         .new_page("about:blank")
         .await
         .expect("failed to create page");
-
-    // tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // let _ = page
-    //     .goto("https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe")
-    //     .await
-    //     .expect("failed to navigate");
 
     let _ = page
         .goto("https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe")

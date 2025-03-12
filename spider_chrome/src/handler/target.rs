@@ -678,7 +678,7 @@ impl Default for TargetConfig {
             ignore_analytics: true,
             only_html: false,
             extra_headers: Default::default(),
-            intercept_manager: NetworkInterceptManager::UNKNOWN,
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }

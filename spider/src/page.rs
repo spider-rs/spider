@@ -479,6 +479,7 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
 }
 
 /// Determine if a url is an asset.
+#[cfg(feature = "chrome")]
 pub(crate) fn is_asset_url(url: &str) -> bool {
     let mut asset = false;
     if let Some(position) = url.rfind('.') {
@@ -2017,7 +2018,6 @@ impl Page {
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
     ) -> (HashSet<A>, Option<f64>) {
-        use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
         use lol_html::{doc_comments, element};
@@ -2179,7 +2179,7 @@ impl Page {
                         let target_url = self.url.clone();
                         let parent_host = parent_host.clone();
 
-                        spawn_task("page_render_fetch", async move {
+                        crate::utils::spawn_task("page_render_fetch", async move {
                             if let Ok(new_page) = crate::features::chrome::attempt_navigation(
                                 "about:blank",
                                 &browser,
@@ -2328,7 +2328,6 @@ impl Page {
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
     ) -> (HashSet<A>, Option<f64>) {
-        use crate::utils::spawn_task;
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
         use lol_html::{doc_comments, element};
@@ -2496,7 +2495,7 @@ impl Page {
                         // let context_id = context_id.clone();
                         let parent_host = parent_host.clone();
 
-                        spawn_task("page_render_fetch", async move {
+                        crate::utils::spawn_task("page_render_fetch", async move {
                             if let Ok(new_page) = crate::features::chrome::attempt_navigation(
                                 "about:blank",
                                 &browser,

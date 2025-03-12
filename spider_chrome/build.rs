@@ -1,4 +1,5 @@
 extern crate phf_codegen;
+use convert_case::{Case, Casing};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -43,7 +44,7 @@ fn generate_domain_map(domain_map_path: &Path, pattern_dir: &str) {
         let path = entry.path();
 
         if let Some(domain_name) = path.file_stem().unwrap().to_str() {
-            let enum_name = format_ident(domain_name);
+            let enum_name = format_ident(domain_name).to_case(Case::UpperCamel);
             writeln!(&mut file, "    {},", enum_name).unwrap();
             domain_variants.push((domain_name.to_string(), enum_name.clone()));
             map.entry(
@@ -53,7 +54,7 @@ fn generate_domain_map(domain_map_path: &Path, pattern_dir: &str) {
         }
     }
 
-    writeln!(&mut file, "    #[default]\n    UNKNOWN,").unwrap(); // Default case
+    writeln!(&mut file, "    #[default]\n    Unknown,").unwrap(); // Default case
     writeln!(&mut file, "}}\n").unwrap();
 
     write!(
@@ -106,7 +107,7 @@ fn generate_domain_map(domain_map_path: &Path, pattern_dir: &str) {
         writeln!(file, "            }},").unwrap();
     }
 
-    writeln!(file, "            NetworkInterceptManager::UNKNOWN => (),").unwrap();
+    writeln!(file, "            NetworkInterceptManager::Unknown => (),").unwrap();
 
     writeln!(file, "        }}").unwrap();
     writeln!(file, "        should_block").unwrap();
@@ -138,7 +139,8 @@ fn generate_url_ignore_tries(url_trie_path: &Path, pattern_dir: &str) {
                             trie_name.to_uppercase()
                         )
                         .unwrap();
-                        writeln!(file, "let mut trie = Trie::new();").unwrap();
+
+                        let mut has_ignore = false;
 
                         for entry in category_entries {
                             let entry = entry.unwrap();
@@ -147,9 +149,17 @@ fn generate_url_ignore_tries(url_trie_path: &Path, pattern_dir: &str) {
                             if path.is_file() {
                                 let contents = fs::read_to_string(path).unwrap();
                                 for pattern in contents.lines() {
+                                    if !has_ignore {
+                                        writeln!(file, "let mut trie = Trie::new();").unwrap();
+                                    }
+                                    has_ignore = true;
                                     writeln!(file, "trie.insert({:?});", pattern.trim()).unwrap();
                                 }
                             }
+                        }
+
+                        if !has_ignore {
+                            writeln!(file, "let trie = Trie::new();").unwrap();
                         }
 
                         writeln!(file, "trie").unwrap();
@@ -218,6 +228,7 @@ fn generate_blockers_mod(blockers_dir: &Path, pattern_dir: &str) {
     }
 }
 
+/// indents uppercased
 fn format_ident(name: &str) -> String {
     name.replace('.', "_").replace('-', "_").to_uppercase()
 }

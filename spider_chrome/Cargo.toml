@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.33.2"
+version = "2.33.3"
 rust-version = "1.70"
 authors = [
     "j-mendez <jeff@spider.cloud>"
@@ -71,6 +71,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
 [build-dependencies]
 phf = { version = "0.11", default-features = false }
 phf_codegen = "0.11"
+convert_case = "0.8"
 
 [features]
 default = ["bytes", "simd"]

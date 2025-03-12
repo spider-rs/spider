@@ -779,7 +779,7 @@ impl Default for HandlerConfig {
             only_html: false,
             extra_headers: Default::default(),
             created_first_target: false,
-            intercept_manager: NetworkInterceptManager::UNKNOWN,
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }

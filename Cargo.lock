@@ -1247,6 +1247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cookie"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5669,7 +5678,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5734,7 +5743,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5743,6 +5752,7 @@ dependencies = [
  "case_insensitive_string",
  "cfg-if",
  "chrono",
+ "convert_case 0.8.0",
  "dunce",
  "fnv",
  "futures",
@@ -5826,7 +5836,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "clap",
  "env_logger",
@@ -5884,7 +5894,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5907,7 +5917,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -5924,7 +5934,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.33.2"
+version = "2.33.3"
 dependencies = [
  "env_logger",
  "lazy_static",

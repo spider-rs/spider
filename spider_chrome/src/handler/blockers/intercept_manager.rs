@@ -18,10 +18,10 @@ impl NetworkInterceptManager {
                     base
                 };
 
-                return *base.unwrap_or(&NetworkInterceptManager::UNKNOWN);
+                return *base.unwrap_or(&NetworkInterceptManager::Unknown);
             }
         }
-        NetworkInterceptManager::UNKNOWN
+        NetworkInterceptManager::Unknown
     }
 }
 
@@ -38,33 +38,33 @@ mod tests {
     #[test]
     fn test_known_domains() {
         let cases = vec![
-            ("http://www.tiktok.com", NetworkInterceptManager::TIKTOK),
-            ("https://facebook.com", NetworkInterceptManager::FACEBOOK),
-            ("https://www.amazon.com", NetworkInterceptManager::AMAZON),
+            ("http://www.tiktok.com", NetworkInterceptManager::Tiktok),
+            ("https://facebook.com", NetworkInterceptManager::Facebook),
+            ("https://www.amazon.com", NetworkInterceptManager::Amazon),
             ("https://subdomain.x.com", NetworkInterceptManager::X),
             (
                 "https://linkedin.com/in/someone",
-                NetworkInterceptManager::LINKEDIN,
+                NetworkInterceptManager::Linkedin,
             ),
             (
                 "https://www.netflix.com/browse",
-                NetworkInterceptManager::NETFLIX,
+                NetworkInterceptManager::Netflix,
             ),
-            ("https://medium.com", NetworkInterceptManager::MEDIUM),
-            ("https://sub.upwork.com", NetworkInterceptManager::UPWORK),
-            ("https://glassdoor.com", NetworkInterceptManager::GLASSDOOR),
-            ("https://ebay.com", NetworkInterceptManager::EBAY),
+            ("https://medium.com", NetworkInterceptManager::Medium),
+            ("https://sub.upwork.com", NetworkInterceptManager::Upwork),
+            ("https://glassdoor.com", NetworkInterceptManager::Glassdoor),
+            ("https://ebay.com", NetworkInterceptManager::Ebay),
             (
                 "https://nytimes.com/section/world",
-                NetworkInterceptManager::NYTIMES,
+                NetworkInterceptManager::Nytimes,
             ),
             (
                 "https://en.wikipedia.org/wiki/Rust",
-                NetworkInterceptManager::WIKIPEDIA,
+                NetworkInterceptManager::Wikipedia,
             ),
             (
                 "https://market.tcgplayer.com",
-                NetworkInterceptManager::TCGPLAYER,
+                NetworkInterceptManager::Tcgplayer,
             ),
         ];
 
@@ -85,7 +85,7 @@ mod tests {
         for url in cases {
             assert_eq!(
                 NetworkInterceptManager::new(&create_url(url)),
-                NetworkInterceptManager::UNKNOWN
+                NetworkInterceptManager::Unknown
             );
         }
     }
@@ -97,7 +97,7 @@ mod tests {
         for url in cases {
             assert_eq!(
                 NetworkInterceptManager::new(&create_url(url)),
-                NetworkInterceptManager::UNKNOWN
+                NetworkInterceptManager::Unknown
             );
         }
     }

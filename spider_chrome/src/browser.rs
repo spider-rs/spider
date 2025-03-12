@@ -799,7 +799,7 @@ impl Default for BrowserConfigBuilder {
             only_html: false,
             extra_headers: Default::default(),
             service_worker_enabled: true,
-            intercept_manager: NetworkInterceptManager::UNKNOWN,
+            intercept_manager: NetworkInterceptManager::Unknown,
         }
     }
 }

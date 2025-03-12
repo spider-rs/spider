@@ -218,7 +218,7 @@ impl NetworkManager {
             block_stylesheets: false,
             block_analytics: true,
             only_html: false,
-            intercept_manager: NetworkInterceptManager::UNKNOWN,
+            intercept_manager: NetworkInterceptManager::Unknown,
             document_reload_tracker: 0,
             document_target_domain: String::new(),
         }
@@ -326,7 +326,7 @@ impl NetworkManager {
 
                             // ignore assets we do not need for frameworks
                             if !ignore_script
-                                && intercept_manager == NetworkInterceptManager::UNKNOWN
+                                && intercept_manager == NetworkInterceptManager::Unknown
                             {
                                 let hydration_file =
                                     JS_FRAMEWORK_PATH.iter().any(|p| new_url.starts_with(p));
@@ -469,7 +469,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
-                                && self.intercept_manager == NetworkInterceptManager::UNKNOWN
+                                && self.intercept_manager == NetworkInterceptManager::Unknown
                                 && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
@@ -588,7 +588,7 @@ impl NetworkManager {
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
                                 && javascript_resource
-                                && self.intercept_manager == NetworkInterceptManager::UNKNOWN
+                                && self.intercept_manager == NetworkInterceptManager::Unknown
                                 && !ALLOWED_MATCHER.is_match(current_url)
                     } else {
                         skip_networking
