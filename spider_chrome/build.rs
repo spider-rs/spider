@@ -148,11 +148,13 @@ fn generate_url_ignore_tries(url_trie_path: &Path, pattern_dir: &str) {
 
                             if path.is_file() {
                                 let contents = fs::read_to_string(path).unwrap();
-                                for pattern in contents.lines() {
-                                    if !has_ignore {
-                                        writeln!(file, "let mut trie = Trie::new();").unwrap();
-                                    }
+
+                                if !has_ignore && !contents.is_empty() {
+                                    writeln!(file, "let mut trie = Trie::new();").unwrap();
                                     has_ignore = true;
+                                }
+
+                                for pattern in contents.lines() {
                                     writeln!(file, "trie.insert({:?});", pattern.trim()).unwrap();
                                 }
                             }

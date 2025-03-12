@@ -7,7 +7,7 @@ use chromiumoxide_cdp::cdp::js_protocol::runtime::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (mut browser, mut handler) = Browser::launch(BrowserConfig::builder().build()?).await?;
+    let (browser, mut handler) = Browser::launch(BrowserConfig::builder().build()?).await?;
 
     let handle = tokio::task::spawn(async move {
         while let Some(h) = handler.next().await {
