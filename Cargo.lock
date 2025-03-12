@@ -2663,20 +2663,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e883defacf53960c7717d9e928dc8667be9501d9f54e6a8b7703d7a30320e9c"
 dependencies = [
  "async-trait",
- "http 1.3.1",
- "http-cache-semantics",
- "httpdate",
- "serde",
- "url",
-]
-
-[[package]]
-name = "http-cache-fork"
-version = "0.20.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7cebd98f0ac31ed3f1086b9c320d877d08bc270cd651b9bbd6c88119832e051"
-dependencies = [
- "async-trait",
  "bincode",
  "cacache",
  "http 1.3.1",
@@ -2688,18 +2674,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "http-cache-reqwest-fork"
-version = "0.15.2"
+name = "http-cache-reqwest"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4815b9c7ce72181e9dbdbe2fc92fb8dfd1ea5a5420405cda4c8d9776d743300"
+checksum = "e076afd9d376f09073b515ce95071b29393687d98ed521948edb899195595ddf"
 dependencies = [
  "anyhow",
  "async-trait",
  "http 1.3.1",
- "http-cache-fork",
+ "http-cache",
  "http-cache-semantics",
  "reqwest",
- "reqwest-middleware-fork",
+ "reqwest-middleware",
  "serde",
  "url",
 ]
@@ -4572,9 +4558,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.39"
+version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1f1914ce909e1658d9907913b4b91947430c7d9be598b15a1912935b8c04801"
+checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
 dependencies = [
  "proc-macro2",
 ]
@@ -4839,9 +4825,9 @@ checksum = "a35e8a6bf28cd121053a66aa2e6a2e3eaffad4a60012179f0e864aa5ffeff215"
 
 [[package]]
 name = "reqwest"
-version = "0.12.13"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "389a89e494bbc88bebf30e23da98742c843863a16a352647716116aa71fae80a"
+checksum = "989e327e510263980e231de548a33e63d34962d29ae61b467389a1a09627a254"
 dependencies = [
  "async-compression",
  "base64 0.22.1",
@@ -4913,10 +4899,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "reqwest-middleware-fork"
-version = "0.4.2"
+name = "reqwest-middleware"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcabc421007384faf8ebf996cd934a0fd7268ef84c7f8434ca5382370d9a167e"
+checksum = "64e8975513bd9a7a43aad01030e79b3498e05db14e9d945df6483e8cf9b8c4c4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5678,7 +5664,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5698,7 +5684,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "http 1.3.1",
  "http-cache",
- "http-cache-reqwest-fork",
+ "http-cache-reqwest",
  "http-cache-semantics",
  "httpdate",
  "itertools 0.14.0",
@@ -5716,7 +5702,7 @@ dependencies = [
  "rand 0.9.0",
  "regex",
  "reqwest",
- "reqwest-middleware-fork",
+ "reqwest-middleware",
  "serde",
  "serde_json",
  "serde_regex",
@@ -5743,7 +5729,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5836,7 +5822,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "clap",
  "env_logger",
@@ -5894,7 +5880,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5917,7 +5903,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -5934,7 +5920,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.33.3"
+version = "2.33.4"
 dependencies = [
  "env_logger",
  "lazy_static",
