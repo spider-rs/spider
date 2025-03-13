@@ -469,11 +469,18 @@ pub enum WebAutomation {
     WaitForDom {
         /// The selector of the element to wait for updates.
         selector: Option<String>,
-        ///  The timeout to wait for.
+        ///  The timeout to wait for in ms.
         timeout: u32,
     },
     /// Waits for an element to appear.
     WaitFor(String),
+    /// Waits for an element to appear with a timeout.
+    WaitForWithTimeout {
+        /// The selector of the element to wait for updates.
+        selector: String,
+        ///  The timeout to wait for in ms.
+        timeout: u64,
+    },
     /// Waits for an element to appear and then clicks on it.
     WaitForAndClick(String),
     /// Scrolls the screen in the horizontal axis by a specified amount in pixels.
@@ -550,14 +557,16 @@ impl WebAutomation {
             WebAutomation::Evaluate(js) => {
                 let _ = page.evaluate(js.as_str()).await;
             }
-            WebAutomation::Click(selector) => match page.find_element(selector).await {
-                Ok(ele) => {
+            WebAutomation::Click(selector) => {
+                if let Ok(ele) = page.find_element(selector).await {
                     let _ = ele.click().await;
                 }
-                _ => (),
-            },
+            }
+            WebAutomation::WaitForWithTimeout { selector, timeout } => {
+                wait_for_selector(page, Some(Duration::from_millis(*timeout)), &selector).await;
+            }
             WebAutomation::Wait(ms) => {
-                tokio::time::sleep(Duration::from_millis(*ms).min(Duration::from_secs(60))).await;
+                tokio::time::sleep(Duration::from_millis(*ms)).await;
             }
             WebAutomation::WaitForDom { selector, timeout } => {
                 let _ = page
@@ -591,15 +600,13 @@ impl WebAutomation {
                 cmd.rect = Some(rect);
                 let _ = page.execute(cmd);
             }
-            WebAutomation::Fill { selector, value } => match page.find_element(selector).await {
-                Ok(ele) => match ele.click().await {
-                    Ok(el) => {
+            WebAutomation::Fill { selector, value } => {
+                if let Ok(ele) = page.find_element(selector).await {
+                    if let Ok(el) = ele.click().await {
                         let _ = el.type_str(value).await;
                     }
-                    _ => (),
-                },
-                _ => (),
-            },
+                }
+            }
             WebAutomation::InfiniteScroll(duration) => {
                 let _ = page.evaluate(set_dynamic_scroll(*duration)).await;
             }
@@ -745,20 +752,14 @@ pub async fn eval_execution_scripts(
     target_url: &str,
     execution_scripts: &Option<ExecutionScripts>,
 ) {
-    match execution_scripts {
-        Some(ref scripts) => {
-            if let Some(script) = scripts.search(target_url) {
+    if let Some(scripts) = &execution_scripts {
+        if let Some(script) = scripts.search(target_url) {
+            let _ = page.evaluate(script.as_str()).await;
+        } else if scripts.match_all {
+            if let Some(script) = scripts.root.value.as_ref() {
                 let _ = page.evaluate(script.as_str()).await;
-            } else if scripts.match_all {
-                match scripts.root.value.as_ref() {
-                    Some(script) => {
-                        let _ = page.evaluate(script.as_str()).await;
-                    }
-                    _ => (),
-                }
             }
         }
-        _ => (),
     }
 }
 

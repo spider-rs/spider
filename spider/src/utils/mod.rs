@@ -292,7 +292,7 @@ pub async fn wait_for_selector(
 
             tokio::select! {
                 _ = sleep => (),
-                v = page.find_elements(selector) => {
+                v = page.find_element(selector) => {
                     if v.is_ok() {
                         break;
                     }
