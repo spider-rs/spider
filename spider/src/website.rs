@@ -1896,7 +1896,7 @@ impl Website {
                 {
                     page.error_status = Some("Invalid proxy configuration.".into());
                     page.should_retry = true;
-                    page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                    page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                 }
             }
 
@@ -1954,7 +1954,7 @@ impl Website {
                     {
                         page.error_status = Some("Invalid proxy configuration.".into());
                         page.should_retry = true;
-                        page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                        page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                     }
                 }
             }
@@ -2084,7 +2084,7 @@ impl Website {
                 {
                     page.error_status = Some("Invalid proxy configuration.".into());
                     page.should_retry = true;
-                    page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                    page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                 }
             }
 
@@ -2142,7 +2142,7 @@ impl Website {
                     {
                         page.error_status = Some("Invalid proxy configuration.".into());
                         page.should_retry = true;
-                        page.status_code = *crate::page::UNKNOWN_STATUS_ERROR;
+                        page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                     }
                 }
             }

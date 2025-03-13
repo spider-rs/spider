@@ -121,6 +121,8 @@ lazy_static! {
     static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
     /// Unkown status code.
     pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(599).expect("valid status code");
+    /// Chrome error status code.
+    pub(crate) static ref CHROME_UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(598).expect("valid status code");
 }
 
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
