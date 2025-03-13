@@ -339,10 +339,7 @@ impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
                 _ => false,
             }
         } else {
-            match std::env::var("SCREENSHOT_FULL_PAGE") {
-                Ok(t) => t == "true",
-                _ => true,
-            }
+            std::env::var("SCREENSHOT_FULL_PAGE").unwrap_or_default() == "true"
         };
         let omit_background = if params.omit_background.is_some() {
             match params.omit_background {
@@ -505,6 +502,8 @@ pub enum WebAutomation {
         /// The output file to store the screenshot.
         output: String,
     },
+    /// Only continue to the next automation if the prior step was valid. Use this intermediate after a step to break out of the chain.
+    ValidateChain,
 }
 
 #[cfg(feature = "chrome")]
@@ -547,68 +546,73 @@ pub(crate) fn generate_wait_for_dom_js_code_with_selector_base(
 impl WebAutomation {
     #[cfg(feature = "chrome")]
     /// Run the web automation step.
-    pub async fn run(&self, page: &chromiumoxide::Page) {
+    pub async fn run(&self, page: &chromiumoxide::Page) -> bool {
         use crate::utils::wait_for_selector;
         use chromiumoxide::cdp::browser_protocol::dom::Rect;
         use chromiumoxide::cdp::browser_protocol::dom::ScrollIntoViewIfNeededParams;
         use std::time::Duration;
 
+        let mut valid = false;
+
         match self {
             WebAutomation::Evaluate(js) => {
-                let _ = page.evaluate(js.as_str()).await;
+                valid = page.evaluate(js.as_str()).await.is_ok();
             }
             WebAutomation::Click(selector) => {
                 if let Ok(ele) = page.find_element(selector).await {
-                    let _ = ele.click().await;
+                    valid = ele.click().await.is_ok();
                 }
             }
             WebAutomation::WaitForWithTimeout { selector, timeout } => {
-                wait_for_selector(page, Some(Duration::from_millis(*timeout)), &selector).await;
+                valid =
+                    wait_for_selector(page, Some(Duration::from_millis(*timeout)), &selector).await;
             }
             WebAutomation::Wait(ms) => {
                 tokio::time::sleep(Duration::from_millis(*ms)).await;
+                valid = true;
             }
             WebAutomation::WaitForDom { selector, timeout } => {
-                let _ = page
+                valid = page
                     .evaluate(
                         generate_wait_for_dom_js_code_with_selector(*timeout, selector.as_deref())
                             .as_str(),
                     )
-                    .await;
+                    .await
+                    .is_ok();
             }
             WebAutomation::WaitFor(selector) => {
-                wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
+                valid = wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
             }
             WebAutomation::WaitForNavigation => {
-                let _ = page.wait_for_navigation().await;
+                valid = page.wait_for_navigation().await.is_ok();
             }
             WebAutomation::WaitForAndClick(selector) => {
-                wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
+                valid = wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
                 if let Ok(ele) = page.find_element(selector).await {
-                    let _ = ele.click().await;
+                    valid = ele.click().await.is_ok();
                 }
             }
             WebAutomation::ScrollX(px) => {
                 let mut cmd = ScrollIntoViewIfNeededParams::builder().build();
                 let rect = Rect::new(*px, 0.0, 10.0, 10.0);
                 cmd.rect = Some(rect);
-                let _ = page.execute(cmd);
+                valid = page.execute(cmd).await.is_ok();
             }
             WebAutomation::ScrollY(px) => {
                 let mut cmd = ScrollIntoViewIfNeededParams::builder().build();
                 let rect = Rect::new(0.0, *px, 10.0, 10.0);
                 cmd.rect = Some(rect);
-                let _ = page.execute(cmd);
+                valid = page.execute(cmd).await.is_ok();
             }
             WebAutomation::Fill { selector, value } => {
                 if let Ok(ele) = page.find_element(selector).await {
                     if let Ok(el) = ele.click().await {
-                        let _ = el.type_str(value).await;
+                        valid = el.type_str(value).await.is_ok();
                     }
                 }
             }
             WebAutomation::InfiniteScroll(duration) => {
-                let _ = page.evaluate(set_dynamic_scroll(*duration)).await;
+                valid = page.evaluate(set_dynamic_scroll(*duration)).await.is_ok();
             }
             WebAutomation::Screenshot {
                 full_page,
@@ -621,9 +625,15 @@ impl WebAutomation {
                 let screenshot_params =
                     ScreenshotParams::new(cdp_params, Some(*full_page), Some(*omit_background));
 
-                let _ = page.save_screenshot(screenshot_params, output).await;
+                valid = page
+                    .save_screenshot(screenshot_params, output)
+                    .await
+                    .is_ok();
             }
-        }
+            _ => (),
+        };
+
+        valid
     }
 }
 
@@ -772,29 +782,41 @@ pub async fn eval_automation_scripts(
 ) {
     if let Some(script_map) = automation_scripts {
         if let Some(scripts) = script_map.search(target_url) {
+            let mut valid = false;
+
             for script in scripts {
-                if let Err(elasped) =
-                    tokio::time::timeout(tokio::time::Duration::from_secs(60), script.run(page))
-                        .await
+                if script == &WebAutomation::ValidateChain && !valid {
+                    break;
+                }
+                match tokio::time::timeout(tokio::time::Duration::from_secs(60), script.run(page))
+                    .await
                 {
-                    log::warn!("Script execution timed out for: {target_url} - {elasped}",);
+                    Ok(next) => valid = next,
+                    Err(elasped) => {
+                        log::warn!("Script execution timed out for: {target_url} - {elasped}")
+                    }
                 }
             }
         } else if script_map.match_all {
-            match script_map.root.value.as_ref() {
-                Some(scripts) => {
-                    for script in scripts {
-                        if let Err(elasped) = tokio::time::timeout(
-                            tokio::time::Duration::from_secs(60),
-                            script.run(page),
-                        )
-                        .await
-                        {
-                            log::warn!("Script execution timed out for: {target_url} - {elasped}",);
+            if let Some(scripts) = script_map.root.value.as_ref() {
+                let mut valid = false;
+
+                for script in scripts {
+                    if script == &WebAutomation::ValidateChain && !valid {
+                        break;
+                    }
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(60),
+                        script.run(page),
+                    )
+                    .await
+                    {
+                        Ok(next) => valid = next,
+                        Err(elasped) => {
+                            log::warn!("Script execution timed out for: {target_url} - {elasped}")
                         }
                     }
                 }
-                _ => (),
             }
         }
     }

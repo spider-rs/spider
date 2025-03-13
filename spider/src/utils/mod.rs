@@ -282,7 +282,8 @@ pub async fn wait_for_selector(
     page: &chromiumoxide::Page,
     timeout: Option<core::time::Duration>,
     selector: &str,
-) {
+) -> bool {
+    let mut valid = false;
     let wait_until = async {
         let mut index = 0;
 
@@ -294,6 +295,7 @@ pub async fn wait_for_selector(
                 _ = sleep => (),
                 v = page.find_element(selector) => {
                     if v.is_ok() {
+                        valid = true;
                         break;
                     }
                 }
@@ -302,10 +304,17 @@ pub async fn wait_for_selector(
             index = (index + 1) % WAIT_TIMEOUTS.len();
         }
     };
+
     match timeout {
-        Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
+        Some(timeout) => {
+            if let Err(_) = tokio::time::timeout(timeout, wait_until).await {
+                valid = false;
+            }
+        }
         _ => wait_until.await,
-    }
+    };
+
+    valid
 }
 
 /// wait for a selector
