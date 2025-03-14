@@ -23,9 +23,12 @@ use bytes::BufMut;
 use case_insensitive_string::CaseInsensitiveString;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
-use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 use tokio::sync::Semaphore;
 use url::Url;
 
@@ -3438,6 +3441,13 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Sem
     } else {
         semaphore
     }
+}
+
+/// Check if the crawl duration is expired.
+pub fn crawl_duration_expired(crawl_timeout: &Option<Duration>, start: &Option<Instant>) -> bool {
+    crawl_timeout
+        .and_then(|duration| start.map(|start| start.elapsed() >= duration))
+        .unwrap_or(false)
 }
 
 /// Return the semaphore that should be used.

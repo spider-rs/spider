@@ -93,6 +93,8 @@ pub struct Configuration {
     pub subdomains: bool,
     /// Allow all tlds for domain.
     pub tld: bool,
+    /// The max timeout for the crawl.
+    pub crawl_timeout: Option<Duration>,
     /// Preserve the HTTP host header from being included.
     pub preserve_host_header: bool,
     /// List of pages to not crawl. [optional: regex pattern matching]
@@ -477,6 +479,12 @@ impl Configuration {
     /// Include tld detection.
     pub fn with_tld(&mut self, tld: bool) -> &mut Self {
         self.tld = tld;
+        self
+    }
+
+    /// The max duration for the crawl. This is useful when websites use a robots.txt with long durations and throttle the timeout removing the full concurrency.
+    pub fn with_crawl_timeout(&mut self, crawl_timeout: Option<Duration>) -> &mut Self {
+        self.crawl_timeout = crawl_timeout;
         self
     }
 

@@ -13,8 +13,8 @@ use crate::page::{Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
 use crate::utils::{
-    emit_log, emit_log_shutdown, get_path_from_url, get_semaphore, networking_capable, prepare_url,
-    setup_website_selectors, spawn_set, AllowedDomainTypes,
+    crawl_duration_expired, emit_log, emit_log_shutdown, get_path_from_url, get_semaphore,
+    networking_capable, prepare_url, setup_website_selectors, spawn_set, AllowedDomainTypes,
 };
 use crate::CaseInsensitiveString;
 use crate::Client;
@@ -26,7 +26,7 @@ use reqwest::redirect::Policy;
 use reqwest::StatusCode;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::{
     sync::{broadcast, Semaphore},
     task::JoinSet,
@@ -3241,6 +3241,12 @@ impl Website {
                 tokio::time::sleep(*throttle).await;
             }
 
+            let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                Some(Instant::now())
+            } else {
+                None
+            };
+
             'outer: loop {
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
@@ -3255,7 +3261,7 @@ impl Website {
 
                     tokio::select! {
                         biased;
-                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                        Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker) => {
                             if !self.handle_process(handle, &mut interval, async {
                                 emit_log_shutdown(link.inner());
                                 let permits = set.len();
@@ -3502,6 +3508,12 @@ impl Website {
                                 tokio::time::sleep(*throttle).await;
                             }
 
+                            let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                                Some(Instant::now())
+                            } else {
+                                None
+                            };
+
                             'outer: loop {
                                 let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
@@ -3518,7 +3530,7 @@ impl Website {
 
                                     tokio::select! {
                                         biased;
-                                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                                        Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker)  => {
                                             if !self
                                                 .handle_process(
                                                     handle,
@@ -3834,6 +3846,12 @@ impl Website {
                 tokio::time::sleep(*throttle).await;
             }
 
+            let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                Some(Instant::now())
+            } else {
+                None
+            };
+
             'outer: loop {
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
@@ -3848,7 +3866,7 @@ impl Website {
 
                     tokio::select! {
                         biased;
-                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                        Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker)   => {
                             if !self.handle_process(handle, &mut interval, async {
                                 emit_log_shutdown(link.inner());
                                 let permits = set.len();
@@ -4124,6 +4142,12 @@ impl Website {
                                 tokio::time::sleep(*throttle).await;
                             }
 
+                            let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                                Some(Instant::now())
+                            } else {
+                                None
+                            };
+
                             'outer: loop {
                                 let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
@@ -4140,7 +4164,7 @@ impl Website {
 
                                     tokio::select! {
                                         biased;
-                                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                                        Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker)  => {
                                             if !self
                                                 .handle_process(
                                                     handle,
@@ -4619,6 +4643,12 @@ impl Website {
                 tokio::time::sleep(*throttle).await;
             }
 
+            let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                Some(Instant::now())
+            } else {
+                None
+            };
+
             'outer: loop {
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
@@ -4633,7 +4663,7 @@ impl Website {
 
                     tokio::select! {
                         biased;
-                        Some(link) = stream.next(), if semaphore.available_permits() > 0 => {
+                        Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker)  => {
                             if !self
                                 .handle_process(
                                     handle,
@@ -5656,6 +5686,12 @@ impl Website {
     /// Include tld detection.
     pub fn with_tld(&mut self, tld: bool) -> &mut Self {
         self.configuration.with_tld(tld);
+        self
+    }
+
+    /// The max duration for the crawl. This is useful when websites use a robots.txt with long durations and throttle the timeout removing the full concurrency.
+    pub fn with_crawl_timeout(&mut self, crawl_timeout: Option<Duration>) -> &mut Self {
+        self.configuration.with_crawl_timeout(crawl_timeout);
         self
     }
 
