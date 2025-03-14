@@ -3,7 +3,7 @@
 let
   spider = pkgs.rustPlatform.buildRustPackage {
     pname = "spider";
-    version = "2.33.9";
+    version = "2.33.10";
 
     src = ./.;
     

@@ -39,25 +39,26 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// (allowance==False) followed by a path."""
 #[derive(Debug, Eq, PartialEq, Clone)]
 #[cfg(not(feature = "regex"))]
-struct RuleLine {
+pub struct RuleLine {
     /// Path of the rule
-    path: String,
+    pub path: String,
     /// Is the rule allowed?
-    allowance: bool,
+    pub allowance: bool,
 }
 
 /// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
 /// (allowance==False) followed by a path."""
 #[derive(Debug, Clone)]
 #[cfg(feature = "regex")]
-struct RuleLine {
+pub struct RuleLine {
     /// Path of the rule
-    path: Option<regex::Regex>,
+    pub path: Option<regex::Regex>,
     /// Is the rule allowed?
-    allowance: bool,
+    pub allowance: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Determine the amount of request allowed between navigation or crawls.
 pub struct RequestRate {
     /// Amount of request allowed within duration
@@ -69,15 +70,15 @@ pub struct RequestRate {
 /// An entry has one or more user-agents and zero or more rulelines
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "regex"), derive(Eq, PartialEq))]
-struct Entry {
+pub struct Entry {
     /// Multiple user agents to use
-    useragents: Vec<String>,
+    pub useragents: Vec<String>,
     /// Rules that should be ignored
-    rulelines: Vec<RuleLine>,
+    pub rulelines: Vec<RuleLine>,
     /// Time to wait in between crawls
-    crawl_delay: Option<Duration>,
+    pub crawl_delay: Option<Duration>,
     /// The request rate to respect
-    req_rate: Option<RequestRate>,
+    pub req_rate: Option<RequestRate>,
 }
 
 /// robots.txt file parser
@@ -89,26 +90,26 @@ pub struct RobotFileParser {
     /// Base entry to list
     default_entry: Entry,
     /// Dis-allow links reguardless of robots.txt
-    disallow_all: bool,
+    pub disallow_all: bool,
     /// Allow links reguardless of robots.txt
-    allow_all: bool,
+    pub allow_all: bool,
     /// Time last checked robots.txt file
-    last_checked: i64,
+    pub last_checked: i64,
     /// Disallow list of regex paths to ignore.
     #[cfg(feature = "regex")]
-    disallow_paths_regex: RegexSet,
+    pub disallow_paths_regex: RegexSet,
     /// Disallow list of paths to ignore.
     #[cfg(feature = "regex")]
-    disallow_paths: HashSet<String>,
+    pub disallow_paths: HashSet<String>,
     /// Disallow list of regex agents to ignore.
     #[cfg(feature = "regex")]
-    disallow_agents_regex: RegexSet,
+    pub disallow_agents_regex: RegexSet,
     /// Wild card agent provided.
     #[cfg(feature = "regex")]
-    wild_card_agent: bool,
+    pub wild_card_agent: bool,
     /// Disallow list of agents to ignore.
     #[cfg(feature = "regex")]
-    disallow_agents: HashSet<String>,
+    pub disallow_agents: HashSet<String>,
 }
 
 impl RuleLine {
@@ -319,6 +320,16 @@ impl RobotFileParser {
         if let Ok(time) = SystemTime::now().duration_since(UNIX_EPOCH) {
             self.last_checked = time.as_secs() as i64;
         }
+    }
+
+    /// Get the entries inserted.
+    pub fn get_entries(&self) -> &Vec<Entry> {
+        &self.entries
+    }
+
+    /// Get the base entry inserted.
+    pub fn get_base_entry(&self) -> &Entry {
+        &self.default_entry
     }
 
     /// Reads the robots.txt URL and feeds it to the parser.

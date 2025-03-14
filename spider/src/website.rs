@@ -386,6 +386,11 @@ impl Website {
         self.sqlite.get_db_pool().await
     }
 
+    /// Get the robots.txt parser.
+    pub fn get_robots_parser(&self) -> &Option<Box<RobotFileParser>> {
+        &self.robot_file_parser
+    }
+
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
