@@ -1,4 +1,5 @@
 use super::blockers::{
+    block_websites::block_xhr,
     ignore_script_embedded, ignore_script_xhr, ignore_script_xhr_media,
     intercept_manager::NetworkInterceptManager,
     scripts::{
@@ -118,6 +119,9 @@ lazy_static! {
 
     /// Ignore the resources for visual content types.
     pub static ref IGNORE_NETWORKING_RESOURCE_MAP: phf::Set<&'static str> = phf::phf_set! {
+        "CspViolationReport",
+        "Manifest",
+        "Other",
         "Prefetch",
         "Ping",
     };
@@ -378,7 +382,8 @@ impl NetworkManager {
             let request_url = event.request.url.as_str();
 
             // check if part of ignore scripts.
-            let skip_analytics = self.block_analytics && ignore_script_xhr(request_url);
+            let skip_analytics =
+                self.block_analytics && (ignore_script_xhr(request_url) || block_xhr(request_url));
 
             if skip_analytics {
                 true
@@ -437,19 +442,16 @@ impl NetworkManager {
                 } else {
                     let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
-
-                    let skip_networking = event.resource_type == ResourceType::Other
-                        || event.resource_type == ResourceType::Manifest
-                        || event.resource_type == ResourceType::CspViolationReport
-                        || event.resource_type == ResourceType::Ping
-                        || event.resource_type == ResourceType::Prefetch
-                        || self.document_reload_tracker >= 3;
-
-                    let network_resource = event.resource_type == ResourceType::Xhr
-                        || event.resource_type == ResourceType::Fetch
-                        || event.resource_type == ResourceType::WebSocket;
-
                     let document_resource = event.resource_type == ResourceType::Document;
+                    let network_resource = !document_resource
+                        && (event.resource_type == ResourceType::Xhr
+                            || event.resource_type == ResourceType::Fetch
+                            || event.resource_type == ResourceType::WebSocket);
+
+                    let skip_networking =
+                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref());
+
+                    let skip_networking = skip_networking || self.document_reload_tracker >= 3;
 
                     if document_resource {
                         if self.document_target_domain == current_url {
@@ -461,10 +463,8 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
-                            || self.ignore_visuals
-                                && (IGNORE_VISUAL_RESOURCE_MAP
-                                    .contains(event.resource_type.as_ref()))
+                        self.ignore_visuals
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
                             || self.block_stylesheets
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript
@@ -559,16 +559,17 @@ impl NetworkManager {
                 } else {
                     let current_url = event.request.url.as_str();
                     let javascript_resource = event.resource_type == ResourceType::Script;
-                    let skip_networking = event.resource_type == ResourceType::Other
-                        || event.resource_type == ResourceType::Manifest
-                        || event.resource_type == ResourceType::CspViolationReport
-                        || event.resource_type == ResourceType::Ping
-                        || event.resource_type == ResourceType::Prefetch
-                        || self.document_reload_tracker >= 3;
-                    let network_resource = event.resource_type == ResourceType::Xhr
-                        || event.resource_type == ResourceType::Fetch
-                        || event.resource_type == ResourceType::WebSocket;
                     let document_resource = event.resource_type == ResourceType::Document;
+                    let network_resource = !document_resource
+                        && (event.resource_type == ResourceType::Xhr
+                            || event.resource_type == ResourceType::Fetch
+                            || event.resource_type == ResourceType::WebSocket);
+
+                    // block all of these events.
+                    let skip_networking =
+                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref());
+
+                    let skip_networking = skip_networking || self.document_reload_tracker >= 3;
 
                     if document_resource {
                         if self.document_target_domain == current_url {
@@ -580,10 +581,8 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref())
-                            || self.ignore_visuals
-                                && (IGNORE_VISUAL_RESOURCE_MAP
-                                    .contains(event.resource_type.as_ref()))
+                        self.ignore_visuals
+                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
                             || self.block_stylesheets
                                 && ResourceType::Stylesheet == event.resource_type
                             || self.block_javascript

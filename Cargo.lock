@@ -5657,7 +5657,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5722,7 +5722,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5815,7 +5815,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "clap",
  "env_logger",
@@ -5841,9 +5841,9 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.33.17"
+version = "2.33.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0c1e7a9d120de470561b1095d13997e0fc1336bf5015b8e1b945c4344aee629"
+checksum = "41fa8cdec7c1cfde6393e357ae1f293dd2444aefa748342db9c11c473ead437a"
 dependencies = [
  "hashbrown 0.15.2",
  "phf 0.11.3",
@@ -5873,7 +5873,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -5896,7 +5896,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -5913,7 +5913,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.33.17"
+version = "2.33.18"
 dependencies = [
  "env_logger",
  "lazy_static",
