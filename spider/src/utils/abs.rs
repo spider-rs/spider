@@ -1,9 +1,6 @@
 use phf::phf_set;
 use url::Url;
 
-#[cfg(feature = "firewall")]
-pub use spider_firewall::is_bad_website_url;
-
 /// Acceptable protocols for data transfering TCP.
 static PROTOCOLS: phf::Set<&'static str> = phf_set! {
     "http://",
@@ -54,7 +51,7 @@ pub(crate) fn block_website(u: &Url) -> bool {
     let mut blocked = false;
 
     if let Some(host) = u.host_str() {
-        if is_bad_website_url(&host) {
+        if spider_firewall::is_bad_website_url(&host) {
             blocked = true;
         }
     }

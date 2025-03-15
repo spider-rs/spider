@@ -145,6 +145,8 @@ pub extern crate string_concat;
 pub extern crate strum;
 #[macro_use]
 pub extern crate lazy_static;
+#[cfg(feature = "firewall")]
+pub extern crate spider_firewall;
 
 /// Configuration structure for `Website`.
 pub mod configuration;
