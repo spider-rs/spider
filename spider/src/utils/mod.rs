@@ -21,6 +21,8 @@ use abs::parse_absolute_url;
 use auto_encoder::is_binary_file;
 use bytes::BufMut;
 use case_insensitive_string::CaseInsensitiveString;
+#[cfg(feature = "chrome")]
+use hashbrown::HashMap;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
 use std::str::FromStr;
@@ -244,6 +246,12 @@ pub struct PageResponse {
     pub bytes_transferred: Option<f64>,
     /// The signature of the page to use for handling de-duplication.
     pub signature: Option<u64>,
+    #[cfg(feature = "chrome")]
+    /// All of the response events mapped with the amount of bytes used.
+    pub response_map: Option<HashMap<String, f64>>,
+    #[cfg(feature = "chrome")]
+    /// All of the request events mapped with the time period of the event sent.
+    pub request_map: Option<HashMap<String, f64>>,
 }
 
 /// wait for event with timeout
@@ -1033,12 +1041,13 @@ pub async fn fetch_page_html_chrome_base(
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
-            EventLoadingFailed, EventResponseReceived, GetResponseBodyParams, RequestId,
-            ResourceType,
+            EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived,
+            GetResponseBodyParams, RequestId, ResourceType,
         },
         error::CdpError,
     };
@@ -1058,17 +1067,29 @@ pub async fn fetch_page_html_chrome_base(
 
     let asset = is_asset_url(url_target.unwrap_or(source));
 
-    let (event_loading_listener, cancel_listener, received_listener) = tokio::join!(
+    let (track_requests, track_responses) = match track_events {
+        Some(tracker) => (tracker.requests, tracker.responses),
+        _ => (false, false),
+    };
+
+    let (event_loading_listener, cancel_listener, received_listener, event_sent_listener) = tokio::join!(
         page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
         ),
         page.event_listener::<EventLoadingFailed>(),
         async {
-            if asset {
+            if asset || track_responses {
                 page.event_listener::<EventResponseReceived>().await
             } else {
                 Err(CdpError::NotFound)
             }
-        }
+        },
+        async {
+            if track_requests {
+                page.event_listener::<EventRequestWillBeSent>().await
+            } else {
+                Err(CdpError::NotFound)
+            }
+        },
     );
 
     let (tx, rx) = oneshot::channel::<bool>();
@@ -1084,21 +1105,36 @@ pub async fn fetch_page_html_chrome_base(
             let mut total = 0.0;
             let mut media_bytes = None;
 
-            if let Ok(mut listener) = event_loading_listener {
+            let mut response_map: Option<HashMap<String, f64>> = if track_responses {
+                Some(HashMap::new())
+            } else {
+                None
+            };
 
+            if let Ok(mut listener) = event_loading_listener {
                 if asset {
                     while let Some(event) = listener.next().await {
                         total += event.encoded_data_length;
-    
+
+                        if let Some(response_map) = response_map.as_mut() {
+                            response_map
+                                .entry(event.request_id.inner().clone())
+                                .and_modify(|e| {
+                                    *e += event.encoded_data_length;
+                                })
+                                .or_insert(event.encoded_data_length);
+                        }
+
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
                                 if request_id == &event.request_id {
-                                    let params = GetResponseBodyParams::new(event.request_id.clone());
-    
+                                    let params =
+                                        GetResponseBodyParams::new(event.request_id.clone());
+
                                     if let Some(page) = &page1 {
                                         if let Ok(command_response) = page.execute(params).await {
                                             let body_response = command_response;
-    
+
                                             let media_file = if body_response.base64_encoded {
                                                 chromiumoxide::utils::base64::decode(
                                                     &body_response.body,
@@ -1117,11 +1153,20 @@ pub async fn fetch_page_html_chrome_base(
                 } else {
                     while let Some(event) = listener.next().await {
                         total += event.encoded_data_length;
+
+                        if let Some(response_map) = response_map.as_mut() {
+                            response_map
+                                .entry(event.request_id.inner().clone())
+                                .and_modify(|e| {
+                                    *e += event.encoded_data_length;
+                                })
+                                .or_insert(event.encoded_data_length);
+                        }
                     }
                 }
             }
 
-            (total, media_bytes)
+            (total, media_bytes, response_map)
         };
 
         let f2 = async {
@@ -1145,31 +1190,69 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         let f3 = async {
-            if asset {
+            let mut response_map: Option<HashMap<String, String>> = if track_responses {
+                Some(HashMap::new())
+            } else {
+                None
+            };
+
+            if asset || response_map.is_some() {
                 if let Ok(mut listener) = received_listener {
                     let mut intial_request = false;
                     let mut allow_download = false;
 
                     while let Some(event) = listener.next().await {
-                        if !intial_request && event.r#type == ResourceType::Document {
-                            allow_download =
-                                DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
-                        }
-                        if event.r#type == ResourceType::Media && allow_download {
-                            if let Some(once) = &finished_media {
-                                let _ = once.set(event.request_id.clone());
+                        // check if media asset needs to be downloaded.
+                        if asset {
+                            if !intial_request && event.r#type == ResourceType::Document {
+                                allow_download =
+                                    DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
                             }
-                            break;
+                            if event.r#type == ResourceType::Media && allow_download {
+                                if let Some(once) = &finished_media {
+                                    let _ = once.set(event.request_id.clone());
+                                }
+                            }
+                            intial_request = true;
                         }
-                        intial_request = true;
+
+                        if let Some(response_map) = response_map.as_mut() {
+                            response_map.insert(
+                                event.request_id.inner().clone(),
+                                event.response.url.clone(),
+                            );
+                        }
                     }
                 }
             }
+
+            response_map
         };
 
-        let (t1, _, _file) = tokio::join!(f1, f2, f3);
+        let f4 = async {
+            let mut request_map: Option<HashMap<String, f64>> = if track_requests {
+                Some(HashMap::new())
+            } else {
+                None
+            };
 
-        t1
+            if request_map.is_some() {
+                if let Some(response_map) = request_map.as_mut() {
+                    if let Ok(mut listener) = event_sent_listener {
+                        while let Some(event) = listener.next().await {
+                            response_map
+                                .insert(event.request.url.clone(), *event.timestamp.inner());
+                        }
+                    }
+                }
+            }
+
+            request_map
+        };
+
+        let (t1, _, res_map, req_map) = tokio::join!(f1, f2, f3, f4);
+
+        (t1.0, t1.1, t1.2, res_map, req_map)
     });
 
     let page_navigation = async {
@@ -1205,7 +1288,6 @@ pub async fn fetch_page_html_chrome_base(
     let start_time = Instant::now();
 
     let mut request_cancelled = false;
-    // let mut request_id: Option<RequestId> = None;
 
     let request_timeout = tokio::select! {
         v = tokio::time::timeout(base_timeout, page_navigation) => {
@@ -1413,10 +1495,32 @@ pub async fn fetch_page_html_chrome_base(
         )
         .await;
 
-        if let Ok((transferred, content)) = bytes_collected_handle.await {
+        if let Ok((transferred, content, bytes_map, response_map, request_map)) =
+            bytes_collected_handle.await
+        {
             page_response.bytes_transferred = Some(transferred);
             if content.is_some() {
                 page_response.content = content.map(|f| f.into());
+            }
+            if response_map.is_some() {
+                let mut _response_map = HashMap::new();
+
+                if let Some(response_map) = response_map {
+                    if let Some(bytes_map) = bytes_map {
+                        for item in response_map {
+                            let b = match bytes_map.get(&item.0) {
+                                Some(f) => *f,
+                                _ => 0.0,
+                            };
+                            _response_map.insert(item.1, b);
+                        }
+                    }
+                }
+
+                page_response.response_map = Some(_response_map);
+            }
+            if request_map.is_some() {
+                page_response.request_map = request_map;
             }
         }
     }
@@ -2070,6 +2174,7 @@ pub async fn fetch_page_html(
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -2090,6 +2195,7 @@ pub async fn fetch_page_html(
                 automation_scripts,
                 &viewport,
                 &request_timeout,
+                &track_events,
             )
             .await
             {
@@ -2225,6 +2331,7 @@ pub async fn fetch_page_html(
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -2240,6 +2347,7 @@ pub async fn fetch_page_html(
         automation_scripts,
         viewport,
         request_timeout,
+        track_events,
     )
     .await
     {
@@ -2265,6 +2373,7 @@ pub async fn fetch_page_html_chrome(
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -2282,6 +2391,7 @@ pub async fn fetch_page_html_chrome(
                 automation_scripts,
                 viewport,
                 request_timeout,
+                track_events,
             )
             .await
             {

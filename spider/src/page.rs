@@ -292,6 +292,12 @@ pub struct Page {
     pub blocked_crawl: bool,
     /// The signature of the page to de-duplicate content.
     pub signature: Option<u64>,
+    #[cfg(feature = "chrome")]
+    /// All of the response events mapped with the amount of bytes used.
+    pub response_map: Option<hashbrown::HashMap<String, f64>>,
+    #[cfg(feature = "chrome")]
+    /// All of the request events mapped with the time period of the event sent.
+    pub request_map: Option<hashbrown::HashMap<String, f64>>,
 }
 
 /// Represent a page visited.
@@ -763,6 +769,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         bytes_transferred: res.bytes_transferred,
         blocked_crawl: false,
         signature: res.signature,
+        #[cfg(feature = "chrome")]
+        response_map: res.response_map,
+        #[cfg(feature = "chrome")]
+        request_map: res.request_map,
     }
 }
 
@@ -790,6 +800,10 @@ pub fn build(_: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
+        #[cfg(feature = "chrome")]
+        response_map: res.response_map,
+        #[cfg(feature = "chrome")]
+        request_map: res.request_map,
         ..Default::default()
     }
 }
@@ -1180,6 +1194,7 @@ impl Page {
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
         request_timeout: &Option<Box<Duration>>,
+        track_events: &Option<crate::configuration::ChromeEventTracker>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -1193,6 +1208,7 @@ impl Page {
             automation_scripts,
             viewport,
             &request_timeout,
+            track_events,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -1569,6 +1585,18 @@ impl Page {
             Some(html) => html,
             _ => Default::default(),
         }
+    }
+
+    /// Get the response events mapped.
+    #[cfg(feature = "chrome")]
+    pub fn get_responses(&self) -> &Option<hashbrown::HashMap<String, f64>> {
+        &self.response_map
+    }
+
+    /// Get the response events mapped.
+    #[cfg(feature = "chrome")]
+    pub fn get_request(&self) -> &Option<hashbrown::HashMap<String, f64>> {
+        &self.request_map
     }
 
     /// Html getter for getting the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS. This fallsback to get_html without the `encoding` flag enabled.
@@ -2218,6 +2246,7 @@ impl Page {
                                     &configuration.automation_scripts,
                                     &configuration.viewport,
                                     &configuration.request_timeout,
+                                    &configuration.track_events,
                                 )
                                 .await;
 
@@ -2536,6 +2565,7 @@ impl Page {
                                     &configuration.automation_scripts,
                                     &configuration.viewport,
                                     &configuration.request_timeout,
+                                    &configuration.track_events,
                                 )
                                 .await;
 

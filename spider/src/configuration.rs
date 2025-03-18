@@ -44,6 +44,28 @@ pub type AllowList = Box<regex::RegexSet>;
 #[cfg_attr(not(feature = "regex"), derive(PartialEq, Eq))]
 pub struct AllowListSet(pub AllowList);
 
+#[cfg(feature = "chrome")]
+/// Track the events made via chrome.
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ChromeEventTracker {
+    /// Track the responses.
+    pub responses: bool,
+    /// Track the requests.
+    pub requests: bool,
+}
+
+#[cfg(feature = "chrome")]
+impl ChromeEventTracker {
+    /// Create a new chrome event tracker
+    pub fn new(requests: bool, responses: bool) -> Self {
+        ChromeEventTracker {
+            requests,
+            responses,
+        }
+    }
+}
+
 /// Determine allow proxy
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -177,6 +199,9 @@ pub struct Configuration {
     pub screenshot: Option<ScreenShotConfig>,
     /// Dangerously accept invalid certficates.
     pub accept_invalid_certs: bool,
+    /// Track the events made via chrome.
+    #[cfg(feature = "chrome")]
+    pub track_events: Option<ChromeEventTracker>,
     /// The auth challenge response. The 'chrome_intercept' flag is also required in order to intercept the response.
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
@@ -1088,6 +1113,13 @@ impl Configuration {
             Some(locale) => Some(locale.into()),
             _ => None,
         };
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Track the events made via chrome.
+    pub fn with_event_tracker(&mut self, track_events: Option<ChromeEventTracker>) -> &mut Self {
+        self.track_events = track_events;
         self
     }
 

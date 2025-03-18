@@ -1888,6 +1888,7 @@ impl Website {
                 &self.configuration.automation_scripts,
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
+                &self.configuration.track_events,
             )
             .await;
 
@@ -1924,6 +1925,7 @@ impl Website {
                             &self.configuration.automation_scripts,
                             &self.configuration.viewport,
                             &self.configuration.request_timeout,
+                            &self.configuration.track_events,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -1945,6 +1947,7 @@ impl Website {
                         &self.configuration.automation_scripts,
                         &self.configuration.viewport,
                         &self.configuration.request_timeout,
+                        &self.configuration.track_events,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2076,6 +2079,7 @@ impl Website {
                 &self.configuration.automation_scripts,
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
+                &self.configuration.track_events,
             )
             .await;
 
@@ -2112,6 +2116,7 @@ impl Website {
                             &self.configuration.automation_scripts,
                             &self.configuration.viewport,
                             &self.configuration.request_timeout,
+                            &self.configuration.track_events,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2133,6 +2138,7 @@ impl Website {
                         &self.configuration.automation_scripts,
                         &self.configuration.viewport,
                         &self.configuration.request_timeout,
+                        &self.configuration.track_events,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2367,6 +2373,7 @@ impl Website {
                 &self.configuration.automation_scripts,
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
+                &self.configuration.track_events,
             )
             .await;
             let u = page.get_url();
@@ -2758,6 +2765,7 @@ impl Website {
                     &config.automation_scripts,
                     &config.viewport,
                     &config.request_timeout,
+                    &config.track_events,
                 )
                 .await;
 
@@ -3599,7 +3607,9 @@ impl Website {
                                                                 &shared.6.execution_scripts,
                                                                 &shared.6.automation_scripts,
                                                                 &shared.6.viewport,
-                                                                &shared.6.request_timeout
+                                                                &shared.6.request_timeout,
+                                                                &shared.6.track_events,
+
                                                             )
                                                             .await;
 
@@ -3623,7 +3633,9 @@ impl Website {
                                                                             &shared.6.execution_scripts,
                                                                             &shared.6.automation_scripts,
                                                                             &shared.6.viewport,
-                                                                            &shared.6.request_timeout
+                                                                            &shared.6.request_timeout,
+                                                                            &shared.6.track_events,
+
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -3644,6 +3656,8 @@ impl Website {
                                                                             &shared.6.automation_scripts,
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
+                                                                            &shared.6.track_events,
+
                                                                         )
                                                                         .await,
                                                                     );
@@ -4233,7 +4247,8 @@ impl Website {
                                                                 &shared.6.execution_scripts,
                                                                 &shared.6.automation_scripts,
                                                                 &shared.6.viewport,
-                                                                &shared.6.request_timeout
+                                                                &shared.6.request_timeout,
+                                                                &shared.6.track_events,
                                                             )
                                                             .await;
 
@@ -4257,7 +4272,9 @@ impl Website {
                                                                             &shared.6.execution_scripts,
                                                                             &shared.6.automation_scripts,
                                                                             &shared.6.viewport,
-                                                                            &shared.6.request_timeout
+                                                                            &shared.6.request_timeout,
+                                                                            &shared.6.track_events,
+
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -4278,6 +4295,7 @@ impl Website {
                                                                             &shared.6.automation_scripts,
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
+                                                                            &shared.6.track_events,
                                                                         )
                                                                         .await,
                                                                     );
@@ -5284,6 +5302,9 @@ impl Website {
                                                                                     &shared
                                                                                         .3
                                                                                         .request_timeout,
+                                                                                        &shared
+                                                                                        .3
+                                                                                        .track_events,
                                                                                 )
                                                                                 .await;
 
@@ -5807,6 +5828,16 @@ impl Website {
         Vec<CompactString>: From<Vec<T>>,
     {
         self.configuration.with_whitelist_url(blacklist_url);
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Track the events made via chrome.
+    pub fn with_event_tracker(
+        &mut self,
+        track_events: Option<crate::configuration::ChromeEventTracker>,
+    ) -> &mut Self {
+        self.configuration.with_event_tracker(track_events);
         self
     }
 
