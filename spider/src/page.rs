@@ -481,8 +481,7 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
 }
 
 /// Determine if a url is an asset.
-#[cfg(feature = "chrome")]
-pub(crate) fn is_asset_url(url: &str) -> bool {
+pub fn is_asset_url(url: &str) -> bool {
     let mut asset = false;
     if let Some(position) = url.rfind('.') {
         if url.len() - position >= 3 {

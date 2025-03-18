@@ -1036,14 +1036,17 @@ pub async fn fetch_page_html_chrome_base(
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES};
     use chromiumoxide::{
-        cdp::browser_protocol::{
-            fetch::GetResponseBodyParams,
-            network::{EventLoadingFailed, EventResponseReceived, RequestId, ResourceType},
+        cdp::browser_protocol::network::{
+            EventLoadingFailed, EventResponseReceived, GetResponseBodyParams, RequestId,
+            ResourceType,
         },
         error::CdpError,
     };
     use std::time::Duration;
-    use tokio::{sync::oneshot, time::Instant};
+    use tokio::{
+        sync::{oneshot, OnceCell},
+        time::Instant,
+    };
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -1069,25 +1072,58 @@ pub async fn fetch_page_html_chrome_base(
     );
 
     let (tx, rx) = oneshot::channel::<bool>();
-    let (tx1, rx1) = if asset {
-        let c = oneshot::channel::<Option<RequestId>>();
 
-        (Some(c.0), Some(c.1))
-    } else {
-        (None, None)
-    };
+    let page1 = if asset { Some(page.clone()) } else { None };
 
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
+        let finished_media: Option<OnceCell<RequestId>> =
+            if asset { Some(OnceCell::new()) } else { None };
+
         let f1 = async {
             let mut total = 0.0;
+            let mut media_bytes = None;
+
             if let Ok(mut listener) = event_loading_listener {
-                while let Some(event) = listener.next().await {
-                    total += event.encoded_data_length;
+
+                if asset {
+                    while let Some(event) = listener.next().await {
+                        total += event.encoded_data_length;
+    
+                        if let Some(once) = &finished_media {
+                            if let Some(request_id) = once.get() {
+                                if request_id == &event.request_id {
+                                    let params = GetResponseBodyParams::new(event.request_id.clone());
+    
+                                    if let Some(page) = &page1 {
+                                        if let Ok(command_response) = page.execute(params).await {
+                                            let body_response = command_response;
+    
+                                            let media_file = if body_response.base64_encoded {
+                                                chromiumoxide::utils::base64::decode(
+                                                    &body_response.body,
+                                                )
+                                                .unwrap_or_default()
+                                            } else {
+                                                body_response.body.as_bytes().to_vec()
+                                            };
+                                            media_bytes = Some(media_file);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    while let Some(event) = listener.next().await {
+                        total += event.encoded_data_length;
+                    }
                 }
             }
-            total
+
+            (total, media_bytes)
         };
+
         let f2 = async {
             if let Ok(mut listener) = cancel_listener {
                 let mut net_aborted = false;
@@ -1111,7 +1147,6 @@ pub async fn fetch_page_html_chrome_base(
         let f3 = async {
             if asset {
                 if let Ok(mut listener) = received_listener {
-                    let mut file_received = None;
                     let mut intial_request = false;
                     let mut allow_download = false;
 
@@ -1121,14 +1156,12 @@ pub async fn fetch_page_html_chrome_base(
                                 DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
                         }
                         if event.r#type == ResourceType::Media && allow_download {
-                            file_received.replace(event.request_id.clone());
+                            if let Some(once) = &finished_media {
+                                let _ = once.set(event.request_id.clone());
+                            }
+                            break;
                         }
                         intial_request = true;
-                    }
-                    if let Some(tx1) = tx1 {
-                        if file_received.is_some() {
-                            let _ = tx1.send(file_received);
-                        }
                     }
                 }
             }
@@ -1172,34 +1205,15 @@ pub async fn fetch_page_html_chrome_base(
     let start_time = Instant::now();
 
     let mut request_cancelled = false;
-    let mut request_id: Option<RequestId> = None;
+    // let mut request_id: Option<RequestId> = None;
 
-    let request_timeout = if let Some(rx1) = rx1 {
-        tokio::select! {
-            v = tokio::time::timeout(base_timeout, page_navigation) => {
-                v.map_err(|_| CdpError::Timeout)
-            }
-            _ = rx => {
-                request_cancelled = true;
-                Ok(Ok(()))
-            }
-            rid = rx1 => {
-                request_cancelled = true;
-                if let Ok(id) = rid {
-                    request_id = id;
-                }
-                Ok(Ok(()))
-            }
+    let request_timeout = tokio::select! {
+        v = tokio::time::timeout(base_timeout, page_navigation) => {
+            v.map_err(|_| CdpError::Timeout)
         }
-    } else {
-        tokio::select! {
-            v = tokio::time::timeout(base_timeout, page_navigation) => {
-                v.map_err(|_| CdpError::Timeout)
-            }
-            _ = rx => {
-                request_cancelled = true;
-                Ok(Ok(()))
-            }
+        _ = rx => {
+            request_cancelled = true;
+            Ok(Ok(()))
         }
     };
 
@@ -1287,25 +1301,9 @@ pub async fn fetch_page_html_chrome_base(
             }
         }
 
-        let mut res: Box<Vec<u8>> = if request_id.is_some() {
-            let params = GetResponseBodyParams::new(request_id.unwrap_or_default());
-
-            if let Ok(command_response) = page.execute(params).await {
-                let body_response = command_response;
-
-                if body_response.base64_encoded {
-                    chromiumoxide::utils::base64::decode(&body_response.body)?.into()
-                } else {
-                    body_response.body.as_bytes().to_vec().into()
-                }
-            } else {
-                Default::default()
-            }
-        } else {
-            match page.content_bytes().await {
-                Ok(b) => b.into(),
-                _ => Default::default(),
-            }
+        let mut res: Box<Vec<u8>> = match page.content_bytes().await {
+            Ok(b) => b.into(),
+            _ => Default::default(),
         };
 
         if cfg!(feature = "real_browser") {
@@ -1414,9 +1412,12 @@ pub async fn fetch_page_html_chrome_base(
             page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
         )
         .await;
-        // we want to use a sync impl to get bytes when storing the page.
-        if let Ok(transferred) = bytes_collected_handle.await {
+
+        if let Ok((transferred, content)) = bytes_collected_handle.await {
             page_response.bytes_transferred = Some(transferred);
+            if content.is_some() {
+                page_response.content = content.map(|f| f.into());
+            }
         }
     }
 
