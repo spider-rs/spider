@@ -1086,6 +1086,14 @@ pub async fn fetch_page_html_chrome_base(
 
     let asset = is_asset_url(url_target.unwrap_or(source));
 
+    let (tx1, rx1) = if asset {
+        let c = oneshot::channel::<Option<RequestId>>();
+
+        (Some(c.0), Some(c.1))
+    } else {
+        (None, None)
+    };
+
     let (track_requests, track_responses) = match track_events {
         Some(tracker) => (tracker.requests, tracker.responses),
         _ => (false, false),
@@ -1113,8 +1121,6 @@ pub async fn fetch_page_html_chrome_base(
 
     let (tx, rx) = oneshot::channel::<bool>();
 
-    let page1 = if asset { Some(page.clone()) } else { None };
-
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
@@ -1122,7 +1128,6 @@ pub async fn fetch_page_html_chrome_base(
 
         let f1 = async {
             let mut total = 0.0;
-            let mut media_bytes = None;
 
             let mut response_map: Option<HashMap<String, f64>> = if track_responses {
                 Some(HashMap::new())
@@ -1145,23 +1150,9 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
                                 if request_id == &event.request_id {
-                                    let params =
-                                        GetResponseBodyParams::new(event.request_id.clone());
-
-                                    if let Some(page) = &page1 {
-                                        if let Ok(command_response) = page.execute(params).await {
-                                            let body_response = command_response;
-
-                                            let media_file = if body_response.base64_encoded {
-                                                chromiumoxide::utils::base64::decode(
-                                                    &body_response.body,
-                                                )
-                                                .unwrap_or_default()
-                                            } else {
-                                                body_response.body.as_bytes().to_vec()
-                                            };
-                                            media_bytes = Some(media_file);
-                                        }
+                                    if let Some(tx1) = tx1 {
+                                        let _ = tx1.send(Some(request_id.clone()));
+                                        break;
                                     }
                                 }
                             }
@@ -1181,7 +1172,7 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            (total, media_bytes, response_map)
+            (total, response_map)
         };
 
         let f2 = async {
@@ -1273,7 +1264,7 @@ pub async fn fetch_page_html_chrome_base(
 
         let (t1, _, res_map, req_map) = tokio::join!(f1, f2, f3, f4);
 
-        (t1.0, t1.1, t1.2, res_map, req_map)
+        (t1.0, t1.1, res_map, req_map)
     });
 
     let page_navigation = async {
@@ -1347,159 +1338,237 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
-    let mut page_response = if timeout_elasped.is_none()
-        && chrome_http_req_res.status_code.is_success()
-        && !request_cancelled
-    {
-        if chrome_http_req_res.waf_check {
-            base_timeout = sub_duration(base_timeout, start_time.elapsed());
-            if let Err(elasped) =
-                tokio::time::timeout(base_timeout, perform_smart_mouse_movement(&page, &viewport))
-                    .await
-            {
-                log::warn!("mouse movement timeout exceeded {elasped}");
-            }
-        }
+    let chrome_http_req_res1 = if asset {
+        Some(chrome_http_req_res.clone())
+    } else {
+        None
+    };
 
-        if wait_for.is_some() {
-            base_timeout = sub_duration(base_timeout, start_time.elapsed());
-            if let Err(elasped) =
-                tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
-            {
-                log::warn!("max wait for timeout {elasped}");
+    let run_page_response = async move {
+        let mut page_response = if timeout_elasped.is_none()
+            && chrome_http_req_res.status_code.is_success()
+            && !request_cancelled
+        {
+            if chrome_http_req_res.waf_check {
+                base_timeout = sub_duration(base_timeout, start_time.elapsed());
+                if let Err(elasped) = tokio::time::timeout(
+                    base_timeout,
+                    perform_smart_mouse_movement(&page, &viewport),
+                )
+                .await
+                {
+                    log::warn!("mouse movement timeout exceeded {elasped}");
+                }
             }
-        }
 
-        if execution_scripts.is_some() || automation_scripts.is_some() {
-            let target_url = if final_url.is_some() {
-                match final_url.as_ref() {
-                    Some(ref u) => u.to_string(),
+            if wait_for.is_some() {
+                base_timeout = sub_duration(base_timeout, start_time.elapsed());
+                if let Err(elasped) =
+                    tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
+                {
+                    log::warn!("max wait for timeout {elasped}");
+                }
+            }
+
+            if execution_scripts.is_some() || automation_scripts.is_some() {
+                let target_url = if final_url.is_some() {
+                    match final_url.as_ref() {
+                        Some(ref u) => u.to_string(),
+                        _ => Default::default(),
+                    }
+                } else if url_target.is_some() {
+                    url_target.unwrap_or_default().to_string()
+                } else {
+                    source.to_string()
+                };
+
+                base_timeout = sub_duration(base_timeout, start_time.elapsed());
+
+                if let Err(elasped) = tokio::time::timeout(base_timeout, async {
+                    tokio::join!(
+                        crate::features::chrome_common::eval_execution_scripts(
+                            &page,
+                            &target_url,
+                            &execution_scripts
+                        ),
+                        crate::features::chrome_common::eval_automation_scripts(
+                            &page,
+                            &target_url,
+                            &automation_scripts
+                        )
+                    );
+                })
+                .await
+                {
+                    log::warn!("eval scripts timeout exceeded {elasped}");
+                }
+            }
+
+            let mut res: Box<Vec<u8>> = if !asset {
+                match page.content_bytes().await {
+                    Ok(b) => b.into(),
                     _ => Default::default(),
                 }
-            } else if url_target.is_some() {
-                url_target.unwrap_or_default().to_string()
             } else {
-                source.to_string()
+                Default::default()
             };
 
-            base_timeout = sub_duration(base_timeout, start_time.elapsed());
-
-            if let Err(elasped) = tokio::time::timeout(base_timeout, async {
-                tokio::join!(
-                    crate::features::chrome_common::eval_execution_scripts(
-                        &page,
-                        &target_url,
-                        &execution_scripts
-                    ),
-                    crate::features::chrome_common::eval_automation_scripts(
-                        &page,
-                        &target_url,
-                        &automation_scripts
+            if cfg!(feature = "real_browser") {
+                // we can skip this check after a set bytes
+                if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
+                    let _ = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(10),
+                        cf_handle(&mut res, &page),
                     )
-                );
-            })
-            .await
-            {
-                log::warn!("eval scripts timeout exceeded {elasped}");
-            }
-        }
+                    .await;
+                }
+            };
 
-        let mut res: Box<Vec<u8>> = match page.content_bytes().await {
-            Ok(b) => b.into(),
-            _ => Default::default(),
-        };
+            let ok = res.len() > 0;
 
-        if cfg!(feature = "real_browser") {
-            // we can skip this check after a set bytes
-            if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
-                let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(10),
-                    cf_handle(&mut res, &page),
-                )
-                .await;
-            }
-        };
-
-        let ok = res.len() > 0;
-
-        if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
+            if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
             chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
         }
 
-        let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
+            let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
-        base_timeout = sub_duration(base_timeout, start_time.elapsed());
+            base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
-        let _ = tokio::time::timeout(
-            base_timeout.max(tokio::time::Duration::from_secs(5)),
-            set_page_response_cookies(&mut page_response, &page),
-        )
-        .await;
-
-        set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
-
-        if openai_config.is_some() {
-            run_openai_request(
-                match url_target {
-                    Some(ref ut) => ut,
-                    _ => source,
-                },
-                page,
-                wait_for,
-                openai_config,
-                &mut page_response,
-                ok,
-            )
-            .await;
-        }
-
-        if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
             let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(30),
-                perform_screenshot(source, page, screenshot, &mut page_response),
+                base_timeout.max(tokio::time::Duration::from_secs(5)),
+                set_page_response_cookies(&mut page_response, &page),
             )
             .await;
-        }
-        page_response.status_code = chrome_http_req_res.status_code;
-        page_response.waf_check = chrome_http_req_res.waf_check;
 
-        if !page_set {
+            set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+
+            if openai_config.is_some() {
+                run_openai_request(
+                    match url_target {
+                        Some(ref ut) => ut,
+                        _ => source,
+                    },
+                    page,
+                    wait_for,
+                    openai_config,
+                    &mut page_response,
+                    ok,
+                )
+                .await;
+            }
+
+            if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(30),
+                    perform_screenshot(source, page, screenshot, &mut page_response),
+                )
+                .await;
+            }
+            page_response.status_code = chrome_http_req_res.status_code;
+            page_response.waf_check = chrome_http_req_res.waf_check;
+
+            if !page_set {
+                let _ = tokio::time::timeout(
+                    base_timeout.max(Duration::from_secs(1)),
+                    cache_chrome_response(&source, &page_response, chrome_http_req_res),
+                )
+                .await;
+            }
+
+            page_response
+        } else {
+            let res = if !asset {
+                match page.content_bytes().await {
+                    Ok(b) => Box::new(b),
+                    _ => Default::default(),
+                }
+            } else {
+                Default::default()
+            };
+            let mut page_response =
+                set_page_response(false, res, &mut chrome_http_req_res, final_url);
             let _ = tokio::time::timeout(
-                base_timeout.max(Duration::from_secs(1)),
-                cache_chrome_response(&source, &page_response, chrome_http_req_res),
+                base_timeout.max(tokio::time::Duration::from_secs(2)),
+                set_page_response_cookies(&mut page_response, &page),
             )
             .await;
-        }
+            set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+            page_response.status_code = chrome_http_req_res.status_code;
+            page_response.waf_check = chrome_http_req_res.waf_check;
 
-        page_response
-    } else {
-        let res = match page.content_bytes().await {
-            Ok(b) => Box::new(b),
-            _ => Default::default(),
+            if let Some(_elasped) = timeout_elasped {
+                page_response.status_code = StatusCode::REQUEST_TIMEOUT;
+            }
+
+            page_response
         };
-        let mut page_response = set_page_response(false, res, &mut chrome_http_req_res, final_url);
-        let _ = tokio::time::timeout(
-            base_timeout.max(tokio::time::Duration::from_secs(2)),
-            set_page_response_cookies(&mut page_response, &page),
-        )
-        .await;
-        set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
-        page_response.status_code = chrome_http_req_res.status_code;
-        page_response.waf_check = chrome_http_req_res.waf_check;
 
-        if let Some(_elasped) = timeout_elasped {
-            page_response.status_code = StatusCode::REQUEST_TIMEOUT;
+        if content {
+            if let Some(final_url) = &page_response.final_url {
+                if final_url == "about:blank" {
+                    page_response.final_url = None;
+                }
+            }
         }
-
         page_response
     };
 
-    if content {
-        if let Some(final_url) = &page_response.final_url {
-            if final_url == "about:blank" {
-                page_response.final_url = None;
+    let mut content: Option<Box<Vec<u8>>> = None;
+
+    let page_response = match rx1 {
+        Some(rx1) => {
+            tokio::select! {
+                v = tokio::time::timeout(base_timeout, run_page_response) => {
+                    v.map_err(|_| CdpError::Timeout)
+                }
+                c = rx1 => {
+                    if let Ok(c) = c {
+                        if let Some(c) = c {
+                            let params =
+                            GetResponseBodyParams::new(c.clone());
+
+                            if let Ok(command_response) = page.execute(params).await {
+                              let body_response = command_response;
+
+                              let media_file = if body_response.base64_encoded {
+                                  chromiumoxide::utils::base64::decode(
+                                      &body_response.body,
+                                  )
+                                  .unwrap_or_default()
+                              } else {
+                                  body_response.body.as_bytes().to_vec()
+                              };
+                              content = Some(media_file.into());
+                          }
+                        }
+                    }
+
+                    let mut page_response = PageResponse::default();
+
+                    let _ = tokio::time::timeout(
+                        base_timeout.max(tokio::time::Duration::from_secs(2)),
+                        set_page_response_cookies(&mut page_response, &page),
+                    )
+                    .await;
+
+                    if let Some(mut chrome_http_req_res1) = chrome_http_req_res1 {
+                        set_page_response_headers(&mut chrome_http_req_res1, &mut page_response);
+
+                        page_response.status_code = chrome_http_req_res1.status_code;
+                        page_response.waf_check = chrome_http_req_res1.waf_check;
+                    }
+
+                    Ok(page_response)
+                }
             }
         }
+        _ => Ok(run_page_response.await),
+    };
+
+    let mut page_response = page_response.unwrap_or_default();
+
+    if content.is_some() {
+        page_response.content = content.map(|f| f.into());
     }
 
     // run initial handling hidden anchors
@@ -1516,12 +1585,9 @@ pub async fn fetch_page_html_chrome_base(
         )
         .await;
 
-        if let Ok((mut transferred, content, bytes_map, response_map, request_map)) =
+        if let Ok((mut transferred, bytes_map, response_map, request_map)) =
             bytes_collected_handle.await
         {
-            if content.is_some() {
-                page_response.content = content.map(|f| f.into());
-            }
             if response_map.is_some() {
                 let mut _response_map = HashMap::new();
 
