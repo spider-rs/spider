@@ -1404,13 +1404,9 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            let mut res: Box<Vec<u8>> = if !asset {
-                match page.content_bytes().await {
-                    Ok(b) => b.into(),
-                    _ => Default::default(),
-                }
-            } else {
-                Default::default()
+            let mut res: Box<Vec<u8>> = match page.content_bytes().await {
+                Ok(b) => b.into(),
+                _ => Default::default(),
             };
 
             if cfg!(feature = "real_browser") {
@@ -1477,13 +1473,9 @@ pub async fn fetch_page_html_chrome_base(
 
             page_response
         } else {
-            let res = if !asset {
-                match page.content_bytes().await {
-                    Ok(b) => Box::new(b),
-                    _ => Default::default(),
-                }
-            } else {
-                Default::default()
+            let res = match page.content_bytes().await {
+                Ok(b) => Box::new(b),
+                _ => Default::default(),
             };
             let mut page_response =
                 set_page_response(false, res, &mut chrome_http_req_res, final_url);
@@ -1510,6 +1502,7 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
         }
+
         page_response
     };
 
