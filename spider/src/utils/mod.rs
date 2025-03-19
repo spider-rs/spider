@@ -114,6 +114,14 @@ lazy_static! {
     };
 }
 
+#[cfg(feature = "chrome")]
+lazy_static! {
+    /// Mask the chrome connection interception bytes from responses. Rejected responses send 17.0 bytes for the response.
+    pub(crate) static ref MASK_BYTES_INTERCEPTION: bool = {
+        std::env::var("MASK_BYTES_INTERCEPTION").unwrap_or_default() == "true"
+    };
+}
+
 lazy_static! {
     /// Prevent fetching resources beyond the bytes limit.
     pub(crate) static ref MAX_SIZE_BYTES: usize = {
@@ -1051,11 +1059,22 @@ pub async fn fetch_page_html_chrome_base(
         },
         error::CdpError,
     };
+    use hashbrown::HashMap;
     use std::time::Duration;
     use tokio::{
         sync::{oneshot, OnceCell},
         time::Instant,
     };
+
+    #[derive(Debug, Clone, Default)]
+    struct ResponseMap {
+        /// The url of the request
+        url: String,
+        /// The network request was skipped.
+        skipped: bool,
+        /// The bytes transffered
+        bytes_transffered: f64,
+    }
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
 
@@ -1119,9 +1138,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(response_map) = response_map.as_mut() {
                             response_map
                                 .entry(event.request_id.inner().clone())
-                                .and_modify(|e| {
-                                    *e += event.encoded_data_length;
-                                })
+                                .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
                         }
 
@@ -1157,9 +1174,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(response_map) = response_map.as_mut() {
                             response_map
                                 .entry(event.request_id.inner().clone())
-                                .and_modify(|e| {
-                                    *e += event.encoded_data_length;
-                                })
+                                .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
                         }
                     }
@@ -1190,7 +1205,7 @@ pub async fn fetch_page_html_chrome_base(
         };
 
         let f3 = async {
-            let mut response_map: Option<HashMap<String, String>> = if track_responses {
+            let mut response_map: Option<HashMap<String, ResponseMap>> = if track_responses {
                 Some(HashMap::new())
             } else {
                 None
@@ -1219,7 +1234,13 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(response_map) = response_map.as_mut() {
                             response_map.insert(
                                 event.request_id.inner().clone(),
-                                event.response.url.clone(),
+                                ResponseMap {
+                                    url: event.response.url.clone(),
+                                    bytes_transffered: event.response.encoded_data_length,
+                                    skipped: *MASK_BYTES_INTERCEPTION
+                                        && event.response.connection_id == 0.0
+                                        && event.response.encoded_data_length <= 17.0,
+                                },
                             );
                         }
                     }
@@ -1495,10 +1516,9 @@ pub async fn fetch_page_html_chrome_base(
         )
         .await;
 
-        if let Ok((transferred, content, bytes_map, response_map, request_map)) =
+        if let Ok((mut transferred, content, bytes_map, response_map, request_map)) =
             bytes_collected_handle.await
         {
-            page_response.bytes_transferred = Some(transferred);
             if content.is_some() {
                 page_response.content = content.map(|f| f.into());
             }
@@ -1508,11 +1528,20 @@ pub async fn fetch_page_html_chrome_base(
                 if let Some(response_map) = response_map {
                     if let Some(bytes_map) = bytes_map {
                         for item in response_map {
-                            let b = match bytes_map.get(&item.0) {
-                                Some(f) => *f,
-                                _ => 0.0,
+                            let b = if item.1.skipped {
+                                0.0
+                            } else {
+                                match bytes_map.get(&item.0) {
+                                    Some(f) => *f,
+                                    _ => 0.0,
+                                }
                             };
-                            _response_map.insert(item.1, b);
+
+                            if item.1.skipped {
+                                transferred -= item.1.bytes_transffered;
+                            }
+
+                            _response_map.insert(item.1.url, b);
                         }
                     }
                 }
@@ -1522,6 +1551,7 @@ pub async fn fetch_page_html_chrome_base(
             if request_map.is_some() {
                 page_response.request_map = request_map;
             }
+            page_response.bytes_transferred = Some(transferred);
         }
     }
 
