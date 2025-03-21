@@ -1,9 +1,7 @@
 [package]
 name = "spider"
 version = "2.34.4"
-authors = [
-    "j-mendez <jeff@spider.cloud>"
-]
+authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
@@ -40,14 +38,18 @@ cron = { version = "0.15", optional = true }
 async-trait = { version = "0.1", optional = true }
 strum = { version = "0.26", features = ["derive"] }
 async_job = { version = "0.1", optional = true }
-reqwest-middleware = { version = "0.4", optional = true,  default-features = false }
+reqwest-middleware = { version = "0.4", optional = true, default-features = false }
 http-cache-reqwest = { version = "0.15", optional = true, default-features = false }
 const_format = { version = "0.2", optional = true }
 async-openai = { version = "0.28", optional = true }
 tiktoken-rs = { version = "0.6", optional = true }
 lol_html = { version = "2" }
 serde_json = { version = "1", optional = true }
-quick-xml = { version = "0.37", features = ["serde", "serialize", "async-tokio"]}
+quick-xml = { version = "0.37", features = [
+    "serde",
+    "serialize",
+    "async-tokio",
+] }
 moka = { version = "0.12", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
 http-cache-semantics = { version = "2", optional = true }
@@ -57,17 +59,28 @@ phf = "0.11"
 phf_codegen = "0.11"
 auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
-string-interner = { version = "0.19", default-features = false, features = ["std", "inline-more", "backends"], optional = true }
+string-interner = { version = "0.19", default-features = false, features = [
+    "std",
+    "inline-more",
+    "backends",
+], optional = true }
 httpdate = { version = "1", optional = true }
 rand = { version = "0.9", optional = true }
 serde_regex = { version = "1", optional = true }
 statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1", optional = true }
-tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
-sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
-sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite" ], optional = true }
+tracing = { version = "0.1", default-features = false, features = [
+    "std",
+], optional = true }
+sysinfo = { version = "0.33", default-features = false, features = [
+    "system",
+], optional = true }
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "sqlite",
+], optional = true }
 h2 = "0.4"
-tower = { version = "0.5", features = [ "limit" ]}
+tower = { version = "0.5", features = ["limit"] }
 pin-project-lite = "0.2"
 sonic-rs = { version = "0.3", optional = true }
 
@@ -76,10 +89,7 @@ version = "2"
 path = "../spider_chrome"
 optional = true
 default-features = false
-features = [
-    "bytes",
-    "stream"
-]
+features = ["bytes", "stream"]
 
 [dependencies.spider_firewall]
 version = "2"
@@ -93,7 +103,7 @@ libc = "0.2"
 tokio = { version = "1", default-features = false, features = [
     "macros",
     "time",
-    "rt-multi-thread"
+    "rt-multi-thread",
 ] }
 fastrand = { version = "2", optional = true }
 reqwest = { version = "0.12", features = [
@@ -108,7 +118,7 @@ reqwest = { version = "0.12", features = [
 tokio = { version = "1", default-features = false, features = [
     "macros",
     "time",
-    "rt"
+    "rt",
 ] }
 fastrand = { version = "2", optional = true, features = ["js"] }
 reqwest = { version = "0.12", features = [
@@ -120,14 +130,23 @@ reqwest = { version = "0.12", features = [
 
 [features]
 default = ["basic", "io_uring"]
-basic = ["sync", "reqwest_native_tls_native_roots", "disk_native_tls", "cookies", "ua_generator", "encoding", "string_interner_buffer_backend", "balance"]
+basic = [
+    "sync",
+    "reqwest_native_tls_native_roots",
+    "disk_native_tls",
+    "cookies",
+    "ua_generator",
+    "encoding",
+    "string_interner_buffer_backend",
+    "balance",
+]
 disk = ["dep:sqlx", "dep:aho-corasick"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
 disk_aws = ["disk", "sqlx/tls-rustls-aws-lc-rs"]
 adblock = ["chrome", "spider_chrome/adblock"]
 balance = ["dep:sysinfo"]
 regex = []
-glob = [ "dep:itertools"]
+glob = ["dep:itertools"]
 ua_generator = ["dep:ua_generator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
@@ -135,7 +154,13 @@ time = []
 io_uring = ["dep:tokio-uring"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
-serde = ["dep:serde", "hashbrown/serde", "string-interner/serde", "dep:serde_regex", "smallvec/serde"]
+serde = [
+    "dep:serde",
+    "hashbrown/serde",
+    "string-interner/serde",
+    "dep:serde_regex",
+    "smallvec/serde",
+]
 fs = ["tokio/fs"]
 full_resources = []
 socks = ["reqwest/socks"]
@@ -145,8 +170,22 @@ cache_request = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
 cache = ["cache_request", "http-cache-reqwest/manager-cacache"]
 cache_mem = ["cache_request", "http-cache-reqwest/manager-moka"]
 cache_openai = ["dep:moka"]
-cache_chrome_hybrid = ["cache_request", "cache", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
-cache_chrome_hybrid_mem = ["cache_request", "cache_mem", "chrome", "dep:http-cache-semantics", "dep:http-cache", "dep:http"]
+cache_chrome_hybrid = [
+    "cache_request",
+    "cache",
+    "chrome",
+    "dep:http-cache-semantics",
+    "dep:http-cache",
+    "dep:http",
+]
+cache_chrome_hybrid_mem = [
+    "cache_request",
+    "cache_mem",
+    "chrome",
+    "dep:http-cache-semantics",
+    "dep:http-cache",
+    "dep:http",
+]
 chrome = ["dep:spider_chrome", "dep:base64"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
@@ -156,6 +195,7 @@ chrome_store_page = ["chrome", "serde"]
 chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
 chrome_simd = ["chrome", "spider_chrome/simd", "simd"]
+chrome_tls_connection = ["chrome", "spider_chrome/chrome_tls_connection"]
 cookies = ["reqwest/cookies"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:rand", "chrome_intercept", "dep:aho-corasick"]
@@ -163,7 +203,14 @@ encoding = []
 headers = ["dep:httpdate"]
 remote_addr = []
 real_browser = ["dep:statrs", "dep:rand"]
-openai = ["chrome", "serde", "chrome_intercept", "dep:async-openai", "dep:tiktoken-rs", "dep:serde_json"]
+openai = [
+    "chrome",
+    "serde",
+    "chrome_intercept",
+    "dep:async-openai",
+    "dep:tiktoken-rs",
+    "dep:serde_json",
+]
 openai_slim_fit = []
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]

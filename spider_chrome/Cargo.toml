@@ -2,9 +2,7 @@
 name = "spider_chrome"
 version = "2.34.4"
 rust-version = "1.70"
-authors = [
-    "j-mendez <jeff@spider.cloud>"
-]
+authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -36,7 +34,7 @@ tokio = { version = "1", features = [
     "fs",
     "macros",
     "process",
-]}
+] }
 tracing = "0.1"
 pin-project-lite = "0.2"
 dunce = "1"
@@ -44,7 +42,10 @@ bytes = { version = "1", features = ["serde"], optional = true }
 reqwest = { version = "0.12" }
 lazy_static = "1"
 phf = { version = "0.11", features = ["macros"] }
-adblock = { version = "0.9", optional = true, default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+adblock = { version = "0.9", optional = true, default-features = false, features = [
+    "embedded-domain-resolver",
+    "full-regex-handling",
+] }
 rand = "0.8"
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 hashbrown = { version = "0.15", default-features = true }
@@ -81,11 +82,18 @@ bytes = ["dep:bytes"]
 adblock = ["dep:adblock"]
 simd = ["dep:sonic-rs"]
 firewall = ["dep:spider_firewall"]
+chrome_tls_connection = ["tokio-tungstenite/native-tls"]
 
 # Temporary features until cargo weak dependencies bug is fixed
 # See https://github.com/rust-lang/cargo/issues/10801
-_fetcher-rusttls-tokio = ["fetcher", "spider_chromiumoxide_fetcher/_rustls-tokio"]
-_fetcher-native-tokio = ["fetcher", "spider_chromiumoxide_fetcher/_native-tokio"]
+_fetcher-rusttls-tokio = [
+    "fetcher",
+    "spider_chromiumoxide_fetcher/_rustls-tokio",
+]
+_fetcher-native-tokio = [
+    "fetcher",
+    "spider_chromiumoxide_fetcher/_native-tokio",
+]
 
 [[example]]
 name = "wiki-tokio"
