@@ -7,7 +7,7 @@ The library is used on [Spider Cloud](https://spider.cloud) for data cleaning.
 
 ```toml
 [dependencies]
-spider_transformations = "0"
+spider_transformations = "2"
 ```
 
 ```rust
@@ -15,7 +15,8 @@ use spider_transformations::transformation::content;
 
 fn main() {
     // page comes from the spider object when streaming.
-    let conf = content::TransformConfig::default();
+    let mut conf = content::TransformConfig::default();
+    conf.return_format = content::ReturnFormat::Markdown;
     let content = content::transform_content(&page, &conf, &None, &None);
 }
 ```
