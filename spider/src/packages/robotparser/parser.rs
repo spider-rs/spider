@@ -31,8 +31,6 @@ use crate::Client;
 use hashbrown::HashSet;
 #[cfg(feature = "regex")]
 use regex::RegexSet;
-use reqwest::Response;
-use reqwest::StatusCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// A rule line is a single "Allow:" (allowance==True) or "Disallow:"
@@ -334,6 +332,7 @@ impl RobotFileParser {
 
     /// Reads the robots.txt URL and feeds it to the parser.
     pub async fn read(&mut self, client: &Client, url: &str) {
+        use crate::client::request_client::StatusCode;
         self.modified();
 
         let request = client.get(string_concat!(url, "robots.txt"));
@@ -362,7 +361,7 @@ impl RobotFileParser {
     }
 
     /// Reads the HTTP response and feeds it to the parser.
-    pub async fn from_response(&mut self, response: Response) {
+    pub async fn from_response(&mut self, response: crate::client::Response) {
         match response.text().await {
             Ok(buf) => {
                 let lines: Vec<&str> = buf.split('\n').collect();

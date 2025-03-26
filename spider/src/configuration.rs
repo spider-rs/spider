@@ -148,6 +148,9 @@ pub struct Configuration {
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: Box<String>,
+    #[cfg(feature = "rquest")]
+    /// The type of request emulation. This does nothing without the flag `sync` enabled.
+    pub emulation: Option<rquest_util::Emulation>,
     #[cfg(feature = "cron")]
     /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
     pub cron_str: String,
@@ -702,6 +705,19 @@ impl Configuration {
     /// Determine whether to collect all the resources found on pages.
     pub fn with_full_resources(&mut self, full_resources: bool) -> &mut Self {
         self.full_resources = full_resources;
+        self
+    }
+
+    /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
+    #[cfg(feature = "rquest")]
+    pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {
+        self.emulation = emulation;
+        self
+    }
+
+    /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
+    #[cfg(not(feature = "rquest"))]
+    pub fn with_emulation(&mut self, full_resources: bool) -> &mut Self {
         self
     }
 
