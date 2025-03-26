@@ -45,18 +45,25 @@ use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
 
-use reqwest::{
-    header::{HeaderName, HeaderValue},
-    Response, StatusCode,
-};
+#[cfg(not(feature = "rquest"))]
+use reqwest::{Response, StatusCode};
+#[cfg(feature = "rquest")]
+use rquest::{Response, StatusCode};
 
 /// The request error.
-#[cfg(not(feature = "cache_request"))]
+#[cfg(all(not(feature = "cache_request"), not(feature = "rquest")))]
 pub(crate) type RequestError = reqwest::Error;
 
-/// The request error.
+/// The request error (for `rquest`).
+#[cfg(all(not(feature = "cache_request"), feature = "rquest"))]
+pub(crate) type RequestError = rquest::Error;
+
+/// The request error (for `reqwest_middleware` with caching).
 #[cfg(feature = "cache_request")]
 pub(crate) type RequestError = reqwest_middleware::Error;
+
+/// The request response.
+pub(crate) type RequestResponse = Response;
 
 /// The wait for duration timeouts.
 #[cfg(feature = "chrome")]
@@ -1811,8 +1818,10 @@ pub async fn get_last_redirect(
 
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
 #[cfg(feature = "cookies")]
-pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
-    let mut headers = reqwest::header::HeaderMap::new();
+pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
+    use crate::client::header::{HeaderMap, HeaderName, HeaderValue};
+
+    let mut headers = HeaderMap::new();
 
     for cookie in res.cookies() {
         if let Ok(h) = HeaderValue::from_str(cookie.value()) {
@@ -1831,7 +1840,7 @@ pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
 
 #[cfg(not(feature = "cookies"))]
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
-pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
+pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
     None
 }
 
@@ -1840,7 +1849,7 @@ fn block_streaming(res: &Response, only_html: bool) -> bool {
     let mut block_streaming = false;
 
     if only_html {
-        if let Some(content_type) = res.headers().get(reqwest::header::CONTENT_TYPE) {
+        if let Some(content_type) = res.headers().get(crate::client::header::CONTENT_TYPE) {
             if let Ok(content_type_str) = content_type.to_str() {
                 if IGNORE_CONTENT_TYPES.contains(content_type_str) {
                     block_streaming = true;

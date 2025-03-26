@@ -1,17 +1,14 @@
 use crate::configuration::Configuration;
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::header::{HOST, REFERER};
-use reqwest::{
-    header::{HeaderMap, HeaderValue},
-    ClientBuilder,
-};
 
 /// Setup the default headers for the request.
 pub fn setup_default_headers(
-    client_builder: ClientBuilder,
+    client_builder: crate::client::ClientBuilder,
     configuration: &Configuration,
     header_map: HeaderMap,
     url: &Option<Box<url::Url>>,
-) -> ClientBuilder {
+) -> crate::client::ClientBuilder {
     let mut headers = match configuration.headers {
         Some(ref h) => *h.clone(),
         None => crate::configuration::SerializableHeaderMap::default(),

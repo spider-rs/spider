@@ -148,6 +148,8 @@ pub extern crate lazy_static;
 #[cfg(feature = "firewall")]
 pub extern crate spider_firewall;
 
+/// Client interface.
+pub mod client;
 /// Configuration structure for `Website`.
 pub mod configuration;
 /// Optional features to use.
@@ -163,6 +165,7 @@ pub mod website;
 
 pub use case_insensitive_string::compact_str;
 pub use case_insensitive_string::CaseInsensitiveString;
+pub use client::{Client, ClientBuilder};
 
 #[cfg(feature = "chrome")]
 pub use chromiumoxide;
@@ -186,20 +189,6 @@ pub mod black_list {
         blacklist_url.contains(link)
     }
 }
-
-/// The asynchronous Client to make requests with.
-#[cfg(not(feature = "cache_request"))]
-pub type Client = reqwest::Client;
-#[cfg(not(feature = "cache_request"))]
-/// The asynchronous Client Builder.
-pub type ClientBuilder = reqwest::ClientBuilder;
-
-/// The asynchronous Client to make requests with HTTP Cache.
-#[cfg(feature = "cache_request")]
-pub type Client = reqwest_middleware::ClientWithMiddleware;
-#[cfg(feature = "cache_request")]
-/// The asynchronous Client Builder.
-pub type ClientBuilder = reqwest_middleware::ClientBuilder;
 
 /// The selectors type. The values are held to make sure the relative domain can be crawled upon base redirects.
 pub type RelativeSelectors = (

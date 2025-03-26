@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.34.6"
+version = "2.35.5"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -83,6 +83,17 @@ h2 = "0.4"
 tower = { version = "0.5", features = ["limit"] }
 pin-project-lite = "0.2"
 sonic-rs = { version = "0.3", optional = true }
+rquest = { version = "5", optional = true, features = [    
+    "json",
+    "stream",
+    "socks",
+    "gzip",
+    "brotli",
+    "zstd",
+    "deflate",
+    "cookies"
+    ] }
+rquest-util = { version = "2", optional = true, features = ["emulation-serde"] }
 
 [dependencies.spider_chrome]
 version = "2"
@@ -231,6 +242,7 @@ string_interner_bucket_backend = ["dep:string-interner"]
 page_error_status_details = []
 simd = ["dep:sonic-rs"]
 firewall = ["dep:spider_firewall", "spider_chrome/firewall"]
+rquest = ["dep:rquest", "dep:rquest-util"]
 
 # Allows full concurrency.
 cowboy = []

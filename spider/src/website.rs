@@ -1,4 +1,5 @@
 use crate::black_list::contains;
+use crate::client::redirect::Policy;
 use crate::compact_str::CompactString;
 use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
@@ -16,13 +17,10 @@ use crate::utils::{
     crawl_duration_expired, emit_log, emit_log_shutdown, get_path_from_url, get_semaphore,
     networking_capable, prepare_url, setup_website_selectors, spawn_set, AllowedDomainTypes,
 };
-use crate::CaseInsensitiveString;
-use crate::Client;
-use crate::RelativeSelectors;
+use crate::{CaseInsensitiveString, Client, ClientBuilder, RelativeSelectors};
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
 use hashbrown::{HashMap, HashSet};
-use reqwest::redirect::Policy;
 use reqwest::StatusCode;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -1094,11 +1092,11 @@ impl Website {
 
     /// Setup strict a strict redirect policy for request. All redirects need to match the host.
     fn setup_strict_policy(&self) -> Policy {
+        use crate::client::redirect::Attempt;
         use crate::page::domain_name;
-        use reqwest::redirect::Attempt;
         use std::sync::atomic::AtomicU8;
 
-        let default_policy = reqwest::redirect::Policy::default();
+        let default_policy = Policy::default();
 
         match self.domain_parsed.as_deref().cloned() {
             Some(host_s) => {
@@ -1143,7 +1141,7 @@ impl Website {
                         }
                     }
                 };
-                reqwest::redirect::Policy::custom(custom_policy)
+                Policy::custom(custom_policy)
             }
             _ => default_policy,
         }
@@ -1152,9 +1150,7 @@ impl Website {
     /// Setup redirect policy for reqwest.
     fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
-            RedirectPolicy::Loose => {
-                reqwest::redirect::Policy::limited(*self.configuration.redirect_limit)
-            }
+            RedirectPolicy::Loose => Policy::limited(*self.configuration.redirect_limit),
             RedirectPolicy::Strict => self.setup_strict_policy(),
         }
     }
@@ -1175,9 +1171,44 @@ impl Website {
             || self.configuration.fingerprint
     }
 
-    /// Build the HTTP client.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
-    fn configure_http_client_builder(&self) -> crate::ClientBuilder {
+    #[cfg(all(not(feature = "rquest"), not(feature = "decentralized")))]
+    /// Base client configuration.
+    fn configure_base_client(&self) -> ClientBuilder {
+        let policy = self.setup_redirect_policy();
+        let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
+
+        let user_agent = match &self.configuration.user_agent {
+            Some(ua) => ua.as_str(),
+            _ => get_ua(self.only_chrome_agent()),
+        };
+
+        if cfg!(feature = "real_browser") {
+            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
+        }
+
+        let client = reqwest::Client::builder()
+            .user_agent(user_agent)
+            .redirect(policy)
+            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
+            .tcp_keepalive(Duration::from_secs(1));
+
+        let client = if self.configuration.http2_prior_knowledge {
+            client.http2_prior_knowledge()
+        } else {
+            client
+        };
+
+        crate::utils::header_utils::setup_default_headers(
+            client,
+            &self.configuration,
+            headers,
+            self.get_url_parsed(),
+        )
+    }
+
+    #[cfg(all(feature = "rquest", not(feature = "decentralized")))]
+    /// Base client configuration.
+    fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
         let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
 
@@ -1193,21 +1224,26 @@ impl Website {
         let client = Client::builder()
             .user_agent(user_agent)
             .redirect(policy)
-            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_secs(1));
 
-        let client = if self.configuration.http2_prior_knowledge {
-            client.http2_prior_knowledge()
+        let client = if let Some(emulation) = self.configuration.emulation {
+            client.emulation(emulation)
         } else {
             client
         };
 
-        let client = crate::utils::header_utils::setup_default_headers(
+        crate::utils::header_utils::setup_default_headers(
             client,
             &self.configuration,
             headers,
             self.get_url_parsed(),
-        );
+        )
+    }
+
+    /// Build the HTTP client.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    fn configure_http_client_builder(&self) -> ClientBuilder {
+        let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -1236,12 +1272,12 @@ impl Website {
                     // use HTTP instead as reqwest does not support the protocol on linux.
                     if replace_plain_socks && socks {
                         if let Ok(proxy) =
-                            reqwest::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                            crate::client::Proxy::all(&proxie.replacen("socks://", "http://", 1))
                         {
                             client = client.proxy(proxy);
                         }
                     } else {
-                        if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                        if let Ok(proxy) = crate::client::Proxy::all(proxie) {
                             client = client.proxy(proxy);
                         }
                     }
@@ -1270,40 +1306,8 @@ impl Website {
 
     /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
-    fn configure_http_client_builder(&self) -> crate::ClientBuilder {
-        use reqwest::header::HeaderMap;
-        use reqwest_middleware::ClientBuilder;
-
-        let mut headers = HeaderMap::new();
-
-        let policy = self.setup_redirect_policy();
-        let user_agent = match &self.configuration.user_agent {
-            Some(ua) => ua.as_str(),
-            _ => &get_ua(self.only_chrome_agent()),
-        };
-
-        if cfg!(feature = "real_browser") {
-            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
-        }
-
-        let client = reqwest::Client::builder()
-            .user_agent(user_agent)
-            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
-            .redirect(policy)
-            .tcp_keepalive(Duration::from_secs(1));
-
-        let client = if self.configuration.http2_prior_knowledge {
-            client.http2_prior_knowledge()
-        } else {
-            client
-        };
-
-        let client = crate::utils::header_utils::setup_default_headers(
-            client,
-            &self.configuration,
-            headers,
-            self.get_url_parsed(),
-        );
+    fn configure_http_client_builder(&self) -> reqwest_middleware::ClientBuilder {
+        let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
             Some(t) => client.timeout(**t),
@@ -1332,12 +1336,12 @@ impl Website {
                     // use HTTP instead as reqwest does not support the protocol on linux.
                     if replace_plain_socks && socks {
                         if let Ok(proxy) =
-                            reqwest::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                            crate::client::Proxy::all(&proxie.replacen("socks://", "http://", 1))
                         {
                             client = client.proxy(proxy);
                         }
                     } else {
-                        if let Ok(proxy) = reqwest::Proxy::all(proxie) {
+                        if let Ok(proxy) = crate::client::Proxy::all(proxie) {
                             client = client.proxy(proxy);
                         }
                     }
@@ -1362,7 +1366,9 @@ impl Website {
             }
             _ => client,
         };
-        let client = ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
+
+        let client =
+            reqwest_middleware::ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
 
         if self.configuration.cache {
             client.with(Cache(HttpCache {
@@ -1379,13 +1385,13 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), feature = "cookies"))]
     fn configure_http_client_cookies(
         &self,
-        client: reqwest::ClientBuilder,
-    ) -> reqwest::ClientBuilder {
+        client: crate::client::ClientBuilder,
+    ) -> crate::client::ClientBuilder {
         let client = client.cookie_store(true);
         if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
             match self.domain_parsed.clone() {
                 Some(p) => {
-                    let cookie_store = reqwest::cookie::Jar::default();
+                    let cookie_store = crate::client::cookie::Jar::default();
                     cookie_store.add_cookie_str(&self.configuration.cookie_str, &p);
                     client.cookie_provider(cookie_store.into())
                 }
@@ -1400,8 +1406,8 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
     fn configure_http_client_cookies(
         &self,
-        client: reqwest::ClientBuilder,
-    ) -> reqwest::ClientBuilder {
+        client: crate::client::ClientBuilder,
+    ) -> crate::client::ClientBuilder {
         client
     }
 
@@ -1476,7 +1482,7 @@ impl Website {
         }
 
         for worker in WORKERS.iter() {
-            if let Ok(worker) = reqwest::Proxy::all(worker) {
+            if let Ok(worker) = crate::client::Proxy::all(worker) {
                 client = client.proxy(worker);
             }
         }
@@ -1544,7 +1550,7 @@ impl Website {
         }
 
         for worker in WORKERS.iter() {
-            if let Ok(worker) = reqwest::Proxy::all(worker) {
+            if let Ok(worker) = crate::client::Proxy::all(worker) {
                 client = client.proxy(worker);
             }
         }
@@ -6018,6 +6024,13 @@ impl Website {
     /// Determine whether to collect all the resources found on pages.
     pub fn with_full_resources(&mut self, full_resources: bool) -> &mut Self {
         self.configuration.with_full_resources(full_resources);
+        self
+    }
+
+    /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
+    #[cfg(feature = "rquest")]
+    pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {
+        self.configuration.with_emulation(emulation);
         self
     }
 
