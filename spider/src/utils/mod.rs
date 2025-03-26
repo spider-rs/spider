@@ -45,18 +45,35 @@ use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
 
-use reqwest::{
-    header::{HeaderName, HeaderValue},
-    Response, StatusCode,
-};
+#[cfg(any(
+    feature = "rquest",
+    not(any(feature = "rquest", feature = "cache_request"))
+))]
+use reqwest::header::{HeaderName, HeaderValue};
+
+#[cfg(feature = "rquest")]
+use rquest::{Response, StatusCode};
+
+#[cfg(all(not(feature = "rquest"), not(feature = "cache_request")))]
+use reqwest::{Response, StatusCode};
+
+#[cfg(feature = "cache_request")]
+use reqwest::{Response, StatusCode};
 
 /// The request error.
-#[cfg(not(feature = "cache_request"))]
+#[cfg(all(not(feature = "cache_request"), not(feature = "rquest")))]
 pub(crate) type RequestError = reqwest::Error;
 
-/// The request error.
+/// The request error (for `rquest`).
+#[cfg(all(not(feature = "cache_request"), feature = "rquest"))]
+pub(crate) type RequestError = rquest::Error;
+
+/// The request error (for `reqwest_middleware` with caching).
 #[cfg(feature = "cache_request")]
 pub(crate) type RequestError = reqwest_middleware::Error;
+
+/// The request response.
+pub(crate) type RequestResponse = Response;
 
 /// The wait for duration timeouts.
 #[cfg(feature = "chrome")]
@@ -1811,8 +1828,8 @@ pub async fn get_last_redirect(
 
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
 #[cfg(feature = "cookies")]
-pub fn get_cookies(res: &Response) -> Option<reqwest::header::HeaderMap> {
-    let mut headers = reqwest::header::HeaderMap::new();
+pub fn get_cookies(res: &Response) -> Option<crate::client::request_client::header::HeaderMap> {
+    let mut headers = crate::client::request_client::header::HeaderMap::new();
 
     for cookie in res.cookies() {
         if let Ok(h) = HeaderValue::from_str(cookie.value()) {
