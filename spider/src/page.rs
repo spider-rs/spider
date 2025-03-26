@@ -669,7 +669,7 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
 #[cfg(not(feature = "decentralized"))]
 fn get_error_status_base(
     should_retry: &mut bool,
-    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
 ) -> Option<RequestError> {
     match error_for_status {
         Some(e) => match e {
@@ -700,7 +700,7 @@ fn get_error_status_base(
 /// Get the error status of the page.
 fn get_error_status(
     should_retry: &mut bool,
-    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
 ) -> Option<String> {
     get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
 }
@@ -709,7 +709,7 @@ fn get_error_status(
 /// Get the error status of the page.
 fn get_error_status(
     should_retry: &mut bool,
-    error_for_status: Option<Result<reqwest::Response, RequestError>>,
+    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
 ) -> Option<std::sync::Arc<reqwest::Error>> {
     get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
 }
