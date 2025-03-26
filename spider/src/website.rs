@@ -2960,7 +2960,7 @@ impl Website {
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     /// Initiates a single fetch with chrome without closing the browser for one page with the ability to send it across threads for subscriptions.
-    pub async fn fetch_chrome_peristed(
+    pub async fn fetch_chrome_persisted(
         &self,
         url: Option<&str>,
         browser: &crate::features::chrome::BrowserController,
@@ -3464,13 +3464,10 @@ impl Website {
                         let mut selectors = self.setup_selectors();
                         self.status = CrawlStatus::Active;
 
-                        let base_links = self
-                            .crawl_establish(&client, &mut selectors, false, &new_page)
-                            .await;
-
-                        drop(new_page);
-
                         if self.single_page() {
+                            self.crawl_establish(&client, &mut selectors, false, &new_page)
+                                .await;
+                            drop(new_page);
                             self.subscription_guard().await;
                             b.dispose();
                         } else {
@@ -3478,6 +3475,12 @@ impl Website {
                             let (mut interval, throttle) = self.setup_crawl();
 
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
+                            let base_links = self
+                                .crawl_establish(&client, &mut selectors, false, &new_page)
+                                .await;
+
+                            drop(new_page);
 
                             let mut links: HashSet<CaseInsensitiveString> =
                                 self.drain_extra_links().collect();
