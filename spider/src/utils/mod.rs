@@ -1502,7 +1502,7 @@ pub async fn fetch_page_html_chrome_base(
             };
 
             let mut page_response =
-                set_page_response(false, res, &mut chrome_http_req_res, final_url);
+                set_page_response(!res.is_empty(), res, &mut chrome_http_req_res, final_url);
 
             if !block_navigation {
                 let _ = tokio::time::timeout(
@@ -1590,6 +1590,10 @@ pub async fn fetch_page_html_chrome_base(
 
     if content.is_some() {
         page_response.content = content.map(|f| f.into());
+    }
+
+    if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
+        page_response.status_code = StatusCode::OK;
     }
 
     // run initial handling hidden anchors
