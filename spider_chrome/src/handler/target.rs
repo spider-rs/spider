@@ -307,7 +307,9 @@ impl Target {
             CdpEvent::PageFrameStartedLoading(ev) => {
                 self.frame_manager.on_frame_started_loading(ev);
             }
-
+            CdpEvent::PageFrameStoppedLoading(ev) => {
+                self.frame_manager.on_frame_stopped_loading(ev);
+            }
             // `Target` events
             CdpEvent::TargetAttachedToTarget(ev) => {
                 if ev.waiting_for_debugger {

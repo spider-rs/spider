@@ -326,8 +326,6 @@ impl NetworkManager {
                         if url.len() > base_path_index {
                             let new_url: &str = &url[base_path_index..];
 
-                            ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(new_url);
-
                             // ignore assets we do not need for frameworks
                             if !ignore_script
                                 && intercept_manager == NetworkInterceptManager::Unknown
@@ -360,11 +358,8 @@ impl NetworkManager {
         }
 
         // fallback for file ending in analytics.js
-        if !ignore_script {
-            ignore_script = url.ends_with("analytics.js")
-                || url.ends_with("ads.js")
-                || url.ends_with("tracking.js")
-                || url.ends_with("track.js");
+        if !ignore_script && block_analytics {
+            ignore_script = URL_IGNORE_TRIE_PATHS.contains_prefix(url);
         }
 
         ignore_script

@@ -1274,6 +1274,8 @@ pub async fn fetch_page_html_chrome_base(
         (t1.0, t1.1, res_map, req_map)
     });
 
+    let mut block_navigation = false;
+
     let page_navigation = async {
         if !page_set {
             // used for smart mode re-rendering direct assigning html
@@ -1290,12 +1292,26 @@ pub async fn fetch_page_html_chrome_base(
                         )
                         .await
                     {
-                        log::info!("{:?}", e);
+                        log::info!(
+                            "Set Content Error({:?}) - {:?}",
+                            e,
+                            &url_target.unwrap_or(source)
+                        );
+                        if let chromiumoxide::error::CdpError::Timeout = e {
+                            block_navigation = true;
+                        }
                     }
                 }
             } else {
                 if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
-                    log::info!("{:?}", e);
+                    log::info!(
+                        "Navigation Error({:?}) - {:?}",
+                        e,
+                        &url_target.unwrap_or(source)
+                    );
+                    if let chromiumoxide::error::CdpError::Timeout = e {
+                        block_navigation = true;
+                    }
                     return Err(e);
                 };
             }
@@ -1308,35 +1324,28 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut request_cancelled = false;
 
-    let request_timeout = tokio::select! {
+    tokio::select! {
         v = tokio::time::timeout(base_timeout, page_navigation) => {
-            v.map_err(|_| CdpError::Timeout)
+            if v.is_err() {
+                request_cancelled = true;
+            }
         }
         _ = rx => {
             request_cancelled = true;
-            Ok(Ok(()))
         }
     };
 
     base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
-    // check if timeout is elasped.
-    let timeout_elasped = if let Err(elasped) = request_timeout {
-        Some(elasped)
-    } else {
-        None
-    };
-
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !request_cancelled {
-        let last_redirect =
-            tokio::time::timeout(base_timeout.max(Duration::from_secs(15)), async {
-                match page.wait_for_navigation_response().await {
-                    Ok(u) => get_last_redirect(&source, &u, &page).await,
-                    _ => None,
-                }
-            })
-            .await;
+    let final_url = if wait_for_navigation && !request_cancelled && !block_navigation {
+        let last_redirect = tokio::time::timeout(base_timeout.max(Duration::from_secs(1)), async {
+            match page.wait_for_navigation_response().await {
+                Ok(u) => get_last_redirect(&source, &u, &page).await,
+                _ => None,
+            }
+        })
+        .await;
         match last_redirect {
             Ok(last) => last,
             _ => None,
@@ -1351,8 +1360,11 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
+    base_timeout = sub_duration(base_timeout, start_time.elapsed());
+
     let run_page_response = async move {
-        let mut page_response = if timeout_elasped.is_none()
+        let mut page_response = if !base_timeout.is_zero()
+            && !block_navigation
             && chrome_http_req_res.status_code.is_success()
             && !request_cancelled
         {
@@ -1411,10 +1423,11 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            let mut res: Box<Vec<u8>> = match page.content_bytes().await {
-                Ok(b) => b.into(),
-                _ => Default::default(),
-            };
+            let mut res: Box<Vec<u8>> = page
+                .outer_html_bytes()
+                .await
+                .map(Box::new)
+                .unwrap_or_default();
 
             if cfg!(feature = "real_browser") {
                 // we can skip this check after a set bytes
@@ -1430,15 +1443,15 @@ pub async fn fetch_page_html_chrome_base(
             let ok = res.len() > 0;
 
             if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
-            chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
-        }
+                chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
+            }
 
             let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
             base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
             let _ = tokio::time::timeout(
-                base_timeout.max(tokio::time::Duration::from_secs(5)),
+                base_timeout.max(tokio::time::Duration::from_secs(1)),
                 set_page_response_cookies(&mut page_response, &page),
             )
             .await;
@@ -1480,22 +1493,31 @@ pub async fn fetch_page_html_chrome_base(
 
             page_response
         } else {
-            let res = match page.content_bytes().await {
-                Ok(b) => Box::new(b),
-                _ => Default::default(),
+            let res = if !block_navigation {
+                page.outer_html_bytes()
+                    .await
+                    .map(Box::new)
+                    .unwrap_or_default()
+            } else {
+                Default::default()
             };
+
             let mut page_response =
                 set_page_response(false, res, &mut chrome_http_req_res, final_url);
-            let _ = tokio::time::timeout(
-                base_timeout.max(tokio::time::Duration::from_secs(2)),
-                set_page_response_cookies(&mut page_response, &page),
-            )
-            .await;
+
+            if !block_navigation {
+                let _ = tokio::time::timeout(
+                    base_timeout.max(tokio::time::Duration::from_secs(1)),
+                    set_page_response_cookies(&mut page_response, &page),
+                )
+                .await;
+            }
+
             set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
             page_response.status_code = chrome_http_req_res.status_code;
             page_response.waf_check = chrome_http_req_res.waf_check;
 
-            if let Some(_elasped) = timeout_elasped {
+            if base_timeout.is_zero() {
                 page_response.status_code = StatusCode::REQUEST_TIMEOUT;
             }
 
