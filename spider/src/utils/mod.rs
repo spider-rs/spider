@@ -1362,12 +1362,14 @@ pub async fn fetch_page_html_chrome_base(
 
     base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
+    let run_events = !base_timeout.is_zero()
+        && !block_navigation
+        && !request_cancelled
+        && (chrome_http_req_res.status_code.is_success()
+            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR);
+
     let run_page_response = async move {
-        let mut page_response = if !base_timeout.is_zero()
-            && !block_navigation
-            && chrome_http_req_res.status_code.is_success()
-            && !request_cancelled
-        {
+        let mut page_response = if run_events {
             if chrome_http_req_res.waf_check {
                 base_timeout = sub_duration(base_timeout, start_time.elapsed());
                 if let Err(elasped) = tokio::time::timeout(
