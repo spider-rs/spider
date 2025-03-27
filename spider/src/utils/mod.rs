@@ -1325,7 +1325,7 @@ pub async fn fetch_page_html_chrome_base(
     let mut request_cancelled = false;
 
     tokio::select! {
-        v = tokio::time::timeout(base_timeout, page_navigation) => {
+        v = tokio::time::timeout(base_timeout + Duration::from_millis(50), page_navigation) => {
             if v.is_err() {
                 request_cancelled = true;
             }
