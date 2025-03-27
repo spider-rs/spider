@@ -800,10 +800,6 @@ pub fn build(_: &str, res: PageResponse) -> Page {
             },
             _ => None,
         },
-        #[cfg(feature = "chrome")]
-        response_map: res.response_map,
-        #[cfg(feature = "chrome")]
-        request_map: res.request_map,
         ..Default::default()
     }
 }
@@ -1588,13 +1584,13 @@ impl Page {
     }
 
     /// Get the response events mapped.
-    #[cfg(feature = "chrome")]
+    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     pub fn get_responses(&self) -> &Option<hashbrown::HashMap<String, f64>> {
         &self.response_map
     }
 
     /// Get the response events mapped.
-    #[cfg(feature = "chrome")]
+    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     pub fn get_request(&self) -> &Option<hashbrown::HashMap<String, f64>> {
         &self.request_map
     }
