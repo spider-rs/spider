@@ -1365,8 +1365,7 @@ pub async fn fetch_page_html_chrome_base(
     let run_events = !base_timeout.is_zero()
         && !block_navigation
         && !request_cancelled
-        && (chrome_http_req_res.status_code.is_success()
-            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR);
+        && !chrome_http_req_res.status_code.is_server_error();
 
     let run_page_response = async move {
         let mut page_response = if run_events {

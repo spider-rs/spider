@@ -111,6 +111,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
+ "getrandom 0.2.15",
  "once_cell",
  "version_check",
  "zerocopy 0.7.35",
@@ -5855,10 +5856,11 @@ dependencies = [
 
 [[package]]
 name = "sonic-rs"
-version = "0.3.17"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0275f9f2f07d47556fe60c2759da8bc4be6083b047b491b2d476aa0bfa558eb1"
+checksum = "4f349e0c89e580088ff03d98beed21ea0d1f4deeaba061976d5405a45ab16cf4"
 dependencies = [
+ "ahash",
  "bumpalo",
  "bytes",
  "cfg-if",
@@ -5884,7 +5886,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5951,7 +5953,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6044,7 +6046,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "clap",
  "env_logger",
@@ -6103,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6126,7 +6128,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -6143,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.35.12"
+version = "2.35.13"
 dependencies = [
  "env_logger",
  "lazy_static",
