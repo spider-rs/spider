@@ -350,12 +350,11 @@ pub async fn wait_for_dom(
     timeout: Option<core::time::Duration>,
     selector: &str,
 ) {
+    let max_duration = timeout.unwrap_or_else(|| core::time::Duration::from_millis(500));
+    let mut deadline = tokio::time::Instant::now() + max_duration;
+
     let script = crate::features::chrome_common::generate_wait_for_dom_js_code_with_selector_base(
-        if let Some(dur) = timeout {
-            dur.as_millis() as u32
-        } else {
-            500
-        },
+        max_duration.as_millis() as u32,
         selector,
     );
 
@@ -363,17 +362,20 @@ pub async fn wait_for_dom(
         let mut index = 0;
 
         loop {
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+
             let current_timeout = WAIT_TIMEOUTS[index];
             let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
 
             tokio::select! {
                 _ = sleep => (),
-                v = page
-                .evaluate(
-                    script.clone(),
-                ) => {
-                    if v.is_ok() {
-                        break
+                result = page.evaluate(script.clone()) => {
+                    if let Ok(vv) = &result {
+                        if vv.value().is_some() {
+                            deadline = tokio::time::Instant::now() + max_duration;
+                        }
                     }
                 }
             }
@@ -382,10 +384,7 @@ pub async fn wait_for_dom(
         }
     };
 
-    match timeout {
-        Some(timeout) => if let Err(_) = tokio::time::timeout(timeout, wait_until).await {},
-        _ => wait_until.await,
-    }
+    wait_until.await;
 }
 
 /// Get the output path of a screenshot and create any parent folders if needed.
@@ -1391,6 +1390,8 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
+            base_timeout = sub_duration(base_timeout, start_time.elapsed());
+
             if execution_scripts.is_some() || automation_scripts.is_some() {
                 let target_url = if final_url.is_some() {
                     match final_url.as_ref() {
@@ -1402,8 +1403,6 @@ pub async fn fetch_page_html_chrome_base(
                 } else {
                     source.to_string()
                 };
-
-                base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
                     tokio::join!(
@@ -1434,11 +1433,7 @@ pub async fn fetch_page_html_chrome_base(
             if cfg!(feature = "real_browser") {
                 // we can skip this check after a set bytes
                 if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
-                    let _ = tokio::time::timeout(
-                        tokio::time::Duration::from_secs(10),
-                        cf_handle(&mut res, &page),
-                    )
-                    .await;
+                    let _ = tokio::time::timeout(base_timeout, cf_handle(&mut res, &page)).await;
                 }
             };
 
@@ -1460,19 +1455,21 @@ pub async fn fetch_page_html_chrome_base(
 
             set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
 
-            if openai_config.is_some() {
-                run_openai_request(
-                    match url_target {
-                        Some(ref ut) => ut,
-                        _ => source,
-                    },
-                    page,
-                    wait_for,
-                    openai_config,
-                    &mut page_response,
-                    ok,
-                )
-                .await;
+            if openai_config.is_some() && !base_timeout.is_zero() {
+                let _ = tokio::time::timeout(
+                    base_timeout,
+                    run_openai_request(
+                        match url_target {
+                            Some(ref ut) => ut,
+                            _ => source,
+                        },
+                        page,
+                        wait_for,
+                        openai_config,
+                        &mut page_response,
+                        ok,
+                    ),
+                );
             }
 
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
