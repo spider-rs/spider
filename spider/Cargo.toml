@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.35.17"
+version = "2.35.18"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -140,7 +140,7 @@ reqwest = { version = "0.12", features = [
 ] }
 
 [features]
-default = ["basic", "io_uring", "chrome"]
+default = ["basic", "io_uring"]
 basic = [
     "sync",
     "reqwest_native_tls_native_roots",
