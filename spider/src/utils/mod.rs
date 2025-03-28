@@ -1273,7 +1273,7 @@ pub async fn fetch_page_html_chrome_base(
         (t1.0, t1.1, res_map, req_map)
     });
 
-    let mut block_navigation = false;
+    let mut block_bytes = false;
 
     let page_navigation = async {
         if !page_set {
@@ -1297,7 +1297,7 @@ pub async fn fetch_page_html_chrome_base(
                             &url_target.unwrap_or(source)
                         );
                         if let chromiumoxide::error::CdpError::Timeout = e {
-                            block_navigation = true;
+                            block_bytes = true;
                         }
                     }
                 }
@@ -1309,7 +1309,7 @@ pub async fn fetch_page_html_chrome_base(
                         &url_target.unwrap_or(source)
                     );
                     if let chromiumoxide::error::CdpError::Timeout = e {
-                        block_navigation = true;
+                        block_bytes = true;
                     }
                     return Err(e);
                 };
@@ -1337,8 +1337,8 @@ pub async fn fetch_page_html_chrome_base(
     base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
-    let final_url = if wait_for_navigation && !request_cancelled && !block_navigation {
-        let last_redirect = tokio::time::timeout(base_timeout.max(Duration::from_secs(1)), async {
+    let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
+        let last_redirect = tokio::time::timeout(base_timeout, async {
             match page.wait_for_navigation_response().await {
                 Ok(u) => get_last_redirect(&source, &u, &page).await,
                 _ => None,
@@ -1362,10 +1362,13 @@ pub async fn fetch_page_html_chrome_base(
     base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
     let run_events = !base_timeout.is_zero()
-        && !block_navigation
+        && !block_bytes
         && !request_cancelled
         && (!chrome_http_req_res.status_code.is_server_error()
+            && !chrome_http_req_res.status_code.is_client_error()
             || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR);
+
+    block_bytes = chrome_http_req_res.status_code == StatusCode::REQUEST_TIMEOUT;
 
     let run_page_response = async move {
         let mut page_response = if run_events {
@@ -1424,11 +1427,15 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            let mut res: Box<Vec<u8>> = page
-                .outer_html_bytes()
-                .await
-                .map(Box::new)
-                .unwrap_or_default();
+            let results = tokio::time::timeout(
+                base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
+                page.outer_html_bytes(),
+            );
+
+            let mut res: Box<Vec<u8>> = match results.await {
+                Ok(v) => v.map(Box::new).unwrap_or_default(),
+                _ => Default::default(),
+            };
 
             if cfg!(feature = "real_browser") {
                 // we can skip this check after a set bytes
@@ -1437,7 +1444,7 @@ pub async fn fetch_page_html_chrome_base(
                 }
             };
 
-            let ok = res.len() > 0;
+            let ok = !res.is_empty();
 
             if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
                 chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
@@ -1448,7 +1455,7 @@ pub async fn fetch_page_html_chrome_base(
             base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
             let _ = tokio::time::timeout(
-                base_timeout.max(tokio::time::Duration::from_secs(1)),
+                base_timeout,
                 set_page_response_cookies(&mut page_response, &page),
             )
             .await;
@@ -1484,7 +1491,7 @@ pub async fn fetch_page_html_chrome_base(
 
             if !page_set {
                 let _ = tokio::time::timeout(
-                    base_timeout.max(Duration::from_secs(1)),
+                    base_timeout,
                     cache_chrome_response(&source, &page_response, chrome_http_req_res),
                 )
                 .await;
@@ -1492,11 +1499,16 @@ pub async fn fetch_page_html_chrome_base(
 
             page_response
         } else {
-            let res = if !block_navigation {
-                page.outer_html_bytes()
-                    .await
-                    .map(Box::new)
-                    .unwrap_or_default()
+            let res = if !block_bytes {
+                let results = tokio::time::timeout(
+                    base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
+                    page.outer_html_bytes(),
+                );
+
+                match results.await {
+                    Ok(v) => v.map(Box::new).unwrap_or_default(),
+                    _ => Default::default(),
+                }
             } else {
                 Default::default()
             };
@@ -1504,9 +1516,9 @@ pub async fn fetch_page_html_chrome_base(
             let mut page_response =
                 set_page_response(!res.is_empty(), res, &mut chrome_http_req_res, final_url);
 
-            if !block_navigation {
+            if !block_bytes {
                 let _ = tokio::time::timeout(
-                    base_timeout.max(tokio::time::Duration::from_secs(1)),
+                    base_timeout,
                     set_page_response_cookies(&mut page_response, &page),
                 )
                 .await;
@@ -1567,7 +1579,7 @@ pub async fn fetch_page_html_chrome_base(
                     let mut page_response = PageResponse::default();
 
                     let _ = tokio::time::timeout(
-                        base_timeout.max(tokio::time::Duration::from_secs(2)),
+                        base_timeout,
                         set_page_response_cookies(&mut page_response, &page),
                     )
                     .await;
