@@ -41,6 +41,63 @@ pub fn setup_default_headers(
     client_builder.default_headers(headers.0)
 }
 
+lazy_static::lazy_static! {
+    /// The brand version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
+    static ref NOT_A_BRAND_VERSION: String = {
+        std::env::var("NOT_A_BRAND_VERSION").unwrap_or_else(|_| "24".to_string())
+    };
+}
+
+fn parse_user_agent_to_ch_ua(ua: &str) -> String {
+    let mut parts = Vec::with_capacity(3);
+
+    if ua.contains("Chrome/") {
+        if let Some(version) = ua
+            .split("Chrome/")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+        {
+            if let Some(major_version) = version.split('.').next() {
+                parts.push(format!(r#""Chromium";v="{}""#, major_version));
+                parts.push(format!(r#""Not:A-Brand";v="{}""#, *NOT_A_BRAND_VERSION));
+                parts.push(format!(r#""Google Chrome";v="{}""#, major_version));
+            }
+        }
+    }
+
+    parts.join(", ")
+}
+
+#[cfg(target_os = "macos")]
+/// sec ch user-agent platform
+fn get_sec_ch_ua_platform() -> &'static str {
+    "\"macOS\""
+}
+
+#[cfg(target_os = "windows")]
+/// sec ch user-agent platform
+fn get_sec_ch_ua_platform() -> &'static str {
+    "\"Windows\""
+}
+
+#[cfg(target_os = "linux")]
+/// sec ch user-agent platform
+fn get_sec_ch_ua_platform() -> &'static str {
+    "\"Linux\""
+}
+
+#[cfg(target_os = "android")]
+/// sec ch user-agent platform
+fn get_sec_ch_ua_platform() -> &'static str {
+    "\"Android\""
+}
+
+#[cfg(target_os = "ios")]
+/// sec ch user-agent platform
+fn get_sec_ch_ua_platform() -> &'static str {
+    "\"iOS\""
+}
+
 /// Build the headers to use to act like a browser
 pub fn get_mimic_headers(user_agent: &str) -> reqwest::header::HeaderMap {
     use reqwest::header::{ACCEPT, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
@@ -49,8 +106,20 @@ pub fn get_mimic_headers(user_agent: &str) -> reqwest::header::HeaderMap {
 
     if user_agent.contains("Chrome/") {
         headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
+
+        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent)) {
+            headers.insert("Sec-Ch-Ua", ch);
+        }
+
+        headers.insert("Sec-Ch-Ua-Mobile", HeaderValue::from_static("?0"));
         headers.insert("Sec-Fetch-Site", HeaderValue::from_static("none"));
         headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
+
+        headers.insert(
+            "Sec-CH-UA-Platform",
+            HeaderValue::from_static(get_sec_ch_ua_platform()),
+        );
+
         headers.insert("Sec-Fetch-User", HeaderValue::from_static("?1"));
         headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
@@ -87,7 +156,7 @@ pub fn get_mimic_headers(user_agent: &str) -> reqwest::header::HeaderMap {
 
 /// convert the headermap to hashmap
 pub fn header_map_to_hash_map(header_map: &HeaderMap) -> std::collections::HashMap<String, String> {
-    let mut hash_map = std::collections::HashMap::new();
+    let mut hash_map = std::collections::HashMap::with_capacity(header_map.len());
 
     for (key, value) in header_map.iter() {
         let key_string = key.as_str().to_string();

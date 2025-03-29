@@ -242,14 +242,43 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
         extra_headers: match config.headers {
             Some(ref headers) => {
-                let hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
+                let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
+
+                if cfg!(feature = "real_browser") {
+                    if let Some(user_agent) = &config.user_agent {
+                        let header_map = crate::utils::header_utils::get_mimic_headers(user_agent);
+                        let header_map =
+                            crate::utils::header_utils::header_map_to_hash_map(&header_map);
+
+                        for (key, value) in header_map {
+                            hm.entry(key).or_insert(value);
+                        }
+                    }
+                }
+
                 if hm.is_empty() {
                     None
                 } else {
                     Some(hm)
                 }
             }
-            _ => None,
+            _ => {
+                if cfg!(feature = "real_browser") {
+                    let mut headers = std::collections::HashMap::new();
+
+                    if let Some(user_agent) = &config.user_agent {
+                        let header_map = crate::utils::header_utils::get_mimic_headers(user_agent);
+                        let header_map =
+                            crate::utils::header_utils::header_map_to_hash_map(&header_map);
+
+                        headers.extend(header_map);
+                    }
+
+                    Some(headers)
+                } else {
+                    None
+                }
+            }
         },
         intercept_manager: config.chrome_intercept.intercept_manager,
         only_html: config.only_html && !config.full_resources,
