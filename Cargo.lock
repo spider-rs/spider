@@ -1606,9 +1606,9 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.20.10"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f63b86c8a8826a49b8c21f08a2d07338eec8d900540f8630dc76284be802989"
+checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -1616,9 +1616,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.20.10"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95133861a8032aaea082871032f5815eb9e98cef03fa916ab4500513994df9e5"
+checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
 dependencies = [
  "fnv",
  "ident_case",
@@ -1630,9 +1630,9 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.20.10"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
+checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core",
  "quote",
@@ -1942,9 +1942,9 @@ dependencies = [
 
 [[package]]
 name = "event-listener-strategy"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c3e4e0dd3673c1139bf041f3008816d9cf2946bbfac2945c09e523b8d7b05b2"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener 5.4.0",
  "pin-project-lite",
@@ -2855,9 +2855,9 @@ dependencies = [
 
 [[package]]
 name = "http2"
-version = "0.4.20"
+version = "0.4.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74160dc6fafa763fbd1891e1de341aa51469bfa3dec0c49497b1111cd44af1e6"
+checksum = "a6e23815f8ec982e1452e1d0fda921ec20a9187fb610ad003c90cc5abd65b2c4"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -4031,9 +4031,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.1"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75b0bedcc4fe52caa0e03d9f1151a323e4aa5e2d78ba3580400cd3c9e2bc4bc"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oorandom"
@@ -4591,9 +4591,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.96"
+version = "2.1.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8cf97e71c0401f4efde4be61e968330d3694ed34475ed2f664be9b2a3e5430a"
+checksum = "1496f247a7781d739a03e54e2d4829931d44c9733c96b971e07f2d24cfb59221"
 dependencies = [
  "psl-types",
 ]
@@ -5886,7 +5886,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5953,7 +5953,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6046,7 +6046,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -6105,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6128,7 +6128,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -6145,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.35.19"
+version = "2.36.0"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -6480,9 +6480,9 @@ dependencies = [
 
 [[package]]
 name = "string_cache"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "938d512196766101d333398efde81bc1f37b00cb42c2f8350e5df639f040bbbe"
+checksum = "bf776ba3fa74f83bf4b63c3dcbbf82173db2632ed8452cb2d891d33f459de70f"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot",

@@ -1323,8 +1323,42 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut request_cancelled = false;
 
+    let page_navigate = async {
+        if cfg!(feature = "real_browser") {
+            let notify = tokio::sync::Notify::new();
+
+            let mouse_loop = async {
+                let mut index = 0;
+
+                loop {
+                    tokio::select! {
+                        _ = notify.notified() => {
+                            break;
+                        }
+                        _ = perform_smart_mouse_movement(&page, &viewport) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(WAIT_TIMEOUTS[index])).await;
+                        }
+                    }
+
+                    index = (index + 1) % WAIT_TIMEOUTS.len();
+                }
+            };
+
+            let navigation_loop = async {
+                let result = page_navigation.await;
+                notify.notify_waiters();
+                result
+            };
+
+            let (result, _) = tokio::join!(navigation_loop, mouse_loop);
+            result
+        } else {
+            page_navigation.await
+        }
+    };
+
     tokio::select! {
-        v = tokio::time::timeout(base_timeout + Duration::from_millis(50), page_navigation) => {
+        v = tokio::time::timeout(base_timeout + Duration::from_millis(50), page_navigate) => {
             if v.is_err() {
                 request_cancelled = true;
             }
@@ -1366,7 +1400,9 @@ pub async fn fetch_page_html_chrome_base(
         && !request_cancelled
         && (!chrome_http_req_res.status_code.is_server_error()
             && !chrome_http_req_res.status_code.is_client_error()
-            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR);
+            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
+            || chrome_http_req_res.status_code.is_redirection()
+            || chrome_http_req_res.status_code.is_success());
 
     block_bytes = chrome_http_req_res.status_code == StatusCode::REQUEST_TIMEOUT;
 
