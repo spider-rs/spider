@@ -116,15 +116,7 @@ pub struct SelectorConfiguration {
 static HTML_TAGS: phf::Set<&'static [u8]> = phf_set! {
     b"<!doctype html",
     b"<html",
-    b"<head",
-    b"<body",
-    b"<title",
-    b"<div",
-    b"<span",
-    b"<meta",
-    b"<link",
-    b"<section",
-    b"<main",
+    b"<document",
 };
 
 /// valid file extensions that will render html from a program
