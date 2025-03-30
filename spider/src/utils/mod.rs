@@ -1090,6 +1090,9 @@ pub async fn fetch_page_html_chrome_base(
         _ => MAX_PAGE_TIMEOUT,
     };
 
+    // track the initial base without modifying.
+    let base_timeout_measurement = base_timeout;
+
     let asset = is_asset_url(url_target.unwrap_or(source));
 
     let (tx1, rx1) = if asset {
@@ -1368,7 +1371,7 @@ pub async fn fetch_page_html_chrome_base(
         }
     };
 
-    base_timeout = sub_duration(base_timeout, start_time.elapsed());
+    base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
@@ -1379,6 +1382,7 @@ pub async fn fetch_page_html_chrome_base(
             }
         })
         .await;
+        base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
         match last_redirect {
             Ok(last) => last,
             _ => None,
@@ -1392,8 +1396,6 @@ pub async fn fetch_page_html_chrome_base(
     } else {
         None
     };
-
-    base_timeout = sub_duration(base_timeout, start_time.elapsed());
 
     let run_events = !base_timeout.is_zero()
         && !block_bytes
@@ -1409,7 +1411,7 @@ pub async fn fetch_page_html_chrome_base(
     let run_page_response = async move {
         let mut page_response = if run_events {
             if chrome_http_req_res.waf_check {
-                base_timeout = sub_duration(base_timeout, start_time.elapsed());
+                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
                 if let Err(elasped) = tokio::time::timeout(
                     base_timeout,
                     perform_smart_mouse_movement(&page, &viewport),
@@ -1421,7 +1423,7 @@ pub async fn fetch_page_html_chrome_base(
             }
 
             if wait_for.is_some() {
-                base_timeout = sub_duration(base_timeout, start_time.elapsed());
+                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
                 if let Err(elasped) =
                     tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
                 {
@@ -1429,7 +1431,7 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            base_timeout = sub_duration(base_timeout, start_time.elapsed());
+            base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             if execution_scripts.is_some() || automation_scripts.is_some() {
                 let target_url = if final_url.is_some() {
@@ -1488,7 +1490,7 @@ pub async fn fetch_page_html_chrome_base(
 
             let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
 
-            base_timeout = sub_duration(base_timeout, start_time.elapsed());
+            base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             let _ = tokio::time::timeout(
                 base_timeout,
