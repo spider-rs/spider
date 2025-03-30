@@ -1564,7 +1564,7 @@ pub async fn fetch_page_html_chrome_base(
             page_response.status_code = chrome_http_req_res.status_code;
             page_response.waf_check = chrome_http_req_res.waf_check;
 
-            if base_timeout.is_zero() {
+            if base_timeout.is_zero() && page_response.content.is_none() {
                 page_response.status_code = StatusCode::REQUEST_TIMEOUT;
             }
 
