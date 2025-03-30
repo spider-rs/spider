@@ -99,13 +99,17 @@ fn get_sec_ch_ua_platform() -> &'static str {
 }
 
 /// Build the headers to use to act like a browser
-pub fn get_mimic_headers(user_agent: &str) -> reqwest::header::HeaderMap {
+pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::header::HeaderMap {
     use reqwest::header::{ACCEPT, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
 
     let mut headers = HeaderMap::new();
 
     if user_agent.contains("Chrome/") {
         headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
+
+        if !chrome_entry {
+            headers.insert("Accept-Language", HeaderValue::from_static("*"));
+        }
 
         if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent)) {
             headers.insert("Sec-Ch-Ua", ch);

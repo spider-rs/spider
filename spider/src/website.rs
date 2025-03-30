@@ -1183,7 +1183,9 @@ impl Website {
         };
 
         if cfg!(feature = "real_browser") {
-            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
+            headers.extend(crate::utils::header_utils::get_mimic_headers(
+                user_agent, false,
+            ));
         }
 
         let client = reqwest::Client::builder()
@@ -1218,7 +1220,9 @@ impl Website {
         };
 
         if cfg!(feature = "real_browser") {
-            headers.extend(crate::utils::header_utils::get_mimic_headers(user_agent));
+            headers.extend(crate::utils::header_utils::get_mimic_headers(
+                user_agent, false,
+            ));
         }
 
         let client = Client::builder()
