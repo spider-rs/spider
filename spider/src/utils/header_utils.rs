@@ -14,7 +14,7 @@ pub fn setup_default_headers(
         None => crate::configuration::SerializableHeaderMap::default(),
     };
 
-    if !headers.contains_key(REFERER) {
+    if !headers.contains_key(REFERER) && cfg!(feature = "real_browser") {
         if let Ok(ref_value) =
             HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
         {
@@ -116,16 +116,15 @@ pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::heade
         }
 
         headers.insert("Sec-Ch-Ua-Mobile", HeaderValue::from_static("?0"));
-        headers.insert("Sec-Fetch-Site", HeaderValue::from_static("none"));
-        headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
-
         headers.insert(
-            "Sec-CH-UA-Platform",
+            "Sec-Ch-Ua-Platform",
             HeaderValue::from_static(get_sec_ch_ua_platform()),
         );
-
-        headers.insert("Sec-Fetch-User", HeaderValue::from_static("?1"));
         headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
+        headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
+        headers.insert("Sec-Fetch-Site", HeaderValue::from_static("none"));
+        headers.insert("Sec-Fetch-User", HeaderValue::from_static("?1"));
+
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     } else if user_agent.contains("Firefox/") {
         headers.insert(
