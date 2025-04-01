@@ -297,8 +297,8 @@ pub struct Website {
 }
 
 impl Website {
-    /// Initialize Website object with a start link to crawl.
-    pub fn new(url: &str) -> Self {
+    /// Initialize the Website with a starting link to crawl and check the firewall base.
+    fn _new(url: &str, check_firewall: bool) -> Self {
         let url = url.trim();
         let url: Box<CaseInsensitiveString> = if networking_capable(url) {
             CaseInsensitiveString::new(&url).into()
@@ -310,7 +310,7 @@ impl Website {
         let mut status = CrawlStatus::Start;
 
         if let Some(ref u) = domain_parsed {
-            if crate::utils::abs::block_website(&u) {
+            if check_firewall && crate::utils::abs::block_website(&u) {
                 status = CrawlStatus::FirewallBlocked;
             }
         }
@@ -322,6 +322,16 @@ impl Website {
             url,
             ..Default::default()
         }
+    }
+
+    /// Initialize the Website with a starting link to crawl.
+    pub fn new(url: &str) -> Self {
+        Website::_new(url, true)
+    }
+
+    /// Initialize the Website with a starting link to crawl and check the firewall.
+    pub fn new_with_firewall(url: &str, check_firewall: bool) -> Self {
+        Website::_new(url, check_firewall)
     }
 
     /// Set the url of the website to re-use configuration and data.
