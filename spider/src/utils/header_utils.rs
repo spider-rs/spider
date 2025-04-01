@@ -224,7 +224,6 @@ pub fn extend_headers(
 ) {
 }
 
-#[cfg(feature = "real_browser")]
 /// Headers has ref
 pub fn has_ref(headers: &std::option::Option<Box<SerializableHeaderMap>>) -> bool {
     match headers {

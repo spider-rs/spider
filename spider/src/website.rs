@@ -1201,6 +1201,7 @@ impl Website {
         let client = reqwest::Client::builder()
             .user_agent(user_agent)
             .redirect(policy)
+            .referer(!cfg!(feature = "spoof") && !cfg!(feature = "real_browser"))
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_secs(1));
 
@@ -1238,6 +1239,7 @@ impl Website {
         let client = Client::builder()
             .user_agent(user_agent)
             .redirect(policy)
+            .referer(!cfg!(feature = "spoof") && !cfg!(feature = "real_browser"))
             .tcp_keepalive(Duration::from_secs(1));
 
         let client = if let Some(emulation) = self.configuration.emulation {
