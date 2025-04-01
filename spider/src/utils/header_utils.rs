@@ -1,6 +1,5 @@
-use crate::configuration::Configuration;
-use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::header::{HOST, REFERER};
+use crate::configuration::{Configuration, SerializableHeaderMap};
+use reqwest::header::{HeaderMap, HeaderValue, HOST, REFERER};
 
 /// Setup the default headers for the request.
 pub fn setup_default_headers(
@@ -13,16 +12,6 @@ pub fn setup_default_headers(
         Some(ref h) => *h.clone(),
         None => crate::configuration::SerializableHeaderMap::default(),
     };
-
-    if !headers.contains_key(REFERER) && cfg!(feature = "real_browser") {
-        if let Ok(ref_value) =
-            HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-        {
-            if !ref_value.is_empty() {
-                headers.insert(REFERER, ref_value);
-            }
-        }
-    }
 
     if !headers.contains_key(HOST) && configuration.preserve_host_header {
         if let Some(u) = url {
@@ -99,10 +88,14 @@ fn get_sec_ch_ua_platform() -> &'static str {
 }
 
 /// Build the headers to use to act like a browser
-pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::header::HeaderMap {
+pub fn get_mimic_headers(
+    user_agent: &str,
+    chrome_entry: bool,
+    contains_referer: bool,
+) -> reqwest::header::HeaderMap {
     use reqwest::header::{ACCEPT, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
-
     let mut headers = HeaderMap::new();
+    let add_ref = !contains_referer && cfg!(feature = "spoof");
 
     if user_agent.contains("Chrome/") {
         headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
@@ -111,13 +104,23 @@ pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::heade
             headers.insert("Accept-Language", HeaderValue::from_static("*"));
         }
 
-        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent)) {
-            headers.insert("Sec-Ch-Ua", ch);
+        if add_ref {
+            if let Ok(ref_value) =
+                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+            {
+                if !ref_value.is_empty() {
+                    headers.insert(REFERER, ref_value);
+                }
+            }
         }
 
-        headers.insert("Sec-Ch-Ua-Mobile", HeaderValue::from_static("?0"));
+        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent)) {
+            headers.insert("Sec-CH-UA", ch);
+        }
+
+        headers.insert("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
         headers.insert(
-            "Sec-Ch-Ua-Platform",
+            "Sec-CH-UA-Platform",
             HeaderValue::from_static(get_sec_ch_ua_platform()),
         );
         headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
@@ -133,6 +136,15 @@ pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::heade
                 "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             ),
         );
+        if add_ref {
+            if let Ok(ref_value) =
+                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+            {
+                if !ref_value.is_empty() {
+                    headers.insert(REFERER, ref_value);
+                }
+            }
+        }
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
         headers.insert(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
         headers.insert(TE, HeaderValue::from_static("trailers"));
@@ -143,6 +155,15 @@ pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::heade
                 "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             ),
         );
+        if add_ref {
+            if let Ok(ref_value) =
+                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+            {
+                if !ref_value.is_empty() {
+                    headers.insert(REFERER, ref_value);
+                }
+            }
+        }
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     } else if user_agent.contains("Edge/") {
         headers.insert(
@@ -151,6 +172,15 @@ pub fn get_mimic_headers(user_agent: &str, chrome_entry: bool) -> reqwest::heade
                 "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             ),
         );
+        if add_ref {
+            if let Ok(ref_value) =
+                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+            {
+                if !ref_value.is_empty() {
+                    headers.insert(REFERER, ref_value);
+                }
+            }
+        }
         headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     }
 
@@ -169,4 +199,36 @@ pub fn header_map_to_hash_map(header_map: &HeaderMap) -> std::collections::HashM
     }
 
     hash_map
+}
+
+#[cfg(feature = "real_browser")]
+/// Extend the headers.
+pub fn extend_headers(
+    header_map: &mut reqwest::header::HeaderMap,
+    user_agent: &str,
+    headers: &std::option::Option<Box<SerializableHeaderMap>>,
+) {
+    header_map.extend(crate::utils::header_utils::get_mimic_headers(
+        user_agent,
+        false,
+        has_ref(&headers),
+    ));
+}
+
+#[cfg(not(feature = "real_browser"))]
+/// Extend the headers.
+pub fn extend_headers(
+    _header_map: &mut reqwest::header::HeaderMap,
+    _user_agent: &str,
+    _headers: &std::option::Option<Box<SerializableHeaderMap>>,
+) {
+}
+
+#[cfg(feature = "real_browser")]
+/// Headers has ref
+pub fn has_ref(headers: &std::option::Option<Box<SerializableHeaderMap>>) -> bool {
+    match headers {
+        Some(headers) => headers.contains_key(REFERER),
+        _ => false,
+    }
 }

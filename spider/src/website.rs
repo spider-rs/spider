@@ -1192,11 +1192,11 @@ impl Website {
             _ => get_ua(self.only_chrome_agent()),
         };
 
-        if cfg!(feature = "real_browser") {
-            headers.extend(crate::utils::header_utils::get_mimic_headers(
-                user_agent, false,
-            ));
-        }
+        crate::utils::header_utils::extend_headers(
+            &mut headers,
+            user_agent,
+            &self.configuration.headers,
+        );
 
         let client = reqwest::Client::builder()
             .user_agent(user_agent)
@@ -1229,11 +1229,11 @@ impl Website {
             _ => get_ua(self.only_chrome_agent()),
         };
 
-        if cfg!(feature = "real_browser") {
-            headers.extend(crate::utils::header_utils::get_mimic_headers(
-                user_agent, false,
-            ));
-        }
+        crate::utils::header_utils::extend_headers(
+            &mut headers,
+            user_agent,
+            &self.configuration.headers,
+        );
 
         let client = Client::builder()
             .user_agent(user_agent)
@@ -1449,8 +1449,7 @@ impl Website {
     /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", not(feature = "cache_request")))]
     pub fn configure_http_client(&self) -> Client {
-        use reqwest::header::HeaderMap;
-        use reqwest::header::HeaderValue;
+        use reqwest::header::{HeaderMap, HeaderValue};
 
         let mut headers = HeaderMap::new();
 

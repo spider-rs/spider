@@ -313,7 +313,7 @@ impl<'de> serde::Deserialize<'de> for SerializableHeaderMap {
         use reqwest::header::{HeaderName, HeaderValue};
         use std::collections::BTreeMap;
         let map: BTreeMap<String, String> = BTreeMap::deserialize(deserializer)?;
-        let mut headers = HeaderMap::new();
+        let mut headers = HeaderMap::with_capacity(map.len());
         for (k, v) in map {
             let key = HeaderName::from_bytes(k.as_bytes()).map_err(serde::de::Error::custom)?;
             let value = HeaderValue::from_str(&v).map_err(serde::de::Error::custom)?;

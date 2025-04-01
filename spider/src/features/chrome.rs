@@ -246,8 +246,11 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
 
                 if cfg!(feature = "real_browser") {
                     if let Some(user_agent) = &config.user_agent {
-                        let header_map =
-                            crate::utils::header_utils::get_mimic_headers(user_agent, true);
+                        let header_map = crate::utils::header_utils::get_mimic_headers(
+                            user_agent,
+                            true,
+                            crate::utils::header_utils::has_ref(&config.headers),
+                        );
                         let header_map =
                             crate::utils::header_utils::header_map_to_hash_map(&header_map);
 
@@ -268,8 +271,12 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                     let mut headers = std::collections::HashMap::new();
 
                     if let Some(user_agent) = &config.user_agent {
-                        let header_map =
-                            crate::utils::header_utils::get_mimic_headers(user_agent, true);
+                        let header_map = crate::utils::header_utils::get_mimic_headers(
+                            user_agent,
+                            true,
+                            crate::utils::header_utils::has_ref(&config.headers),
+                        );
+
                         let header_map =
                             crate::utils::header_utils::header_map_to_hash_map(&header_map);
 
