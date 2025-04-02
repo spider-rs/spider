@@ -93,12 +93,17 @@ pub fn get_mimic_headers(
     chrome_entry: bool,
     contains_referer: bool,
 ) -> reqwest::header::HeaderMap {
-    use reqwest::header::{ACCEPT, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
+    use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
     let mut headers = HeaderMap::new();
     let add_ref = !contains_referer && cfg!(feature = "spoof");
 
     if user_agent.contains("Chrome/") {
         headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
+
+        headers.insert(
+            ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, br, zstd"),
+        );
 
         if !chrome_entry {
             headers.insert("Accept-Language", HeaderValue::from_static("*"));
