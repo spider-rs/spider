@@ -1073,6 +1073,7 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     #[derive(Debug, Clone, Default)]
+    /// Map of the response.
     struct ResponseMap {
         /// The url of the request
         url: String,
@@ -1080,6 +1081,16 @@ pub async fn fetch_page_html_chrome_base(
         skipped: bool,
         /// The bytes transferred
         bytes_transferred: f64,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct ResponseBase {
+        /// The map of the response.
+        response_map: Option<HashMap<String, ResponseMap>>,
+        /// The headers of request.
+        headers: Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+        /// The status code.
+        status_code: Option<i64>,
     }
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
@@ -1211,15 +1222,29 @@ pub async fn fetch_page_html_chrome_base(
                 None
             };
 
+            let mut status_code = None;
+            let mut headers = None;
+
             if asset || response_map.is_some() {
                 if let Ok(mut listener) = received_listener {
-                    let mut intial_request = false;
+                    let mut initial_asset = false;
                     let mut allow_download = false;
+                    let mut intial_request = false;
 
                     while let Some(event) = listener.next().await {
+                        if !intial_request && event.r#type == ResourceType::Document {
+                            let redirect =
+                                event.response.status >= 300 && event.response.status <= 399;
+
+                            if !redirect {
+                                intial_request = true;
+                                status_code = Some(event.response.status);
+                                headers = Some(event.response.headers.clone());
+                            }
+                        }
                         // check if media asset needs to be downloaded.
                         if asset {
-                            if !intial_request && event.r#type == ResourceType::Document {
+                            if !initial_asset && event.r#type == ResourceType::Document {
                                 allow_download =
                                     DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
                             }
@@ -1228,7 +1253,7 @@ pub async fn fetch_page_html_chrome_base(
                                     let _ = once.set(event.request_id.clone());
                                 }
                             }
-                            intial_request = true;
+                            initial_asset = true;
                         }
 
                         if let Some(response_map) = response_map.as_mut() {
@@ -1247,7 +1272,11 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            response_map
+            ResponseBase {
+                response_map,
+                status_code,
+                headers,
+            }
         };
 
         let f4 = async {
@@ -1660,9 +1689,10 @@ pub async fn fetch_page_html_chrome_base(
         )
         .await;
 
-        if let Ok((mut transferred, bytes_map, response_map, request_map)) =
-            bytes_collected_handle.await
+        if let Ok((mut transferred, bytes_map, mut rs, request_map)) = bytes_collected_handle.await
         {
+            let response_map = rs.response_map;
+
             if response_map.is_some() {
                 let mut _response_map = HashMap::new();
 
@@ -1688,6 +1718,16 @@ pub async fn fetch_page_html_chrome_base(
                 }
 
                 page_response.response_map = Some(_response_map);
+
+                if let Some(status) = rs.status_code {
+                    if let Ok(scode) = status.try_into() {
+                        if let Ok(status) = StatusCode::from_u16(scode) {
+                            page_response.status_code = status;
+                        }
+                    }
+                }
+
+                set_page_response_headers_raw(&mut rs.headers, &mut page_response);
             }
             if request_map.is_some() {
                 page_response.request_map = request_map;
@@ -1732,6 +1772,43 @@ fn set_page_response_headers(
 #[cfg(all(feature = "chrome", not(feature = "headers")))]
 fn set_page_response_headers(
     _chrome_http_req_res: &mut ChromeHTTPReqRes,
+    _page_response: &mut PageResponse,
+) {
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", feature = "headers"))]
+fn set_page_response_headers_raw(
+    chrome_http_req_res: &mut Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+    page_response: &mut PageResponse,
+) {
+    if let Some(chrome_headers) = chrome_http_req_res {
+        let mut header_map = reqwest::header::HeaderMap::new();
+
+        if let Some(obj) = chrome_headers.inner().as_object() {
+            for (index, (key, value)) in obj.iter().enumerate() {
+                use std::str::FromStr;
+                if let (Ok(header_name), Ok(header_value)) = (
+                    reqwest::header::HeaderName::from_str(key),
+                    reqwest::header::HeaderValue::from_str(&value.to_string()),
+                ) {
+                    header_map.insert(header_name, header_value);
+                }
+                if index > 1000 {
+                    break;
+                }
+            }
+        }
+        if !header_map.is_empty() {
+            page_response.headers = Some(header_map);
+        }
+    }
+}
+
+/// Set the page response.
+#[cfg(all(feature = "chrome", not(feature = "headers")))]
+fn set_page_response_headers_raw(
+    _chrome_http_req_res: &mut Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
     _page_response: &mut PageResponse,
 ) {
 }

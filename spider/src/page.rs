@@ -682,7 +682,17 @@ fn get_error_status_base(
                     *should_retry = true;
                 }
                 if let Some(status_code) = er.status() {
-                    if status_code.is_client_error() {
+                    let retry = match status_code {
+                        StatusCode::TOO_MANY_REQUESTS
+                        | StatusCode::UNAUTHORIZED
+                        | StatusCode::INTERNAL_SERVER_ERROR
+                        | StatusCode::BAD_GATEWAY
+                        | StatusCode::SERVICE_UNAVAILABLE
+                        | StatusCode::GATEWAY_TIMEOUT => true,
+                        _ => false,
+                    };
+
+                    if retry {
                         *should_retry = true;
                     }
                 }
