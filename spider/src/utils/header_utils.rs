@@ -35,9 +35,13 @@ lazy_static::lazy_static! {
     static ref NOT_A_BRAND_VERSION: String = {
         std::env::var("NOT_A_BRAND_VERSION").unwrap_or_else(|_| "24".to_string())
     };
+    /// The chrome platform version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
+    static ref CHROME_PLATFORM_VERSION: String = {
+        std::env::var("CHROME_PLATFORM_VERSION").unwrap_or_else(|_| "\"14.6.1\"".to_string())
+    };
 }
 
-fn parse_user_agent_to_ch_ua(ua: &str) -> String {
+fn parse_user_agent_to_ch_ua(ua: &str, dec: bool) -> String {
     let mut parts = Vec::with_capacity(3);
 
     if ua.contains("Chrome/") {
@@ -47,8 +51,16 @@ fn parse_user_agent_to_ch_ua(ua: &str) -> String {
             .and_then(|s| s.split_whitespace().next())
         {
             if let Some(major_version) = version.split('.').next() {
-                parts.push(format!(r#""Chromium";v="{}""#, major_version));
-                parts.push(format!(r#""Not:A-Brand";v="{}""#, *NOT_A_BRAND_VERSION));
+                parts.push(format!(
+                    r#""Chromium";v="{}{}""#,
+                    major_version,
+                    if dec { ".0.0" } else { "" }
+                ));
+                parts.push(format!(
+                    r#""Not:A-Brand";v="{}{}""#,
+                    *NOT_A_BRAND_VERSION,
+                    if dec { ".0.0" } else { "" }
+                ));
                 parts.push(format!(r#""Google Chrome";v="{}""#, major_version));
             }
         }
@@ -87,106 +99,195 @@ fn get_sec_ch_ua_platform() -> &'static str {
     "\"iOS\""
 }
 
+#[cfg(target_arch = "x86")]
+/// sec-ch-ua-arch: system architecture (32-bit x86)
+fn get_sec_ch_ua_arch() -> &'static str {
+    "\"x86\""
+}
+
+#[cfg(target_arch = "x86_64")]
+/// sec-ch-ua-arch: system architecture (64-bit x86_64)
+fn get_sec_ch_ua_arch() -> &'static str {
+    "\"x86_64\""
+}
+
+#[cfg(target_arch = "aarch64")]
+/// sec-ch-ua-arch: system architecture (ARM 64-bit)
+fn get_sec_ch_ua_arch() -> &'static str {
+    "\"arm64\""
+}
+
+#[cfg(target_arch = "arm")]
+/// sec-ch-ua-arch: system architecture (ARM 32-bit)
+fn get_sec_ch_ua_arch() -> &'static str {
+    "\"arm\""
+}
+
+#[cfg(not(any(
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "arm"
+)))]
+/// sec-ch-ua-arch: unknown or unsupported architecture
+fn get_sec_ch_ua_arch() -> &'static str {
+    "\"unknown\""
+}
+
 /// Build the headers to use to act like a browser
 pub fn get_mimic_headers(
     user_agent: &str,
-    chrome_entry: bool,
+    header_map: &std::option::Option<Box<SerializableHeaderMap>>,
     contains_referer: bool,
 ) -> reqwest::header::HeaderMap {
-    use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, TE, UPGRADE_INSECURE_REQUESTS};
+    use reqwest::header::{
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, REFERER, TE, UPGRADE_INSECURE_REQUESTS,
+    };
+
     let mut headers = HeaderMap::new();
     let add_ref = !contains_referer && cfg!(feature = "spoof");
 
+    let binding = reqwest::header::HeaderMap::new();
+    let header_map = header_map.as_ref().map(|h| h.inner()).unwrap_or(&binding);
+
+    macro_rules! insert_or_default {
+        ($key:expr, $default:expr) => {
+            if let Some(val) = header_map.get($key) {
+                headers.insert($key, val.clone());
+            } else {
+                headers.insert($key, $default);
+            }
+        };
+        ($name:literal, $default:expr) => {
+            if let Some(val) = header_map.get($name) {
+                headers.insert($name, val.clone());
+            } else {
+                headers.insert($name, $default);
+            }
+        };
+    }
+
     if user_agent.contains("Chrome/") {
-        headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"));
-
-        headers.insert(
+        insert_or_default!(
+            ACCEPT,
+            HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+        );
+        insert_or_default!(
             ACCEPT_ENCODING,
-            HeaderValue::from_static("gzip, deflate, br, zstd"),
+            HeaderValue::from_static("gzip, deflate, br, zstd")
         );
-
-        if !chrome_entry {
-            headers.insert("Accept-Language", HeaderValue::from_static("*"));
-        }
+        insert_or_default!("Accept-Language", HeaderValue::from_static("*"));
 
         if add_ref {
-            if let Ok(ref_value) =
-                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-            {
-                if !ref_value.is_empty() {
-                    headers.insert(REFERER, ref_value);
+            if !header_map.contains_key(REFERER) {
+                if let Ok(ref_value) =
+                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                {
+                    if !ref_value.is_empty() {
+                        headers.insert(REFERER, ref_value);
+                    }
                 }
             }
         }
 
-        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent)) {
-            headers.insert("Sec-CH-UA", ch);
+        if !header_map.contains_key("Sec-CH-UA") {
+            if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false)) {
+                headers.insert("Sec-CH-UA", ch);
+            }
+        }
+        if !header_map.contains_key("Sec-CH-UA-Full-Version-List") {
+            if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true)) {
+                headers.insert("Sec-CH-UA-Full-Version-List", ch);
+            }
         }
 
-        headers.insert("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
-        headers.insert(
+        insert_or_default!(
+            "Sec-CH-UA-Arc",
+            HeaderValue::from_static(get_sec_ch_ua_arch())
+        );
+        insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
+        insert_or_default!(
             "Sec-CH-UA-Platform",
-            HeaderValue::from_static(get_sec_ch_ua_platform()),
+            HeaderValue::from_static(get_sec_ch_ua_platform())
         );
-        headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
-        headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
-        headers.insert("Sec-Fetch-Site", HeaderValue::from_static("none"));
-        headers.insert("Sec-Fetch-User", HeaderValue::from_static("?1"));
 
-        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+        #[cfg(not(target_os = "linux"))]
+        insert_or_default!(
+            "Sec-CH-UA-Platform-Version",
+            HeaderValue::from_str(&CHROME_PLATFORM_VERSION).unwrap()
+        );
+
+        insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
+        insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
+        insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
+        insert_or_default!("Sec-Fetch-User", HeaderValue::from_static("?1"));
+
+        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     } else if user_agent.contains("Firefox/") {
-        headers.insert(
+        insert_or_default!(
             ACCEPT,
             HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            ),
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            )
         );
+
         if add_ref {
-            if let Ok(ref_value) =
-                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-            {
-                if !ref_value.is_empty() {
-                    headers.insert(REFERER, ref_value);
+            if !header_map.contains_key(REFERER) {
+                if let Ok(ref_value) =
+                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                {
+                    if !ref_value.is_empty() {
+                        headers.insert(REFERER, ref_value);
+                    }
                 }
             }
         }
-        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-        headers.insert(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
-        headers.insert(TE, HeaderValue::from_static("trailers"));
+
+        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+        insert_or_default!(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
+        insert_or_default!(TE, HeaderValue::from_static("trailers"));
     } else if user_agent.contains("Safari/") && !user_agent.contains("Chrome/") {
-        headers.insert(
+        insert_or_default!(
             ACCEPT,
             HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            ),
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            )
         );
+
         if add_ref {
-            if let Ok(ref_value) =
-                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-            {
-                if !ref_value.is_empty() {
-                    headers.insert(REFERER, ref_value);
+            if !header_map.contains_key(REFERER) {
+                if let Ok(ref_value) =
+                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                {
+                    if !ref_value.is_empty() {
+                        headers.insert(REFERER, ref_value);
+                    }
                 }
             }
         }
-        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+
+        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     } else if user_agent.contains("Edge/") {
-        headers.insert(
+        insert_or_default!(
             ACCEPT,
             HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            ),
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            )
         );
+
         if add_ref {
-            if let Ok(ref_value) =
-                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-            {
-                if !ref_value.is_empty() {
-                    headers.insert(REFERER, ref_value);
+            if !header_map.contains_key(REFERER) {
+                if let Ok(ref_value) =
+                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                {
+                    if !ref_value.is_empty() {
+                        headers.insert(REFERER, ref_value);
+                    }
                 }
             }
         }
-        headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+
+        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     }
 
     headers
@@ -215,7 +316,7 @@ pub fn extend_headers(
 ) {
     header_map.extend(crate::utils::header_utils::get_mimic_headers(
         user_agent,
-        false,
+        &headers,
         has_ref(&headers),
     ));
 }

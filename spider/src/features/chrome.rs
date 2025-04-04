@@ -248,7 +248,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                     if let Some(user_agent) = &config.user_agent {
                         let header_map = crate::utils::header_utils::get_mimic_headers(
                             user_agent,
-                            true,
+                            &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
                         );
                         let header_map =
@@ -273,7 +273,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                     if let Some(user_agent) = &config.user_agent {
                         let header_map = crate::utils::header_utils::get_mimic_headers(
                             user_agent,
-                            true,
+                            &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
                         );
 
