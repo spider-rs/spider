@@ -414,9 +414,26 @@ impl Configuration {
             chrome_intercept: RequestInterceptConfiguration::new(cfg!(
                 feature = "chrome_intercept"
             )),
+            user_agent: Some(Box::new(get_ua(true).into())),
             only_html: true,
             ..Default::default()
         }
+    }
+
+    /// Determine if the agent should be set to a Chrome Agent.
+    #[cfg(not(feature = "chrome"))]
+    pub(crate) fn only_chrome_agent(&self) -> bool {
+        false
+    }
+
+    /// Determine if the agent should be set to a Chrome Agent.
+    #[cfg(feature = "chrome")]
+    pub(crate) fn only_chrome_agent(&self) -> bool {
+        self.chrome_connection_url.is_some()
+            || self.wait_for.is_some()
+            || self.chrome_intercept.enabled
+            || self.stealth_mode
+            || self.fingerprint
     }
 
     #[cfg(feature = "regex")]

@@ -1437,9 +1437,12 @@ pub async fn fetch_page_html_chrome_base(
 
     block_bytes = chrome_http_req_res.status_code == StatusCode::REQUEST_TIMEOUT;
 
+    let waf_check = chrome_http_req_res.waf_check;
+    let status_code = chrome_http_req_res.status_code;
+
     let run_page_response = async move {
         let mut page_response = if run_events {
-            if chrome_http_req_res.waf_check {
+            if waf_check {
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
                 if let Err(elasped) = tokio::time::timeout(
                     base_timeout,
@@ -1504,6 +1507,8 @@ pub async fn fetch_page_html_chrome_base(
                 _ => Default::default(),
             };
 
+            let forbidden = waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
+
             if cfg!(feature = "real_browser") {
                 // we can skip this check after a set bytes
                 if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
@@ -1513,11 +1518,16 @@ pub async fn fetch_page_html_chrome_base(
 
             let ok = !res.is_empty();
 
-            if chrome_http_req_res.waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>"){
-                chrome_http_req_res.status_code = StatusCode::FORBIDDEN;
-            }
-
-            let mut page_response = set_page_response(ok, res, &mut chrome_http_req_res, final_url);
+            let mut page_response = set_page_response(
+                ok,
+                res,
+                if forbidden {
+                    StatusCode::FORBIDDEN
+                } else {
+                    status_code
+                },
+                final_url,
+            );
 
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
@@ -1526,8 +1536,6 @@ pub async fn fetch_page_html_chrome_base(
                 set_page_response_cookies(&mut page_response, &page),
             )
             .await;
-
-            set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
 
             if openai_config.is_some() && !base_timeout.is_zero() {
                 let _ = tokio::time::timeout(
@@ -1553,8 +1561,6 @@ pub async fn fetch_page_html_chrome_base(
                 )
                 .await;
             }
-            page_response.status_code = chrome_http_req_res.status_code;
-            page_response.waf_check = chrome_http_req_res.waf_check;
 
             page_response
         } else {
@@ -1572,8 +1578,7 @@ pub async fn fetch_page_html_chrome_base(
                 Default::default()
             };
 
-            let mut page_response =
-                set_page_response(!res.is_empty(), res, &mut chrome_http_req_res, final_url);
+            let mut page_response = set_page_response(!res.is_empty(), res, status_code, final_url);
 
             if !block_bytes {
                 let _ = tokio::time::timeout(
@@ -1582,10 +1587,6 @@ pub async fn fetch_page_html_chrome_base(
                 )
                 .await;
             }
-
-            set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
-            page_response.status_code = chrome_http_req_res.status_code;
-            page_response.waf_check = chrome_http_req_res.waf_check;
 
             if base_timeout.is_zero() && page_response.content.is_none() {
                 page_response.status_code = StatusCode::REQUEST_TIMEOUT;
@@ -1668,6 +1669,10 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut page_response = page_response.unwrap_or_default();
 
+    set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
+    page_response.status_code = chrome_http_req_res.status_code;
+    page_response.waf_check = chrome_http_req_res.waf_check;
+
     if content.is_some() {
         page_response.content = content.map(|f| f.into());
     }
@@ -1729,6 +1734,19 @@ pub async fn fetch_page_html_chrome_base(
                 }
 
                 set_page_response_headers_raw(&mut rs.headers, &mut page_response);
+
+                if let Some(response_headers) = &page_response.headers {
+                    chrome_http_req_res.response_headers =
+                        crate::utils::header_utils::header_map_to_hash_map(&response_headers);
+                }
+
+                if !page_set {
+                    let _ = tokio::time::timeout(
+                        base_timeout,
+                        cache_chrome_response(&source, &page_response, chrome_http_req_res),
+                    )
+                    .await;
+                }
             }
             if request_map.is_some() {
                 page_response.request_map = request_map;
@@ -1745,12 +1763,12 @@ pub async fn fetch_page_html_chrome_base(
 fn set_page_response(
     ok: bool,
     res: Box<Vec<u8>>,
-    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    status_code: StatusCode,
     final_url: Option<String>,
 ) -> PageResponse {
     PageResponse {
         content: if ok { Some(res.into()) } else { None },
-        status_code: chrome_http_req_res.status_code,
+        status_code,
         final_url,
         ..Default::default()
     }

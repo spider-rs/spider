@@ -203,6 +203,7 @@ pub fn get_mimic_headers(
             HeaderValue::from_static(get_sec_ch_ua_arch())
         );
         insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
+
         insert_or_default!(
             "sec-ch-ua-platform",
             HeaderValue::from_static(get_sec_ch_ua_platform())

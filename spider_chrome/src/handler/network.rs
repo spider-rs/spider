@@ -531,7 +531,6 @@ impl NetworkManager {
                             event.resource_type,
                             event.request.url
                         );
-
                         self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
                     }
                 }

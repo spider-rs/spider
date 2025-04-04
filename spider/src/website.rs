@@ -1165,22 +1165,6 @@ impl Website {
         }
     }
 
-    /// Determine if the agent should be set to a Chrome Agent.
-    #[cfg(not(feature = "chrome"))]
-    fn only_chrome_agent(&self) -> bool {
-        false
-    }
-
-    /// Determine if the agent should be set to a Chrome Agent.
-    #[cfg(feature = "chrome")]
-    fn only_chrome_agent(&self) -> bool {
-        self.configuration.chrome_connection_url.is_some()
-            || self.configuration.wait_for.is_some()
-            || self.configuration.chrome_intercept.enabled
-            || self.configuration.stealth_mode
-            || self.configuration.fingerprint
-    }
-
     #[cfg(all(not(feature = "rquest"), not(feature = "decentralized")))]
     /// Base client configuration.
     fn configure_base_client(&self) -> ClientBuilder {
@@ -1189,7 +1173,7 @@ impl Website {
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
-            _ => get_ua(self.only_chrome_agent()),
+            _ => get_ua(self.configuration.only_chrome_agent()),
         };
 
         crate::utils::header_utils::extend_headers(
@@ -1226,7 +1210,7 @@ impl Website {
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
-            _ => get_ua(self.only_chrome_agent()),
+            _ => get_ua(self.configuration.only_chrome_agent()),
         };
 
         crate::utils::header_utils::extend_headers(
@@ -1458,7 +1442,7 @@ impl Website {
         let mut client = Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(self.only_chrome_agent()),
+                _ => &get_ua(self.configuration.only_chrome_agent()),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500));
@@ -1526,7 +1510,7 @@ impl Website {
         let mut client = reqwest::Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(self.only_chrome_agent()),
+                _ => &get_ua(self.configuration.only_chrome_agent()),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500));
