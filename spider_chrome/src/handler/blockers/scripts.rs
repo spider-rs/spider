@@ -151,6 +151,7 @@ lazy_static::lazy_static! {
             "https://cdn-cookieyes.com/",
             "https://s.kk-resources.com/leadtag.js",
             "https://nexus.ensighten.com/",
+            "https://c.oracleinfinity.io/acs/account/fp3kyrmvtg/js/prod/odc.js",
             "https://static-tracking.klaviyo.com/",
             "https://cdn-widgetsrepository.yotpo.com/",
             "https://a.klaviyo.com/onsite/track-analytics?",
