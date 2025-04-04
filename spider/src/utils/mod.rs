@@ -1556,14 +1556,6 @@ pub async fn fetch_page_html_chrome_base(
             page_response.status_code = chrome_http_req_res.status_code;
             page_response.waf_check = chrome_http_req_res.waf_check;
 
-            if !page_set {
-                let _ = tokio::time::timeout(
-                    base_timeout,
-                    cache_chrome_response(&source, &page_response, chrome_http_req_res),
-                )
-                .await;
-            }
-
             page_response
         } else {
             let res = if !block_bytes {
@@ -1656,6 +1648,15 @@ pub async fn fetch_page_html_chrome_base(
 
                         page_response.status_code = chrome_http_req_res1.status_code;
                         page_response.waf_check = chrome_http_req_res1.waf_check;
+
+                        if !page_set {
+                            let _ = tokio::time::timeout(
+                                base_timeout,
+                                cache_chrome_response(&source, &page_response, chrome_http_req_res1),
+                            )
+                            .await;
+                        }
+
                     }
 
                     Ok(page_response)
