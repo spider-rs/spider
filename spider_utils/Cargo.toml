@@ -1,9 +1,7 @@
 [package]
 name = "spider_utils"
-version = "2.36.14"
-authors = [
-    "j-mendez <jeff@spider.cloud>"
-]
+version = "2.36.15"
+authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Utilities to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
@@ -30,7 +28,7 @@ path = "../spider_transformations"
 optional = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"]}
+tokio = { version = "1", features = ["full"] }
 
 [features]
 default = []

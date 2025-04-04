@@ -3,10 +3,10 @@
 let
   spider = pkgs.rustPlatform.buildRustPackage {
     pname = "spider";
-    version = "2.36.14";
+    version = "2.36.15";
 
     src = ./.;
-    
+
     cargoLock = {
       lockFile = ./Cargo.lock;
     };

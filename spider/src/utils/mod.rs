@@ -2170,29 +2170,6 @@ where
     )
 }
 
-/// Setup default response
-pub(crate) fn setup_default_response(target_url: &str, res: &Response) -> PageResponse {
-    let u = res.url().as_str();
-
-    let rd = if target_url != u {
-        Some(u.into())
-    } else {
-        None
-    };
-
-    PageResponse {
-        #[cfg(feature = "headers")]
-        headers: Some(res.headers().clone()),
-        #[cfg(feature = "remote_addr")]
-        remote_addr: res.remote_addr(),
-        #[cfg(feature = "cookies")]
-        cookies: get_cookies(res),
-        status_code: res.status(),
-        final_url: rd,
-        ..Default::default()
-    }
-}
-
 /// Perform a network request to a resource extracting all content streaming.
 async fn fetch_page_html_raw_base(
     target_url: &str,
@@ -2203,7 +2180,7 @@ async fn fetch_page_html_raw_base(
         Ok(res) if res.status().is_success() => {
             handle_response_bytes(res, target_url, only_html).await
         }
-        Ok(res) => setup_default_response(target_url, &res),
+        Ok(res) => handle_response_bytes(res, target_url, only_html).await,
         Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.36.14"
+version = "2.36.15"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -83,7 +83,7 @@ h2 = "0.4"
 tower = { version = "0.5", features = ["limit"] }
 pin-project-lite = "0.2"
 sonic-rs = { version = "0.4", optional = true }
-rquest = { version = "5", optional = true, features = [    
+rquest = { version = "5", optional = true, features = [
     "json",
     "stream",
     "socks",
@@ -91,8 +91,8 @@ rquest = { version = "5", optional = true, features = [
     "brotli",
     "zstd",
     "deflate",
-    "cookies"
-    ] }
+    "cookies",
+] }
 rquest-util = { version = "2", optional = true, features = ["emulation-serde"] }
 
 [dependencies.spider_chrome]

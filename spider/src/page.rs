@@ -629,7 +629,7 @@ pub fn validate_empty(content: &Option<Box<Vec<u8>>>, is_success: bool) -> bool 
     match content {
         Some(ref content) => {
             !(content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
-                     content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") && 
+                     content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") &&
                       content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n"))
         }
         _ => false,
@@ -932,7 +932,7 @@ impl Page {
         links_pages: &mut Option<hashbrown::HashSet<A>>,
     ) -> Self {
         use crate::utils::{
-            handle_response_bytes_writer, modify_selectors, setup_default_response,
+            handle_response_bytes, handle_response_bytes_writer, modify_selectors,
             AllowedDomainTypes,
         };
         let page_response: PageResponse = match client.get(url).send().await {
@@ -1151,7 +1151,7 @@ impl Page {
 
                 response.0
             }
-            Ok(res) => setup_default_response(url, &res),
+            Ok(res) => handle_response_bytes(res, url, only_html).await,
             Err(err) => {
                 log::info!("error fetching {}", url);
                 let mut page_response = PageResponse::default();
