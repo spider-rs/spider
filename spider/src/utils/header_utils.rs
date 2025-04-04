@@ -190,15 +190,12 @@ pub fn get_mimic_headers(
             }
         }
 
-        if !header_map.contains_key("Sec-CH-UA") {
-            if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false)) {
-                headers.insert("Sec-CH-UA", ch);
-            }
+        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false)) {
+            insert_or_default!("sec-ch-ua", ch);
         }
-        if !header_map.contains_key("Sec-CH-UA-Full-Version-List") {
-            if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true)) {
-                headers.insert("Sec-CH-UA-Full-Version-List", ch);
-            }
+
+        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true)) {
+            insert_or_default!("sec-ch-ua-full-version-list", ch);
         }
 
         insert_or_default!(
@@ -207,13 +204,13 @@ pub fn get_mimic_headers(
         );
         insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
         insert_or_default!(
-            "Sec-CH-UA-Platform",
+            "sec-ch-ua-platform",
             HeaderValue::from_static(get_sec_ch_ua_platform())
         );
 
         #[cfg(not(target_os = "linux"))]
         insert_or_default!(
-            "Sec-CH-UA-Platform-Version",
+            "sec-ch-ua-platform-version",
             HeaderValue::from_str(&CHROME_PLATFORM_VERSION).unwrap()
         );
 
