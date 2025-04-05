@@ -217,12 +217,15 @@ impl FrameManager {
         let get_tree = page::GetFrameTreeParams::default();
         let set_lifecycle = page::SetLifecycleEventsEnabledParams::new(true);
         let enable_runtime = runtime::EnableParams::default();
-        let mut commands = Vec::with_capacity(4);
+        let disable_runtime = runtime::DisableParams::default();
+
+        let mut commands = Vec::with_capacity(5);
 
         let enable_id = enable.identifier();
         let get_tree_id = get_tree.identifier();
         let set_lifecycle_id = set_lifecycle.identifier();
         let enable_runtime_id = enable_runtime.identifier();
+        let disable_runtime_id = disable_runtime.identifier();
 
         if let Ok(value) = serde_json::to_value(enable) {
             commands.push((enable_id, value));
@@ -238,6 +241,10 @@ impl FrameManager {
 
         if let Ok(value) = serde_json::to_value(enable_runtime) {
             commands.push((enable_runtime_id, value));
+        }
+
+        if let Ok(value) = serde_json::to_value(disable_runtime) {
+            commands.push((disable_runtime_id, value));
         }
 
         CommandChain::new(commands, timeout)

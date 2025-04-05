@@ -238,7 +238,7 @@ impl NetworkManager {
         CommandChain::new(cmds, self.request_timeout)
     }
 
-    fn push_cdp_request<T: Command>(&mut self, cmd: T) {
+    pub(crate) fn push_cdp_request<T: Command>(&mut self, cmd: T) {
         let method = cmd.identifier();
         if let Ok(params) = serde_json::to_value(cmd) {
             self.queued_events

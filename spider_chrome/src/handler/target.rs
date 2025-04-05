@@ -413,6 +413,7 @@ impl Target {
                                     self.network_manager.init_commands(),
                                 );
                             }
+
                             self.poll(cx, now)
                         }
                         Some(Ok((method, params))) => Some(TargetEvent::Request(Request {
