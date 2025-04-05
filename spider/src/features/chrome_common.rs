@@ -515,7 +515,7 @@ pub(crate) fn generate_wait_for_dom_js_code_with_selector(
     let t = timeout.min(crate::utils::FIVE_MINUTES);
     let s = selector.unwrap_or("body");
     format!(
-        "new Promise((r,j)=>{{const s='{s}',t={t},i=220,n=100;let l=Date.now(),el,o,d,c;const check=()=>{{el=document.querySelector(s);if(!el)return;clearInterval(wait);l=Date.now();o=new MutationObserver(()=>{{l=Date.now();}});o.observe(el,{{childList:!0,subtree:!0,attributes:!0,characterData:!0}});d=setTimeout(()=>{{clearInterval(c),o.disconnect(),j(new Error('Dom Timeout.'))}},t);c=setInterval(()=>{{Date.now()-l>=i&&(clearTimeout(d),clearInterval(c),o.disconnect(),r(!0))}},n);}};const wait=setInterval(check,n);check();}});",
+        "new Promise((r,j)=>{{const s='{s}',t={t},i=220,n=25;let l=Date.now(),el,o,d,c;const check=()=>{{el=document.querySelector(s);if(!el)return;clearInterval(wait);l=Date.now();o=new MutationObserver(()=>{{l=Date.now();}});o.observe(el,{{childList:!0,subtree:!0,attributes:!0,characterData:!0}});d=setTimeout(()=>{{clearInterval(c),o.disconnect(),j(new Error('Dom Timeout.'))}},t);c=setInterval(()=>{{Date.now()-l>=i&&(clearTimeout(d),clearInterval(c),o.disconnect(),r(!0))}},n);}};const wait=setInterval(check,n);check();}});",
         s = s,
         t = t
     )

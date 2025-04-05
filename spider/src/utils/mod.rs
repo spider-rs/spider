@@ -68,6 +68,9 @@ pub(crate) type RequestResponse = Response;
 /// The wait for duration timeouts.
 #[cfg(feature = "chrome")]
 const WAIT_TIMEOUTS: [u64; 6] = [0, 20, 50, 100, 100, 500];
+/// The wait for duration timeouts.
+#[cfg(feature = "chrome")]
+const DOM_WAIT_TIMEOUTS: [u64; 6] = [100, 200, 300, 300, 400, 500];
 
 /// Ignore the content types.
 pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
@@ -343,7 +346,7 @@ pub async fn wait_for_selector(
     valid
 }
 
-/// wait for a selector
+/// wait for dom to finish updating target selector
 #[cfg(feature = "chrome")]
 pub async fn wait_for_dom(
     page: &chromiumoxide::Page,
@@ -366,14 +369,16 @@ pub async fn wait_for_dom(
                 break;
             }
 
-            let current_timeout = WAIT_TIMEOUTS[index];
+            let current_timeout = DOM_WAIT_TIMEOUTS[index];
             let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
 
             tokio::select! {
                 _ = sleep => (),
                 result = page.evaluate(script.clone()) => {
                     if let Ok(vv) = &result {
-                        if vv.value().is_some() {
+                        if vv.value().is_none() {
+                            break
+                        } else {
                             deadline = tokio::time::Instant::now() + max_duration;
                         }
                     }
@@ -384,7 +389,7 @@ pub async fn wait_for_dom(
         }
     };
 
-    wait_until.await;
+    let _ = tokio::time::timeout(max_duration, wait_until).await;
 }
 
 /// Get the output path of a screenshot and create any parent folders if needed.
