@@ -157,6 +157,28 @@ fn get_sec_ch_ua_bitness() -> &'static str {
     }
 }
 
+fn get_accept_language() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "en-US,en;q=0.9"
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        "en-US,en;q=0.9"
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        "en-US,en;q=0.9"
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        "en"
+    }
+}
+
 /// Build the headers to use to act like a browser
 pub fn get_mimic_headers(
     user_agent: &str,
@@ -191,6 +213,9 @@ pub fn get_mimic_headers(
     }
 
     if user_agent.contains("Chrome/") {
+        #[cfg(target_os = "linux")]
+        let linux_agent = user_agent.contains("Linux");
+
         insert_or_default!(
             ACCEPT,
             HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
@@ -199,16 +224,18 @@ pub fn get_mimic_headers(
             ACCEPT_ENCODING,
             HeaderValue::from_static("gzip, deflate, br, zstd")
         );
-        insert_or_default!("Accept-Language", HeaderValue::from_static("*"));
 
-        if add_ref {
-            if !header_map.contains_key(REFERER) {
-                if let Ok(ref_value) =
-                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-                {
-                    if !ref_value.is_empty() {
-                        headers.insert(REFERER, ref_value);
-                    }
+        insert_or_default!(
+            "Accept-Language",
+            HeaderValue::from_static(get_accept_language())
+        );
+
+        if add_ref && !header_map.contains_key(REFERER) {
+            if let Ok(ref_value) =
+                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+            {
+                if !ref_value.is_empty() {
+                    headers.insert(REFERER, ref_value);
                 }
             }
         }
@@ -222,10 +249,12 @@ pub fn get_mimic_headers(
         }
 
         #[cfg(target_os = "linux")]
-        insert_or_default!(
-            "Sec-CH-UA-Bitness",
-            HeaderValue::from_static(get_sec_ch_ua_bitness())
-        );
+        if linux_agent {
+            insert_or_default!(
+                "Sec-CH-UA-Bitness",
+                HeaderValue::from_static(get_sec_ch_ua_bitness())
+            );
+        }
 
         insert_or_default!(
             "Sec-CH-UA-Arc",
@@ -234,14 +263,15 @@ pub fn get_mimic_headers(
         insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
 
         #[cfg(target_os = "linux")]
-        insert_or_default!("Sec-CH-UA-Model", HeaderValue::from_static(""));
+        if linux_agent {
+            insert_or_default!("Sec-CH-UA-Model", HeaderValue::from_static(""));
+        }
 
         insert_or_default!(
             "sec-ch-ua-platform",
             HeaderValue::from_static(get_sec_ch_ua_platform())
         );
 
-        #[cfg(not(target_os = "linux"))]
         insert_or_default!(
             "sec-ch-ua-platform-version",
             HeaderValue::from_str(&CHROME_PLATFORM_VERSION).unwrap()
