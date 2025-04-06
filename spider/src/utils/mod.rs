@@ -1044,6 +1044,17 @@ const MAX_PAGE_TIMEOUT: tokio::time::Duration =
 const HALF_MAX_PAGE_TIMEOUT: tokio::time::Duration =
     tokio::time::Duration::from_millis(FIVE_MINUTES as u64 / 2);
 
+#[cfg(all(feature = "chrome", feature = "headers"))]
+fn store_headers(page_response: &PageResponse, chrome_http_req_res: &mut ChromeHTTPReqRes) {
+    if let Some(response_headers) = &page_response.headers {
+        chrome_http_req_res.response_headers =
+            crate::utils::header_utils::header_map_to_hash_map(&response_headers);
+    }
+}
+
+#[cfg(all(feature = "chrome", not(feature = "headers")))]
+fn store_headers(_page_response: &PageResponse, _chrome_http_req_res: &mut ChromeHTTPReqRes) {}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -1740,10 +1751,7 @@ pub async fn fetch_page_html_chrome_base(
 
                 set_page_response_headers_raw(&mut rs.headers, &mut page_response);
 
-                if let Some(response_headers) = &page_response.headers {
-                    chrome_http_req_res.response_headers =
-                        crate::utils::header_utils::header_map_to_hash_map(&response_headers);
-                }
+                store_headers(&page_response, &mut chrome_http_req_res);
 
                 if !page_set {
                     let _ = tokio::time::timeout(
