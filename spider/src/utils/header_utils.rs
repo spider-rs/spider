@@ -37,7 +37,17 @@ lazy_static::lazy_static! {
     };
     /// The chrome platform version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
     static ref CHROME_PLATFORM_VERSION: String = {
-        std::env::var("CHROME_PLATFORM_VERSION").unwrap_or_else(|_| "\"14.6.1\"".to_string())
+        std::env::var("CHROME_PLATFORM_VERSION").unwrap_or_else(|_| {
+            #[cfg(target_os = "linux")]
+            {
+                "\"6.12.10\"".to_string()
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                "\"14.6.1\"".to_string()
+            }
+        })
     };
 }
 
@@ -134,6 +144,19 @@ fn get_sec_ch_ua_arch() -> &'static str {
     "\"unknown\""
 }
 
+#[cfg(target_os = "linux")]
+fn get_sec_ch_ua_bitness() -> &'static str {
+    #[cfg(target_pointer_width = "64")]
+    {
+        "64"
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    {
+        "32"
+    }
+}
+
 /// Build the headers to use to act like a browser
 pub fn get_mimic_headers(
     user_agent: &str,
@@ -198,11 +221,20 @@ pub fn get_mimic_headers(
             insert_or_default!("sec-ch-ua-full-version-list", ch);
         }
 
+        #[cfg(target_os = "linux")]
+        insert_or_default!(
+            "Sec-CH-UA-Bitness",
+            HeaderValue::from_static(get_sec_ch_ua_bitness())
+        );
+
         insert_or_default!(
             "Sec-CH-UA-Arc",
             HeaderValue::from_static(get_sec_ch_ua_arch())
         );
         insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
+
+        #[cfg(target_os = "linux")]
+        insert_or_default!("Sec-CH-UA-Model", HeaderValue::from_static(""));
 
         insert_or_default!(
             "sec-ch-ua-platform",

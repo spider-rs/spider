@@ -28,6 +28,13 @@ use crate::{cmd::CommandChain, ArcHttpRequest};
 pub const UTILITY_WORLD_NAME: &str = "__chromiumoxide_utility_world__";
 const EVALUATION_SCRIPT_URL: &str = "____chromiumoxide_utility_world___evaluation_script__";
 
+lazy_static::lazy_static! {
+    /// Spoof the runtime.
+    static ref CHROME_SPOOF_RUNTIME: bool = {
+        std::env::var("CHROME_SPOOF_RUNTIME").unwrap_or_else(|_| "false".to_string()) == "true"
+    };
+}
+
 /// Represents a frame on the page
 #[derive(Debug)]
 pub struct Frame {
@@ -219,7 +226,7 @@ impl FrameManager {
         let enable_runtime = runtime::EnableParams::default();
         let disable_runtime = runtime::DisableParams::default();
 
-        let mut commands = Vec::with_capacity(5);
+        let mut commands = Vec::with_capacity(if *CHROME_SPOOF_RUNTIME { 4 } else { 5 });
 
         let enable_id = enable.identifier();
         let get_tree_id = get_tree.identifier();
@@ -243,8 +250,10 @@ impl FrameManager {
             commands.push((enable_runtime_id, value));
         }
 
-        if let Ok(value) = serde_json::to_value(disable_runtime) {
-            commands.push((disable_runtime_id, value));
+        if *CHROME_SPOOF_RUNTIME {
+            if let Ok(value) = serde_json::to_value(disable_runtime) {
+                commands.push((disable_runtime_id, value));
+            }
         }
 
         CommandChain::new(commands, timeout)
