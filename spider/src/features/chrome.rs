@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::utils::log;
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::{
@@ -13,7 +11,9 @@ use chromiumoxide::handler::REQUEST_TIMEOUT;
 use chromiumoxide::page::DISABLE_DIALOGS;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
+use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -674,9 +674,18 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         match config.evaluate_on_new_document {
             Some(ref script) => {
                 if config.fingerprint {
+                    let linux = match &config.user_agent {
+                        Some(agent) => agent.contains("Chrome") && agent.contains("Linux"),
+                        _ => false,
+                    };
+
                     let _ = chrome_page
                         .evaluate_on_new_document(string_concat!(
-                            crate::features::chrome::FP_JS,
+                            if linux {
+                                &*crate::features::chrome::FP_JS_CHROME
+                            } else {
+                                &*crate::features::chrome::FP_JS
+                            },
                             script.as_str(),
                             if dismiss_dialogs && !stealth_mode {
                                 DISABLE_DIALOGS
@@ -700,9 +709,17 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             }
             _ => {
                 if config.fingerprint {
+                    let linux = match &config.user_agent {
+                        Some(agent) => agent.contains("Chrome") && agent.contains("Linux"),
+                        _ => false,
+                    };
                     let _ = chrome_page
                         .evaluate_on_new_document(string_concat!(
-                            crate::features::chrome::FP_JS,
+                            if linux {
+                                &*crate::features::chrome::FP_JS_CHROME
+                            } else {
+                                &*crate::features::chrome::FP_JS
+                            },
                             if dismiss_dialogs && !stealth_mode {
                                 DISABLE_DIALOGS
                             } else {
@@ -976,15 +993,19 @@ static CHROME_ARGS: [&'static str; 63] = [
     "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
 ];
 
-static BASE_FP_JS: &'static str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*config.random.value())],array:e=>new Int32Array([e[Math.floor(e.length*config.random.value())],e[Math.floor(e.length*config.random.value())]]),items:(e,t)=>{let o=e.length,r=Array(t),n=Array(o);for(t>o&&(t=o);t--;){let a=Math.floor(config.random.value()*o);r[t]=e[a in n?n[a]:a],n[a]=--o in n?n[o]:o}return r}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*config.random.value()),o=.1*config.random.value()*arguments[1][e];return arguments[1][e]+=o,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get(){let e=Math.floor(this.getBoundingClientRect().height),t=e&&1===rand.sign();return t?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get(){let e=Math.floor(this.getBoundingClientRect().width),t=e&&1===rand.sign();return t?e+rand.noise():e}});const context={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(context.BUFFER!==e){context.BUFFER=e;for(let o=0;o<e.length;o+=100){let r=Math.floor(Math.random()*o);e[r]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),o=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=o.apply(this,arguments);for(let t=0;t<arguments[0].length;t+=100){let r=Math.floor(Math.random()*t);arguments[0][r]+=.1*Math.random()}return e}}),e}})}};context.getChannelData(AudioBuffer),context.createAnalyser(AudioContext),context.getChannelData(OfflineAudioContext),context.createAnalyser(OfflineAudioContext),navigator.mediaDevices.getUserMedia=navigator.webkitGetUserMedia=navigator.mozGetUserMedia=navigator.getUserMedia=webkitRTCPeerConnection=RTCPeerConnection=MediaStreamTrack=void 0;Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});"#;
+// pub static CANVAS_FP_LINUX_JS: &str = r#"const t=HTMLCanvasElement.prototype.toBlob,e=HTMLCanvasElement.prototype.toDataURL,o=CanvasRenderingContext2D.prototype.getImageData,n=(t,e)=>{const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},n=t.width,r=t.height,a=o=>{const a=o*4;return[a,a+1,a+2,a+3]},i=o=>{for(let a=0;a<r;a++)for(let i=0;i<n;i++){const[l,c,d,h]=a*n+i<<2;o.data[l]+=o.r,o.data[c]+=o.g,o.data[d]+=o.b,o.data[h]+=o.a}};let c=o.apply(e,[0,0,n,r]);i(c),e.putImageData(c,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return n(this,this.getContext("2d")),t.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return n(this,this.getContext("2d")),e.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return n(this.canvas,this),o.apply(this,arguments)}});"#;
+pub static CANVAS_FP_MAC: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_WINDOWS: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(6*Math.random())-3,g:Math.floor(6*Math.random())-3,b:Math.floor(6*Math.random())-3,a:Math.floor(6*Math.random())-3},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let f=0;f<r;f++)for(let i=0;i<n;i++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
 
-use lazy_static::lazy_static;
+pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let o=e.length,r=Array(t),n=Array(o);for(t>o&&(t=o);t--;){let a=Math.floor(Math.random()*o);r[t]=e[a in n?n[a]:a],n[a]=--o in n?n[o]:o}return r}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),o=.1*Math.random()*arguments[1][e];return arguments[1][e]+=o,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get(){let e=Math.floor(this.getBoundingClientRect().height),t=e&&1===rand.sign();return t?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get(){let e=Math.floor(this.getBoundingClientRect().width),t=e&&1===rand.sign();return t?e+rand.noise():e}});const context={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(context.BUFFER!==e){context.BUFFER=e;for(let o=0;o<e.length;o+=100){let r=Math.floor(Math.random()*o);e[r]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),o=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=o.apply(this,arguments);for(let t=0;t<arguments[0].length;t+=100){let r=Math.floor(Math.random()*t);arguments[0][r]+=.1*Math.random()}return e}}),e}})}};context.getChannelData(AudioBuffer),context.createAnalyser(AudioContext),context.getChannelData(OfflineAudioContext),context.createAnalyser(OfflineAudioContext),navigator.mediaDevices.getUserMedia=navigator.webkitGetUserMedia=navigator.mozGetUserMedia=navigator.getUserMedia=webkitRTCPeerConnection=RTCPeerConnection=MediaStreamTrack=void 0;Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});"#;
+pub static BASE_FP_LINUX_JS: &str = r#"(()=>{const e=HTMLCanvasElement.prototype,t=e.toBlob,o=e.toDataURL,n=CanvasRenderingContext2D.prototype.getImageData,a=(e,t)=>{const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},n=e.width,a=e.height,i=n*a*4,c=t.getImageData(0,0,n,a);for(let e=0;e<i;e+=4)c.data[e]+=o.r,c.data[e+1]+=o.g,c.data[e+2]+=o.b,c.data[e+3]+=o.a;t.putImageData(c,0,0)};Object.defineProperty(e,"toBlob",{value:function(){return a(this,this.getContext("2d")),t.apply(this,arguments)}}),Object.defineProperty(e,"toDataURL",{value:function(){return a(this,this.getContext("2d")),o.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return a(this.canvas,this),n.apply(this,arguments)}});const r=WebGLRenderingContext.prototype.getParameter;WebGLRenderingContext.prototype.getParameter=function(e){const t=this.getExtension("WEBGL_debug_renderer_info");return t?e===t.UNMASKED_VENDOR_WEBGL?"Intel Inc.":e===t.UNMASKED_RENDERER_WEBGL?"Mesa Intel(R) UHD Graphics 620 (KBL GT2)":r.call(this,e):r.call(this,e)};const d={BUFFER:null};[AudioContext.prototype,OfflineAudioContext.prototype].forEach(e=>{const t=e.getChannelData;e.getChannelData=function(){const e=t.apply(this,arguments);if(d.BUFFER!==e){d.BUFFER=e;for(let t=0;t<e.length;t+=100)e[t]+=1e-7*Math.random()}return e};const o=e.createAnalyser;e.createAnalyser=function(){const e=o.apply(this,arguments),t=e.getFloatFrequencyData;return e.getFloatFrequencyData=function(e){for(let o=0;o<e.length;o+=100)e[o]+=.1*Math.random();return t.call(this,e)},e}});Object.defineProperties(navigator,{webdriver:{get:()=>!1},platform:{get:()=>"Linux x86_64"},languages:{get:()=>["en-US","en"]},language:{get:()=>"en-US"},plugins:{get:()=>[1,2,3,4,5]}});const s={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,1,-1,1,1,1,-1][Math.floor(8*Math.random())]};Object.defineProperties(HTMLElement.prototype,{offsetHeight:{get(){const e=Math.floor(this.getBoundingClientRect().height);return e&&1===s.sign()?e+s.noise():e}},offsetWidth:{get(){const e=Math.floor(this.getBoundingClientRect().width);return e&&1===s.sign()?e+s.noise():e}}})})();r"#;
 
 #[cfg(target_os = "macos")]
 lazy_static! {
     pub(crate) static ref FP_JS: String = BASE_FP_JS
         .replace("Intel Open Source Technology Center", "Apple Inc.")
-        .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1");
+        .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1")
+        .replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1);
 }
 
 #[cfg(target_os = "windows")]
@@ -994,24 +1015,20 @@ lazy_static! {
         .replace(
             "Mesa DRI Intel(R) Ivybridge Mobile",
             "NVIDIA GeForce GTX 1650/PCIe/SSE2"
-        );
+        )
+        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1);
 }
 
 #[cfg(target_os = "linux")]
 lazy_static! {
-    pub(crate) static ref FP_JS: String = BASE_FP_JS
-        .replace("Intel Open Source Technology Center", "X.Org")
-        .replace(
-            "Mesa DRI Intel(R) Ivybridge Mobile",
-            "AMD Radeon RX 580 Series"
-        );
+    pub(crate) static ref FP_JS: String = BASE_FP_LINUX_JS.into();
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 lazy_static! {
-    pub(crate) static ref FP_JS: String = BASE_FP_JS
-        .replace("Intel Open Source Technology Center", "Generic Vendor")
-        .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Generic Renderer");
+    pub(crate) static ref FP_JS: String = BASE_FP_LINUX_JS.into();
 }
-// /// Handle extracting links from anchors that are not found.
-// pub(crate) static ANCHOR_EVENTS: &'static str = r###"() => new Promise((resolve) => { const _pageRoutes = new Set(), _originalPushState = window.history.pushState; window.history.pushState = function(_state, _title, _url) { _pageRoutes.add(_url) }; function _onRouteChange() { _pageRoutes.add(window.location.href) } document.querySelectorAll("a:not([href])").forEach(_anchor => { _anchor.click() }); window.addEventListener("popstate", _onRouteChange); return resolve(Array.from(_pageRoutes)); } )"###;
+
+lazy_static! {
+    pub(crate) static ref FP_JS_CHROME: String = BASE_FP_LINUX_JS.into();
+}
