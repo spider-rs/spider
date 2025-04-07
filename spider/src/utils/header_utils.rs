@@ -35,12 +35,18 @@ lazy_static::lazy_static! {
     static ref NOT_A_BRAND_VERSION: String = {
         std::env::var("NOT_A_BRAND_VERSION").unwrap_or_else(|_| "24".to_string())
     };
+    /// The chrome platform linux version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
+    static ref CHROME_PLATFORM_LINUX_VERSION: String = {
+        std::env::var("CHROME_PLATFORM_LINUX_VERSION").unwrap_or_else(|_| {
+            "\"6.12.10\"".to_string()
+        })
+    };
     /// The chrome platform version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
     static ref CHROME_PLATFORM_VERSION: String = {
         std::env::var("CHROME_PLATFORM_VERSION").unwrap_or_else(|_| {
             #[cfg(target_os = "linux")]
             {
-                "\"6.12.10\"".to_string()
+                CHROME_PLATFORM_LINUX_VERSION.to_string()
             }
 
             #[cfg(not(target_os = "linux"))]
@@ -51,32 +57,46 @@ lazy_static::lazy_static! {
     };
 }
 
-fn parse_user_agent_to_ch_ua(ua: &str, dec: bool) -> String {
+fn parse_user_agent_to_ch_ua(ua: &str, dec: bool, linux: bool) -> String {
     let mut parts = Vec::with_capacity(3);
 
-    if ua.contains("Chrome/") {
-        if let Some(version) = ua
-            .split("Chrome/")
-            .nth(1)
-            .and_then(|s| s.split_whitespace().next())
-        {
-            if let Some(major_version) = version.split('.').next() {
-                parts.push(format!(
-                    r#""Chromium";v="{}{}""#,
-                    major_version,
-                    if dec { ".0.0" } else { "" }
-                ));
-                parts.push(format!(
-                    r#""Not:A-Brand";v="{}{}""#,
-                    *NOT_A_BRAND_VERSION,
-                    if dec { ".0.0" } else { "" }
-                ));
-                parts.push(format!(r#""Google Chrome";v="{}""#, major_version));
-            }
+    if let Some(version) = ua
+        .split("Chrome/")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+    {
+        if let Some(major_version) = version.split('.').next() {
+            parts.push(format!(
+                r#""Chromium";v="{}{}""#,
+                major_version,
+                if dec {
+                    if linux {
+                        ".0.0.0"
+                    } else {
+                        ".0.0"
+                    }
+                } else {
+                    ""
+                }
+            ));
+            parts.push(format!(
+                r#""Not:A-Brand";v="{}{}""#,
+                *NOT_A_BRAND_VERSION,
+                if dec {
+                    if linux {
+                        ".0.0.0"
+                    } else {
+                        ".0.0"
+                    }
+                } else {
+                    ""
+                }
+            ));
+            parts.push(format!(r#""Google Chrome";v="{}""#, major_version));
         }
     }
 
-    parts.join(", ")
+    parts.join(", ").trim_end().into()
 }
 
 #[cfg(target_os = "macos")]
@@ -144,7 +164,6 @@ fn get_sec_ch_ua_arch() -> &'static str {
     "\"unknown\""
 }
 
-#[cfg(target_os = "linux")]
 fn get_sec_ch_ua_bitness() -> &'static str {
     #[cfg(target_pointer_width = "64")]
     {
@@ -213,7 +232,6 @@ pub fn get_mimic_headers(
     }
 
     if user_agent.contains("Chrome/") {
-        #[cfg(target_os = "linux")]
         let linux_agent = user_agent.contains("Linux");
 
         insert_or_default!(
@@ -224,11 +242,18 @@ pub fn get_mimic_headers(
             ACCEPT_ENCODING,
             HeaderValue::from_static("gzip, deflate, br, zstd")
         );
-
         insert_or_default!(
             "Accept-Language",
-            HeaderValue::from_static(get_accept_language())
+            HeaderValue::from_static(if linux_agent {
+                "en-US,en;q=0.9"
+            } else {
+                get_accept_language()
+            })
         );
+
+        if linux_agent {
+            insert_or_default!("connection", HeaderValue::from_static("keep-alive"));
+        }
 
         if add_ref && !header_map.contains_key(REFERER) {
             if let Ok(ref_value) =
@@ -240,48 +265,55 @@ pub fn get_mimic_headers(
             }
         }
 
-        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false)) {
+        if let Ok(ch) =
+            HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false, linux_agent))
+        {
             insert_or_default!("sec-ch-ua", ch);
         }
-
-        if let Ok(ch) = HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true)) {
+        if let Ok(ch) =
+            HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
+        {
             insert_or_default!("sec-ch-ua-full-version-list", ch);
         }
-
-        #[cfg(target_os = "linux")]
         if linux_agent {
+            insert_or_default!(
+                "Sec-CH-UA-Arc",
+                HeaderValue::from_static(if linux_agent {
+                    "x86_64"
+                } else {
+                    get_sec_ch_ua_arch()
+                })
+            );
             insert_or_default!(
                 "Sec-CH-UA-Bitness",
                 HeaderValue::from_static(get_sec_ch_ua_bitness())
             );
         }
-
-        insert_or_default!(
-            "Sec-CH-UA-Arc",
-            HeaderValue::from_static(get_sec_ch_ua_arch())
-        );
         insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
-
-        #[cfg(target_os = "linux")]
         if linux_agent {
             insert_or_default!("Sec-CH-UA-Model", HeaderValue::from_static(""));
         }
-
         insert_or_default!(
             "sec-ch-ua-platform",
-            HeaderValue::from_static(get_sec_ch_ua_platform())
+            HeaderValue::from_static(if linux_agent {
+                "\"Linux\""
+            } else {
+                get_sec_ch_ua_platform()
+            })
         );
-
         insert_or_default!(
             "sec-ch-ua-platform-version",
-            HeaderValue::from_str(&CHROME_PLATFORM_VERSION).unwrap()
+            HeaderValue::from_str(if linux_agent {
+                &CHROME_PLATFORM_LINUX_VERSION
+            } else {
+                &CHROME_PLATFORM_VERSION
+            })
+            .unwrap()
         );
-
         insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
         insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
         insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
         insert_or_default!("Sec-Fetch-User", HeaderValue::from_static("?1"));
-
         insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
     } else if user_agent.contains("Firefox/") {
         insert_or_default!(
