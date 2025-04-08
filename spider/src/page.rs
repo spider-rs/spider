@@ -73,6 +73,7 @@ const BASE_CSS_SELECTORS: &str = concat!(
     ":not([href$=\".m4a\"])",
     ":not([href$=\".aiff\"])",
     ":not([href$=\".pdf\"])",
+    ":not([href$=\".rtf\"])",
     ":not([href$=\".eps\"])",
     ":not([href$=\".yaml\"])",
     ":not([href$=\".yml\"])",
@@ -164,7 +165,8 @@ lazy_static! {
         "application/x-rar-compressed", // rar archives
         "application/x-7z-compressed",   // 7z archives
         "application/x-tar",   // tar archives
-        "application/pdf"     // pdf
+        "application/pdf",     // pdf
+        "application/rtf"     // rtf
     };
 
     /// Visual assets to ignore.
@@ -181,7 +183,7 @@ lazy_static! {
             "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
             "mkv", "webm", "m4v",                            // Additional Video files
             "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps", "yaml", "yml", "xml",              // Other additional files
+            "pdf", "eps", "yaml", "yml", "xml",  "rtf",      // Other additional files
 
             // Including extensions with extra dot
             ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
@@ -193,7 +195,7 @@ lazy_static! {
             ".bmp", ".tiff", ".tif", ".heic", ".heif",
             ".mkv", ".webm", ".m4v",
             ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps", ".yaml", ".yml", ".xml"
+            ".pdf", ".eps", ".yaml", ".yml", ".xml", ".rtf"
         ].map(|s| s.into()));
 
         m

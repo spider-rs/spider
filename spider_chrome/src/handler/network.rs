@@ -108,6 +108,7 @@ lazy_static! {
         "application/x-7z-compressed",
         "application/x-rpm",
         "application/x-shockwave-flash",
+        "application/rtf",
     };
 
     /// Ignore the resources for visual content types.
@@ -129,9 +130,8 @@ lazy_static! {
     /// Case insenstive css matching
     pub static ref CSS_EXTENSION: CaseInsensitiveString = CaseInsensitiveString::from("css");
 
-
     /// The command chain.
-    pub static ref INIT_CHAIN:Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
+    pub static ref INIT_CHAIN: Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
         let enable = EnableParams::default();
 
         if let Ok(c) = serde_json::to_value(&enable) {
@@ -142,7 +142,7 @@ lazy_static! {
     };
 
     /// The command chain with https ignore.
-    pub static ref INIT_CHAIN_IGNORE_HTTP_ERRORS:Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
+    pub static ref INIT_CHAIN_IGNORE_HTTP_ERRORS: Vec<(std::borrow::Cow<'static, str>, serde_json::Value)>  = {
         let enable = EnableParams::default();
         let mut v = vec![];
         if let Ok(c) = serde_json::to_value(&enable) {
