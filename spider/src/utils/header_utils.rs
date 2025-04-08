@@ -255,6 +255,8 @@ pub fn get_mimic_headers(
             insert_or_default!("connection", HeaderValue::from_static("keep-alive"));
         }
 
+        insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
+
         if add_ref && !header_map.contains_key(REFERER) {
             if let Ok(ref_value) =
                 HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
