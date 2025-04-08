@@ -165,7 +165,13 @@ lazy_static! {
     };
 }
 
+/// Determine if a redirect is true.
+pub(crate) fn is_redirect_status(status: i64) -> bool {
+    matches!(status, 301 | 302 | 303 | 307 | 308)
+}
+
 #[derive(Debug)]
+/// The base network manager.
 pub struct NetworkManager {
     queued_events: VecDeque<NetworkEvent>,
     ignore_httpserrors: bool,
@@ -447,14 +453,60 @@ impl NetworkManager {
                         IGNORE_NETWORKING_RESOURCE_MAP.contains(event.resource_type.as_ref());
 
                     let skip_networking = skip_networking || self.document_reload_tracker >= 3;
+                    let mut replacer = None;
 
                     if document_resource {
                         if self.document_target_domain == current_url {
                             // this will prevent the domain from looping (3 times is enough).
                             self.document_reload_tracker += 1;
+                        } else if !self.document_target_domain.is_empty()
+                            && event.redirected_request_id.is_some()
+                        {
+                            let (http_document_replacement, mut https_document_replacement) =
+                                if self.document_target_domain.starts_with("http://") {
+                                    (
+                                        self.document_target_domain.replace("http://", "http//"),
+                                        self.document_target_domain.replace("http://", "https://"),
+                                    )
+                                } else {
+                                    (
+                                        self.document_target_domain.replace("https://", "https//"),
+                                        self.document_target_domain.replace("https://", "http://"),
+                                    )
+                                };
+
+                            let trailing = https_document_replacement.ends_with('/');
+
+                            if trailing {
+                                https_document_replacement.pop();
+                            }
+
+                            if https_document_replacement.ends_with('/') {
+                                https_document_replacement.pop();
+                            }
+
+                            let redirect_mask = format!(
+                                "{}{}",
+                                https_document_replacement, http_document_replacement
+                            );
+
+                            // handle redirect masking
+                            if current_url == redirect_mask {
+                                replacer = Some(if trailing {
+                                    format!("{}/", https_document_replacement)
+                                } else {
+                                    https_document_replacement
+                                });
+                            }
                         }
                         self.document_target_domain = event.request.url.clone();
                     }
+
+                    let current_url = match &replacer {
+                        Some(r) => r,
+                        _ => &event.request.url,
+                    }
+                    .as_str();
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -498,7 +550,7 @@ impl NetworkManager {
                         && (javascript_resource || network_resource || document_resource)
                     {
                         self.intercept_manager.intercept_detection(
-                            &event.request.url,
+                            &current_url,
                             self.ignore_visuals,
                             network_resource,
                         )
@@ -508,17 +560,13 @@ impl NetworkManager {
 
                     let skip_networking =
                         if !skip_networking && (javascript_resource || network_resource) {
-                            block_website(&event.request.url)
+                            block_website(&current_url)
                         } else {
                             skip_networking
                         };
 
                     if skip_networking {
-                        tracing::debug!(
-                            "Blocked: {:?} - {}",
-                            event.resource_type,
-                            event.request.url
-                        );
+                        tracing::debug!("Blocked: {:?} - {}", event.resource_type, current_url);
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -526,12 +574,16 @@ impl NetworkManager {
                             );
                         self.push_cdp_request(fullfill_params);
                     } else {
-                        tracing::debug!(
-                            "Allowed: {:?} - {}",
-                            event.resource_type,
-                            event.request.url
-                        );
-                        self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
+                        tracing::debug!("Allowed: {:?} - {}", event.resource_type, current_url);
+                        let mut continue_params =
+                            ContinueRequestParams::new(event.request_id.clone());
+
+                        if replacer.is_some() {
+                            continue_params.url = Some(current_url.into());
+                            continue_params.intercept_response = Some(false);
+                        }
+
+                        self.push_cdp_request(continue_params)
                     }
                 }
             } else {
@@ -569,9 +621,54 @@ impl NetworkManager {
                         if self.document_target_domain == current_url {
                             // this will prevent the domain from looping (3 times is enough).
                             self.document_reload_tracker += 1;
+                        } else if !self.document_target_domain.is_empty()
+                            && event.redirected_request_id.is_some()
+                        {
+                            let (http_document_replacement, mut https_document_replacement) =
+                                if self.document_target_domain.starts_with("http://") {
+                                    (
+                                        self.document_target_domain.replace("http://", "http//"),
+                                        self.document_target_domain.replace("http://", "https://"),
+                                    )
+                                } else {
+                                    (
+                                        self.document_target_domain.replace("https://", "https//"),
+                                        self.document_target_domain.replace("https://", "http://"),
+                                    )
+                                };
+
+                            let trailing = https_document_replacement.ends_with('/');
+
+                            if trailing {
+                                https_document_replacement.pop();
+                            }
+
+                            if https_document_replacement.ends_with('/') {
+                                https_document_replacement.pop();
+                            }
+
+                            let redirect_mask = format!(
+                                "{}{}",
+                                https_document_replacement, http_document_replacement
+                            );
+
+                            // handle redirect masking
+                            if current_url == redirect_mask {
+                                replacer = Some(if trailing {
+                                    format!("{}/", https_document_replacement)
+                                } else {
+                                    https_document_replacement
+                                });
+                            }
                         }
                         self.document_target_domain = event.request.url.clone();
                     }
+
+                    let current_url = match &replacer {
+                        Some(r) => r,
+                        _ => &event.request.url,
+                    }
+                    .as_str();
 
                     // main initial check
                     let skip_networking = if !skip_networking {
@@ -637,6 +734,8 @@ impl NetworkManager {
                         };
 
                     if skip_networking {
+                        tracing::debug!("Blocked: {:?} - {}", event.resource_type, current_url);
+
                         let fullfill_params =
                             crate::handler::network::fetch::FulfillRequestParams::new(
                                 event.request_id.clone(),
@@ -644,9 +743,19 @@ impl NetworkManager {
                             );
                         self.push_cdp_request(fullfill_params);
                     } else {
-                        self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
+                        tracing::debug!("Allowed: {:?} - {}", event.resource_type, current_url);
+
+                        let mut continue_params =
+                            ContinueRequestParams::new(event.request_id.clone());
+
+                        if replacer.is_some() {
+                            continue_params.url = Some(current_url.into());
+                            continue_params.intercept_response = Some(false);
+                        }
                     }
                 }
+            } else {
+                self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
             }
         }
 
@@ -802,13 +911,40 @@ impl NetworkManager {
         interception_id: Option<InterceptionId>,
     ) {
         let mut redirect_chain = Vec::new();
-        if let Some(redirect_resp) = event.redirect_response.as_ref() {
+        let mut redirect_location = None;
+
+        if let Some(redirect_resp) = &event.redirect_response {
             if let Some(mut request) = self.requests.remove(event.request_id.as_ref()) {
-                self.handle_request_redirect(&mut request, redirect_resp.clone());
+                if is_redirect_status(redirect_resp.status) {
+                    if let Some(location) = redirect_resp.headers.inner()["Location"].as_str() {
+                        if redirect_resp.url != location {
+                            let fixed_location = location.replace(&redirect_resp.url, "");
+                            request.response.as_mut().map(|resp| {
+                                resp.headers.0["Location"] =
+                                    serde_json::Value::String(fixed_location.clone());
+                            });
+                            redirect_location = Some(fixed_location);
+                        }
+                    }
+                }
+
+                self.handle_request_redirect(
+                    &mut request,
+                    if let Some(redirect_location) = redirect_location {
+                        let mut redirect_resp = redirect_resp.clone();
+                        redirect_resp.headers.0["Location"] =
+                            serde_json::Value::String(redirect_location);
+                        redirect_resp
+                    } else {
+                        redirect_resp.clone()
+                    },
+                );
+
                 redirect_chain = std::mem::take(&mut request.redirect_chain);
                 redirect_chain.push(request);
             }
         }
+
         let request = HttpRequest::new(
             event.request_id.clone(),
             event.frame_id.clone(),
