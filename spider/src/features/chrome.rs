@@ -250,6 +250,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                             user_agent,
                             &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
+                            &None,
                         );
                         let header_map =
                             crate::utils::header_utils::header_map_to_hash_map(&header_map);
@@ -275,6 +276,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                             user_agent,
                             &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
+                            &None,
                         );
 
                         let header_map =
@@ -660,7 +662,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                             .enable_stealth_mode_with_agent_and_dimiss_dialogs(agent)
                             .await
                     } else {
-                        chrome_page.enable_stealth_mode_with_agent(agent).await
+                        chrome_page.enable_stealth_mode().await
                     };
                 }
                 _ => {

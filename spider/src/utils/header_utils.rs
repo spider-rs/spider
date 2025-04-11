@@ -13,7 +13,7 @@ pub fn setup_default_headers(
         None => crate::configuration::SerializableHeaderMap::default(),
     };
 
-    if !headers.contains_key(HOST) && configuration.preserve_host_header {
+    if !headers.contains_key("Host") && configuration.preserve_host_header {
         if let Some(u) = url {
             if let Some(host) = u.host_str() {
                 if let Ok(ref_value) = HeaderValue::from_str(host) {
@@ -198,20 +198,53 @@ fn get_accept_language() -> &'static str {
     }
 }
 
+/// The kind of browser.
+#[derive(PartialEq, Eq)]
+enum BrowserKind {
+    /// Chrome
+    Chrome,
+    /// Firefox
+    Firefox,
+    /// Safari
+    Safari,
+    /// Edge
+    Edge,
+    /// Other
+    Other,
+}
+
 /// Build the headers to use to act like a browser
 pub fn get_mimic_headers(
     user_agent: &str,
     header_map: &std::option::Option<Box<SerializableHeaderMap>>,
     contains_referer: bool,
+    hostname: &Option<&str>,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
-        HeaderValue, ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, REFERER, TE, UPGRADE_INSECURE_REQUESTS,
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, REFERER, TE,
+        UPGRADE_INSECURE_REQUESTS,
     };
 
-    let mut headers = HeaderMap::new();
-    let add_ref = !contains_referer && cfg!(feature = "spoof");
+    let browser = if user_agent.contains("Chrome/") {
+        BrowserKind::Chrome
+    } else if user_agent.contains("Firefox/") {
+        BrowserKind::Firefox
+    } else if user_agent.contains("Safari/") {
+        BrowserKind::Safari
+    } else if user_agent.contains("Edge/") {
+        BrowserKind::Edge
+    } else {
+        BrowserKind::Other
+    };
 
-    let binding = reqwest::header::HeaderMap::new();
+    let add_ref = !contains_referer && cfg!(feature = "spoof");
+    let cap = if browser == BrowserKind::Chrome {
+        26
+    } else {
+        10
+    };
+    let mut headers = HeaderMap::with_capacity(cap);
+    let binding = reqwest::header::HeaderMap::with_capacity(cap);
     let header_map = header_map.as_ref().map(|h| h.inner()).unwrap_or(&binding);
 
     macro_rules! insert_or_default {
@@ -231,55 +264,97 @@ pub fn get_mimic_headers(
         };
     }
 
-    if user_agent.contains("Chrome/") {
-        let linux_agent = user_agent.contains("Linux");
+    match browser {
+        BrowserKind::Chrome => {
+            let linux_agent = user_agent.contains("Linux");
 
-        insert_or_default!(
-            ACCEPT,
-            HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
-        );
-        insert_or_default!(
-            ACCEPT_ENCODING,
-            HeaderValue::from_static("gzip, deflate, br, zstd")
-        );
-        insert_or_default!(
-            "Accept-Language",
-            HeaderValue::from_static(if linux_agent {
-                "en-US,en;q=0.9"
-            } else {
-                get_accept_language()
-            })
-        );
-
-        if linux_agent {
-            insert_or_default!("connection", HeaderValue::from_static("keep-alive"));
-        }
-
-        insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
-
-        if add_ref && !header_map.contains_key(REFERER) {
-            if let Ok(ref_value) =
-                HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
-            {
-                if !ref_value.is_empty() {
-                    headers.insert(REFERER, ref_value);
+            // 1. Host
+            if let Some(host) = &hostname {
+                if let Ok(host_value) = HeaderValue::from_str(host) {
+                    insert_or_default!("Host", host_value);
                 }
             }
-        }
 
-        if let Ok(ch) =
-            HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false, linux_agent))
-        {
-            insert_or_default!("sec-ch-ua", ch);
-        }
-        if let Ok(ch) =
-            HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
-        {
-            insert_or_default!("sec-ch-ua-full-version-list", ch);
-        }
-        if linux_agent {
+            // 2. Connection
+            insert_or_default!("Connection", HeaderValue::from_static("keep-alive"));
+
+            // 3. sec-ch-ua group
+            if let Ok(sec_ch_ua) =
+                HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false, linux_agent))
+            {
+                insert_or_default!("sec-ch-ua", sec_ch_ua);
+            }
+            insert_or_default!("sec-ch-ua-mobile", HeaderValue::from_static("?0"));
             insert_or_default!(
-                "Sec-CH-UA-Arc",
+                "sec-ch-ua-platform",
+                HeaderValue::from_static(if linux_agent {
+                    "\"Linux\""
+                } else {
+                    get_sec_ch_ua_platform()
+                })
+            );
+
+            // 4. Upgrade-Insecure-Requests
+            insert_or_default!("Upgrade-Insecure-Requests", HeaderValue::from_static("1"));
+
+            // 5. User-Agent
+            if let Ok(ua) = HeaderValue::from_str(user_agent) {
+                insert_or_default!("User-Agent", ua);
+            }
+
+            // 6. Accept
+            insert_or_default!(
+                "Accept",
+                HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+            );
+
+            // 7. Sec-Fetch group
+            insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
+            insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
+            insert_or_default!("Sec-Fetch-User", HeaderValue::from_static("?1"));
+            insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
+
+            // 8. Referer (if spoofing enabled and missing)
+            if !contains_referer {
+                insert_or_default!(
+                    "Referer",
+                    HeaderValue::from_static(crate::features::spoof_referrer::spoof_referrer())
+                );
+            }
+
+            // 9. Accept-Encoding and Accept-Language
+            insert_or_default!(
+                ACCEPT_ENCODING,
+                HeaderValue::from_static("gzip, deflate, br, zstd")
+            );
+            insert_or_default!(
+                ACCEPT_LANGUAGE,
+                HeaderValue::from_static(get_accept_language())
+            );
+
+            // 10. Optional behavior/diagnostic headers
+            insert_or_default!("Cache-Control", HeaderValue::from_static("max-age=0"));
+            insert_or_default!("Pragma", HeaderValue::from_static("no-cache"));
+            insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
+            insert_or_default!("Downlink", HeaderValue::from_static("10"));
+            insert_or_default!("Rtt", HeaderValue::from_static("50"));
+
+            // 11. Extra client hints (real Chrome includes some of these)
+            insert_or_default!(
+                "sec-ch-ua-full-version-list",
+                HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
+                    .unwrap()
+            );
+            if let Ok(sec_ch_platform) = HeaderValue::from_str(if linux_agent {
+                &CHROME_PLATFORM_LINUX_VERSION
+            } else {
+                &CHROME_PLATFORM_VERSION
+            }) {
+                insert_or_default!("sec-ch-ua-platform-version", sec_ch_platform);
+            }
+            insert_or_default!("sec-ch-ua-model", HeaderValue::from_static(""));
+            insert_or_default!(
+                "sec-ch-ua-arc",
                 HeaderValue::from_static(if linux_agent {
                     "x86_64"
                 } else {
@@ -287,46 +362,28 @@ pub fn get_mimic_headers(
                 })
             );
             insert_or_default!(
-                "Sec-CH-UA-Bitness",
+                "sec-ch-ua-bitness",
                 HeaderValue::from_static(get_sec_ch_ua_bitness())
             );
+            insert_or_default!(
+                "sec-ch-ua-form-factors",
+                HeaderValue::from_static(r#""Desktop""#)
+            );
+            insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
+            insert_or_default!(
+                "sec-ch-prefers-color-scheme",
+                HeaderValue::from_static("light")
+            );
         }
-        insert_or_default!("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
-        if linux_agent {
-            insert_or_default!("Sec-CH-UA-Model", HeaderValue::from_static(""));
-        }
-        insert_or_default!(
-            "sec-ch-ua-platform",
-            HeaderValue::from_static(if linux_agent {
-                "\"Linux\""
-            } else {
-                get_sec_ch_ua_platform()
-            })
-        );
-        insert_or_default!(
-            "sec-ch-ua-platform-version",
-            HeaderValue::from_str(if linux_agent {
-                &CHROME_PLATFORM_LINUX_VERSION
-            } else {
-                &CHROME_PLATFORM_VERSION
-            })
-            .unwrap()
-        );
-        insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
-        insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
-        insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
-        insert_or_default!("Sec-Fetch-User", HeaderValue::from_static("?1"));
-        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-    } else if user_agent.contains("Firefox/") {
-        insert_or_default!(
-            ACCEPT,
-            HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-            )
-        );
+        BrowserKind::Firefox => {
+            insert_or_default!(
+                ACCEPT,
+                HeaderValue::from_static(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+                )
+            );
 
-        if add_ref {
-            if !header_map.contains_key(REFERER) {
+            if add_ref && !header_map.contains_key(REFERER) {
                 if let Ok(ref_value) =
                     HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
                 {
@@ -335,21 +392,19 @@ pub fn get_mimic_headers(
                     }
                 }
             }
+            insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+            insert_or_default!(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
+            insert_or_default!(TE, HeaderValue::from_static("trailers"));
         }
+        BrowserKind::Safari => {
+            insert_or_default!(
+                ACCEPT,
+                HeaderValue::from_static(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                )
+            );
 
-        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-        insert_or_default!(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
-        insert_or_default!(TE, HeaderValue::from_static("trailers"));
-    } else if user_agent.contains("Safari/") && !user_agent.contains("Chrome/") {
-        insert_or_default!(
-            ACCEPT,
-            HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            )
-        );
-
-        if add_ref {
-            if !header_map.contains_key(REFERER) {
+            if add_ref && !header_map.contains_key(REFERER) {
                 if let Ok(ref_value) =
                     HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
                 {
@@ -358,19 +413,18 @@ pub fn get_mimic_headers(
                     }
                 }
             }
+
+            insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
         }
+        BrowserKind::Edge => {
+            insert_or_default!(
+                ACCEPT,
+                HeaderValue::from_static(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+                )
+            );
 
-        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
-    } else if user_agent.contains("Edge/") {
-        insert_or_default!(
-            ACCEPT,
-            HeaderValue::from_static(
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-            )
-        );
-
-        if add_ref {
-            if !header_map.contains_key(REFERER) {
+            if add_ref && !header_map.contains_key(REFERER) {
                 if let Ok(ref_value) =
                     HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
                 {
@@ -379,9 +433,10 @@ pub fn get_mimic_headers(
                     }
                 }
             }
-        }
 
-        insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+            insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+        }
+        BrowserKind::Other => {}
     }
 
     headers
@@ -407,11 +462,13 @@ pub fn extend_headers(
     header_map: &mut reqwest::header::HeaderMap,
     user_agent: &str,
     headers: &std::option::Option<Box<SerializableHeaderMap>>,
+    hostname: &Option<&str>,
 ) {
     header_map.extend(crate::utils::header_utils::get_mimic_headers(
         user_agent,
         &headers,
         has_ref(&headers),
+        hostname,
     ));
 }
 
@@ -421,6 +478,7 @@ pub fn extend_headers(
     _header_map: &mut reqwest::header::HeaderMap,
     _user_agent: &str,
     _headers: &std::option::Option<Box<SerializableHeaderMap>>,
+    _hostname: &Option<&str>,
 ) {
 }
 

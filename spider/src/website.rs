@@ -1180,13 +1180,22 @@ impl Website {
             &mut headers,
             user_agent,
             &self.configuration.headers,
+            &match &self.domain_parsed {
+                Some(u) => u.host_str(),
+                _ => None,
+            },
         );
 
         let client = reqwest::Client::builder()
-            .user_agent(user_agent)
             .redirect(policy)
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_secs(1));
+
+        let client = if !headers.contains_key("User-Agent") {
+            client.user_agent(user_agent)
+        } else {
+            client
+        };
 
         let client = if self.configuration.http2_prior_knowledge {
             client.http2_prior_knowledge()
@@ -1217,12 +1226,21 @@ impl Website {
             &mut headers,
             user_agent,
             &self.configuration.headers,
+            &match &self.domain_parsed {
+                Some(u) => u.host_str(),
+                _ => None,
+            },
         );
 
         let client = Client::builder()
-            .user_agent(user_agent)
             .redirect(policy)
             .tcp_keepalive(Duration::from_secs(1));
+
+        let client = if !headers.contains_key("User-Agent") {
+            client.user_agent(user_agent)
+        } else {
+            client
+        };
 
         let client = if let Some(emulation) = self.configuration.emulation {
             client.emulation(emulation)

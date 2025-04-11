@@ -2193,7 +2193,6 @@ where
             remote_addr,
             #[cfg(feature = "cookies")]
             cookies,
-            // content,
             final_url,
             status_code,
             ..Default::default()

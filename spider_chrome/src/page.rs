@@ -48,8 +48,6 @@ pub struct Page {
     inner: Arc<PageInner>,
 }
 
-const DEFAULT_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
-
 /// List of chrome plugins.
 static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "internal-pdf-viewer",
@@ -172,10 +170,7 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode(&self) -> Result<()> {
-        let _ = tokio::join!(
-            self._enable_stealth_mode(None),
-            self.set_user_agent(DEFAULT_AGENT),
-        );
+        let _ = self._enable_stealth_mode(None).await;
 
         Ok(())
     }

@@ -630,7 +630,8 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSel
 pub fn validate_empty(content: &Option<Box<Vec<u8>>>, is_success: bool) -> bool {
     match content {
         Some(ref content) => {
-            !(content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
+            // is_success && content.starts_with(br#"<html style=\"height:100%\"><head><META NAME=\"ROBOTS\" CONTENT=\"NOINDEX, NOFOLLOW\"><meta name=\"format-detection\" content=\"telephone=no\"><meta name=\"viewport\" content=\"initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge,chrome=1\"></head><body style=\"margin:0px;height:100%\"><iframe id=\"main-iframe\" src=\"/_Incapsula_"#)
+            !( content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
                      content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") &&
                       content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n"))
         }
@@ -745,6 +746,7 @@ pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
 pub fn build(url: &str, res: PageResponse) -> Page {
     let success = res.status_code.is_success();
     let resource_found = validate_empty(&res.content, success);
+
     let mut should_retry = resource_found && !success
         || res.status_code.is_server_error()
         || res.status_code == StatusCode::TOO_MANY_REQUESTS
@@ -1169,6 +1171,7 @@ impl Page {
                 page_response
             }
         };
+
         build(url, page_response)
     }
 
