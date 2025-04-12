@@ -1671,9 +1671,9 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.8.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "575f75dfd25738df5b91b8e43e14d44bda14637a58fae779fd2b064f8bf3e010"
+checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "deadpool"
@@ -4662,9 +4662,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.99"
+version = "2.1.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89186bbd6ebdabc007b20bda4807abe8f4ad0636d0fb86be20f8cfce25b8f4b3"
+checksum = "70295efe3fd3db60e81f452e2eacc407b4e6c2e1ff7f763424ae6e16105cee26"
 dependencies = [
  "psl-types",
 ]
@@ -5958,7 +5958,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -6025,7 +6025,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6118,7 +6118,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "clap",
  "env_logger",
@@ -6177,7 +6177,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6200,7 +6200,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "hashbrown 0.15.2",
  "indexmap 1.9.3",
@@ -6217,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.36.46"
+version = "2.36.47"
 dependencies = [
  "env_logger",
  "lazy_static",

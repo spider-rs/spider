@@ -226,7 +226,7 @@ impl FrameManager {
         let enable_runtime = runtime::EnableParams::default();
         let disable_runtime = runtime::DisableParams::default();
 
-        let mut commands = Vec::with_capacity(if *CHROME_SPOOF_RUNTIME { 4 } else { 5 });
+        let mut commands = Vec::with_capacity(if *CHROME_SPOOF_RUNTIME { 5 } else { 4 });
 
         let enable_id = enable.identifier();
         let get_tree_id = get_tree.identifier();
