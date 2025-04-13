@@ -186,6 +186,17 @@ impl Page {
     /// Changes your user_agent with a custom agent, removes the `navigator.webdriver` property
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
+    pub async fn enable_stealth_mode_with_dimiss_dialogs(&self, ua: &str) -> Result<()> {
+        let _ = tokio::join!(
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS)),
+            self.set_user_agent(ua)
+        );
+        Ok(())
+    }
+
+    /// Changes your user_agent with a custom agent, removes the `navigator.webdriver` property
+    /// changes permissions, pluggins rendering contexts and the `window.chrome`
+    /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_agent_and_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
             self._enable_stealth_mode(Some(DISABLE_DIALOGS)),
