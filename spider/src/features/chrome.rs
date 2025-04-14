@@ -251,6 +251,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                             &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
                             &None,
+                            true,
                         );
                         let header_map =
                             crate::utils::header_utils::header_map_to_hash_map(&header_map);
@@ -277,6 +278,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                             &config.headers,
                             crate::utils::header_utils::has_ref(&config.headers),
                             &None,
+                            true,
                         );
 
                         let header_map =

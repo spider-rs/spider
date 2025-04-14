@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, SerializableHeaderMap};
-use reqwest::header::{HeaderMap, HeaderValue, HOST, REFERER};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, HOST, REFERER};
 
 /// Setup the default headers for the request.
 pub fn setup_default_headers(
@@ -13,7 +13,7 @@ pub fn setup_default_headers(
         None => crate::configuration::SerializableHeaderMap::default(),
     };
 
-    if !headers.contains_key("Host") && configuration.preserve_host_header {
+    if !headers.contains_key(HOST) && configuration.preserve_host_header {
         if let Some(u) = url {
             if let Some(host) = u.host_str() {
                 if let Ok(ref_value) = HeaderValue::from_str(host) {
@@ -213,16 +213,36 @@ enum BrowserKind {
     Other,
 }
 
-/// Build the headers to use to act like a browser
+#[derive(Clone)]
+/// Header key value.
+pub enum HeaderKey {
+    /// The name of the header.
+    Name(HeaderName),
+    /// The static str.
+    Str(&'static str),
+}
+
+impl HeaderKey {
+    /// Return HeaderName if valid
+    pub fn as_header_name(&self) -> HeaderName {
+        match self {
+            HeaderKey::Name(h) => h.clone(),
+            HeaderKey::Str(s) => HeaderName::from_bytes(s.as_bytes()).expect("valid header"),
+        }
+    }
+}
+
+/// Build the headers to use to act like a browser.
 pub fn get_mimic_headers(
     user_agent: &str,
     header_map: &std::option::Option<Box<SerializableHeaderMap>>,
     contains_referer: bool,
     hostname: &Option<&str>,
+    chrome: bool,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
-        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, REFERER, TE,
-        UPGRADE_INSECURE_REQUESTS,
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, TE,
+        UPGRADE_INSECURE_REQUESTS, USER_AGENT, PRAGMA
     };
 
     let browser = if user_agent.contains("Chrome/") {
@@ -268,15 +288,52 @@ pub fn get_mimic_headers(
         BrowserKind::Chrome => {
             let linux_agent = user_agent.contains("Linux");
 
+            // if not a chrome request we should stick to the headers from request to prevent duplications.
+            let (
+                host_header,
+                connection_header,
+                useragent_header,
+                accept_header,
+                refererer_header,
+                upgrade_request_header,
+                cache_control_header,
+                pragma_header,
+            ) = if !chrome {
+                (
+                    HeaderKey::Name(HOST),
+                    HeaderKey::Name(CONNECTION),
+                    HeaderKey::Name(USER_AGENT),
+                    HeaderKey::Name(ACCEPT),
+                    HeaderKey::Name(REFERER),
+                    HeaderKey::Name(UPGRADE_INSECURE_REQUESTS),
+                    HeaderKey::Name(CACHE_CONTROL),
+                    HeaderKey::Name(PRAGMA),
+                )
+            } else {
+                (
+                    HeaderKey::Str("Host"),
+                    HeaderKey::Str("Connection"),
+                    HeaderKey::Str("User-Agent"),
+                    HeaderKey::Str("Accept"),
+                    HeaderKey::Str("Referer"),
+                    HeaderKey::Str("Upgrade-Insecure-Requests"),
+                    HeaderKey::Str("Cache-Control"),
+                    HeaderKey::Str("Pragma"),
+                )
+            };
+
             // 1. Host
             if let Some(host) = &hostname {
                 if let Ok(host_value) = HeaderValue::from_str(host) {
-                    insert_or_default!("Host", host_value);
+                    insert_or_default!(&host_header.as_header_name(), host_value);
                 }
             }
 
             // 2. Connection
-            insert_or_default!("Connection", HeaderValue::from_static("keep-alive"));
+            insert_or_default!(
+                &connection_header.as_header_name(),
+                HeaderValue::from_static("keep-alive")
+            );
 
             // 3. sec-ch-ua group
             if let Ok(sec_ch_ua) =
@@ -295,16 +352,19 @@ pub fn get_mimic_headers(
             );
 
             // 4. Upgrade-Insecure-Requests
-            insert_or_default!("Upgrade-Insecure-Requests", HeaderValue::from_static("1"));
+            insert_or_default!(
+                &upgrade_request_header.as_header_name(),
+                HeaderValue::from_static("1")
+            );
 
             // 5. User-Agent
             if let Ok(ua) = HeaderValue::from_str(user_agent) {
-                insert_or_default!("User-Agent", ua);
+                insert_or_default!(&useragent_header.as_header_name(), ua);
             }
 
             // 6. Accept
             insert_or_default!(
-                "Accept",
+               &accept_header.as_header_name(),
                 HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
             );
 
@@ -317,7 +377,7 @@ pub fn get_mimic_headers(
             // 8. Referer (if spoofing enabled and missing)
             if !contains_referer {
                 insert_or_default!(
-                    "Referer",
+                    &refererer_header.as_header_name(),
                     HeaderValue::from_static(crate::features::spoof_referrer::spoof_referrer())
                 );
             }
@@ -333,8 +393,14 @@ pub fn get_mimic_headers(
             );
 
             // 10. Optional behavior/diagnostic headers
-            insert_or_default!("Cache-Control", HeaderValue::from_static("max-age=0"));
-            insert_or_default!("Pragma", HeaderValue::from_static("no-cache"));
+            insert_or_default!(
+                &cache_control_header.as_header_name(),
+                HeaderValue::from_static("max-age=0")
+            );
+            insert_or_default!(
+                &pragma_header.as_header_name(),
+                HeaderValue::from_static("no-cache")
+            );
             insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
             insert_or_default!("Downlink", HeaderValue::from_static("10"));
             insert_or_default!("Rtt", HeaderValue::from_static("50"));
@@ -469,6 +535,7 @@ pub fn extend_headers(
         &headers,
         has_ref(&headers),
         hostname,
+        false,
     ));
 }
 
