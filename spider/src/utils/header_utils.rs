@@ -241,8 +241,8 @@ pub fn get_mimic_headers(
     chrome: bool,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
-        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, TE,
-        UPGRADE_INSECURE_REQUESTS, USER_AGENT, PRAGMA
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, PRAGMA,
+        TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     };
 
     let browser = if user_agent.contains("Chrome/") {
