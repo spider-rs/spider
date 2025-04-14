@@ -567,53 +567,47 @@ pub async fn perform_chrome_http_request(
 
     match page_base.await {
         Ok(page_base) => {
-            match page_base {
-                Some(http_request) => {
-                    if let Some(http_method) = http_request.method.as_deref() {
-                        method = http_method.into();
+            if let Some(http_request) = page_base {
+                if let Some(http_method) = http_request.method.as_deref() {
+                    method = http_method.into();
+                }
+
+                request_headers.clone_from(&http_request.headers);
+
+                if let Some(ref response) = http_request.response {
+                    if let Some(ref p) = response.protocol {
+                        protocol.clone_from(p);
                     }
 
-                    request_headers.clone_from(&http_request.headers);
-
-                    if let Some(ref response) = http_request.response {
-                        if let Some(ref p) = response.protocol {
-                            protocol.clone_from(p);
+                    if let Some(res_headers) = response.headers.inner().as_object() {
+                        for (k, v) in res_headers {
+                            response_headers.insert(k.to_string(), v.to_string());
                         }
-
-                        if let Some(res_headers) = response.headers.inner().as_object() {
-                            for (k, v) in res_headers {
-                                response_headers.insert(k.to_string(), v.to_string());
-                            }
-                        }
-
-                        if !response.url.starts_with(source) {
-                            waf_check = match response.security_details {
-                                Some(ref security_details) => {
-                                    if security_details.subject_name == "challenges.cloudflare.com"
-                                    {
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }
-                                _ => response.url.contains("/cdn-cgi/challenge-platform"),
-                            };
-                            if !waf_check {
-                                waf_check = match response.protocol {
-                                    Some(ref protocol) => protocol == "blob",
-                                    _ => false,
-                                }
-                            }
-                        }
-
-                        status_code = StatusCode::from_u16(response.status as u16)
-                            .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
                     }
+
+                    if !response.url.starts_with(source) {
+                        waf_check = match response.security_details {
+                            Some(ref security_details) => {
+                                if security_details.subject_name == "challenges.cloudflare.com" {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                        };
+                        if !waf_check {
+                            waf_check = match response.protocol {
+                                Some(ref protocol) => protocol == "blob",
+                                _ => false,
+                            }
+                        }
+                    }
+
+                    status_code = StatusCode::from_u16(response.status as u16)
+                        .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
                 }
-                _ => {
-                    status_code = *UNKNOWN_STATUS_ERROR;
-                }
-            };
+            }
         }
         Err(e) => return Err(e),
     }
