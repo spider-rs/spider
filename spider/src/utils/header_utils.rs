@@ -241,8 +241,8 @@ pub fn get_mimic_headers(
     chrome: bool,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
-        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, TE,
-        UPGRADE_INSECURE_REQUESTS, USER_AGENT, PRAGMA
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, PRAGMA,
+        TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     };
 
     let browser = if user_agent.contains("Chrome/") {
@@ -406,11 +406,11 @@ pub fn get_mimic_headers(
             insert_or_default!("Rtt", HeaderValue::from_static("50"));
 
             // 11. Extra client hints (real Chrome includes some of these)
-            insert_or_default!(
-                "sec-ch-ua-full-version-list",
+            if let Ok(ua_full_list) =
                 HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
-                    .unwrap()
-            );
+            {
+                insert_or_default!("sec-ch-ua-full-version-list", ua_full_list);
+            }
             if let Ok(sec_ch_platform) = HeaderValue::from_str(if linux_agent {
                 &CHROME_PLATFORM_LINUX_VERSION
             } else {

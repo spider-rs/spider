@@ -1191,7 +1191,7 @@ impl Website {
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_secs(1));
 
-        let client = if !headers.contains_key("User-Agent") {
+        let client = if !headers.contains_key(crate::client::header::USER_AGENT) {
             client.user_agent(user_agent)
         } else {
             client
