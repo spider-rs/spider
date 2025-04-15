@@ -141,14 +141,8 @@ fn get_sec_ch_ua_arch() -> &'static str {
     "\"x86_64\""
 }
 
-#[cfg(target_arch = "aarch64")]
-/// sec-ch-ua-arch: system architecture (ARM 64-bit)
-fn get_sec_ch_ua_arch() -> &'static str {
-    "\"arm64\""
-}
-
-#[cfg(target_arch = "arm")]
-/// sec-ch-ua-arch: system architecture (ARM 32-bit)
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+/// sec-ch-ua-arch: general CPU family for Chrome
 fn get_sec_ch_ua_arch() -> &'static str {
     "\"arm\""
 }
@@ -418,7 +412,7 @@ pub fn get_mimic_headers(
             }) {
                 insert_or_default!("sec-ch-ua-platform-version", sec_ch_platform);
             }
-            insert_or_default!("sec-ch-ua-model", HeaderValue::from_static(""));
+            insert_or_default!("sec-ch-ua-model", HeaderValue::from_static("\"\""));
             insert_or_default!(
                 "sec-ch-ua-arc",
                 HeaderValue::from_static(if linux_agent {
