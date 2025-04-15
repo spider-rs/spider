@@ -279,14 +279,15 @@ impl NetworkManager {
     }
 
     pub fn set_cache_enabled(&mut self, enabled: bool) {
+        let run = self.user_cache_disabled != !enabled;
         self.user_cache_disabled = !enabled;
-        self.update_protocol_cache_disabled();
+        if run {
+            self.update_protocol_cache_disabled();
+        }
     }
 
     pub fn update_protocol_cache_disabled(&mut self) {
-        self.push_cdp_request(SetCacheDisabledParams::new(
-            self.user_cache_disabled || self.protocol_request_interception_enabled,
-        ));
+        self.push_cdp_request(SetCacheDisabledParams::new(self.user_cache_disabled));
     }
 
     pub fn authenticate(&mut self, credentials: Credentials) {
@@ -300,8 +301,6 @@ impl NetworkManager {
         if enabled == self.protocol_request_interception_enabled {
             return;
         }
-
-        self.update_protocol_cache_disabled();
 
         if enabled {
             self.push_cdp_request(ENABLE_FETCH.clone())

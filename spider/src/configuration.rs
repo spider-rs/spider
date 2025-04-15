@@ -416,6 +416,7 @@ impl Configuration {
             )),
             user_agent: Some(Box::new(get_ua(true).into())),
             only_html: true,
+            cache: true,
             ..Default::default()
         }
     }
