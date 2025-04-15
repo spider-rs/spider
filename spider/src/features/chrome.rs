@@ -664,7 +664,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                             .enable_stealth_mode_with_dimiss_dialogs(agent)
                             .await
                     } else {
-                        chrome_page.enable_stealth_mode().await
+                        chrome_page.enable_stealth_mode_with_agent(agent).await
                     };
                 }
                 _ => {
