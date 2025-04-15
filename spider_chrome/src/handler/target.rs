@@ -555,6 +555,9 @@ impl Target {
                             }
                         }
                         TargetMessage::AddEventListener(req) => {
+                            if req.method == "Fetch.requestPaused" {
+                                self.network_manager.disable_request_intercept();
+                            }
                             // register a new listener
                             self.event_listeners.add_listener(req);
                         }

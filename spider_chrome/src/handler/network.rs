@@ -286,6 +286,10 @@ impl NetworkManager {
         }
     }
 
+    pub fn disable_request_intercept(&mut self) {
+        self.protocol_request_interception_enabled = true;
+    }
+
     pub fn update_protocol_cache_disabled(&mut self) {
         self.push_cdp_request(SetCacheDisabledParams::new(self.user_cache_disabled));
     }
@@ -430,6 +434,10 @@ impl NetworkManager {
     #[cfg(not(feature = "adblock"))]
     pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
         use super::blockers::block_websites::block_website;
+
+        if self.user_request_interception_enabled && self.protocol_request_interception_enabled {
+            return;
+        }
 
         if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
             self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
@@ -593,6 +601,10 @@ impl NetworkManager {
 
     #[cfg(feature = "adblock")]
     pub fn on_fetch_request_paused(&mut self, event: &EventRequestPaused) {
+        if self.user_request_interception_enabled && self.protocol_request_interception_enabled {
+            return;
+        }
+
         if !self.user_request_interception_enabled && self.protocol_request_interception_enabled {
             self.push_cdp_request(ContinueRequestParams::new(event.request_id.clone()))
         } else {

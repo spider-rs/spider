@@ -97,8 +97,8 @@ impl EventListeners {
 
 pub struct EventListenerRequest {
     listener: UnboundedSender<Arc<dyn Event>>,
-    method: MethodId,
-    kind: EventKind,
+    pub method: MethodId,
+    pub kind: EventKind,
 }
 
 impl EventListenerRequest {
