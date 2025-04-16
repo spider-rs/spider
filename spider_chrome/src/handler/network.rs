@@ -299,7 +299,8 @@ impl NetworkManager {
 
     pub fn authenticate(&mut self, credentials: Credentials) {
         self.credentials = Some(credentials);
-        self.update_protocol_request_interception()
+        self.update_protocol_request_interception();
+        self.protocol_request_interception_enabled = true;
     }
 
     fn update_protocol_request_interception(&mut self) {
