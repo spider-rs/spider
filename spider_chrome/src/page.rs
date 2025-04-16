@@ -100,6 +100,8 @@ pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=fun
 pub const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
 /// The outer HTML of a webpage.
 const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
+/// XML serilalizer for custom pages or testing.
+const FULL_XML_SERIALIZER_JS: &str = "(()=>{const s=new XMLSerializer();let x=s.serializeToString(document);if(!x.startsWith('<?xml'))x='<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n'+x;return x})()";
 
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
@@ -1309,6 +1311,12 @@ impl Page {
     /// Returns the HTML content of the page
     pub async fn content_bytes(&self) -> Result<Vec<u8>> {
         Ok(self.evaluate(OUTER_HTML).await?.into_bytes()?)
+    }
+
+    #[cfg(feature = "bytes")]
+    /// Returns the full serialized content of the page (HTML or XML)
+    pub async fn content_bytes_xml(&self) -> Result<Vec<u8>> {
+        Ok(self.evaluate(FULL_XML_SERIALIZER_JS).await?.into_bytes()?)
     }
 
     #[cfg(feature = "bytes")]

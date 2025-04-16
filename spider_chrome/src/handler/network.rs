@@ -199,6 +199,8 @@ pub struct NetworkManager {
     pub block_analytics: bool,
     /// Only html from loading.
     pub only_html: bool,
+    /// Is xml document?
+    pub xml_document: bool,
     /// The custom intercept handle logic to run on the website.
     pub intercept_manager: NetworkInterceptManager,
     /// Track the amount of times the document reloaded.
@@ -228,6 +230,7 @@ impl NetworkManager {
             block_stylesheets: false,
             block_analytics: true,
             only_html: false,
+            xml_document: false,
             intercept_manager: NetworkInterceptManager::Unknown,
             document_reload_tracker: 0,
             document_target_domain: String::new(),
@@ -506,6 +509,11 @@ impl NetworkManager {
                                 });
                             }
                         }
+
+                        if self.document_target_domain.is_empty() && current_url.ends_with(".xml") {
+                            self.xml_document = true;
+                        }
+
                         self.document_target_domain = event.request.url.clone();
                     }
 
@@ -517,14 +525,19 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
-                            || self.block_stylesheets
-                                && ResourceType::Stylesheet == event.resource_type
-                            || self.block_javascript
-                                && javascript_resource
-                                && self.intercept_manager == NetworkInterceptManager::Unknown
-                                && !ALLOWED_MATCHER.is_match(current_url)
+                        if self.xml_document && current_url.ends_with("sitemap-style.xsl") {
+                            false
+                        } else {
+                            self.ignore_visuals
+                                && (IGNORE_VISUAL_RESOURCE_MAP
+                                    .contains(event.resource_type.as_ref()))
+                                || self.block_stylesheets
+                                    && ResourceType::Stylesheet == event.resource_type
+                                || self.block_javascript
+                                    && javascript_resource
+                                    && self.intercept_manager == NetworkInterceptManager::Unknown
+                                    && !ALLOWED_MATCHER.is_match(current_url)
+                        }
                     } else {
                         skip_networking
                     };
@@ -672,6 +685,11 @@ impl NetworkManager {
                                 });
                             }
                         }
+
+                        if self.document_target_domain.is_empty() && current_url.ends_with(".xml") {
+                            self.xml_document = true;
+                        }
+
                         self.document_target_domain = event.request.url.clone();
                     }
 
@@ -683,14 +701,19 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        self.ignore_visuals
-                            && (IGNORE_VISUAL_RESOURCE_MAP.contains(event.resource_type.as_ref()))
-                            || self.block_stylesheets
-                                && ResourceType::Stylesheet == event.resource_type
-                            || self.block_javascript
-                                && javascript_resource
-                                && self.intercept_manager == NetworkInterceptManager::Unknown
-                                && !ALLOWED_MATCHER.is_match(current_url)
+                        if self.xml_document && current_url.ends_with("sitemap-style.xsl") {
+                            false
+                        } else {
+                            self.ignore_visuals
+                                && (IGNORE_VISUAL_RESOURCE_MAP
+                                    .contains(event.resource_type.as_ref()))
+                                || self.block_stylesheets
+                                    && ResourceType::Stylesheet == event.resource_type
+                                || self.block_javascript
+                                    && javascript_resource
+                                    && self.intercept_manager == NetworkInterceptManager::Unknown
+                                    && !ALLOWED_MATCHER.is_match(current_url)
+                        }
                     } else {
                         skip_networking
                     };

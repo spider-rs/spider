@@ -174,7 +174,7 @@ lazy_static! {
         let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(62);
 
         m.extend([
-            "jpg", "jpeg", "png", "gif", "svg", "webp",       // Image files
+            "jpg", "jpeg", "png", "gif", "svg", "webp",      // Image files
             "mp4", "avi", "mov", "wmv", "flv",               // Video files
             "mp3", "wav", "ogg",                             // Audio files
             "woff", "woff2", "ttf", "otf",                   // Font files
@@ -183,7 +183,7 @@ lazy_static! {
             "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
             "mkv", "webm", "m4v",                            // Additional Video files
             "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps", "yaml", "yml", "xml",  "rtf",      // Other additional files
+            "pdf", "eps", "yaml", "yml", "rtf",              // Other additional files
 
             // Including extensions with extra dot
             ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
@@ -195,7 +195,7 @@ lazy_static! {
             ".bmp", ".tiff", ".tif", ".heic", ".heif",
             ".mkv", ".webm", ".m4v",
             ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps", ".yaml", ".yml", ".xml", ".rtf"
+            ".pdf", ".eps", ".yaml", ".yml", ".rtf"
         ].map(|s| s.into()));
 
         m

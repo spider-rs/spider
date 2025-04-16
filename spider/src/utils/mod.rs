@@ -190,7 +190,7 @@ async fn cf_handle(
             wait_for.page_navigations = true;
             page_wait(&page, &Some(wait_for.clone())).await;
 
-            if let Ok(next_content) = page.content_bytes().await {
+            if let Ok(next_content) = page.outer_html_bytes().await {
                 let next_content = if next_content.ends_with(cf)
                     || next_content.ends_with(cf2)
                     || next_content.starts_with(cn) && next_content.ends_with(cnf)
@@ -198,7 +198,7 @@ async fn cf_handle(
                     wait_for.delay =
                         WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
                     page_wait(&page, &Some(wait_for)).await;
-                    match page.content_bytes().await {
+                    match page.outer_html_bytes().await {
                         Ok(nc) => nc,
                         _ => next_content,
                     }
@@ -722,7 +722,7 @@ pub async fn run_openai_request(
                     if html.is_some() {
                         page_wait(&page, &wait_for).await;
                         if json_res.js.len() <= 400 && json_res.js.contains("window.location") {
-                            if let Ok(b) = page.content_bytes().await {
+                            if let Ok(b) = page.outer_html_bytes().await {
                                 page_response.content = Some(b.into());
                             }
                         } else {
@@ -1113,8 +1113,8 @@ pub async fn fetch_page_html_chrome_base(
 
     // track the initial base without modifying.
     let base_timeout_measurement = base_timeout;
-
-    let asset = is_asset_url(url_target.unwrap_or(source));
+    let target_url = url_target.unwrap_or(source);
+    let asset = is_asset_url(target_url);
 
     let (tx1, rx1) = if asset {
         let c = oneshot::channel::<Option<RequestId>>();
