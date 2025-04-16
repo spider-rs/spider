@@ -1760,6 +1760,11 @@ impl Website {
             )
             .await;
 
+            if page.get_html_bytes_u8().starts_with(b"<?xml") {
+                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
+                    .await;
+            }
+
             if self.domain_parsed.is_none() {
                 if let Some(mut domain_parsed) = domain_parsed.take() {
                     convert_abs_url(&mut domain_parsed);
@@ -2036,11 +2041,18 @@ impl Website {
                 page.page_links = Some(Box::new(Default::default()));
             }
 
-            let links = if !page.is_empty() {
+            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+
+            let mut links = if !page.is_empty() && !xml_file {
                 page.links_ssg(&base, &client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
+
+            if xml_file {
+                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
+                    .await;
+            }
 
             self.initial_status_code = page.status_code;
 
@@ -2209,11 +2221,18 @@ impl Website {
                 page.page_links = Some(Box::new(Default::default()));
             }
 
-            let links = if !page.is_empty() {
+            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+
+            let links = if !page.is_empty() && !xml_file {
                 page.links_ssg(&base, &client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
+
+            if xml_file {
+                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
+                    .await;
+            }
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
