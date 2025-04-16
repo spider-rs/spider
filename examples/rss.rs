@@ -8,7 +8,7 @@ use tokio::io::AsyncWriteExt;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://a11ywatch.com/rss")
-        .with_limit(1)
+        .with_limit(5)
         .build()
         .unwrap();
     let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
