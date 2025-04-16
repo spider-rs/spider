@@ -299,7 +299,8 @@ impl NetworkManager {
 
     pub fn authenticate(&mut self, credentials: Credentials) {
         self.credentials = Some(credentials);
-        self.update_protocol_request_interception()
+        self.update_protocol_request_interception();
+        self.protocol_request_interception_enabled = true;
     }
 
     fn update_protocol_request_interception(&mut self) {
@@ -308,7 +309,6 @@ impl NetworkManager {
         if enabled == self.protocol_request_interception_enabled {
             return;
         }
-        self.protocol_request_interception_enabled = enabled;
 
         if enabled {
             self.push_cdp_request(ENABLE_FETCH.clone())
