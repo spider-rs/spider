@@ -727,6 +727,7 @@ fn get_error_status(
     get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
 }
 
+#[cfg(not(feature = "decentralized"))]
 /// Instantiate a new page without scraping it and with the base URL parsed (used for testing purposes).
 pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
     let mut page = build(url, res);
@@ -1157,6 +1158,7 @@ impl Page {
             Ok(res) => handle_response_bytes(res, url, only_html).await,
             Err(err) => {
                 log::info!("error fetching {}", url);
+
                 let mut page_response = PageResponse::default();
 
                 if let Some(status_code) = err.status() {
@@ -1524,6 +1526,10 @@ impl Page {
             self.set_url_parsed_direct()
         }
     }
+
+    /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
+    #[cfg(feature = "decentralized")]
+    pub fn set_url_parsed_direct_empty(&mut self) {}
 
     /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
     #[cfg(not(feature = "decentralized"))]
