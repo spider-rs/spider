@@ -728,7 +728,6 @@ fn get_error_status(
 }
 
 /// Instantiate a new page without scraping it and with the base URL parsed (used for testing purposes).
-#[cfg(not(feature = "decentralized"))]
 pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
     let mut page = build(url, res);
     page.set_url_parsed_direct_empty();
@@ -1629,7 +1628,6 @@ impl Page {
     }
 
     /// Find the links as a stream using string resource validation for XML files
-    #[cfg(all(not(feature = "decentralized")))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
         A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
