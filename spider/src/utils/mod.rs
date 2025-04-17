@@ -2209,7 +2209,13 @@ async fn fetch_page_html_raw_base(
         Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
-            page_response.status_code = *UNKNOWN_STATUS_ERROR;
+
+            if let Some(status_code) = err.status() {
+                page_response.status_code = status_code;
+            } else {
+                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+            }
+
             page_response.error_for_status = Some(Err(err));
             page_response
         }
@@ -2404,7 +2410,13 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
         Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
-            page_response.status_code = *UNKNOWN_STATUS_ERROR;
+
+            if let Some(status_code) = err.status() {
+                page_response.status_code = status_code;
+            } else {
+                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+            }
+
             page_response.error_for_status = Some(Err(err));
             page_response
         }
@@ -2558,7 +2570,13 @@ pub async fn fetch_page_html(
                         Err(err) => {
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
-                            page_response.status_code = *UNKNOWN_STATUS_ERROR;
+
+                            if let Some(status_code) = err.status() {
+                                page_response.status_code = status_code;
+                            } else {
+                                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                            }
+
                             page_response.error_for_status = Some(Err(err));
                             page_response
                         }
@@ -2718,7 +2736,6 @@ pub async fn fetch_page_html_chrome(
                             }
 
                             page_response.error_for_status = Some(Err(err));
-
                             page_response
                         }
                     }
