@@ -245,16 +245,9 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
 
                 if cfg!(feature = "real_browser") {
-                    if let Some(user_agent) = &config.user_agent {
-                        let header_map = crate::utils::header_utils::get_mimic_headers(
-                            user_agent,
-                            &config.headers,
-                            crate::utils::header_utils::has_ref(&config.headers),
-                            &None,
-                            true,
-                        );
+                    if let Some(header_map) = &config.headers {
                         let header_map =
-                            crate::utils::header_utils::header_map_to_hash_map(&header_map);
+                            crate::utils::header_utils::header_map_to_hash_map(&*&header_map.0);
 
                         for (key, value) in header_map {
                             hm.entry(key).or_insert(value);
@@ -272,17 +265,9 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                 if cfg!(feature = "real_browser") {
                     let mut headers = std::collections::HashMap::new();
 
-                    if let Some(user_agent) = &config.user_agent {
-                        let header_map = crate::utils::header_utils::get_mimic_headers(
-                            user_agent,
-                            &config.headers,
-                            crate::utils::header_utils::has_ref(&config.headers),
-                            &None,
-                            true,
-                        );
-
+                    if let Some(header_map) = &config.headers {
                         let header_map =
-                            crate::utils::header_utils::header_map_to_hash_map(&header_map);
+                            crate::utils::header_utils::header_map_to_hash_map(&*&header_map.0);
 
                         headers.extend(header_map);
                     }

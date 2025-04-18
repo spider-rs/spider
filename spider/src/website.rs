@@ -3,6 +3,7 @@ use crate::client::redirect::Policy;
 use crate::compact_str::CompactString;
 use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
+    SerializableHeaderMap,
 };
 #[cfg(feature = "smart")]
 use crate::features::chrome::OnceBrowser;
@@ -1166,10 +1167,8 @@ impl Website {
         }
     }
 
-    #[cfg(all(not(feature = "rquest"), not(feature = "decentralized")))]
-    /// Base client configuration.
-    fn configure_base_client(&self) -> ClientBuilder {
-        let policy = self.setup_redirect_policy();
+    /// Configure the headers to use.
+    pub fn configure_headers(&mut self) {
         let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
 
         let user_agent = match &self.configuration.user_agent {
@@ -1184,12 +1183,36 @@ impl Website {
             &None,
         );
 
+        if !headers.is_empty() {
+            self.configuration
+                .headers
+                .replace(Box::new(SerializableHeaderMap::from(headers)));
+        }
+    }
+
+    #[cfg(all(not(feature = "rquest"), not(feature = "decentralized")))]
+    /// Base client configuration.
+    fn configure_base_client(&self) -> ClientBuilder {
+        let policy = self.setup_redirect_policy();
+
+        let user_agent = match &self.configuration.user_agent {
+            Some(ua) => ua.as_str(),
+            _ => get_ua(self.configuration.only_chrome_agent()),
+        };
+
         // let missing_host =
         //     !headers.contains_key(crate::client::header::HOST) && !headers.contains_key("Host");
-        let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
-            && !headers.contains_key("User-Agent");
-        let missing_referer = !headers.contains_key(crate::client::header::REFERER)
-            && !headers.contains_key("Referer");
+        let (missing_agent, missing_referer) = match &self.configuration.headers {
+            Some(headers) => {
+                let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
+                    && !headers.contains_key("User-Agent");
+                let missing_referer = !headers.contains_key(crate::client::header::REFERER)
+                    && !headers.contains_key("Referer");
+
+                (missing_agent, missing_referer)
+            }
+            _ => (true, true),
+        };
 
         let client = reqwest::Client::builder()
             .redirect(policy)
@@ -1216,36 +1239,30 @@ impl Website {
             client
         };
 
-        crate::utils::header_utils::setup_default_headers(
-            client,
-            &self.configuration,
-            headers,
-            self.get_url_parsed(),
-        )
+        crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
 
     #[cfg(all(feature = "rquest", not(feature = "decentralized")))]
     /// Base client configuration.
     fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
-        let mut headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
 
         let user_agent = match &self.configuration.user_agent {
             Some(ua) => ua.as_str(),
             _ => get_ua(self.configuration.only_chrome_agent()),
         };
 
-        crate::utils::header_utils::extend_headers(
-            &mut headers,
-            user_agent,
-            &self.configuration.headers,
-            &None,
-        );
+        let (missing_agent, missing_referer) = match &self.configuration.headers {
+            Some(headers) => {
+                let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
+                    && !headers.contains_key("User-Agent");
+                let missing_referer = !headers.contains_key(crate::client::header::REFERER)
+                    && !headers.contains_key("Referer");
 
-        let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
-            && !headers.contains_key("User-Agent");
-        let missing_referer = !headers.contains_key(crate::client::header::REFERER)
-            && !headers.contains_key("Referer");
+                (missing_agent, missing_referer)
+            }
+            _ => (true, true),
+        };
 
         let client = Client::builder()
             .redirect(policy)
@@ -1265,12 +1282,7 @@ impl Website {
             client
         };
 
-        crate::utils::header_utils::setup_default_headers(
-            client,
-            &self.configuration,
-            headers,
-            self.get_url_parsed(),
-        )
+        crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
 
     /// Build the HTTP client.
@@ -1685,6 +1697,8 @@ impl Website {
     fn setup_base(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
         self.setup_disk();
+        self.configure_headers();
+
         crate::utils::connect::init_background_runtime();
 
         let client = match self.client.take() {

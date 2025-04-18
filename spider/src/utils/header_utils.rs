@@ -1,34 +1,7 @@
 use crate::configuration::{Configuration, SerializableHeaderMap};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, HOST, REFERER};
-
-/// Setup the default headers for the request.
-pub fn setup_default_headers(
-    client_builder: crate::client::ClientBuilder,
-    configuration: &Configuration,
-    header_map: HeaderMap,
-    url: &Option<Box<url::Url>>,
-) -> crate::client::ClientBuilder {
-    let mut headers = match configuration.headers {
-        Some(ref h) => *h.clone(),
-        None => crate::configuration::SerializableHeaderMap::default(),
-    };
-
-    if !headers.contains_key(HOST) && configuration.preserve_host_header {
-        if let Some(u) = url {
-            if let Some(host) = u.host_str() {
-                if let Ok(ref_value) = HeaderValue::from_str(host) {
-                    if !ref_value.is_empty() {
-                        headers.insert(HOST, ref_value);
-                    }
-                }
-            }
-        }
-    }
-
-    headers.extend(header_map);
-
-    client_builder.default_headers(headers.0)
-}
+#[cfg(feature = "real_browser")]
+use rand::{rng, Rng};
+use reqwest::header::{HeaderMap, HeaderName, REFERER};
 
 lazy_static::lazy_static! {
     /// The brand version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
@@ -57,6 +30,20 @@ lazy_static::lazy_static! {
     };
 }
 
+/// Setup the default headers for the request.
+pub fn setup_default_headers(
+    client_builder: crate::client::ClientBuilder,
+    configuration: &Configuration,
+) -> crate::client::ClientBuilder {
+    let headers = match configuration.headers {
+        Some(ref h) => *h.clone(),
+        None => crate::configuration::SerializableHeaderMap::default(),
+    };
+
+    client_builder.default_headers(headers.0)
+}
+
+#[cfg(feature = "real_browser")]
 fn parse_user_agent_to_ch_ua(ua: &str, dec: bool, linux: bool) -> String {
     let mut parts = Vec::with_capacity(3);
 
@@ -100,48 +87,56 @@ fn parse_user_agent_to_ch_ua(ua: &str, dec: bool, linux: bool) -> String {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg(feature = "real_browser")]
 /// sec ch user-agent platform
 fn get_sec_ch_ua_platform() -> &'static str {
     "\"macOS\""
 }
 
 #[cfg(target_os = "windows")]
+#[cfg(feature = "real_browser")]
 /// sec ch user-agent platform
 fn get_sec_ch_ua_platform() -> &'static str {
     "\"Windows\""
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(feature = "real_browser")]
 /// sec ch user-agent platform
 fn get_sec_ch_ua_platform() -> &'static str {
     "\"Linux\""
 }
 
 #[cfg(target_os = "android")]
+#[cfg(feature = "real_browser")]
 /// sec ch user-agent platform
 fn get_sec_ch_ua_platform() -> &'static str {
     "\"Android\""
 }
 
 #[cfg(target_os = "ios")]
+#[cfg(feature = "real_browser")]
 /// sec ch user-agent platform
 fn get_sec_ch_ua_platform() -> &'static str {
     "\"iOS\""
 }
 
 #[cfg(target_arch = "x86")]
+#[cfg(feature = "real_browser")]
 /// sec-ch-ua-arch: system architecture (32-bit x86)
 fn get_sec_ch_ua_arch() -> &'static str {
     "\"x86\""
 }
 
 #[cfg(target_arch = "x86_64")]
+#[cfg(feature = "real_browser")]
 /// sec-ch-ua-arch: system architecture (64-bit x86_64)
 fn get_sec_ch_ua_arch() -> &'static str {
     "\"x86_64\""
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+#[cfg(feature = "real_browser")]
 /// sec-ch-ua-arch: general CPU family for Chrome
 fn get_sec_ch_ua_arch() -> &'static str {
     "\"arm\""
@@ -153,11 +148,13 @@ fn get_sec_ch_ua_arch() -> &'static str {
     target_arch = "aarch64",
     target_arch = "arm"
 )))]
+#[cfg(feature = "real_browser")]
 /// sec-ch-ua-arch: unknown or unsupported architecture
 fn get_sec_ch_ua_arch() -> &'static str {
     "\"unknown\""
 }
 
+#[cfg(feature = "real_browser")]
 fn get_sec_ch_ua_bitness() -> &'static str {
     #[cfg(target_pointer_width = "64")]
     {
@@ -169,7 +166,7 @@ fn get_sec_ch_ua_bitness() -> &'static str {
         "32"
     }
 }
-
+#[cfg(feature = "real_browser")]
 fn get_accept_language() -> &'static str {
     #[cfg(target_os = "windows")]
     {
@@ -194,6 +191,7 @@ fn get_accept_language() -> &'static str {
 
 /// The kind of browser.
 #[derive(PartialEq, Eq)]
+#[cfg(feature = "real_browser")]
 enum BrowserKind {
     /// Chrome
     Chrome,
@@ -227,6 +225,7 @@ impl HeaderKey {
 }
 
 /// Build the headers to use to act like a browser.
+#[cfg(feature = "real_browser")]
 pub fn get_mimic_headers(
     user_agent: &str,
     header_map: &std::option::Option<Box<SerializableHeaderMap>>,
@@ -235,8 +234,8 @@ pub fn get_mimic_headers(
     chrome: bool,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
-        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, PRAGMA,
-        TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
+        HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, HOST,
+        PRAGMA, TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     };
 
     let browser = if user_agent.contains("Chrome/") {
@@ -253,7 +252,7 @@ pub fn get_mimic_headers(
 
     let add_ref = !contains_referer && cfg!(feature = "spoof");
     let cap = if browser == BrowserKind::Chrome {
-        26
+        31
     } else {
         10
     };
@@ -333,13 +332,11 @@ pub fn get_mimic_headers(
                     }
                 }
             }
-
             // 2. Connection
             insert_or_default!(
                 &connection_header.as_header_name(),
                 HeaderValue::from_static("keep-alive")
             );
-
             // 3. sec-ch-ua group
             if let Ok(sec_ch_ua) =
                 HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false, linux_agent))
@@ -355,24 +352,20 @@ pub fn get_mimic_headers(
                     get_sec_ch_ua_platform()
                 })
             );
-
             // 4. Upgrade-Insecure-Requests
             insert_or_default!(
                 &upgrade_request_header.as_header_name(),
                 HeaderValue::from_static("1")
             );
-
             // 5. User-Agent
             if let Ok(ua) = HeaderValue::from_str(user_agent) {
                 insert_or_default!(&useragent_header.as_header_name(), ua);
             }
-
             // 6. Accept
             insert_or_default!(
                &accept_header.as_header_name(),
                 HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
             );
-
             // 7. Sec-Fetch group
             insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
             insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
@@ -396,7 +389,6 @@ pub fn get_mimic_headers(
                 &accept_language.as_header_name(),
                 HeaderValue::from_static(get_accept_language())
             );
-
             // 10. Optional behavior/diagnostic headers
             insert_or_default!(
                 &cache_control_header.as_header_name(),
@@ -408,8 +400,25 @@ pub fn get_mimic_headers(
                 HeaderValue::from_static("no-cache")
             );
 
+            let memory_levels = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
+            let device_memory = memory_levels[rng().random_range(0..memory_levels.len())];
+
+            let device_memory_str = format!("{}", device_memory);
+
+            if let Ok(device_memory_str) = HeaderValue::from_str(&device_memory_str) {
+                insert_or_default!("Device-Memory", device_memory_str);
+            }
+
             insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
-            insert_or_default!("Downlink", HeaderValue::from_static("10"));
+            insert_or_default!("Ect", HeaderValue::from_static("4g"));
+
+            let downlink_mbps = rng().random_range(0.1..=10.0);
+            let downlink_str = format!("{:.1}", downlink_mbps);
+
+            if let Ok(dl) = HeaderValue::from_str(&downlink_str) {
+                insert_or_default!("Downlink", dl);
+            }
+
             insert_or_default!("Rtt", HeaderValue::from_static("50"));
 
             // 11. Extra client hints (real Chrome includes some of these)
@@ -438,11 +447,16 @@ pub fn get_mimic_headers(
                 "sec-ch-ua-bitness",
                 HeaderValue::from_static(get_sec_ch_ua_bitness())
             );
+            // TODO: parse the user-agent for mobile or desktop
             insert_or_default!(
                 "sec-ch-ua-form-factors",
                 HeaderValue::from_static(r#""Desktop""#)
             );
             insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
+            insert_or_default!(
+                "sec-ch-prefers-reduced-motion",
+                HeaderValue::from_static("no-preference")
+            );
             insert_or_default!(
                 "sec-ch-prefers-color-scheme",
                 HeaderValue::from_static("light")
@@ -515,6 +529,18 @@ pub fn get_mimic_headers(
     headers
 }
 
+#[cfg(not(feature = "real_browser"))]
+/// Build the headers to use to act like a browser.
+pub fn get_mimic_headers(
+    _user_agent: &str,
+    _header_map: &std::option::Option<Box<SerializableHeaderMap>>,
+    _contains_referer: bool,
+    _hostname: &Option<&str>,
+    _chrome: bool,
+) -> reqwest::header::HeaderMap {
+    Default::default()
+}
+
 /// convert the headermap to hashmap
 pub fn header_map_to_hash_map(header_map: &HeaderMap) -> std::collections::HashMap<String, String> {
     let mut hash_map = std::collections::HashMap::with_capacity(header_map.len());
@@ -549,11 +575,14 @@ pub fn extend_headers(
 #[cfg(not(feature = "real_browser"))]
 /// Extend the headers.
 pub fn extend_headers(
-    _header_map: &mut reqwest::header::HeaderMap,
+    header_map: &mut reqwest::header::HeaderMap,
     _user_agent: &str,
-    _headers: &std::option::Option<Box<SerializableHeaderMap>>,
+    headers: &std::option::Option<Box<SerializableHeaderMap>>,
     _hostname: &Option<&str>,
 ) {
+    if let Some(_headers) = headers {
+        header_map.extend(_headers.0.clone());
+    }
 }
 
 /// Headers has ref
