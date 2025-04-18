@@ -1161,6 +1161,7 @@ impl Website {
     fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
             RedirectPolicy::Loose => Policy::limited(*self.configuration.redirect_limit),
+            RedirectPolicy::None => Policy::none(),
             RedirectPolicy::Strict => self.setup_strict_policy(),
         }
     }
@@ -1180,18 +1181,30 @@ impl Website {
             &mut headers,
             user_agent,
             &self.configuration.headers,
-            &match &self.domain_parsed {
-                Some(u) => u.host_str(),
-                _ => None,
-            },
+            &None,
         );
+
+        // let missing_host =
+        //     !headers.contains_key(crate::client::header::HOST) && !headers.contains_key("Host");
+        let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
+            && !headers.contains_key("User-Agent");
+        let missing_referer = !headers.contains_key(crate::client::header::REFERER)
+            && !headers.contains_key("Referer");
 
         let client = reqwest::Client::builder()
             .redirect(policy)
+            .http09_responses()
+            .http1_ignore_invalid_headers_in_responses(true)
+            .referer(missing_referer)
+            .connect_timeout(Duration::from_secs(10))
+            // .set_host(missing_host)
+            // .http1_preserve_header_order()
+            // .http1_preserve_header_case()
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
             .tcp_keepalive(Duration::from_secs(1));
 
-        let client = if !headers.contains_key(crate::client::header::USER_AGENT) {
+        // check both casing for user-agent
+        let client = if missing_agent {
             client.user_agent(user_agent)
         } else {
             client
@@ -1226,17 +1239,21 @@ impl Website {
             &mut headers,
             user_agent,
             &self.configuration.headers,
-            &match &self.domain_parsed {
-                Some(u) => u.host_str(),
-                _ => None,
-            },
+            &None,
         );
+
+        let missing_agent = !headers.contains_key(crate::client::header::USER_AGENT)
+            && !headers.contains_key("User-Agent");
+        let missing_referer = !headers.contains_key(crate::client::header::REFERER)
+            && !headers.contains_key("Referer");
 
         let client = Client::builder()
             .redirect(policy)
+            .referer(missing_referer)
+            .connect_timeout(Duration::from_secs(10))
             .tcp_keepalive(Duration::from_secs(1));
 
-        let client = if !headers.contains_key("User-Agent") {
+        let client = if missing_agent {
             client.user_agent(user_agent)
         } else {
             client

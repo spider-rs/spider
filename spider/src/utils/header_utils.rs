@@ -292,6 +292,8 @@ pub fn get_mimic_headers(
                 upgrade_request_header,
                 cache_control_header,
                 pragma_header,
+                accept_encoding,
+                accept_language,
             ) = if !chrome {
                 (
                     HeaderKey::Name(HOST),
@@ -302,6 +304,8 @@ pub fn get_mimic_headers(
                     HeaderKey::Name(UPGRADE_INSECURE_REQUESTS),
                     HeaderKey::Name(CACHE_CONTROL),
                     HeaderKey::Name(PRAGMA),
+                    HeaderKey::Name(ACCEPT_ENCODING),
+                    HeaderKey::Name(ACCEPT_LANGUAGE),
                 )
             } else {
                 (
@@ -313,13 +317,20 @@ pub fn get_mimic_headers(
                     HeaderKey::Str("Upgrade-Insecure-Requests"),
                     HeaderKey::Str("Cache-Control"),
                     HeaderKey::Str("Pragma"),
+                    HeaderKey::Str("Accept-Encoding"),
+                    HeaderKey::Str("Accept-Language"),
                 )
             };
 
             // 1. Host
-            if let Some(host) = &hostname {
-                if let Ok(host_value) = HeaderValue::from_str(host) {
-                    insert_or_default!(&host_header.as_header_name(), host_value);
+            // Note: do not set the host header for the client in case of redirects to prevent mismatches.
+            if chrome {
+                if let Some(host) = &hostname {
+                    if !host.is_empty() {
+                        if let Ok(host_value) = HeaderValue::from_str(host) {
+                            insert_or_default!(&host_header.as_header_name(), host_value);
+                        }
+                    }
                 }
             }
 
@@ -378,11 +389,11 @@ pub fn get_mimic_headers(
 
             // 9. Accept-Encoding and Accept-Language
             insert_or_default!(
-                ACCEPT_ENCODING,
+                &accept_encoding.as_header_name(),
                 HeaderValue::from_static("gzip, deflate, br, zstd")
             );
             insert_or_default!(
-                ACCEPT_LANGUAGE,
+                &accept_language.as_header_name(),
                 HeaderValue::from_static(get_accept_language())
             );
 
@@ -391,10 +402,12 @@ pub fn get_mimic_headers(
                 &cache_control_header.as_header_name(),
                 HeaderValue::from_static("max-age=0")
             );
+
             insert_or_default!(
                 &pragma_header.as_header_name(),
                 HeaderValue::from_static("no-cache")
             );
+
             insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
             insert_or_default!("Downlink", HeaderValue::from_static("10"));
             insert_or_default!("Rtt", HeaderValue::from_static("50"));
@@ -529,7 +542,7 @@ pub fn extend_headers(
         &headers,
         has_ref(&headers),
         hostname,
-        false,
+        true,
     ));
 }
 

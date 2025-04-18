@@ -29,6 +29,12 @@ pub enum RedirectPolicy {
     )]
     /// A strict policy only allowing request that match the domain set for crawling.
     Strict,
+    #[cfg_attr(
+        feature = "serde",
+        serde(alias = "None", alias = "none", alias = "NONE",)
+    )]
+    /// Prevent all redirects.
+    None,
 }
 
 #[cfg(not(feature = "regex"))]
