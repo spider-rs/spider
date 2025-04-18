@@ -232,11 +232,14 @@ pub fn get_mimic_headers(
     contains_referer: bool,
     hostname: &Option<&str>,
     chrome: bool,
+    viewport: &Option<crate::features::chrome_common::Viewport>,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
         HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, HOST,
         PRAGMA, TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     };
+
+    use crate::features::chrome_viewport::randomize_viewport;
 
     let browser = if user_agent.contains("Chrome/") {
         BrowserKind::Chrome
@@ -321,6 +324,12 @@ pub fn get_mimic_headers(
                 )
             };
 
+            let memory_levels = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
+            let device_memory = memory_levels[rng().random_range(0..memory_levels.len())];
+            let device_memory_str = format!("{}", device_memory);
+            let downlink_mbps = rng().random_range(0.1..=10.0);
+            let downlink_str = format!("{:.1}", downlink_mbps);
+
             // 1. Host
             // Note: do not set the host header for the client in case of redirects to prevent mismatches.
             if chrome {
@@ -332,6 +341,7 @@ pub fn get_mimic_headers(
                     }
                 }
             }
+
             // 2. Connection
             insert_or_default!(
                 &connection_header.as_header_name(),
@@ -389,38 +399,46 @@ pub fn get_mimic_headers(
                 &accept_language.as_header_name(),
                 HeaderValue::from_static(get_accept_language())
             );
+            insert_or_default!(
+                &pragma_header.as_header_name(),
+                HeaderValue::from_static("no-cache")
+            );
+
+            if let Ok(device_memory_str) = HeaderValue::from_str(&device_memory_str) {
+                insert_or_default!("Device-Memory", device_memory_str);
+            }
+
             // 10. Optional behavior/diagnostic headers
             insert_or_default!(
                 &cache_control_header.as_header_name(),
                 HeaderValue::from_static("max-age=0")
             );
 
-            insert_or_default!(
-                &pragma_header.as_header_name(),
-                HeaderValue::from_static("no-cache")
-            );
+            insert_or_default!("Dpr", HeaderValue::from_static("2"));
 
-            let memory_levels = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
-            let device_memory = memory_levels[rng().random_range(0..memory_levels.len())];
+            if let Some(vp) = viewport {
+                let width = if vp.width > 0 {
+                    format!("{}", vp.width)
+                } else {
+                    format!(
+                        "{}",
+                        randomize_viewport(&crate::features::chrome_viewport::DeviceType::Desktop)
+                            .width
+                    )
+                };
 
-            let device_memory_str = format!("{}", device_memory);
-
-            if let Ok(device_memory_str) = HeaderValue::from_str(&device_memory_str) {
-                insert_or_default!("Device-Memory", device_memory_str);
+                if let Ok(width) = HeaderValue::from_str(&width) {
+                    insert_or_default!("Viewport-Width", width);
+                }
             }
 
             insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
             insert_or_default!("Ect", HeaderValue::from_static("4g"));
-
-            let downlink_mbps = rng().random_range(0.1..=10.0);
-            let downlink_str = format!("{:.1}", downlink_mbps);
+            insert_or_default!("Rtt", HeaderValue::from_static("50"));
 
             if let Ok(dl) = HeaderValue::from_str(&downlink_str) {
                 insert_or_default!("Downlink", dl);
             }
-
-            insert_or_default!("Rtt", HeaderValue::from_static("50"));
-
             // 11. Extra client hints (real Chrome includes some of these)
             if let Ok(ua_full_list) =
                 HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
@@ -537,6 +555,7 @@ pub fn get_mimic_headers(
     _contains_referer: bool,
     _hostname: &Option<&str>,
     _chrome: bool,
+    _viewport: &Option<crate::features::chrome_common::Viewport>,
 ) -> reqwest::header::HeaderMap {
     Default::default()
 }
@@ -562,6 +581,7 @@ pub fn extend_headers(
     user_agent: &str,
     headers: &std::option::Option<Box<SerializableHeaderMap>>,
     hostname: &Option<&str>,
+    viewport: &Option<crate::features::chrome_common::Viewport>,
 ) {
     header_map.extend(crate::utils::header_utils::get_mimic_headers(
         user_agent,
@@ -569,6 +589,7 @@ pub fn extend_headers(
         has_ref(&headers),
         hostname,
         true,
+        viewport,
     ));
 }
 
@@ -579,6 +600,7 @@ pub fn extend_headers(
     _user_agent: &str,
     headers: &std::option::Option<Box<SerializableHeaderMap>>,
     _hostname: &Option<&str>,
+    _viewport: &Option<crate::features::chrome_common::Viewport>,
 ) {
     if let Some(_headers) = headers {
         header_map.extend(_headers.0.clone());

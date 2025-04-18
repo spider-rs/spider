@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.36.73"
+version = "2.36.74"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -150,6 +150,7 @@ basic = [
     "encoding",
     "string_interner_buffer_backend",
     "balance",
+    "real_browser"
 ]
 disk = ["dep:sqlx", "dep:aho-corasick"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]

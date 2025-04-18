@@ -1181,6 +1181,7 @@ impl Website {
             user_agent,
             &self.configuration.headers,
             &None,
+            &self.configuration.viewport,
         );
 
         if !headers.is_empty() {

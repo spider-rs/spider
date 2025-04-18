@@ -176,8 +176,7 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: bool,
-    /// Configure the viewport for chrome.
-    #[cfg(feature = "chrome")]
+    /// Configure the viewport for chrome and viewport headers.
     pub viewport: Option<Viewport>,
     /// Overrides default host system timezone with the specified one.
     #[cfg(feature = "chrome")]
@@ -835,15 +834,6 @@ impl Configuration {
         self
     }
 
-    /// Configures the view port for chrome. This method does nothing if the `chrome` feature is not enabled.
-    #[cfg(not(feature = "chrome"))]
-    pub fn with_viewport(
-        &mut self,
-        _viewport: Option<crate::configuration::Viewport>,
-    ) -> &mut Self {
-        self
-    }
-
     /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
     pub fn with_retry(&mut self, retry: u8) -> &mut Self {
         self.retry = retry;
@@ -857,7 +847,6 @@ impl Configuration {
     }
 
     /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
-    #[cfg(feature = "chrome")]
     pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
         self.viewport = match viewport {
             Some(vp) => Some(vp.into()),
