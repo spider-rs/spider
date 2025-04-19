@@ -12,12 +12,13 @@ pub mod trie;
 #[cfg(feature = "balance")]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
-
+use crate::page::AntiBotTech;
 use crate::{
-    page::{AntiBotTech, STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
+    page::{STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
+use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
 use bytes::BufMut;
 use case_insensitive_string::CaseInsensitiveString;
@@ -98,6 +99,39 @@ pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
     "application/x-rpm",
     "application/x-shockwave-flash",
 };
+
+lazy_static! {
+    /// Scan for error anti-bot pages.
+    static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::new([
+        "cf-error-code",
+        "Access to this page has been denied",
+        "DataDome",
+        "perimeterx",
+        "funcaptcha",
+        "Request unsuccessful. Incapsula incident ID",
+    ]).unwrap();
+
+    static ref AC_URL_SCAN: AhoCorasick = AhoCorasick::builder()
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst) // optional: stops at first match
+        .build([
+            "/cdn-cgi/challenge-platform",       // 0
+            "datadome.co",                       // 1
+            "dd-api.io",                         // 2
+            "perimeterx.net",                    // 3
+            "px-captcha",                        // 4
+            "arkoselabs.com",                    // 5
+            "funcaptcha",                        // 6
+            "kasada.io",                         // 7
+            "fingerprint.com",                   // 8
+            "fpjs.io",                           // 9
+            "incapsula",                         // 10
+            "imperva",                           // 11
+            "radwarebotmanager",                 // 12
+            "reblaze.com",                       // 13
+            "cheq.ai",                           // 14
+        ])
+        .unwrap();
+}
 
 #[cfg(feature = "fs")]
 lazy_static! {
@@ -515,58 +549,113 @@ pub fn handle_extra_ai_data(
     };
 }
 
-/// Detect anti-bot tech from the response.
-fn detect_anti_bot_tech(subject_name: &str, url: &str) -> AntiBotTech {
-    if subject_name == "challenges.cloudflare.com" {
-        return AntiBotTech::Cloudflare;
+/// Accepts different header types (for flexibility).
+pub enum HeaderSource<'a> {
+    /// From reqwest or internal HeaderMap.
+    HeaderMap(&'a crate::client::header::HeaderMap),
+    /// From a string-based HashMap.
+    Map(&'a std::collections::HashMap<String, String>),
+}
+
+/// Detect from headers.
+pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTech> {
+    macro_rules! has_key {
+        ($key:expr) => {
+            match headers {
+                HeaderSource::HeaderMap(hm) => hm.contains_key($key),
+                HeaderSource::Map(map) => map.contains_key($key),
+            }
+        };
     }
 
-    if url.contains("/cdn-cgi/challenge-platform") {
-        return AntiBotTech::Cloudflare;
+    if has_key!("cf-chl-bypass") || has_key!("cf-ray") {
+        return Some(AntiBotTech::Cloudflare);
+    }
+    if has_key!("x-captcha-endpoint") {
+        return Some(AntiBotTech::DataDome);
+    }
+    if has_key!("x-perimeterx") || has_key!("pxhd") {
+        return Some(AntiBotTech::PerimeterX);
+    }
+    if has_key!("x-akamaibot") {
+        return Some(AntiBotTech::AkamaiBotManager);
+    }
+    if has_key!("x-imperva-id") || has_key!("x-iinfo") {
+        return Some(AntiBotTech::Imperva);
+    }
+    if has_key!("x-reblaze-uuid") {
+        return Some(AntiBotTech::Reblaze);
     }
 
-    if url.contains("datadome.co") || url.contains("dd-api.io") {
-        return AntiBotTech::DataDome;
+    None
+}
+
+/// Detect the anti-bot technology.
+pub fn detect_anti_bot_from_body(body: &Vec<u8>) -> Option<AntiBotTech> {
+    // Scan body for anti-bot fingerprints (only for small pages)
+    if body.len() < 30_000 {
+        if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
+            for mat in finder {
+                match mat.pattern().as_usize() {
+                    0 => return Some(AntiBotTech::Cloudflare),
+                    1 | 2 => return Some(AntiBotTech::DataDome),
+                    3 => return Some(AntiBotTech::PerimeterX),
+                    4 => return Some(AntiBotTech::ArkoseLabs),
+                    5 => return Some(AntiBotTech::Imperva),
+                    _ => (),
+                }
+            }
+        }
     }
 
-    if url.contains("perimeterx.net") || url.contains("px-captcha") {
-        return AntiBotTech::PerimeterX;
+    None
+}
+
+/// Detect antibot from url
+pub fn detect_antibot_from_url(url: &str) -> Option<AntiBotTech> {
+    if let Some(mat) = AC_URL_SCAN.find(url) {
+        let tech = match mat.pattern().as_usize() {
+            0 => AntiBotTech::Cloudflare,
+            1 | 2 => AntiBotTech::DataDome,
+            3 | 4 => AntiBotTech::PerimeterX,
+            5 | 6 => AntiBotTech::ArkoseLabs,
+            7 => AntiBotTech::Kasada,
+            8 | 9 => AntiBotTech::FingerprintJS,
+            10 | 11 => AntiBotTech::Imperva,
+            12 => AntiBotTech::RadwareBotManager,
+            13 => AntiBotTech::Reblaze,
+            14 => AntiBotTech::CHEQ,
+            _ => return None,
+        };
+        Some(tech)
+    } else {
+        None
+    }
+}
+/// Detect the anti-bot used from the request.
+pub fn detect_anti_bot_tech_response(
+    url: &str,
+    headers: &HeaderSource,
+    body: &Vec<u8>,
+    subject_name: Option<&str>,
+) -> AntiBotTech {
+    // Check by TLS subject (Chrome/CDP TLS details)
+    if let Some(subject) = subject_name {
+        if subject == "challenges.cloudflare.com" {
+            return AntiBotTech::Cloudflare;
+        }
     }
 
-    if url.contains("hcaptcha.com") && url.contains("humansecurity") {
-        return AntiBotTech::HUMAN;
+    if let Some(tech) = detect_anti_bot_from_headers(headers) {
+        return tech;
     }
 
-    if url.contains("arkoselabs.com") || url.contains("funcaptcha") {
-        return AntiBotTech::ArkoseLabs;
+    if let Some(tech) = detect_antibot_from_url(url) {
+        return tech;
     }
 
-    if url.contains("kasada.io") {
-        return AntiBotTech::Kasada;
-    }
-
-    if url.contains("fingerprint.com") || url.contains("fpjs.io") {
-        return AntiBotTech::FingerprintJS;
-    }
-
-    if url.contains("imperva.com") || url.contains("incapsula") {
-        return AntiBotTech::Imperva;
-    }
-
-    if url.contains("akamai.net") && url.contains("bot-manager") {
-        return AntiBotTech::AkamaiBotManager;
-    }
-
-    if url.contains("radwarebotmanager") {
-        return AntiBotTech::RadwareBotManager;
-    }
-
-    if url.contains("reblaze.com") {
-        return AntiBotTech::Reblaze;
-    }
-
-    if url.contains("cheq.ai") {
-        return AntiBotTech::CHEQ;
+    if let Some(anti_bot) = detect_anti_bot_from_body(body) {
+        return anti_bot;
     }
 
     AntiBotTech::None
@@ -648,20 +737,26 @@ pub async fn perform_chrome_http_request(
                     }
 
                     if !response.url.starts_with(source) {
-                        match response.security_details {
-                            Some(ref security_details) => {
-                                anti_bot_tech = detect_anti_bot_tech(
-                                    &security_details.subject_name,
+                        match &response.security_details {
+                            Some(security_details) => {
+                                anti_bot_tech = detect_anti_bot_tech_response(
                                     &response.url,
+                                    &HeaderSource::Map(&response_headers),
+                                    &Default::default(),
+                                    Some(&security_details.subject_name),
                                 );
-
-                                waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
                             }
                             _ => {
-                                anti_bot_tech = detect_anti_bot_tech("", &response.url);
-                                waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
+                                anti_bot_tech = detect_anti_bot_tech_response(
+                                    &response.url,
+                                    &HeaderSource::Map(&response_headers),
+                                    &Default::default(),
+                                    None,
+                                );
                             }
                         };
+                        waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
+
                         if !waf_check {
                             waf_check = match response.protocol {
                                 Some(ref protocol) => protocol == "blob",
@@ -1516,7 +1611,7 @@ pub async fn fetch_page_html_chrome_base(
 
     let waf_check = chrome_http_req_res.waf_check;
     let status_code = chrome_http_req_res.status_code;
-    let anti_bot_tech = chrome_http_req_res.anti_bot_tech;
+    let mut anti_bot_tech = chrome_http_req_res.anti_bot_tech;
 
     let run_page_response = async move {
         let mut page_response = if run_events {
@@ -1776,8 +1871,6 @@ pub async fn fetch_page_html_chrome_base(
     //     }
     // }
 
-    page_response.anti_bot_tech = anti_bot_tech;
-
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
             base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
@@ -1794,7 +1887,14 @@ pub async fn fetch_page_html_chrome_base(
 
                 if let Some(response_map) = response_map {
                     if let Some(bytes_map) = bytes_map {
+                        let detect_anti_bots =
+                            response_map.len() <= 4 && anti_bot_tech == AntiBotTech::None;
+
                         for item in response_map {
+                            if detect_anti_bots && item.1.url.contains("_Incapsula_Resource?") {
+                                anti_bot_tech = AntiBotTech::Imperva;
+                            }
+
                             let b = if item.1.skipped {
                                 0.0
                             } else {
@@ -1824,8 +1924,24 @@ pub async fn fetch_page_html_chrome_base(
                 }
 
                 set_page_response_headers_raw(&mut rs.headers, &mut page_response);
-
                 store_headers(&page_response, &mut chrome_http_req_res);
+
+                if anti_bot_tech == AntiBotTech::None {
+                    let final_url = match &page_response.final_url {
+                        Some(final_url) => final_url,
+                        _ => target_url,
+                    };
+                    if let Some(h) = &page_response.headers {
+                        if let Some(content) = &page_response.content {
+                            anti_bot_tech = detect_anti_bot_tech_response(
+                                &final_url,
+                                &HeaderSource::HeaderMap(h),
+                                &content,
+                                None,
+                            );
+                        }
+                    }
+                }
 
                 if !page_set {
                     let _ = tokio::time::timeout(
@@ -1842,6 +1958,8 @@ pub async fn fetch_page_html_chrome_base(
             page_response.bytes_transferred = Some(transferred);
         }
     }
+
+    page_response.anti_bot_tech = anti_bot_tech;
 
     Ok(page_response)
 }
@@ -2134,13 +2252,13 @@ pub async fn handle_response_bytes(
     };
 
     let status_code: StatusCode = res.status();
-    #[cfg(feature = "headers")]
     let headers = res.headers().clone();
     #[cfg(feature = "remote_addr")]
     let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
 
     let mut content: Option<Box<Vec<u8>>> = None;
+    let mut anti_bot_tech = AntiBotTech::default();
 
     if !block_streaming(&res, only_html) {
         let mut data = match res.content_length() {
@@ -2176,6 +2294,12 @@ pub async fn handle_response_bytes(
             }
         }
 
+        anti_bot_tech = detect_anti_bot_tech_response(
+            &target_url,
+            &HeaderSource::HeaderMap(&headers),
+            &data,
+            None,
+        );
         content.replace(Box::new(data.into()));
     }
 
@@ -2189,6 +2313,7 @@ pub async fn handle_response_bytes(
         content,
         final_url: rd,
         status_code,
+        anti_bot_tech,
         ..Default::default()
     }
 }
@@ -2213,11 +2338,11 @@ where
     };
 
     let status_code: StatusCode = res.status();
-    #[cfg(feature = "headers")]
     let headers = res.headers().clone();
     #[cfg(feature = "remote_addr")]
     let remote_addr = res.remote_addr();
     let cookies = get_cookies(&res);
+    let mut anti_bot_tech = AntiBotTech::default();
 
     let mut rewrite_error = false;
 
@@ -2258,6 +2383,13 @@ where
                 }
             }
         }
+
+        anti_bot_tech = detect_anti_bot_tech_response(
+            &target_url,
+            &HeaderSource::HeaderMap(&headers),
+            &collected_bytes,
+            None,
+        );
     }
 
     (
@@ -2270,6 +2402,7 @@ where
             cookies,
             final_url,
             status_code,
+            anti_bot_tech,
             ..Default::default()
         },
         rewrite_error,
