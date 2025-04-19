@@ -1433,7 +1433,6 @@ impl Website {
         &self,
         client: crate::client::ClientBuilder,
     ) -> crate::client::ClientBuilder {
-        let client = client.cookie_store(true);
         if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
             match self.domain_parsed.clone() {
                 Some(p) => {
@@ -1441,10 +1440,10 @@ impl Website {
                     cookie_store.add_cookie_str(&self.configuration.cookie_str, &p);
                     client.cookie_provider(cookie_store.into())
                 }
-                _ => client,
+                _ => client.cookie_store(true),
             }
         } else {
-            client
+            client.cookie_store(true)
         }
     }
 
