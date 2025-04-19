@@ -27,10 +27,10 @@ use crate::error::{CdpError, Result};
 use crate::handler::browser::BrowserContext;
 use crate::handler::domworld::DOMWorldKind;
 use crate::handler::emulation::EmulationManager;
+use crate::handler::frame::FrameRequestedNavigation;
 use crate::handler::frame::{
     FrameEvent, FrameManager, NavigationError, NavigationId, NavigationOk,
 };
-use crate::handler::frame::{FrameRequestedNavigation, UTILITY_WORLD_NAME};
 use crate::handler::network::{NetworkEvent, NetworkManager};
 use crate::handler::page::PageHandle;
 use crate::handler::viewport::Viewport;
@@ -404,10 +404,18 @@ impl Target {
                 if let Poll::Ready(poll) = cmds.poll(now) {
                     return match poll {
                         None => {
-                            if let Some(isolated_world_cmds) =
-                                self.frame_manager.ensure_isolated_world(UTILITY_WORLD_NAME)
-                            {
-                                *cmds = isolated_world_cmds;
+                            if let Some(world_name) = self.frame_manager.get_isolated_world_name() {
+                                let world_name = world_name.clone();
+
+                                if let Some(isolated_world_cmds) =
+                                    self.frame_manager.ensure_isolated_world(&world_name)
+                                {
+                                    *cmds = isolated_world_cmds;
+                                } else {
+                                    self.init_state = TargetInit::InitializingNetwork(
+                                        self.network_manager.init_commands(),
+                                    );
+                                }
                             } else {
                                 self.init_state = TargetInit::InitializingNetwork(
                                     self.network_manager.init_commands(),

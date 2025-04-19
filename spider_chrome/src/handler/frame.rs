@@ -25,7 +25,6 @@ use crate::handler::http::HttpRequest;
 use crate::handler::REQUEST_TIMEOUT;
 use crate::{cmd::CommandChain, ArcHttpRequest};
 
-pub const UTILITY_WORLD_NAME: &str = "__chromiumoxide_utility_world__";
 const EVALUATION_SCRIPT_URL: &str = "____chromiumoxide_utility_world___evaluation_script__";
 
 lazy_static::lazy_static! {
@@ -33,6 +32,39 @@ lazy_static::lazy_static! {
     static ref CHROME_SPOOF_RUNTIME: bool = {
         std::env::var("CHROME_SPOOF_RUNTIME").unwrap_or_else(|_| "false".to_string()) == "true"
     };
+}
+
+/// Generate a collision-resistant world name using `id` + randomness.
+pub fn random_world_name(id: &str) -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let rand_len = rng.gen_range(6..=12);
+
+    // Convert first few chars of id into base36-compatible chars
+    let id_part: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(5)
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_alphabetic() {
+                c
+            } else {
+                // convert 0-9 into a base36 letter offset to obscure it a bit
+                (b'a' + (c as u8 - b'0') % 26) as char
+            }
+        })
+        .collect();
+
+    // Generate random base36 tail
+    let rand_part: String = (0..rand_len)
+        .filter_map(|_| std::char::from_digit(rng.gen_range(0..36), 36))
+        .collect();
+
+    // Ensure first char is always a letter (10–35 => a–z)
+    let first = std::char::from_digit(rng.gen_range(10..36), 36).unwrap_or('a');
+
+    format!("{first}{id_part}{rand_part}")
 }
 
 /// Represents a frame on the page
@@ -53,10 +85,13 @@ pub struct Frame {
     name: Option<String>,
     /// The received lifecycle events
     lifecycle_events: HashSet<MethodId>,
+    isolated_world_name: String,
 }
 
 impl Frame {
     pub fn new(id: FrameId) -> Self {
+        let isolated_world_name = random_world_name(id.inner());
+
         Self {
             parent_frame: None,
             id,
@@ -68,6 +103,7 @@ impl Frame {
             child_frames: Default::default(),
             name: None,
             lifecycle_events: Default::default(),
+            isolated_world_name,
         }
     }
 
@@ -84,7 +120,12 @@ impl Frame {
             child_frames: Default::default(),
             name: None,
             lifecycle_events: Default::default(),
+            isolated_world_name: parent.isolated_world_name.clone(),
         }
+    }
+
+    pub fn get_isolated_world_name(&self) -> &String {
+        &self.isolated_world_name
     }
 
     pub fn parent_id(&self) -> Option<&FrameId> {
@@ -166,23 +207,6 @@ impl Frame {
 
     pub fn set_request(&mut self, request: HttpRequest) {
         self.http_request = Some(Arc::new(request))
-    }
-}
-
-impl From<CdpFrame> for Frame {
-    fn from(frame: CdpFrame) -> Self {
-        Self {
-            parent_frame: frame.parent_id.map(From::from),
-            id: frame.id,
-            main_world: Default::default(),
-            secondary_world: Default::default(),
-            loader_id: Some(frame.loader_id),
-            url: Some(frame.url),
-            http_request: None,
-            child_frames: Default::default(),
-            name: frame.name,
-            lifecycle_events: Default::default(),
-        }
     }
 }
 
@@ -269,6 +293,16 @@ impl FrameManager {
         } else {
             None
         }
+    }
+
+    /// Get the main isolated world name.
+    pub fn get_isolated_world_name(&self) -> Option<&String> {
+        self.main_frame
+            .as_ref()
+            .and_then(|id| match self.frames.get(id) {
+                Some(fid) => Some(fid.get_isolated_world_name()),
+                _ => None,
+            })
     }
 
     pub fn frames(&self) -> impl Iterator<Item = &Frame> + '_ {
@@ -487,7 +521,7 @@ impl FrameManager {
                     frame
                         .main_world
                         .set_context(event.context.id, event.context.unique_id.clone());
-                } else if event.context.name == UTILITY_WORLD_NAME
+                } else if event.context.name == frame.isolated_world_name
                     && frame.secondary_world.execution_context().is_none()
                 {
                     frame
