@@ -236,6 +236,54 @@ pub struct AIResults {
     pub error: Option<String>,
 }
 
+/// Enumeration of known anti-bot and fraud prevention technologies.
+#[derive(Debug, Default, Clone, Copy)]
+pub enum AntiBotTech {
+    /// Cloudflare Bot Management - integrated with CDN/WAF, provides behavioral and ML detection.
+    Cloudflare,
+    /// DataDome - bot protection focused on e-commerce, travel, and classifieds.
+    DataDome,
+    /// HUMAN (formerly White Ops) - advanced bot mitigation with a focus on ad fraud and Satori threat intelligence.
+    HUMAN,
+    /// PerimeterX - offers Bot Defender and Code Defender with a strong focus on e-commerce and credential stuffing.
+    PerimeterX,
+    /// Kasada - bot defense using client-side interrogation and cryptographic challenges.
+    Kasada,
+    /// FingerprintJS - device fingerprinting and fraud detection via browser and device signal intelligence.
+    FingerprintJS,
+    /// Arkose Labs - bot mitigation through interactive challenges and risk scoring, used by large enterprises.
+    ArkoseLabs,
+    /// Imperva - offers bot management as part of a broader WAF/CDN suite with threat intelligence integration.
+    Imperva,
+    /// F5 - legacy enterprise security vendor offering bot protection through traffic inspection and WAF.
+    F5,
+    /// Queue-it - virtual waiting room technology to manage surges in traffic and prevent bot scalping.
+    QueueIt,
+    /// Netacea - behavioral analysis and intent-based detection via server-side interception.
+    Netacea,
+    /// AppsFlyer - primarily a mobile attribution platform with anti-fraud capabilities.
+    AppsFlyer,
+    /// Adjust - mobile measurement and analytics provider with fraud prevention modules.
+    Adjust,
+    /// AppTrana - Indusface is a leading application security SaaS company that secures critical Web, Mobil
+    AppTrana,
+    /// Akamai Bot Manager - enterprise-grade bot management as part of Akamai’s edge security stack.
+    AkamaiBotManager,
+    /// Radware Bot Manager - bot detection via intent-based algorithms and real-time profiling.
+    RadwareBotManager,
+    /// Reblaze - cloud-based web security suite including bot management, WAF, and DDoS mitigation.
+    Reblaze,
+    /// CHEQ - marketing security and fraud prevention focused on ad spend protection and invalid traffic.
+    CHEQ,
+    /// Incode - identity verification and fraud prevention with biometric and document validation.
+    Incode,
+    /// Singula - AI-based marketing and user protection, offering user behavior analysis and fraud insights.
+    Singula,
+    /// Fallback value if none match or detection failed.
+    #[default]
+    None,
+}
+
 /// Represent a page visited.
 #[derive(Debug, Clone)]
 #[cfg(not(feature = "decentralized"))]
@@ -300,6 +348,8 @@ pub struct Page {
     #[cfg(feature = "chrome")]
     /// All of the request events mapped with the time period of the event sent.
     pub request_map: Option<hashbrown::HashMap<String, f64>>,
+    /// The anti-bot tech used.
+    pub anti_bot_tech: AntiBotTech,
 }
 
 /// Represent a page visited.
@@ -343,6 +393,8 @@ pub struct Page {
     pub blocked_crawl: bool,
     /// The signature of the page to de-duplicate content.
     pub signature: Option<u64>,
+    /// The anti-bot tech used.
+    pub anti_bot_tech: AntiBotTech,
 }
 
 /// Validate link and push into the map
@@ -787,6 +839,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         response_map: res.response_map,
         #[cfg(feature = "chrome")]
         request_map: res.request_map,
+        anti_bot_tech: res.anti_bot_tech,
     }
 }
 

@@ -14,7 +14,7 @@ pub mod trie;
 pub mod detect_system;
 
 use crate::{
-    page::{STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
+    page::{AntiBotTech, STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
@@ -270,6 +270,8 @@ pub struct PageResponse {
     #[cfg(feature = "chrome")]
     /// All of the request events mapped with the time period of the event sent.
     pub request_map: Option<HashMap<String, f64>>,
+    /// The anti-bot tech used.
+    pub anti_bot_tech: crate::page::AntiBotTech,
 }
 
 /// wait for event with timeout
@@ -513,6 +515,63 @@ pub fn handle_extra_ai_data(
     };
 }
 
+/// Detect anti-bot tech from the response.
+fn detect_anti_bot_tech(subject_name: &str, url: &str) -> AntiBotTech {
+    if subject_name == "challenges.cloudflare.com" {
+        return AntiBotTech::Cloudflare;
+    }
+
+    if url.contains("/cdn-cgi/challenge-platform") {
+        return AntiBotTech::Cloudflare;
+    }
+
+    if url.contains("datadome.co") || url.contains("dd-api.io") {
+        return AntiBotTech::DataDome;
+    }
+
+    if url.contains("perimeterx.net") || url.contains("px-captcha") {
+        return AntiBotTech::PerimeterX;
+    }
+
+    if url.contains("hcaptcha.com") && url.contains("humansecurity") {
+        return AntiBotTech::HUMAN;
+    }
+
+    if url.contains("arkoselabs.com") || url.contains("funcaptcha") {
+        return AntiBotTech::ArkoseLabs;
+    }
+
+    if url.contains("kasada.io") {
+        return AntiBotTech::Kasada;
+    }
+
+    if url.contains("fingerprint.com") || url.contains("fpjs.io") {
+        return AntiBotTech::FingerprintJS;
+    }
+
+    if url.contains("imperva.com") || url.contains("incapsula") {
+        return AntiBotTech::Imperva;
+    }
+
+    if url.contains("akamai.net") && url.contains("bot-manager") {
+        return AntiBotTech::AkamaiBotManager;
+    }
+
+    if url.contains("radwarebotmanager") {
+        return AntiBotTech::RadwareBotManager;
+    }
+
+    if url.contains("reblaze.com") {
+        return AntiBotTech::Reblaze;
+    }
+
+    if url.contains("cheq.ai") {
+        return AntiBotTech::CHEQ;
+    }
+
+    AntiBotTech::None
+}
+
 /// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
 pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
@@ -538,6 +597,8 @@ pub struct ChromeHTTPReqRes {
     pub request_headers: std::collections::HashMap<String, String>,
     /// The HTTP protocol of the request.
     pub protocol: String,
+    /// The anti-bot tech used.
+    pub anti_bot_tech: crate::page::AntiBotTech,
 }
 
 #[cfg(feature = "chrome")]
@@ -553,6 +614,7 @@ pub async fn perform_chrome_http_request(
         std::collections::HashMap::default();
     let mut request_headers = std::collections::HashMap::default();
     let mut protocol = String::from("http/1.1");
+    let mut anti_bot_tech = AntiBotTech::default();
 
     let page_base =
         page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
@@ -586,15 +648,19 @@ pub async fn perform_chrome_http_request(
                     }
 
                     if !response.url.starts_with(source) {
-                        waf_check = match response.security_details {
+                        match response.security_details {
                             Some(ref security_details) => {
-                                if security_details.subject_name == "challenges.cloudflare.com" {
-                                    true
-                                } else {
-                                    false
-                                }
+                                anti_bot_tech = detect_anti_bot_tech(
+                                    &security_details.subject_name,
+                                    &response.url,
+                                );
+
+                                waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
                             }
-                            _ => response.url.contains("/cdn-cgi/challenge-platform"),
+                            _ => {
+                                anti_bot_tech = detect_anti_bot_tech("", &response.url);
+                                waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
+                            }
                         };
                         if !waf_check {
                             waf_check = match response.protocol {
@@ -619,6 +685,7 @@ pub async fn perform_chrome_http_request(
         response_headers,
         request_headers,
         protocol,
+        anti_bot_tech,
     })
 }
 
@@ -1449,6 +1516,7 @@ pub async fn fetch_page_html_chrome_base(
 
     let waf_check = chrome_http_req_res.waf_check;
     let status_code = chrome_http_req_res.status_code;
+    let anti_bot_tech = chrome_http_req_res.anti_bot_tech;
 
     let run_page_response = async move {
         let mut page_response = if run_events {
@@ -1708,6 +1776,8 @@ pub async fn fetch_page_html_chrome_base(
     //     }
     // }
 
+    page_response.anti_bot_tech = anti_bot_tech;
+
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
             base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
@@ -1768,6 +1838,7 @@ pub async fn fetch_page_html_chrome_base(
             if request_map.is_some() {
                 page_response.request_map = request_map;
             }
+
             page_response.bytes_transferred = Some(transferred);
         }
     }
