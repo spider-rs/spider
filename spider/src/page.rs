@@ -237,7 +237,7 @@ pub struct AIResults {
 }
 
 /// Enumeration of known anti-bot and fraud prevention technologies.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AntiBotTech {
     /// Cloudflare Bot Management - integrated with CDN/WAF, provides behavioral and ML detection.
     Cloudflare,

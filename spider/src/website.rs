@@ -11,7 +11,7 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 #[cfg(feature = "disk")]
 use crate::features::disk::DatabaseHandler;
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{Page, PageLinkBuildSettings};
+use crate::page::{AntiBotTech, Page, PageLinkBuildSettings};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
 use crate::utils::{
@@ -286,6 +286,8 @@ pub struct Website {
     status: CrawlStatus,
     /// The initial status code of the first request.
     initial_status_code: StatusCode,
+    /// The initial anti-bot tech found
+    initial_anti_bot_tech: AntiBotTech,
     /// The website was manually stopped.
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
@@ -1884,6 +1886,7 @@ impl Website {
             links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
+            self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
@@ -2086,6 +2089,7 @@ impl Website {
             }
 
             self.initial_status_code = page.status_code;
+            self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
@@ -2321,6 +2325,7 @@ impl Website {
             .await;
 
             self.initial_status_code = page.status_code;
+            self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
@@ -2616,6 +2621,7 @@ impl Website {
                 links.extend(links_ssg);
 
                 self.initial_status_code = page.status_code;
+                self.initial_anti_bot_tech = page.anti_bot_tech;
 
                 if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
                     self.status = CrawlStatus::Blocked;
@@ -2750,6 +2756,7 @@ impl Website {
             page.bytes_transferred = bytes_transferred;
 
             self.initial_status_code = page.status_code;
+            self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
