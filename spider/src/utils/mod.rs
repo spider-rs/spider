@@ -3830,6 +3830,33 @@ pub fn crawl_duration_expired(crawl_timeout: &Option<Duration>, start: &Option<I
         .unwrap_or(false)
 }
 
+/// is the content html and safe for formatting.
+static HTML_TAGS: phf::Set<&'static [u8]> = phf_set! {
+    b"<!doctype html",
+    b"<html",
+    b"<document",
+};
+
+/// Check if the content is HTML.
+pub fn is_html_content_check(bytes: &[u8]) -> bool {
+    let check_bytes = if bytes.len() > 1024 {
+        &bytes[..1024]
+    } else {
+        bytes
+    };
+
+    for tag in HTML_TAGS.iter() {
+        if check_bytes
+            .windows(tag.len())
+            .any(|window| window.eq_ignore_ascii_case(tag))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Return the semaphore that should be used.
 #[cfg(not(feature = "balance"))]
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Semaphore> {
