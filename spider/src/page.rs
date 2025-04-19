@@ -1633,6 +1633,32 @@ impl Page {
         }
     }
 
+    /// Modify xml - html.
+    #[cfg(all(
+        feature = "sitemap",
+        feature = "chrome",
+        not(feature = "decentralized")
+    ))]
+    pub(crate) fn modify_xml_html(&mut self) -> &[u8] {
+        if let Some(xml) = self.html.as_deref() {
+            const XML_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
+
+            let stripped = if let Ok(xml_str) = std::str::from_utf8(xml) {
+                xml_str
+                    .strip_prefix(XML_DECL)
+                    .unwrap_or(xml_str)
+                    .as_bytes()
+                    .to_vec()
+            } else {
+                xml.to_vec()
+            };
+
+            self.html = Some(Box::new(stripped));
+        }
+
+        self.html.as_deref().map(Vec::as_slice).unwrap_or_default()
+    }
+
     /// Get the response events mapped.
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     pub fn get_responses(&self) -> &Option<hashbrown::HashMap<String, f64>> {

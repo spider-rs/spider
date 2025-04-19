@@ -5328,11 +5328,12 @@ impl Website {
 
                         let is_xml = page
                             .get_html_bytes_u8()
-                            .starts_with(b"<?xml version=\"1.0\"");
+                            .starts_with(b"<?xml version=\"1.0\"")
+                            && page.get_html_bytes_u8() == b"</html>";
 
                         if is_xml {
-                            let mut stream =
-                                tokio_stream::iter(SiteMapReader::new(&*page.get_html_bytes_u8()));
+                            let reader = SiteMapReader::new(&*page.get_html_bytes_u8());
+                            let mut stream = tokio_stream::iter(reader);
 
                             while let Some(entity) = stream.next().await {
                                 if !self.handle_process(handle, &mut interval, async {}).await {
@@ -5449,6 +5450,9 @@ impl Website {
                                 }
                             }
                         } else {
+                            if page.get_html_bytes_u8().starts_with(b"<?xml") {
+                                page.modify_xml_html();
+                            }
                             let links = page.links(&shared.6, &shared.7).await;
                             let mut stream = tokio_stream::iter(links);
 
