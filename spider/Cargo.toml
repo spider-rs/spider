@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.36.76"
+version = "2.36.77"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -44,6 +44,7 @@ const_format = { version = "0.2", optional = true }
 async-openai = { version = "0.28", optional = true }
 tiktoken-rs = { version = "0.6", optional = true }
 lol_html = { version = "2" }
+cookie = { version = "0", optional = true }
 serde_json = { version = "1", optional = true }
 quick-xml = { version = "0.37", features = [
     "serde",
@@ -208,7 +209,7 @@ chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
 chrome_simd = ["chrome", "spider_chrome/simd", "simd"]
 chrome_tls_connection = ["chrome", "spider_chrome/chrome_tls_connection"]
-cookies = ["reqwest/cookies"]
+cookies = ["reqwest/cookies", "dep:cookie"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:rand", "chrome_intercept", "dep:aho-corasick"]
 encoding = []

@@ -818,6 +818,36 @@ pub fn build(_: &str, res: PageResponse) -> Page {
     }
 }
 
+#[cfg(feature = "headers")]
+/// Re build the cookies.
+pub fn build_cookie_header_from_set_cookie(page: &Page) -> Option<reqwest::header::HeaderValue> {
+    use reqwest::header::HeaderValue;
+    let mut cookie_pairs = Vec::new();
+
+    if let Some(headers) = &page.headers {
+        for cookie in headers.get_all(crate::client::header::SET_COOKIE).iter() {
+            if let Ok(cookie_str) = cookie.to_str() {
+                if let Ok(parsed) = cookie::Cookie::parse(cookie_str) {
+                    cookie_pairs.push(format!("{}={}", parsed.name(), parsed.value()));
+                }
+            }
+        }
+    }
+
+    if cookie_pairs.is_empty() {
+        None
+    } else {
+        let cookie_header_str = cookie_pairs.join("; ");
+        HeaderValue::from_str(&cookie_header_str).ok()
+    }
+}
+
+#[cfg(not(feature = "headers"))]
+/// Re build the cookies.
+pub fn build_cookie_header_from_set_cookie(_page: &Page) -> Option<reqwest::header::HeaderValue> {
+    None
+}
+
 /// Settings for streaming rewriter
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PageLinkBuildSettings {

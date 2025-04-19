@@ -1507,10 +1507,20 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
-            let results = tokio::time::timeout(
-                base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
-                page.outer_html_bytes(),
-            );
+            let xml_target = match &final_url {
+                Some(f) => f.ends_with(".xml"),
+                _ => target_url.ends_with(".xml"),
+            };
+
+            let page_fn = async {
+                if xml_target {
+                    page.content_bytes_xml().await
+                } else {
+                    page.outer_html_bytes().await
+                }
+            };
+
+            let results = tokio::time::timeout(base_timeout.max(HALF_MAX_PAGE_TIMEOUT), page_fn);
 
             let mut res: Box<Vec<u8>> = match results.await {
                 Ok(v) => v.map(Box::new).unwrap_or_default(),

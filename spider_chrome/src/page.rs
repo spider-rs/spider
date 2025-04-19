@@ -101,7 +101,7 @@ pub const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEn
 /// The outer HTML of a webpage.
 const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
 /// XML serilalizer for custom pages or testing.
-const FULL_XML_SERIALIZER_JS: &str = "(()=>{const s=new XMLSerializer();let x=s.serializeToString(document);if(!x.startsWith('<?xml'))x='<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n'+x;return x})()";
+const FULL_XML_SERIALIZER_JS: &str = "(()=>{let e=document.querySelector('#webkit-xml-viewer-source-xml');let x=e?e.innerHTML:new XMLSerializer().serializeToString(document);return x.startsWith('<?xml')?x:'<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n'+x})()";
 
 /// Obfuscates browser plugins on frame creation
 fn generate_random_plugin_filename() -> String {
