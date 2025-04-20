@@ -891,6 +891,11 @@ impl Website {
         &self.initial_status_code
     }
 
+    /// Get the initial anti-bot tech code used for the intitial request
+    pub fn get_initial_anti_bot_tech(&self) -> &AntiBotTech {
+        &self.initial_anti_bot_tech
+    }
+
     /// Drain the links visited.
     #[cfg(any(
         feature = "string_interner_bucket_backend",
