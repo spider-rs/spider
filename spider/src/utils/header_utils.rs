@@ -383,11 +383,14 @@ pub fn get_mimic_headers(
             insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
 
             // 8. Referer (if spoofing enabled and missing)
-            if !contains_referer {
-                insert_or_default!(
-                    &refererer_header.as_header_name(),
-                    HeaderValue::from_static(crate::features::spoof_referrer::spoof_referrer())
-                );
+            if add_ref && !header_map.contains_key(REFERER) {
+                let spoof_ref = crate::features::spoof_referrer::spoof_referrer();
+                if !spoof_ref.is_empty() {
+                    insert_or_default!(
+                        &refererer_header.as_header_name(),
+                        HeaderValue::from_static(spoof_ref)
+                    );
+                }
             }
 
             // 9. Accept-Encoding and Accept-Language
