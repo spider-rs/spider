@@ -1228,11 +1228,17 @@ impl Website {
             .http1_ignore_invalid_headers_in_responses(true)
             .referer(missing_referer)
             .connect_timeout(Duration::from_secs(10))
+            .http1_title_case_headers()
             // .set_host(missing_host)
             // .http1_preserve_header_order()
             // .http1_preserve_header_case()
-            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs)
-            .tcp_keepalive(Duration::from_secs(1));
+            .danger_accept_invalid_certs(self.configuration.accept_invalid_certs);
+
+        let client = if self.configuration.proxies.is_none() {
+            client
+        } else {
+            client.tcp_keepalive(Duration::from_secs(30))
+        };
 
         // check both casing for user-agent
         let client = if missing_agent {
@@ -1275,8 +1281,13 @@ impl Website {
         let client = Client::builder()
             .redirect(policy)
             .referer(missing_referer)
-            .connect_timeout(Duration::from_secs(10))
-            .tcp_keepalive(Duration::from_secs(1));
+            .connect_timeout(Duration::from_secs(10));
+
+        let client = if self.configuration.proxies.is_none() {
+            client
+        } else {
+            client.tcp_keepalive(Duration::from_secs(30))
+        };
 
         let client = if missing_agent {
             client.user_agent(user_agent)
