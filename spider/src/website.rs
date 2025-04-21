@@ -1228,6 +1228,7 @@ impl Website {
             .http1_ignore_invalid_headers_in_responses(true)
             .referer(missing_referer)
             .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(20))
             .http1_title_case_headers()
             // .set_host(missing_host)
             // .http1_preserve_header_order()
@@ -3706,7 +3707,6 @@ impl Website {
                                                                 &shared.6.viewport,
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
-
                                                             )
                                                             .await;
 
@@ -3732,7 +3732,6 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -3754,7 +3753,6 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-
                                                                         )
                                                                         .await,
                                                                     );
@@ -5159,6 +5157,7 @@ impl Website {
                         Err(err) => {
                             // do not retry error again.
                             if attempted_correct {
+                                first_request = true;
                                 break;
                             }
 
@@ -5220,8 +5219,10 @@ impl Website {
         scrape: bool,
     ) {
         use crate::features::chrome::attempt_navigation;
-        use sitemap::reader::{SiteMapEntity, SiteMapReader};
-        use sitemap::structs::Location;
+        use sitemap::{
+            reader::{SiteMapEntity, SiteMapReader},
+            structs::Location,
+        };
 
         if let Some(mut b) = self.setup_browser().await {
             let selectors = self.setup_selectors();
@@ -5289,21 +5290,6 @@ impl Website {
 
                     let shared_1 = shared.clone();
 
-                    let handles = crate::utils::spawn_task("page_fetch", async move {
-                        let mut pages = Vec::new();
-
-                        while let Some(page) = rx.recv().await {
-                            if scrape || persist_links {
-                                pages.push(page.clone());
-                            };
-                            if shared_1.0.is_some() {
-                                channel_send_page(&shared_1.0, page, &shared_1.1);
-                            }
-                        }
-
-                        pages
-                    });
-
                     if let Ok(new_page) = attempt_navigation(
                         "about:blank",
                         &b.browser.0,
@@ -5313,6 +5299,21 @@ impl Website {
                     )
                     .await
                     {
+                        let handles = crate::utils::spawn_task("page_fetch", async move {
+                            let mut pages = Vec::new();
+
+                            while let Some(page) = rx.recv().await {
+                                if scrape || persist_links {
+                                    pages.push(page.clone());
+                                };
+                                if shared_1.0.is_some() {
+                                    channel_send_page(&shared_1.0, page, &shared_1.1);
+                                }
+                            }
+
+                            pages
+                        });
+
                         let (_, intercept_handle) = tokio::join!(
                             crate::features::chrome::setup_chrome_events(
                                 &new_page,
@@ -5491,10 +5492,11 @@ impl Website {
 
                                 let allowed = self.is_allowed(&link);
 
+                                // because of the sitemap allow the budget to process first.
                                 if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                                     exceeded_budget = true;
-                                    break;
                                 }
+
                                 if allowed.eq(&ProcessLinkStatus::Blocked) {
                                     continue;
                                 }
@@ -5777,8 +5779,8 @@ impl Website {
 
                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                             *exceeded_budget = true;
-                            break;
                         }
+
                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                             continue;
                         }
@@ -5820,6 +5822,10 @@ impl Website {
                     log::info!("incorrect sitemap error: {:?}", err.msg())
                 }
             };
+
+            if *exceeded_budget {
+                break;
+            }
         }
     }
 
