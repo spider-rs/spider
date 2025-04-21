@@ -146,12 +146,30 @@ impl Browser {
 
         let (tx, rx) = channel(1000);
 
+        let handler_config = BrowserConfig {
+            ignore_https_errors: config.ignore_https_errors,
+            viewport: config.viewport.clone(),
+            request_timeout: config.request_timeout,
+            request_intercept: config.request_intercept,
+            cache_enabled: config.cache_enabled,
+            ignore_visuals: config.ignore_visuals,
+            ignore_stylesheets: config.ignore_stylesheets,
+            ignore_javascript: config.ignore_javascript,
+            ignore_analytics: config.ignore_analytics,
+            ignore_ads: config.ignore_ads,
+            extra_headers: config.extra_headers.clone(),
+            only_html: config.only_html,
+            service_worker_enabled: config.service_worker_enabled,
+            intercept_manager: config.intercept_manager,
+            ..Default::default()
+        };
+
         let fut = Handler::new(conn, rx, config);
         let browser_context = fut.default_browser_context().clone();
 
         let browser = Self {
             sender: tx,
-            config: None,
+            config: Some(handler_config),
             child: None,
             debug_ws_url,
             browser_context,
@@ -652,7 +670,7 @@ pub enum HeadlessMode {
     New,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BrowserConfig {
     /// Determines whether to run headless version of the browser. Defaults to
     /// true.
@@ -693,7 +711,7 @@ pub struct BrowserConfig {
 
     /// Ignore https errors, default is true
     ignore_https_errors: bool,
-    viewport: Option<Viewport>,
+    pub viewport: Option<Viewport>,
     /// The duration after a request with no response should time out
     request_timeout: Duration,
 

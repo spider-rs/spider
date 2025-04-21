@@ -73,7 +73,7 @@ lazy_static::lazy_static! {
             .build()
             .unwrap();
         let enable_performance = performance::EnableParams::default();
-        let enable_log = cdplog::EnableParams::default();
+        let disable_log = cdplog::DisableParams::default();
 
         vec![
                 (
@@ -85,8 +85,8 @@ lazy_static::lazy_static! {
                     serde_json::to_value(enable_performance).unwrap_or_default(),
                 ),
                 (
-                    enable_log.identifier(),
-                    serde_json::to_value(enable_log).unwrap_or_default(),
+                    disable_log.identifier(),
+                    serde_json::to_value(disable_log).unwrap_or_default(),
                 )
             ]
     };
