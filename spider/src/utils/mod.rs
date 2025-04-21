@@ -1604,6 +1604,7 @@ pub async fn fetch_page_html_chrome_base(
         && (!chrome_http_req_res.status_code.is_server_error()
             && !chrome_http_req_res.status_code.is_client_error()
             || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
+            || chrome_http_req_res.status_code == 404
             || chrome_http_req_res.status_code.is_redirection()
             || chrome_http_req_res.status_code.is_success());
 
@@ -2409,6 +2410,11 @@ where
     )
 }
 
+/// Continue to parse a valid web page.
+pub(crate) fn valid_parsing_status(res: &Response) -> bool {
+    res.status().is_success() || res.status() == 404
+}
+
 /// Perform a network request to a resource extracting all content streaming.
 async fn fetch_page_html_raw_base(
     target_url: &str,
@@ -2416,7 +2422,7 @@ async fn fetch_page_html_raw_base(
     only_html: bool,
 ) -> PageResponse {
     match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => {
+        Ok(res) if valid_parsing_status(&res) => {
             handle_response_bytes(res, target_url, only_html).await
         }
         Ok(res) => handle_response_bytes(res, target_url, only_html).await,
@@ -2450,7 +2456,7 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
 #[cfg(feature = "decentralized")]
 pub async fn fetch_page(target_url: &str, client: &Client) -> Option<Vec<u8>> {
     match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => match res.bytes().await {
+        Ok(res) if valid_parsing_status(&res) => match res.bytes().await {
             Ok(text) => Some(text.into()),
             Err(_) => {
                 log("- error fetching {}", &target_url);
@@ -2480,7 +2486,7 @@ pub enum FetchPageResult {
 /// Perform a network request to a resource with the response headers..
 pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchPageResult {
     match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => {
+        Ok(res) if valid_parsing_status(&res) => {
             let headers = res.headers().clone();
             let b = match res.bytes().await {
                 Ok(text) => Some(text),
@@ -2513,7 +2519,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     match client.get(target_url).send().await {
-        Ok(res) if res.status().is_success() => {
+        Ok(res) if valid_parsing_status(&res) => {
             let u = res.url().as_str();
 
             let rd = if target_url != u {
@@ -2687,7 +2693,7 @@ pub async fn fetch_page_html(
                     use crate::bytes::BufMut;
 
                     match client.get(target_url).send().await {
-                        Ok(res) if res.status().is_success() => {
+                        Ok(res) if valid_parsing_status(&res) => {
                             #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
                             let cookies = get_cookies(&res);
@@ -2890,7 +2896,7 @@ pub async fn fetch_page_html_chrome(
                     use crate::bytes::BufMut;
 
                     match client.get(target_url).send().await {
-                        Ok(res) if res.status().is_success() => {
+                        Ok(res) if valid_parsing_status(&res) => {
                             #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
                             #[cfg(feature = "remote_addr")]

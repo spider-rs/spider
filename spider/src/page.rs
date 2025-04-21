@@ -1023,7 +1023,7 @@ impl Page {
             AllowedDomainTypes,
         };
         let page_response: PageResponse = match client.get(url).send().await {
-            Ok(res) if res.status().is_success() => {
+            Ok(res) if crate::utils::valid_parsing_status(&res) => {
                 let cell = if r_settings.ssg_build {
                     Some(tokio::sync::OnceCell::new())
                 } else {
