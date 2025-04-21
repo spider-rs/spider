@@ -6302,6 +6302,12 @@ impl Website {
         self
     }
 
+    /// Dismiss all dialogs on the page. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_dismiss_dialogs(&mut self, full_resources: bool) -> &mut Self {
+        self.configuration.with_dismiss_dialogs(full_resources);
+        self
+    }
+
     /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
     #[cfg(feature = "rquest")]
     pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {

@@ -731,6 +731,19 @@ impl Configuration {
         self
     }
 
+    /// Determine whether to dismiss dialogs. This method does nothing if the `chrome` is enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_dismiss_dialogs(&mut self, dismiss_dialogs: bool) -> &mut Self {
+        self.dismiss_dialogs = Some(dismiss_dialogs);
+        self
+    }
+
+    /// Determine whether to dismiss dialogs. This method does nothing if the `chrome` is enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_dismiss_dialogs(&mut self, _dismiss_dialogs: bool) -> &mut Self {
+        self
+    }
+
     /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
     #[cfg(feature = "rquest")]
     pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {
