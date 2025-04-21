@@ -542,14 +542,24 @@ pub(crate) async fn attempt_navigation(
     cdp_params.url = url.into();
     cdp_params.for_tab = Some(false);
 
-    if let Some(vp) = viewport {
-        if vp.width >= 25 {
-            cdp_params.width = Some(vp.width.into());
-        }
-        if vp.height >= 25 {
-            cdp_params.height = Some(vp.height.into());
-        }
-    }
+    browser
+        .config()
+        .and_then(|c| c.viewport.as_ref())
+        .and_then(|b_vp| {
+            viewport.as_ref().map(|vp| {
+                let new_viewport = b_vp.width == vp.width && b_vp.height == vp.height;
+
+                if !new_viewport {
+                    if vp.width >= 25 {
+                        cdp_params.width = Some(vp.width.into());
+                    }
+                    if vp.height >= 25 {
+                        cdp_params.height = Some(vp.height.into());
+                    }
+                    cdp_params.new_window = Some(true);
+                }
+            })
+        });
 
     let page_result = tokio::time::timeout(
         match request_timeout {

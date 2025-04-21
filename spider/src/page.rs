@@ -285,7 +285,7 @@ pub enum AntiBotTech {
 }
 
 /// Represent a page visited.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// The bytes of the resource.
