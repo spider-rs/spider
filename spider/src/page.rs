@@ -31,6 +31,10 @@ pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE: usize =
     MAX_PRE_ALLOCATED_HTML_PAGE_SIZE as usize;
 
+/// Allocate up to 16kb * 4 upfront for small pages.
+#[cfg(feature = "chrome")]
+pub(crate) const TURNSTILE_WALL_PAGE_SIZE: usize = MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE * 4;
+
 /// Base css selector to use for getting valid web pages.
 const BASE_CSS_SELECTORS: &str = concat!(
     "a[href]",

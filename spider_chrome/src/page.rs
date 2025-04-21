@@ -840,7 +840,7 @@ impl Page {
         Ok(self)
     }
 
-    /// Disables runtime domain
+    /// Disables runtime domain.
     pub async fn disable_runtime(&self) -> Result<&Self> {
         self.execute(js_protocol::runtime::DisableParams::default())
             .await?;

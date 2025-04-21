@@ -61,7 +61,7 @@ async fn crawl_website(url: &str) -> Result<()> {
                 let _ = stdout
                     .write_all(
                         format!(
-                            "---- {}\nBytes transferred {:?}\nHTML Size {:?}\nLinks: {:?}\nRequests Sent {:?}\nResponses {:?}\nAnti-Bot {:?}\n",
+                            "---- {}\nBytes transferred {:?}\nHTML Size {:?}\nLinks: {:?}\nRequests Sent {:?}\nResponses {:?}\n",
                             page.get_url(),
                             page.bytes_transferred.unwrap_or_default(),
                             page.get_html_bytes_u8().len(),
@@ -70,8 +70,7 @@ async fn crawl_website(url: &str) -> Result<()> {
                                 _ => 0,
                             },
                             page.get_request().as_ref().map(|f| f.len()),
-                            page.get_responses(),
-                            page.anti_bot_tech
+                            page.get_responses()
                         )
                         .as_bytes(),
                     )

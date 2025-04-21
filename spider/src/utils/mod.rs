@@ -194,6 +194,7 @@ lazy_static! {
         b"Performance &amp; security by Cloudflare</div></div></div></body></html>";
     static ref CF_HEAD: &'static [u8; 34] = b"<html><head>\n    <style global=\"\">";
     static ref CF_MOCK_FRAME: &'static [u8; 137] = b"<iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>";
+    static ref CF_JUST_A_MOMENT:&'static [u8; 81] = b"<!DOCTYPE html><html lang=\"en-US\" dir=\"ltr\"><head><title>Just a moment...</title>";
 }
 
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
@@ -209,12 +210,17 @@ async fn cf_handle(
     let cn = CF_HEAD.as_ref();
     let cnf = CF_MOCK_FRAME.as_ref();
 
-    if b.ends_with(cf) || b.ends_with(cf2) || b.starts_with(cn) && b.ends_with(cnf) {
+    if b.ends_with(cf)
+        || b.ends_with(cf2)
+        || b.starts_with(cn) && b.ends_with(cnf)
+        || b.starts_with(CF_JUST_A_MOMENT.as_ref())
+    {
         let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
             let mut wait_for = WaitFor::default();
             wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
             wait_for.idle_network =
                 WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
+
             page_wait(&page, &Some(wait_for.clone())).await;
 
             let _ = page
@@ -222,6 +228,7 @@ async fn cf_handle(
                 .await;
 
             wait_for.page_navigations = true;
+
             page_wait(&page, &Some(wait_for.clone())).await;
 
             if let Ok(next_content) = page.outer_html_bytes().await {
@@ -1678,7 +1685,16 @@ pub async fn fetch_page_html_chrome_base(
 
             let page_fn = async {
                 if xml_target {
-                    page.content_bytes_xml().await
+                    match page.content_bytes_xml().await {
+                        Ok(page_bytes) => {
+                            if page_bytes.is_empty() {
+                                page.outer_html_bytes().await
+                            } else {
+                                Ok(page_bytes)
+                            }
+                        }
+                        _ => page.outer_html_bytes().await,
+                    }
                 } else {
                     page.outer_html_bytes().await
                 }
@@ -1695,7 +1711,9 @@ pub async fn fetch_page_html_chrome_base(
 
             if cfg!(feature = "real_browser") {
                 // we can skip this check after a set bytes
-                if res.len() <= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE {
+                if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE
+                    && anti_bot_tech == AntiBotTech::Cloudflare
+                {
                     let _ = tokio::time::timeout(base_timeout, cf_handle(&mut res, &page)).await;
                 }
             };

@@ -15,7 +15,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::target::EventAttachedToTarget;
 use chromiumoxide_cdp::cdp::js_protocol::runtime::*;
 use chromiumoxide_cdp::cdp::{
     browser_protocol::page::{self, FrameId},
-    js_protocol::runtime,
+    // js_protocol::runtime,
 };
 use chromiumoxide_types::{Method, MethodId, Request};
 
@@ -27,12 +27,12 @@ use crate::{cmd::CommandChain, ArcHttpRequest};
 
 const EVALUATION_SCRIPT_URL: &str = "____chromiumoxide_utility_world___evaluation_script__";
 
-lazy_static::lazy_static! {
-    /// Spoof the runtime.
-    static ref CHROME_SPOOF_RUNTIME: bool = {
-        std::env::var("CHROME_SPOOF_RUNTIME").unwrap_or_else(|_| "false".to_string()) == "true"
-    };
-}
+// lazy_static::lazy_static! {
+//     /// Spoof the runtime.
+//     static ref CHROME_SPOOF_RUNTIME: bool = {
+//         std::env::var("CHROME_SPOOF_RUNTIME").unwrap_or_else(|_| "false".to_string()) == "true"
+//     };
+// }
 
 /// Generate a collision-resistant world name using `id` + randomness.
 pub fn random_world_name(id: &str) -> String {
@@ -247,16 +247,17 @@ impl FrameManager {
         let enable = page::EnableParams::default();
         let get_tree = page::GetFrameTreeParams::default();
         let set_lifecycle = page::SetLifecycleEventsEnabledParams::new(true);
-        let enable_runtime = runtime::EnableParams::default();
-        let disable_runtime = runtime::DisableParams::default();
+        // let enable_runtime = runtime::EnableParams::default();
+        // let disable_runtime = runtime::DisableParams::default();
 
-        let mut commands = Vec::with_capacity(if *CHROME_SPOOF_RUNTIME { 5 } else { 4 });
+        // let mut commands = Vec::with_capacity(if *CHROME_SPOOF_RUNTIME { 5 } else { 4 });
+        let mut commands = Vec::with_capacity(3);
 
         let enable_id = enable.identifier();
         let get_tree_id = get_tree.identifier();
         let set_lifecycle_id = set_lifecycle.identifier();
-        let enable_runtime_id = enable_runtime.identifier();
-        let disable_runtime_id = disable_runtime.identifier();
+        // let enable_runtime_id = enable_runtime.identifier();
+        // let disable_runtime_id = disable_runtime.identifier();
 
         if let Ok(value) = serde_json::to_value(enable) {
             commands.push((enable_id, value));
@@ -270,15 +271,15 @@ impl FrameManager {
             commands.push((set_lifecycle_id, value));
         }
 
-        if let Ok(value) = serde_json::to_value(enable_runtime) {
-            commands.push((enable_runtime_id, value));
-        }
+        // if let Ok(value) = serde_json::to_value(enable_runtime) {
+        //     commands.push((enable_runtime_id, value));
+        // }
 
-        if *CHROME_SPOOF_RUNTIME {
-            if let Ok(value) = serde_json::to_value(disable_runtime) {
-                commands.push((disable_runtime_id, value));
-            }
-        }
+        // if *CHROME_SPOOF_RUNTIME {
+        //     if let Ok(value) = serde_json::to_value(disable_runtime) {
+        //         commands.push((disable_runtime_id, value));
+        //     }
+        // }
 
         CommandChain::new(commands, timeout)
     }
