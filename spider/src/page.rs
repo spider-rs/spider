@@ -321,7 +321,7 @@ pub struct Page {
     pub final_redirect_destination: Option<String>,
     #[cfg(feature = "time")]
     /// The duration from start of parsing to end of gathering links.
-    duration: Instant,
+    duration: Option<Instant>,
     #[cfg(feature = "chrome")]
     /// Page object for chrome. The page may be closed when accessing it on another thread from concurrency.
     chrome_page: Option<chromiumoxide::Page>,
@@ -820,7 +820,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         base: None,
         url: url.into(),
         #[cfg(feature = "time")]
-        duration: Instant::now(),
+        duration: Some(Instant::now()),
         external_domains_caseless: Default::default(),
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
@@ -1742,8 +1742,11 @@ impl Page {
 
     /// Get the elasped duration of the page since scraped.
     #[cfg(all(feature = "time", not(feature = "decentralized")))]
-    pub fn get_duration_elasped(&self) -> Duration {
-        self.duration.elapsed()
+    pub fn get_duration_elapsed(&self) -> Duration {
+        self.duration
+            .as_ref()
+            .map(|t| t.elapsed())
+            .unwrap_or_default()
     }
 
     /// Find the links as a stream using string resource validation for XML files
