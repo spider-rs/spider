@@ -55,7 +55,6 @@ static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
     "pepperflashplugin-nonfree",
     "libunity-webplugin.so",
     "Shockwave Flash",
-    "Chrome PDF Viewer",
     "Widevine Content Decryption Module",
     "Google Talk Plugin",
     "Java(TM) Platform SE",
@@ -155,24 +154,34 @@ pub fn wrap_eval_script(source: &str) -> String {
 }
 
 impl Page {
-    /// Removes the `navigator.webdriver` property
-    /// changes permissions, pluggins rendering contexts and the `window.chrome`
-    /// property to make it harder to detect the scraper as a bot
-    async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
-        let source = if let Some(cs) = custom_script {
-            format!("{}{cs}", build_stealth_script())
-        } else {
-            build_stealth_script()
-        };
-        let source = wrap_eval_script(&source);
-
+    /// Add a custom script to eval on new document.
+    pub async fn add_script_to_evaluate_on_new_document(
+        &self,
+        source: Option<String>,
+    ) -> Result<()> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source,
+            source: source.unwrap_or_default(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
         })
         .await?;
+        Ok(())
+    }
+
+    /// Removes the `navigator.webdriver` property
+    /// changes permissions, pluggins rendering contexts and the `window.chrome`
+    /// property to make it harder to detect the scraper as a bot
+    pub async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
+        let source = if let Some(cs) = custom_script {
+            format!("{};{cs}", build_stealth_script())
+        } else {
+            build_stealth_script()
+        };
+        let source = wrap_eval_script(&source);
+
+        self.add_script_to_evaluate_on_new_document(Some(source))
+            .await?;
         Ok(())
     }
 

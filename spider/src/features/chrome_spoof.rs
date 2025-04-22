@@ -14,6 +14,8 @@ pub struct HighEntropyUaData {
     pub architecture: String,
     /// The device model (mostly non-empty for Android devices).
     pub model: String,
+    /// The platform being used.
+    pub platform: String,
     /// The OS platform version (e.g., "10.0" for Windows 10, "13" for Android 13).
     pub platform_version: String,
     /// A list of brand/version pairs representing the full user agent fingerprint.
@@ -30,68 +32,103 @@ pub fn build_high_entropy_data(
         .split_whitespace()
         .find(|s| s.starts_with("Chrome/"))
         .and_then(|s| s.strip_prefix("Chrome/"))
-        .unwrap_or("122.0.0.0");
+        .unwrap_or("135.0.0.0");
 
-    let (architecture, model, platform_version) = if user_agent.contains("Android") {
-        // Example: Android 13; Pixel 7 Pro
-        let version = user_agent
-            .split(';')
-            .find(|s| s.trim().starts_with("Android "))
-            .map(|s| s.trim().strip_prefix("Android ").unwrap_or("13"))
-            .unwrap_or("13");
+    let (architecture, model, platform, platform_version): (String, String, String, String) =
+        if user_agent.contains("Android") {
+            let version = user_agent
+                .split(';')
+                .find(|s| s.trim().starts_with("Android "))
+                .and_then(|s| s.trim().strip_prefix("Android "))
+                .unwrap_or("13")
+                .to_string();
 
-        let model = user_agent
-            .split(';')
-            .nth(2)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+            let model = user_agent
+                .split(';')
+                .nth(2)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
 
-        ("arm", model, version.to_string())
-    } else if user_agent.contains("Windows NT") {
-        // Example: Windows NT 10.0; Win64; x64
-        let version = user_agent
-            .split("Windows NT ")
-            .nth(1)
-            .and_then(|s| s.split(';').next())
-            .unwrap_or("10.0");
+            ("arm".to_string(), model, "Android".to_string(), version)
+        } else if user_agent.contains("Windows NT") {
+            let version = user_agent
+                .split("Windows NT ")
+                .nth(1)
+                .and_then(|s| s.split(';').next())
+                .unwrap_or("10.0")
+                .to_string();
 
-        ("x86", "".to_string(), version.to_string())
-    } else if user_agent.contains("Macintosh") {
-        // Example: Mac OS X 10_15_7
-        let version = user_agent
-            .split("Mac OS X ")
-            .nth(1)
-            .and_then(|s| s.split(')').next())
-            .map(|s| s.replace('_', "."))
-            .unwrap_or("13.6.0".to_string());
+            (
+                "x86".to_string(),
+                "".to_string(),
+                "Windows".to_string(),
+                version,
+            )
+        } else if user_agent.contains("Mac OS X") {
+            let chrome_major = full_version
+                .split('.')
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(135);
 
-        ("x86", "".to_string(), version)
-    } else if user_agent.contains("Linux") {
-        (
-            "x86",
-            "".to_string(),
-            full_version
+            // Start at 14.6.1 for Chrome 135
+            let base_chrome = 135;
+            let base_mac = 14.6;
+
+            let delta = if chrome_major > base_chrome {
+                ((chrome_major - base_chrome) as f32 * 0.1).round()
+            } else {
+                0.0
+            };
+
+            let mac_major = base_mac + delta;
+            let platform_version = format!("{:.1}.1", mac_major);
+
+            (
+                "arm".to_string(),
+                "".to_string(),
+                "macOS".to_string(),
+                platform_version,
+            )
+        } else if user_agent.contains("Linux") {
+            let platform_version = full_version
                 .split('.')
                 .take(3)
                 .collect::<Vec<_>>()
-                .join("."),
-        )
-    } else {
-        ("x86", "".to_string(), "1.0.0".to_string())
-    };
+                .join(".");
+
+            (
+                "x86".to_string(),
+                "".to_string(),
+                "Linux".to_string(),
+                platform_version,
+            )
+        } else {
+            (
+                "x86".to_string(),
+                "".to_string(),
+                "Unknown".to_string(),
+                "1.0.0".to_string(),
+            )
+        };
 
     HighEntropyUaData {
-        architecture: architecture.to_string(),
+        architecture: architecture.into(),
         model,
-        platform_version,
+        platform: platform.into(),
+        platform_version: platform_version.into(),
         full_version_list: vec![
             BrandEntry {
-                brand: "Chromium".into(),
+                brand: "Google Chrome".into(),
                 version: full_version.into(),
             },
             BrandEntry {
                 brand: "Not-A.Brand".into(),
-                version: "99.0.0.0".into(),
+                version: "8.0.0.0".into(), // todo: dynamic parse.
+            },
+            BrandEntry {
+                brand: "Chromium".into(),
+                version: full_version.into(),
             },
         ],
     }
@@ -102,17 +139,28 @@ pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> St
     let brands = data
         .full_version_list
         .iter()
+        .map(|b| {
+            let major_version = b.version.split('.').next().unwrap_or("99");
+            format!("{{brand:'{}',version:'{}'}}", b.brand, major_version)
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // `fullVersionList`: full versions preserved
+    let full_versions = data
+        .full_version_list
+        .iter()
         .map(|b| format!("{{brand:'{}',version:'{}'}}", b.brand, b.version))
         .collect::<Vec<_>>()
         .join(",");
 
-    let script = format!(
-        "Object.defineProperty(navigator.userAgentData,'getHighEntropyValues',{{configurable:!0,enumerable:!1,writable:!1,value:function(h){{const v={{architecture:'{}',model:'{}',platformVersion:'{}',fullVersionList:[{}]}};return Promise.resolve(Object.fromEntries(h.map(k=>[k,v[k]??null])))}}}});",
-        data.architecture,
-        data.model,
-        data.platform_version,
-        brands
-    );
-
-    script
+    format!(
+        r#"Object.defineProperty(Navigator.prototype,'userAgentData',{{get:()=>({{brands:[{brands}],mobile:!1,platform:'{platform}',getHighEntropyValues:(h=>Promise.resolve(Object.fromEntries(h.map(k=>[k,{{architecture:'{arch}',model:'{model}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null]))))}}),configurable:!0}});"#,
+        platform = data.platform,
+        arch = data.architecture,
+        model = data.model,
+        plat = data.platform_version,
+        brands = brands,
+        full_versions = full_versions
+    )
 }

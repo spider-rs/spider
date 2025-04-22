@@ -628,107 +628,92 @@ pub async fn setup_chrome_interception_base(
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
     let stealth_mode = cfg!(feature = "chrome_stealth") || config.stealth_mode;
-    let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true); // polyfill window.alert.
+    let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
+
+    let spoof_script = if stealth_mode {
+        chromiumoxide::page::wrap_eval_script(
+            &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+                &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
+            ),
+        )
+    } else {
+        "".into()
+    };
+
+    let linux = config
+        .user_agent
+        .as_deref()
+        .map(|ua| ua.contains("Chrome") && ua.contains("Linux"))
+        .unwrap_or(false);
+
+    let fp_script = if config.fingerprint {
+        let fp_script = if linux {
+            if dismiss_dialogs {
+                &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
+            } else {
+                &*crate::features::chrome::FP_JS_CHROME
+            }
+        } else {
+            if dismiss_dialogs {
+                &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS
+            } else {
+                &*crate::features::chrome::FP_JS
+            }
+        };
+        fp_script
+    } else {
+        &Default::default()
+    };
+
+    // Final combined script to inject
+    let merged_script = if let Some(script) = config.evaluate_on_new_document.as_deref() {
+        if config.fingerprint {
+            Some(string_concat!(
+                chromiumoxide::page::wrap_eval_script(&fp_script),
+                chromiumoxide::page::wrap_eval_script(&script),
+                chromiumoxide::page::wrap_eval_script(&spoof_script)
+            ))
+        } else {
+            Some(string_concat!(
+                chromiumoxide::page::wrap_eval_script(&script),
+                chromiumoxide::page::wrap_eval_script(&spoof_script),
+                if dismiss_dialogs { DISABLE_DIALOGS } else { "" }
+            ))
+        }
+    } else if config.fingerprint {
+        Some(string_concat!(
+            chromiumoxide::page::wrap_eval_script(&fp_script),
+            chromiumoxide::page::wrap_eval_script(&spoof_script)
+        ))
+    } else {
+        None
+    };
 
     let stealth = async {
         match config.user_agent.as_deref() {
-            Some(agent) if stealth_mode && dismiss_dialogs => {
-                let _ = chrome_page
-                    .enable_stealth_mode_with_dimiss_dialogs(agent)
-                    .await;
-            }
             Some(agent) if stealth_mode => {
-                let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+                let _ = tokio::join!(
+                    chrome_page._enable_stealth_mode(merged_script.as_deref()),
+                    chrome_page.set_user_agent(agent.as_str())
+                );
             }
             Some(agent) => {
-                let _ = chrome_page.set_user_agent(agent.as_str()).await;
+                let _ = tokio::join!(
+                    chrome_page.set_user_agent(agent.as_str()),
+                    chrome_page.add_script_to_evaluate_on_new_document(merged_script)
+                );
             }
             None if stealth_mode => {
-                let _ = chrome_page.enable_stealth_mode().await;
+                let _ = chrome_page
+                    ._enable_stealth_mode(merged_script.as_deref())
+                    .await;
             }
             None => {}
         }
     };
 
-    // todo: merge eval docs with stealth.
-    let eval_docs = async {
-        let spoof_script = if stealth_mode {
-            chromiumoxide::page::wrap_eval_script(
-                &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-                    &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
-                ),
-            )
-        } else {
-            "".into()
-        };
-
-        let disable_dialogs_script = if dismiss_dialogs && !stealth_mode {
-            DISABLE_DIALOGS
-        } else {
-            ""
-        };
-
-        let linux = config
-            .user_agent
-            .as_deref()
-            .map(|ua| ua.contains("Chrome") && ua.contains("Linux"))
-            .unwrap_or(false);
-
-        if let Some(script) = config.evaluate_on_new_document.as_deref() {
-            if config.fingerprint {
-                let fp_script = if linux {
-                    if dismiss_dialogs && !stealth_mode {
-                        &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
-                    } else {
-                        &*crate::features::chrome::FP_JS_CHROME
-                    }
-                } else {
-                    if dismiss_dialogs && !stealth_mode {
-                        &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS
-                    } else {
-                        &*crate::features::chrome::FP_JS
-                    }
-                };
-
-                let _ = chrome_page
-                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
-                        &string_concat!(fp_script, script, spoof_script),
-                    ))
-                    .await;
-            } else {
-                let _ = chrome_page
-                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
-                        &string_concat!(script, disable_dialogs_script, spoof_script),
-                    ))
-                    .await;
-            }
-        } else if config.fingerprint {
-            if linux {
-                let _ = chrome_page
-                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
-                        &string_concat!(
-                            &*crate::features::chrome::FP_JS_CHROME,
-                            disable_dialogs_script,
-                            spoof_script
-                        ),
-                    ))
-                    .await;
-            } else {
-                let _ = chrome_page
-                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
-                        &string_concat!(
-                            &*crate::features::chrome::FP_JS,
-                            disable_dialogs_script,
-                            spoof_script
-                        ),
-                    ))
-                    .await;
-            }
-        }
-    };
-
     if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
-        tokio::join!(stealth, eval_docs, configure_browser(&chrome_page, &config))
+        tokio::join!(stealth, configure_browser(&chrome_page, &config))
     })
     .await
     {
@@ -990,20 +975,25 @@ static CHROME_ARGS: [&'static str; 63] = [
 
 // pub static CANVAS_FP_LINUX_JS: &str = r#"const t=HTMLCanvasElement.prototype.toBlob,e=HTMLCanvasElement.prototype.toDataURL,o=CanvasRenderingContext2D.prototype.getImageData,n=(t,e)=>{const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},n=t.width,r=t.height,a=o=>{const a=o*4;return[a,a+1,a+2,a+3]},i=o=>{for(let a=0;a<r;a++)for(let i=0;i<n;i++){const[l,c,d,h]=a*n+i<<2;o.data[l]+=o.r,o.data[c]+=o.g,o.data[d]+=o.b,o.data[h]+=o.a}};let c=o.apply(e,[0,0,n,r]);i(c),e.putImageData(c,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return n(this,this.getContext("2d")),t.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return n(this,this.getContext("2d")),e.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return n(this.canvas,this),o.apply(this,arguments)}});"#;
 /// Mac canvas fingerprint.
-pub static CANVAS_FP_MAC: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_MAC: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
 /// Windows canvas fingerprint.
-pub static CANVAS_FP_WINDOWS: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(6*Math.random())-3,g:Math.floor(6*Math.random())-3,b:Math.floor(6*Math.random())-3,a:Math.floor(6*Math.random())-3},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let f=0;f<r;f++)for(let i=0;i<n;i++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_WINDOWS: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(6*Math.random())-3,g:Math.floor(6*Math.random())-3,b:Math.floor(6*Math.random())-3,a:Math.floor(6*Math.random())-3},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let f=0;f<r;f++)for(let i=0;i<n;i++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
 /// Linux canvas fingerprint.
-pub static CANVAS_FP_LINUX: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=t.getImageData(0,0,r,n);for(let i=0;i<r*n*4;i+=4)a.data[i]+=o.r,a.data[i+1]+=o.g,a.data[i+2]+=o.b,a.data[i+3]+=o.a;t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_LINUX: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=t.getImageData(0,0,r,n);for(let i=0;i<r*n*4;i+=4)a.data[i]+=o.r,a.data[i+1]+=o.g,a.data[i+2]+=o.b,a.data[i+3]+=o.a;t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+/// Fingerprint JS to spoof.
+pub static SPOOF_FINGERPRINT: &str = r###"const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let r=e.length,a=Array(t),n=Array(r);for(t>r&&(t=r);t--;){let o=Math.floor(Math.random()*r);a[t]=e[o in n?n[o]:o],n[o]=--r in n?n[r]:r}return a}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),r=.1*Math.random()*arguments[1][e];return arguments[1][e]+=r,t.apply(this,arguments)}})},parameter:e=>{e.prototype.getParameter;Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get:function(){let e=Math.floor(this.getBoundingClientRect().height);return e&&1===rand.sign()?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get:function(){let e=Math.floor(this.getBoundingClientRect().width);return e&&1===rand.sign()?e+rand.noise():e}});const ctx={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(ctx.BUFFER!==e){ctx.BUFFER=e;for(let t=0;t<e.length;t+=100){e[Math.floor(Math.random()*t)]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),r=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=r.apply(this,arguments);for(let e=0;e<arguments[0].length;e+=100){let t=Math.floor(Math.random()*e);arguments[0][t]+=.1*Math.random()}return e}}),e}})}};ctx.getChannelData(AudioBuffer),ctx.createAnalyser(AudioContext),ctx.getChannelData(OfflineAudioContext),ctx.createAnalyser(OfflineAudioContext),window.webkitRTCPeerConnection=void 0,window.RTCPeerConnection=void 0,window.MediaStreamTrack=void 0;Object.defineProperty(Navigator.prototype,'gpu',{get:()=>{},configurable:!0});Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"###;
+
 /// Base fingerprint JS.
-pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let o=e.length,r=Array(t),n=Array(o);for(t>o&&(t=o);t--;){let a=Math.floor(Math.random()*o);r[t]=e[a in n?n[a]:a],n[a]=--o in n?n[o]:o}return r}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),o=.1*Math.random()*arguments[1][e];return arguments[1][e]+=o,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get(){let e=Math.floor(this.getBoundingClientRect().height),t=e&&1===rand.sign();return t?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get(){let e=Math.floor(this.getBoundingClientRect().width),t=e&&1===rand.sign();return t?e+rand.noise():e}});const context={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(context.BUFFER!==e){context.BUFFER=e;for(let o=0;o<e.length;o+=100){let r=Math.floor(Math.random()*o);e[r]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),o=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=o.apply(this,arguments);for(let t=0;t<arguments[0].length;t+=100){let r=Math.floor(Math.random()*t);arguments[0][r]+=.1*Math.random()}return e}}),e}})}};context.getChannelData(AudioBuffer),context.createAnalyser(AudioContext),context.getChannelData(OfflineAudioContext),context.createAnalyser(OfflineAudioContext),navigator.mediaDevices.getUserMedia=navigator.webkitGetUserMedia=navigator.mozGetUserMedia=navigator.getUserMedia=webkitRTCPeerConnection=RTCPeerConnection=MediaStreamTrack=void 0;Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(navigator,"gpu",{get:()=>undefined,configurable:!0});"#;
+pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}{{SPOOF_FINGERPRINT}}"#;
 
 #[cfg(target_os = "macos")]
 lazy_static! {
     pub(crate) static ref FP_JS: String = BASE_FP_JS
         .replace("Intel Open Source Technology Center", "Apple Inc.")
         .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1")
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1);
+        .replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1)
+        .replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1)
+        .replace("\n", "");
 }
 
 #[cfg(target_os = "windows")]
@@ -1014,32 +1004,36 @@ lazy_static! {
             "Mesa DRI Intel(R) Ivybridge Mobile",
             "NVIDIA GeForce GTX 1650/PCIe/SSE2"
         )
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1);
+        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)
+        .replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1)
+        .replace("\n", "");
 }
 
 #[cfg(target_os = "linux")]
 lazy_static! {
     /// Fingerprint handling.
-    pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1);
+    pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 lazy_static! {
     /// Fingerprint handling.
-    pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1);
+    pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
 }
 
 lazy_static! {
     /// Fingerprint handling.
-    pub(crate) static ref FP_JS_CHROME: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1);
+    pub(crate) static ref FP_JS_CHROME: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
     /// Fingerprint and dismiss Dom
     pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS: String = string_concat!(
         &FP_JS,
+        ";",
         DISABLE_DIALOGS
     );
     /// Fingerprint and dismiss Dom - Linux
     pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS_LINUX: String = string_concat!(
         &FP_JS_CHROME,
+        ";",
         DISABLE_DIALOGS
     );
 }
