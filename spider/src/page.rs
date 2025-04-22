@@ -2666,7 +2666,11 @@ impl Page {
                             )
                             .await
                             {
-                                let intercept_handle =
+                                let (_, intercept_handle) = tokio::join!(
+                                    crate::features::chrome::setup_chrome_events(
+                                        &new_page,
+                                        &configuration,
+                                    ),
                                     crate::features::chrome::setup_chrome_interception_base(
                                         &new_page,
                                         configuration.chrome_intercept.enabled,
@@ -2674,13 +2678,7 @@ impl Page {
                                         configuration.chrome_intercept.block_visuals,
                                         &parent_host,
                                     )
-                                    .await;
-
-                                crate::features::chrome::setup_chrome_events(
-                                    &new_page,
-                                    &configuration,
-                                )
-                                .await;
+                                );
 
                                 let page_resource = crate::utils::fetch_page_html_chrome_base(
                                     &html_resource,

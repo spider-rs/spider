@@ -94,10 +94,9 @@ static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
 pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
 pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
 pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
-pub const HIDE_WEBDRIVER: &str =
-    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});";
+pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});"#;
 pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
-pub const NAVIGATOR_SCRIPT: &str = "Object.defineProperty(navigator,'pdfViewerEnabled',{value:true,writable:true,configurable:true,enumerable:true});";
+pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(Navigator.prototype,"pdfViewerEnabled",{get:()=>1,configurable:!0,enumerable:!1});"#;
 /// The outer HTML of a webpage.
 const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
 /// XML serilalizer for custom pages or testing.
@@ -124,7 +123,7 @@ fn get_plugin_filenames() -> Vec<String> {
         .map(|f| f.to_string())
         .collect();
 
-    for _ in 0..2 {
+    for _ in 0..4 {
         plugins.push(generate_random_plugin_filename());
     }
 
@@ -134,10 +133,11 @@ fn get_plugin_filenames() -> Vec<String> {
 
 /// Generate the hide plugins script.
 fn generate_hide_plugins() -> String {
-    let plugins = get_plugin_filenames();
+    let random_plugins = get_plugin_filenames();
+
     let plugin_script = format!(
-        "Object.defineProperty(navigator,'plugins',{{get:()=>[{{filename:'{}'}},{{filename:'{}'}},{{filename:'{}'}},{{filename:'{}'}}]}});",
-        plugins[0], plugins[1], plugins[2], plugins[3]
+        r#"Object.defineProperty(Navigator.prototype,"plugins",{{configurable:!0,enumerable:!1,get:()=>[{{name:"Chrome PDF Viewer",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{name:"Chromium PDF Viewer",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{name:"WebKit built-in PDF",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{filename:"{}"}},{{filename:"{}"}},{{filename:"{}"}},{{filename:"{}"}}]}});"#,
+        random_plugins[0], random_plugins[1], random_plugins[2], random_plugins[3]
     );
 
     format!("{}{}", NAVIGATOR_SCRIPT, plugin_script)
@@ -146,7 +146,12 @@ fn generate_hide_plugins() -> String {
 /// Generate the initial stealth script to send in one command.
 fn build_stealth_script() -> String {
     let plugins = generate_hide_plugins();
-    format!("{HIDE_CHROME}{HIDE_WEBGL}{HIDE_PERMISSIONS}{HIDE_WEBDRIVER}{plugins}")
+    format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{plugins};")
+}
+
+/// Simple function to wrap the eval script safely.
+pub fn wrap_eval_script(source: &str) -> String {
+    format!(r#"(()=>{{{}}})();"#, source)
 }
 
 impl Page {
@@ -154,12 +159,15 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
+        let source = if let Some(cs) = custom_script {
+            format!("{}{cs}", build_stealth_script())
+        } else {
+            build_stealth_script()
+        };
+        let source = wrap_eval_script(&source);
+
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: if let Some(cs) = custom_script {
-                format!("{}{cs}", build_stealth_script())
-            } else {
-                build_stealth_script()
-            },
+            source,
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,

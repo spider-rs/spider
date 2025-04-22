@@ -318,7 +318,7 @@ impl PageInner {
             evaluate.return_by_value = Some(true);
         }
 
-        evaluate.silent = Some(true);
+        // evaluate.silent = Some(true);
 
         let resp = self.execute(evaluate).await?.result;
 
@@ -344,7 +344,7 @@ impl PageInner {
             evaluate.return_by_value = Some(true);
         }
 
-        evaluate.silent = Some(true);
+        // evaluate.silent = Some(true);
 
         let resp = self.execute(evaluate).await?.result;
         if let Some(exception) = resp.exception_details {

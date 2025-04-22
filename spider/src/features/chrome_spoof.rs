@@ -106,11 +106,13 @@ pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> St
         .collect::<Vec<_>>()
         .join(",");
 
-    format!(
+    let script = format!(
         "Object.defineProperty(navigator.userAgentData,'getHighEntropyValues',{{configurable:!0,enumerable:!1,writable:!1,value:function(h){{const v={{architecture:'{}',model:'{}',platformVersion:'{}',fullVersionList:[{}]}};return Promise.resolve(Object.fromEntries(h.map(k=>[k,v[k]??null])))}}}});",
         data.architecture,
         data.model,
         data.platform_version,
         brands
-    )
+    );
+
+    script
 }

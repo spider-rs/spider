@@ -2864,15 +2864,16 @@ impl Website {
             )
             .await
             {
-                crate::features::chrome::setup_chrome_events(&chrome_page, &config).await;
-                let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                    &chrome_page,
-                    config.chrome_intercept.enabled,
-                    &config.auth_challenge_response,
-                    config.chrome_intercept.block_visuals,
-                    &url,
-                )
-                .await;
+                let (_, intercept_handle) = tokio::join!(
+                    crate::features::chrome::setup_chrome_events(&chrome_page, &config),
+                    crate::features::chrome::setup_chrome_interception_base(
+                        &chrome_page,
+                        config.chrome_intercept.enabled,
+                        &config.auth_challenge_response,
+                        config.chrome_intercept.block_visuals,
+                        &url,
+                    )
+                );
 
                 let next_page = Page::new(
                     &url,
@@ -3701,16 +3702,16 @@ impl Website {
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
-                                                            crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
-
-                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                                &new_page,
-                                                                shared.6.chrome_intercept.enabled,
-                                                                &shared.6.auth_challenge_response,
-                                                                shared.6.chrome_intercept.block_visuals,
-                                                                &shared.7,
-                                                            )
-                                                            .await;
+                                                            let (_, intercept_handle) = tokio::join!(
+                                                                crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
+                                                                crate::features::chrome::setup_chrome_interception_base(
+                                                                    &new_page,
+                                                                    shared.6.chrome_intercept.enabled,
+                                                                    &shared.6.auth_challenge_response,
+                                                                    shared.6.chrome_intercept.block_visuals,
+                                                                    &shared.7,
+                                                                )
+                                                            );
 
                                                             let link_result =
                                                                 match on_link_find_callback {
@@ -4338,16 +4339,16 @@ impl Website {
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
-                                                            crate::features::chrome::setup_chrome_events(&new_page, &shared.6).await;
-
-                                                            let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                                &new_page,
-                                                                shared.6.chrome_intercept.enabled,
-                                                                &shared.6.auth_challenge_response,
-                                                                shared.6.chrome_intercept.block_visuals,
-                                                                &shared.7,
-                                                            )
-                                                            .await;
+                                                            let (_, intercept_handle) = tokio::join!(
+                                                                crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
+                                                                crate::features::chrome::setup_chrome_interception_base(
+                                                                    &new_page,
+                                                                    shared.6.chrome_intercept.enabled,
+                                                                    &shared.6.auth_challenge_response,
+                                                                    shared.6.chrome_intercept.block_visuals,
+                                                                    &shared.7,
+                                                                )
+                                                            );
 
                                                             let link_result =
                                                                 match on_link_find_callback {
@@ -5418,19 +5419,18 @@ impl Website {
                                                             )
                                                             .await
                                                             {
-                                                                let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+                                                                let (_, intercept_handle) = tokio::join!(
+                                                                    crate::features::chrome::setup_chrome_events(
+                                                                        &new_page, &shared.3,
+                                                                    ),
+                                                                    crate::features::chrome::setup_chrome_interception_base(
                                                                         &new_page,
                                                                         shared.3.chrome_intercept.enabled,
                                                                         &shared.3.auth_challenge_response,
                                                                         shared.3.chrome_intercept.block_visuals,
                                                                         &shared.4,
                                                                     )
-                                                                    .await;
-
-                                                                crate::features::chrome::setup_chrome_events(
-                                                                    &new_page, &shared.3,
-                                                                )
-                                                                .await;
+                                                                );
 
                                                                 let mut page = Page::new(
                                                                     &link.inner(),
@@ -5541,19 +5541,18 @@ impl Website {
                                                 )
                                                 .await {
                                                     Ok(new_page) => {
-                                                        let intercept_handle = crate::features::chrome::setup_chrome_interception_base(
-                                                            &new_page,
-                                                            shared.3.chrome_intercept.enabled,
-                                                            &shared.3.auth_challenge_response,
-                                                            shared.3.chrome_intercept.block_visuals,
-                                                            &shared.4,
-                                                        )
-                                                        .await;
-
-                                                        crate::features::chrome::setup_chrome_events(
-                                                            &new_page, &shared.3,
-                                                        )
-                                                        .await;
+                                                        let (_, intercept_handle) = tokio::join!(
+                                                            crate::features::chrome::setup_chrome_events(
+                                                                &new_page, &shared.3,
+                                                            ),
+                                                            crate::features::chrome::setup_chrome_interception_base(
+                                                                &new_page,
+                                                                shared.3.chrome_intercept.enabled,
+                                                                &shared.3.auth_challenge_response,
+                                                                shared.3.chrome_intercept.block_visuals,
+                                                                &shared.4,
+                                                            )
+                                                        );
 
                                                         let mut page = Page::new(
                                                             &link.inner(),

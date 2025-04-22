@@ -651,112 +651,98 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true); // polyfill window.alert.
 
     let stealth = async {
-        if stealth_mode {
-            match config.user_agent.as_ref() {
-                Some(agent) => {
-                    let _ = if dismiss_dialogs {
-                        chrome_page
-                            .enable_stealth_mode_with_dimiss_dialogs(agent)
-                            .await
-                    } else {
-                        chrome_page.enable_stealth_mode_with_agent(agent).await
-                    };
-                }
-                _ => {
-                    let _ = chrome_page.enable_stealth_mode().await;
-                }
+        match config.user_agent.as_deref() {
+            Some(agent) if stealth_mode && dismiss_dialogs => {
+                let _ = chrome_page
+                    .enable_stealth_mode_with_dimiss_dialogs(agent)
+                    .await;
             }
+            Some(agent) if stealth_mode => {
+                let _ = chrome_page.enable_stealth_mode_with_agent(agent).await;
+            }
+            Some(agent) => {
+                let _ = chrome_page.set_user_agent(agent.as_str()).await;
+            }
+            None if stealth_mode => {
+                let _ = chrome_page.enable_stealth_mode().await;
+            }
+            None => {}
         }
     };
 
+    // todo: merge eval docs with stealth.
     let eval_docs = async {
-        match config.evaluate_on_new_document {
-            Some(ref script) => {
-                if config.fingerprint {
-                    let linux = match &config.user_agent {
-                        Some(agent) => agent.contains("Chrome") && agent.contains("Linux"),
-                        _ => false,
-                    };
+        let spoof_script = if stealth_mode {
+            chromiumoxide::page::wrap_eval_script(
+                &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+                    &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
+                ),
+            )
+        } else {
+            "".into()
+        };
 
-                    let _ = chrome_page
-                        .evaluate_on_new_document(string_concat!(
-                            if linux {
-                                if dismiss_dialogs && !stealth_mode {
-                                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
-                                } else {
-                                    &*crate::features::chrome::FP_JS_CHROME
-                                }
-                            } else {
-                                if dismiss_dialogs && !stealth_mode {
-                                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS
-                                } else {
-                                    &*crate::features::chrome::FP_JS
-                                }
-                            },
-                            script.as_str(),
-                            if stealth_mode {
-                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-                                    &crate::features::chrome_spoof::build_high_entropy_data(
-                                        &config.user_agent,
-                                    ),
-                                )
-                            } else {
-                                "".into()
-                            }
-                        ))
-                        .await;
+        let disable_dialogs_script = if dismiss_dialogs && !stealth_mode {
+            DISABLE_DIALOGS
+        } else {
+            ""
+        };
+
+        let linux = config
+            .user_agent
+            .as_deref()
+            .map(|ua| ua.contains("Chrome") && ua.contains("Linux"))
+            .unwrap_or(false);
+
+        if let Some(script) = config.evaluate_on_new_document.as_deref() {
+            if config.fingerprint {
+                let fp_script = if linux {
+                    if dismiss_dialogs && !stealth_mode {
+                        &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
+                    } else {
+                        &*crate::features::chrome::FP_JS_CHROME
+                    }
                 } else {
-                    let _ = chrome_page
-                        .evaluate_on_new_document(string_concat!(
-                            script.as_str(),
-                            if dismiss_dialogs && !stealth_mode {
-                                DISABLE_DIALOGS
-                            } else {
-                                ""
-                            },
-                            if stealth_mode {
-                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-                                    &crate::features::chrome_spoof::build_high_entropy_data(
-                                        &config.user_agent,
-                                    ),
-                                )
-                            } else {
-                                "".into()
-                            }
-                        ))
-                        .await;
-                }
+                    if dismiss_dialogs && !stealth_mode {
+                        &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS
+                    } else {
+                        &*crate::features::chrome::FP_JS
+                    }
+                };
+
+                let _ = chrome_page
+                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
+                        &string_concat!(fp_script, script, spoof_script),
+                    ))
+                    .await;
+            } else {
+                let _ = chrome_page
+                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
+                        &string_concat!(script, disable_dialogs_script, spoof_script),
+                    ))
+                    .await;
             }
-            _ => {
-                if config.fingerprint {
-                    let linux = match &config.user_agent {
-                        Some(agent) => agent.contains("Chrome") && agent.contains("Linux"),
-                        _ => false,
-                    };
-                    let _ = chrome_page
-                        .evaluate_on_new_document(string_concat!(
-                            if linux {
-                                &*crate::features::chrome::FP_JS_CHROME
-                            } else {
-                                &*crate::features::chrome::FP_JS
-                            },
-                            if dismiss_dialogs && !stealth_mode {
-                                DISABLE_DIALOGS
-                            } else {
-                                ""
-                            },
-                            if stealth_mode {
-                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-                                    &crate::features::chrome_spoof::build_high_entropy_data(
-                                        &config.user_agent,
-                                    ),
-                                )
-                            } else {
-                                "".into()
-                            }
-                        ))
-                        .await;
-                }
+        } else if config.fingerprint {
+            if linux {
+                let _ = chrome_page
+                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
+                        &string_concat!(
+                            &*crate::features::chrome::FP_JS_CHROME,
+                            disable_dialogs_script,
+                            spoof_script
+                        ),
+                    ))
+                    .await;
+            } else {
+                let _ = chrome_page
+                    .evaluate_on_new_document(chromiumoxide::page::wrap_eval_script(
+                        &string_concat!(
+                            &*crate::features::chrome::FP_JS,
+                            disable_dialogs_script,
+                            spoof_script
+                        ),
+                    ))
+                    .await;
             }
         }
     };
@@ -1030,7 +1016,7 @@ pub static CANVAS_FP_WINDOWS: &str = r#"const toBlob=HTMLCanvasElement.prototype
 /// Linux canvas fingerprint.
 pub static CANVAS_FP_LINUX: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=t.getImageData(0,0,r,n);for(let i=0;i<r*n*4;i+=4)a.data[i]+=o.r,a.data[i+1]+=o.g,a.data[i+2]+=o.b,a.data[i+3]+=o.a;t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return noisify(this,this.getContext("2d")),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return noisify(this,this.getContext("2d")),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
 /// Base fingerprint JS.
-pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let o=e.length,r=Array(t),n=Array(o);for(t>o&&(t=o);t--;){let a=Math.floor(Math.random()*o);r[t]=e[a in n?n[a]:a],n[a]=--o in n?n[o]:o}return r}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),o=.1*Math.random()*arguments[1][e];return arguments[1][e]+=o,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get(){let e=Math.floor(this.getBoundingClientRect().height),t=e&&1===rand.sign();return t?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get(){let e=Math.floor(this.getBoundingClientRect().width),t=e&&1===rand.sign();return t?e+rand.noise():e}});const context={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(context.BUFFER!==e){context.BUFFER=e;for(let o=0;o<e.length;o+=100){let r=Math.floor(Math.random()*o);e[r]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),o=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=o.apply(this,arguments);for(let t=0;t<arguments[0].length;t+=100){let r=Math.floor(Math.random()*t);arguments[0][r]+=.1*Math.random()}return e}}),e}})}};context.getChannelData(AudioBuffer),context.createAnalyser(AudioContext),context.getChannelData(OfflineAudioContext),context.createAnalyser(OfflineAudioContext),navigator.mediaDevices.getUserMedia=navigator.webkitGetUserMedia=navigator.mozGetUserMedia=navigator.getUserMedia=webkitRTCPeerConnection=RTCPeerConnection=MediaStreamTrack=void 0;Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(navigator,"gpu",{get:()=>undefined,configurable:!0});"#;
+pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let o=e.length,r=Array(t),n=Array(o);for(t>o&&(t=o);t--;){let a=Math.floor(Math.random()*o);r[t]=e[a in n?n[a]:a],n[a]=--o in n?n[o]:o}return r}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),o=.1*Math.random()*arguments[1][e];return arguments[1][e]+=o,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get(){let e=Math.floor(this.getBoundingClientRect().height),t=e&&1===rand.sign();return t?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get(){let e=Math.floor(this.getBoundingClientRect().width),t=e&&1===rand.sign();return t?e+rand.noise():e}});const context={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(context.BUFFER!==e){context.BUFFER=e;for(let o=0;o<e.length;o+=100){let r=Math.floor(Math.random()*o);e[r]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),o=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=o.apply(this,arguments);for(let t=0;t<arguments[0].length;t+=100){let r=Math.floor(Math.random()*t);arguments[0][r]+=.1*Math.random()}return e}}),e}})}};context.getChannelData(AudioBuffer),context.createAnalyser(AudioContext),context.getChannelData(OfflineAudioContext),context.createAnalyser(OfflineAudioContext),navigator.mediaDevices.getUserMedia=navigator.webkitGetUserMedia=navigator.mozGetUserMedia=navigator.getUserMedia=webkitRTCPeerConnection=RTCPeerConnection=MediaStreamTrack=void 0;Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(WebGLRenderingContext.prototype,"getParameter",{value:function(e){return 37445===e?"Intel Open Source Technology Center":37446===e?"Mesa DRI Intel(R) Ivybridge Mobile":WebGLRenderingContext.prototype.getParameter.call(this,e)}});Object.defineProperty(navigator,"gpu",{get:()=>undefined,configurable:!0});"#;
 
 #[cfg(target_os = "macos")]
 lazy_static! {
