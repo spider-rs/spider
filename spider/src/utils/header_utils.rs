@@ -617,3 +617,67 @@ pub fn has_ref(headers: &std::option::Option<Box<SerializableHeaderMap>>) -> boo
         _ => false,
     }
 }
+
+/// Should title the case headers.
+pub fn is_title_case_browser_header(header: &str) -> bool {
+    match header {
+        "user-agent"
+        | "accept"
+        | "accept-language"
+        | "accept-encoding"
+        | "connection"
+        | "device-memory"
+        | "host"
+        | "referer"
+        | "upgrade-insecure-requests"
+        | "cache-control"
+        | "pragma"
+        | "dpr"
+        | "viewport-width"
+        | "priority"
+        | "rtt"
+        | "ect"
+        | "downlink" => true,
+        _ => false,
+    }
+}
+
+/// Capitalizes each part of a hyphenated header: `user-agent` → `User-Agent`
+fn title_case_header(key: &str) -> String {
+    let is_leading_hyphen = key.starts_with('-');
+
+    key.split('-')
+        .enumerate()
+        .map(|(i, part)| {
+            if part.is_empty() && i == 0 && is_leading_hyphen {
+                // Preserve leading hyphen
+                String::new()
+            } else {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Modify a reqwest::Request to title-case eligible headers
+pub fn rewrite_headers_to_title_case(headers: &mut std::collections::HashMap<String, String>) {
+    let mut new_headers = std::collections::HashMap::with_capacity(headers.len());
+
+    for (key, value) in headers.iter() {
+        let raw = key.as_str();
+
+        if is_title_case_browser_header(raw) {
+            let new_key = title_case_header(raw);
+            new_headers.insert(new_key, value.clone());
+        } else {
+            new_headers.insert(key.clone(), value.clone());
+        }
+    }
+
+    *headers = new_headers;
+}

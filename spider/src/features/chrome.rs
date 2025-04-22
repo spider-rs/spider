@@ -245,14 +245,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
 
                 if cfg!(feature = "real_browser") {
-                    if let Some(header_map) = &config.headers {
-                        let header_map =
-                            crate::utils::header_utils::header_map_to_hash_map(&*&header_map.0);
-
-                        for (key, value) in header_map {
-                            hm.entry(key).or_insert(value);
-                        }
-                    }
+                    crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
                 }
 
                 if hm.is_empty() {
@@ -261,22 +254,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
                     Some(hm)
                 }
             }
-            _ => {
-                if cfg!(feature = "real_browser") {
-                    let mut headers = std::collections::HashMap::new();
-
-                    if let Some(header_map) = &config.headers {
-                        let header_map =
-                            crate::utils::header_utils::header_map_to_hash_map(&*&header_map.0);
-
-                        headers.extend(header_map);
-                    }
-
-                    Some(headers)
-                } else {
-                    None
-                }
-            }
+            _ => None,
         },
         intercept_manager: config.chrome_intercept.intercept_manager,
         only_html: config.only_html && !config.full_resources,
@@ -363,8 +341,10 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_analytics = config.chrome_intercept.block_analytics;
                 browser_config.extra_headers = match config.headers {
                     Some(ref headers) => {
-                        let hm =
+                        let mut hm =
                             crate::utils::header_utils::header_map_to_hash_map(headers.inner());
+                        crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
+
                         if hm.is_empty() {
                             None
                         } else {
