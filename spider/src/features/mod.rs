@@ -6,6 +6,9 @@ pub mod chrome_common;
 #[cfg(feature = "real_browser")]
 /// Mouse movements
 pub mod chrome_mouse_movements;
+/// Chrome spoofing modules
+#[cfg(feature = "chrome")]
+pub mod chrome_spoof;
 #[cfg(feature = "real_browser")]
 /// Viewport
 pub mod chrome_viewport;

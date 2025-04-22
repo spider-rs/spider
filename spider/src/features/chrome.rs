@@ -693,7 +693,16 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                                     &*crate::features::chrome::FP_JS
                                 }
                             },
-                            script.as_str()
+                            script.as_str(),
+                            if stealth_mode {
+                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+                                    &crate::features::chrome_spoof::build_high_entropy_data(
+                                        &config.user_agent,
+                                    ),
+                                )
+                            } else {
+                                "".into()
+                            }
                         ))
                         .await;
                 } else {
@@ -704,6 +713,15 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                                 DISABLE_DIALOGS
                             } else {
                                 ""
+                            },
+                            if stealth_mode {
+                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+                                    &crate::features::chrome_spoof::build_high_entropy_data(
+                                        &config.user_agent,
+                                    ),
+                                )
+                            } else {
+                                "".into()
                             }
                         ))
                         .await;
@@ -726,6 +744,15 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                                 DISABLE_DIALOGS
                             } else {
                                 ""
+                            },
+                            if stealth_mode {
+                                crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+                                    &crate::features::chrome_spoof::build_high_entropy_data(
+                                        &config.user_agent,
+                                    ),
+                                )
+                            } else {
+                                "".into()
                             }
                         ))
                         .await;

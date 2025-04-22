@@ -343,7 +343,7 @@ impl PageInner {
         if evaluate.return_by_value.is_none() {
             evaluate.return_by_value = Some(true);
         }
-    
+
         evaluate.silent = Some(true);
 
         let resp = self.execute(evaluate).await?.result;
