@@ -1573,8 +1573,10 @@ pub async fn fetch_page_html_chrome_base(
                 request_cancelled = true;
             }
         }
-        _ = rx => {
-            request_cancelled = true;
+        v = rx => {
+            if let Ok(v) = v {
+                request_cancelled = !v;
+            }
         }
     };
 

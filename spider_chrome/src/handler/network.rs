@@ -79,7 +79,7 @@ lazy_static! {
     pub static ref JS_FRAMEWORK_PATH: phf::Set<&'static str> = {
         phf::phf_set! {
             // Add allowed assets from JS_FRAMEWORK_ASSETS except the excluded ones
-            "_next/static/", "_astro/", "_app/immutable"
+            "_astro/", "_app/immutable"
         }
     };
 

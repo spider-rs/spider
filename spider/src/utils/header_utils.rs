@@ -347,6 +347,7 @@ pub fn get_mimic_headers(
                 &connection_header.as_header_name(),
                 HeaderValue::from_static("keep-alive")
             );
+
             // 3. sec-ch-ua group
             if let Ok(sec_ch_ua) =
                 HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, false, linux_agent))
@@ -625,6 +626,7 @@ pub fn is_title_case_browser_header(header: &str) -> bool {
         | "accept"
         | "accept-language"
         | "accept-encoding"
+        | "access-control-allow-origin"
         | "connection"
         | "device-memory"
         | "host"

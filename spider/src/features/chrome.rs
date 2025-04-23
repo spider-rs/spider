@@ -481,25 +481,29 @@ pub async fn launch_browser(
 pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
     let timezone_id = async {
         if let Some(timezone_id) = configuration.timezone_id.as_deref() {
-            let _ = new_page
+            if !timezone_id.is_empty() {
+                let _ = new_page
                 .emulate_timezone(
                     chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
                         timezone_id,
                     ),
                 )
                 .await;
+            }
         }
     };
 
     let locale = async {
         if let Some(locale) = configuration.locale.as_deref() {
-            let _ = new_page
-                .emulate_locale(
-                    chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
-                        locale: Some(locale.into()),
-                    },
-                )
-                .await;
+            if !locale.is_empty() {
+                let _ = new_page
+                    .emulate_locale(
+                        chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                            locale: Some(locale.into()),
+                        },
+                    )
+                    .await;
+            }
         }
     };
 

@@ -4,10 +4,6 @@ use std::sync::Arc;
 use futures::channel::mpsc::unbounded;
 use futures::channel::oneshot::channel as oneshot_channel;
 use futures::{stream, SinkExt, StreamExt};
-use rand::distributions::Alphanumeric;
-use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
-
 use chromiumoxide_cdp::cdp::browser_protocol::dom::*;
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     MediaFeature, SetEmulatedMediaParams, SetGeolocationOverrideParams, SetLocaleOverrideParams,
@@ -41,111 +37,33 @@ use crate::js::{Evaluation, EvaluationResult};
 use crate::layout::Point;
 use crate::listeners::{EventListenerRequest, EventStream};
 use crate::{utils, ArcHttpRequest};
-use phf::phf_set;
 
 #[derive(Debug, Clone)]
 pub struct Page {
     inner: Arc<PageInner>,
 }
 
-/// List of chrome plugins.
-static PLUGINS_SET: phf::Set<&'static str> = phf_set! {
-    "internal-pdf-viewer",
-    "internal-nacl-plugin",
-    "pepperflashplugin-nonfree",
-    "libunity-webplugin.so",
-    "Shockwave Flash",
-    "Widevine Content Decryption Module",
-    "Google Talk Plugin",
-    "Java(TM) Platform SE",
-    "Silverlight Plug-In",
-    "QuickTime Plug-in",
-    "Adobe Acrobat",
-    "RealPlayer Version Plugin",
-    "RealJukebox NS Plugin",
-    "iTunes Application Detector",
-    "VLC Web Plugin",
-    "DivX Plus Web Player",
-    "Unity Player",
-    "Facebook Video Calling Plugin",
-    "Windows Media Player Plug-in Dynamic Link Library",
-    "Microsoft Office Live Plug-in",
-    "Google Earth Plugin",
-    "Adobe Flash Player",
-    "Shockwave for Director",
-    "npapi",
-    "ActiveTouch General Plugin Container",
-    "Java Deployment Toolkit",
-    "Garmin Communicator Plug-In",
-    "npffmpeg",
-    "Silverlight",
-    "Citrix ICA Client Plugin (Win32)",
-    "MetaStream 3 Plugin",
-    "Google Update",
-    "Photo Gallery",
-    "plugin-pdf",
-    "Microsoft Office 2010",
-    "Mozilla Default Plug-in",
-    "Exif Image Viewer",
-    "DivX Browser Plug-In",
-};
-
 pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
 pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
 pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
 pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});"#;
 pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
-pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(Navigator.prototype,"pdfViewerEnabled",{get:()=>1,configurable:!0,enumerable:!1});"#;
+pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(Navigator.prototype,'pdfViewerEnabled',{get:()=>!0,configurable:!0,enumerable:!1});"#;
+pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"const pdfMime={type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"};const pdfPlugin=name=>({name,filename:"internal-pdf-viewer",description:"Portable Document Format",0:pdfMime,length:1});const plugins=[pdfPlugin("PDF Viewer"),pdfPlugin("Chrome PDF Viewer"),pdfPlugin("Chromium PDF Viewer"),pdfPlugin("Microsoft Edge PDF Viewer"),pdfPlugin("WebKit built-in PDF")];Object.defineProperty(Navigator.prototype,"plugins",{get:()=>plugins,configurable:!0,enumerable:!1});Object.defineProperty(Navigator.prototype,"mimeTypes",{get:()=>{let o={...pdfMime,enabledPlugin:plugins[0]};o[0]=o;o.length=1;return o},configurable:!0,enumerable:!1});"#;
+
 /// The outer HTML of a webpage.
 const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
 /// XML serilalizer for custom pages or testing.
 const FULL_XML_SERIALIZER_JS: &str = "(()=>{let e=document.querySelector('#webkit-xml-viewer-source-xml');let x=e?e.innerHTML:new XMLSerializer().serializeToString(document);return x.startsWith('<?xml')?x:'<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n'+x})()";
 
-/// Obfuscates browser plugins on frame creation
-fn generate_random_plugin_filename() -> String {
-    let mut rng = thread_rng();
-    let random_string: String = (0..10)
-        .map(|_| rng.sample(Alphanumeric))
-        .map(char::from)
-        .collect();
-    format!("{}.plugin", random_string)
-}
-
-/// Returns a vector with a mix of real and random plugin filenames
-fn get_plugin_filenames() -> Vec<String> {
-    use rand::prelude::IteratorRandom;
-
-    let mut plugins: Vec<String> = PLUGINS_SET
-        .iter()
-        .choose_multiple(&mut thread_rng(), 2)
-        .into_iter()
-        .map(|f| f.to_string())
-        .collect();
-
-    for _ in 0..4 {
-        plugins.push(generate_random_plugin_filename());
-    }
-
-    plugins.shuffle(&mut thread_rng());
-    plugins
-}
-
 /// Generate the hide plugins script.
 fn generate_hide_plugins() -> String {
-    let random_plugins = get_plugin_filenames();
-
-    let plugin_script = format!(
-        r#"Object.defineProperty(Navigator.prototype,"plugins",{{configurable:!0,enumerable:!1,get:()=>[{{name:"Chrome PDF Viewer",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{name:"Chromium PDF Viewer",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{name:"WebKit built-in PDF",filename:"internal-pdf-viewer",description:"Portable Document Format",0:{{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"}},length:1}},{{filename:"{}"}},{{filename:"{}"}},{{filename:"{}"}},{{filename:"{}"}}]}});"#,
-        random_plugins[0], random_plugins[1], random_plugins[2], random_plugins[3]
-    );
-
-    format!("{}{}", NAVIGATOR_SCRIPT, plugin_script)
+    format!("{}", PLUGIN_AND_MIMETYPE_SPOOF)
 }
 
 /// Generate the initial stealth script to send in one command.
 fn build_stealth_script() -> String {
-    let plugins = generate_hide_plugins();
-    format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{plugins};")
+    format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};")
 }
 
 /// Simple function to wrap the eval script safely.
@@ -159,13 +77,19 @@ impl Page {
         &self,
         source: Option<String>,
     ) -> Result<()> {
-        self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: source.unwrap_or_default(),
-            world_name: None,
-            include_command_line_api: None,
-            run_immediately: None,
-        })
-        .await?;
+        if source.is_some() {
+            let source = source.unwrap_or_default();
+
+            if !source.is_empty() {
+                self.execute(AddScriptToEvaluateOnNewDocumentParams {
+                    source,
+                    world_name: None,
+                    include_command_line_api: None,
+                    run_immediately: None,
+                })
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -182,6 +106,7 @@ impl Page {
 
         self.add_script_to_evaluate_on_new_document(Some(source))
             .await?;
+
         Ok(())
     }
 
