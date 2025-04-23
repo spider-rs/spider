@@ -1,9 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures::channel::mpsc::unbounded;
-use futures::channel::oneshot::channel as oneshot_channel;
-use futures::{stream, SinkExt, StreamExt};
 use chromiumoxide_cdp::cdp::browser_protocol::dom::*;
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     MediaFeature, SetEmulatedMediaParams, SetGeolocationOverrideParams, SetLocaleOverrideParams,
@@ -24,6 +21,9 @@ use chromiumoxide_cdp::cdp::js_protocol::runtime::{
 };
 use chromiumoxide_cdp::cdp::{browser_protocol, IntoEventKind};
 use chromiumoxide_types::*;
+use futures::channel::mpsc::unbounded;
+use futures::channel::oneshot::channel as oneshot_channel;
+use futures::{stream, SinkExt, StreamExt};
 
 use crate::auth::Credentials;
 use crate::element::Element;

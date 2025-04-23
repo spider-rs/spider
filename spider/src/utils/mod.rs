@@ -164,6 +164,13 @@ lazy_static! {
     pub(crate) static ref MASK_BYTES_INTERCEPTION: bool = {
         std::env::var("MASK_BYTES_INTERCEPTION").unwrap_or_default() == "true"
     };
+    /// Cloudflare turnstile wait.
+    pub(crate) static ref CF_WAIT_FOR: crate::features::chrome_common::WaitFor = {
+        let mut wait_for = crate::features::chrome_common::WaitFor::default();
+        wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
+        wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
+        wait_for
+    };
 }
 
 lazy_static! {
@@ -197,67 +204,65 @@ lazy_static! {
     static ref CF_JUST_A_MOMENT:&'static [u8; 81] = b"<!DOCTYPE html><html lang=\"en-US\" dir=\"ltr\"><head><title>Just a moment...</title>";
 }
 
-/// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
+/// Is cloudflare turnstile page? This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
-async fn cf_handle(
-    b: &mut Vec<u8>,
-    page: &chromiumoxide::Page,
-) -> Result<(), chromiumoxide::error::CdpError> {
-    use crate::configuration::{WaitFor, WaitForDelay, WaitForIdleNetwork};
-
+pub(crate) fn detect_cf_turnstyle(b: &Vec<u8>) -> bool {
     let cf = CF_END.as_ref();
     let cf2 = CF_END2.as_ref();
     let cn = CF_HEAD.as_ref();
     let cnf = CF_MOCK_FRAME.as_ref();
 
-    if b.ends_with(cf)
+    b.ends_with(cf)
         || b.ends_with(cf2)
         || b.starts_with(cn) && b.ends_with(cnf)
         || b.starts_with(CF_JUST_A_MOMENT.as_ref())
-    {
-        let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
-            let mut wait_for = WaitFor::default();
-            wait_for.delay = WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
-            wait_for.idle_network =
-                WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
+}
 
-            page_wait(&page, &Some(wait_for.clone())).await;
+/// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn cf_handle(
+    b: &mut Vec<u8>,
+    page: &chromiumoxide::Page,
+) -> Result<bool, chromiumoxide::error::CdpError> {
+    let mut validated = false;
 
-            let _ = page
-                .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
-                .await;
+    let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let mut wait_for = CF_WAIT_FOR.clone();
 
-            wait_for.page_navigations = true;
+        page_wait(&page, &Some(wait_for.clone())).await;
 
-            page_wait(&page, &Some(wait_for.clone())).await;
+        let _ = page
+            .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
+            .await;
 
-            if let Ok(next_content) = page.outer_html_bytes().await {
-                let next_content = if next_content.ends_with(cf)
-                    || next_content.ends_with(cf2)
-                    || next_content.starts_with(cn) && next_content.ends_with(cnf)
-                {
-                    wait_for.delay =
-                        WaitForDelay::new(Some(core::time::Duration::from_secs(4))).into();
-                    page_wait(&page, &Some(wait_for)).await;
-                    match page.outer_html_bytes().await {
-                        Ok(nc) => nc,
-                        _ => next_content,
-                    }
-                } else {
-                    next_content
-                };
+        wait_for.page_navigations = true;
 
-                *b = next_content;
-            }
-        })
-        .await;
+        page_wait(&page, &Some(wait_for.clone())).await;
 
-        match page_result {
-            Ok(_) => Ok(()),
-            _ => Err(chromiumoxide::error::CdpError::Timeout),
+        if let Ok(next_content) = page.outer_html_bytes().await {
+            let next_content = if !detect_cf_turnstyle(&next_content) {
+                validated = true;
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_secs(4),
+                ))
+                .into();
+                page_wait(&page, &Some(wait_for)).await;
+                match page.outer_html_bytes().await {
+                    Ok(nc) => nc,
+                    _ => next_content,
+                }
+            } else {
+                next_content
+            };
+
+            *b = next_content;
         }
-    } else {
-        Ok(())
+    })
+    .await;
+
+    match page_result {
+        Ok(_) => Ok(validated),
+        _ => Err(chromiumoxide::error::CdpError::Timeout),
     }
 }
 
@@ -773,6 +778,12 @@ pub async fn perform_chrome_http_request(
 
                     status_code = StatusCode::from_u16(response.status as u16)
                         .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                } else {
+                    if let Some(failure_text) = &http_request.failure_text {
+                        if failure_text == "net::ERR_FAILED" {
+                            waf_check = true;
+                        }
+                    }
                 }
             }
         }
@@ -1561,6 +1572,7 @@ pub async fn fetch_page_html_chrome_base(
             };
 
             let (result, _) = tokio::join!(navigation_loop, mouse_loop);
+
             result
         } else {
             page_navigation.await
@@ -1613,14 +1625,16 @@ pub async fn fetch_page_html_chrome_base(
             && !chrome_http_req_res.status_code.is_client_error()
             || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
             || chrome_http_req_res.status_code == 404
+            || chrome_http_req_res.status_code == 403
             || chrome_http_req_res.status_code.is_redirection()
             || chrome_http_req_res.status_code.is_success());
 
     block_bytes = chrome_http_req_res.status_code == StatusCode::REQUEST_TIMEOUT;
 
     let waf_check = chrome_http_req_res.waf_check;
-    let status_code = chrome_http_req_res.status_code;
+    let mut status_code = chrome_http_req_res.status_code;
     let mut anti_bot_tech = chrome_http_req_res.anti_bot_tech;
+    let mut validate_cf = false;
 
     let run_page_response = async move {
         let mut page_response = if run_events {
@@ -1714,12 +1728,32 @@ pub async fn fetch_page_html_chrome_base(
                 // we can skip this check after a set bytes
                 if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE
                     && anti_bot_tech == AntiBotTech::Cloudflare
+                    || waf_check
                 {
-                    let _ = tokio::time::timeout(base_timeout, cf_handle(&mut res, &page)).await;
+                    // detect the turnstile page.
+                    if detect_cf_turnstyle(&res) {
+                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                            if let Ok(success) = cf_handle(&mut res, &page).await {
+                                if success {
+                                    status_code = StatusCode::OK;
+                                }
+                            }
+                        })
+                        .await
+                        {
+                            validate_cf = true;
+                        }
+                    }
                 }
             };
 
             let ok = !res.is_empty();
+
+            if validate_cf && ok {
+                if !detect_cf_turnstyle(&res) && status_code == StatusCode::FORBIDDEN {
+                    status_code = StatusCode::OK;
+                }
+            }
 
             let mut page_response = set_page_response(
                 ok,
@@ -1959,6 +1993,19 @@ pub async fn fetch_page_html_chrome_base(
                                 &content,
                                 None,
                             );
+                        }
+                    }
+                }
+
+                if let Some(content) = &page_response.content {
+                    // validate if the turnstile page is still open.
+                    if anti_bot_tech == AntiBotTech::Cloudflare
+                        && page_response.status_code == StatusCode::FORBIDDEN
+                    {
+                        let cf_turnstile = detect_cf_turnstyle(&content);
+
+                        if !cf_turnstile {
+                            page_response.status_code = StatusCode::OK;
                         }
                     }
                 }
