@@ -43,13 +43,17 @@ pub struct Page {
     inner: Arc<PageInner>,
 }
 
-pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{};});";
-pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)'; } return getParameter(parameter);};";
-pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters);}";
-pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,"webdriver",{get:()=>!1,configurable:!0,enumerable:!1});"#;
+// use https://github.com/spider-rs/headless-browser for ideal default settings.
+pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
+pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)' } return getParameter(parameter);};";
+pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) };";
+pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>!1,configurable:!0,enumerable:!1});"#;
 pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
-pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(Navigator.prototype,'pdfViewerEnabled',{get:()=>!0,configurable:!0,enumerable:!1});"#;
-pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"const pdfMime={type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"};const pdfPlugin=name=>({name,filename:"internal-pdf-viewer",description:"Portable Document Format",0:pdfMime,length:1});const plugins=[pdfPlugin("PDF Viewer"),pdfPlugin("Chrome PDF Viewer"),pdfPlugin("Chromium PDF Viewer"),pdfPlugin("Microsoft Edge PDF Viewer"),pdfPlugin("WebKit built-in PDF")];Object.defineProperty(Navigator.prototype,"plugins",{get:()=>plugins,configurable:!0,enumerable:!1});Object.defineProperty(Navigator.prototype,"mimeTypes",{get:()=>{let o={...pdfMime,enabledPlugin:plugins[0]};o[0]=o;o.length=1;return o},configurable:!0,enumerable:!1});"#;
+pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(nativeGet, 'toString', { value: () => "function get pdfViewerEnabled() { [native code] }" }); Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { get: nativeGet, configurable: true });"#;
+pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"const pdfMime={type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"};const pdfPlugin=name=>({name,filename:"internal-pdf-viewer",description:"Portable Document Format",0:pdfMime,length:1});const plugins=[pdfPlugin("PDF Viewer"),pdfPlugin("Chrome PDF Viewer"),pdfPlugin("Chromium PDF Viewer"),pdfPlugin("Microsoft Edge PDF Viewer"),pdfPlugin("WebKit built-in PDF")];Object.defineProperty(Navigator.prototype,"plugins",{get:()=>plugins,configurable:!0,enumerable:!1});Object.defineProperty(Navigator.prototype,'mimeTypes',{get:()=>{let o={...pdfMime,enabledPlugin:plugins[0]};o[0]=o;o.length=1;return o},configurable:!0,enumerable:!1});"#;
+pub const GPU_SPOOF_SCRIPT: &str = r#"class WGSLanguageFeatures{constructor(){this.size=4}}class GPU{get wgslLanguageFeatures(){return new WGSLanguageFeatures()}requestAdapter(){return Promise.resolve({requestDevice:()=>Promise.resolve({})})}getPreferredCanvasFormat(){return'bgra8unorm'}get [Symbol.toStringTag](){return'GPU'}}Object.defineProperty(Navigator.prototype,'gpu',{get:()=>new GPU(),configurable:true,enumerable:false});"#;
+pub const NATIVE_GET_SCRIPT: &str = r#"const nativeGet = new Function("return true");"#;
+pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
 
 /// The outer HTML of a webpage.
 const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
@@ -61,9 +65,30 @@ fn generate_hide_plugins() -> String {
     format!("{}", PLUGIN_AND_MIMETYPE_SPOOF)
 }
 
+/// Tier of stealth to use.
+#[derive(PartialEq)]
+enum Tier {
+    /// Basic spoofing.
+    Basic,
+    /// Mid spoofing.
+    Mid,
+    /// Full spoofing.
+    Full,
+}
+
 /// Generate the initial stealth script to send in one command.
-fn build_stealth_script() -> String {
-    format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};")
+fn build_stealth_script(tier: Tier) -> String {
+    if tier == Tier::Basic {
+        format!(
+            r#"{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};"#
+        )
+    } else if tier == Tier::Mid {
+        format!("{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{GPU_SPOOF_SCRIPT};")
+    } else if tier == Tier::Full {
+        format!("{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{GPU_SPOOF_SCRIPT};")
+    } else {
+        Default::default()
+    }
 }
 
 /// Simple function to wrap the eval script safely.
@@ -98,9 +123,9 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot
     pub async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
         let source = if let Some(cs) = custom_script {
-            format!("{};{cs}", build_stealth_script())
+            format!("{};{cs}", build_stealth_script(Tier::Basic))
         } else {
-            build_stealth_script()
+            build_stealth_script(Tier::Basic)
         };
         let source = wrap_eval_script(&source);
 

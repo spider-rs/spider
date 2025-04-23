@@ -155,7 +155,7 @@ pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> St
         .join(",");
 
     format!(
-        r#"Object.defineProperty(Navigator.prototype,'userAgentData',{{get:()=>({{brands:[{brands}],mobile:!1,platform:'{platform}',getHighEntropyValues:(h=>Promise.resolve(Object.fromEntries(h.map(k=>[k,{{architecture:'{arch}',model:'{model}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null]))))}}),configurable:!0}});"#,
+        "(()=>{{const v={{brands:[{brands}],mobile:!1,platform:'{platform}',getHighEntropyValues:h=>Promise.resolve(Object.fromEntries(h.map(k=>[k,{{architecture:'{arch}',model:'{model}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null])))}};const f=function(){{return v}};Object.defineProperty(f,'toString',{{value:()=>\"function get userAgentData() {{ [native code] }}\"}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();",
         platform = data.platform,
         arch = data.architecture,
         model = data.model,
