@@ -167,7 +167,8 @@ lazy_static! {
     /// Cloudflare turnstile wait.
     pub(crate) static ref CF_WAIT_FOR: crate::features::chrome_common::WaitFor = {
         let mut wait_for = crate::features::chrome_common::WaitFor::default();
-        wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(core::time::Duration::from_secs(1))).into();
+        wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(core::time::Duration::from_millis(1000))).into();
+        // wait_for.dom = crate::features::chrome_common::WaitForSelector::new(Some(core::time::Duration::from_millis(1000)), "body".into()).into();
         wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         wait_for
     };
@@ -242,6 +243,7 @@ async fn cf_handle(
         if let Ok(next_content) = page.outer_html_bytes().await {
             let next_content = if !detect_cf_turnstyle(&next_content) {
                 validated = true;
+                // we should use wait for dom instead.
                 wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
                     core::time::Duration::from_secs(4),
                 ))
@@ -747,6 +749,8 @@ pub async fn perform_chrome_http_request(
                         }
                     }
 
+                    let mut firewall = false;
+
                     if !response.url.starts_with(source) {
                         match &response.security_details {
                             Some(security_details) => {
@@ -756,6 +760,7 @@ pub async fn perform_chrome_http_request(
                                     &Default::default(),
                                     Some(&security_details.subject_name),
                                 );
+                                firewall = true;
                             }
                             _ => {
                                 anti_bot_tech = detect_anti_bot_tech_response(
@@ -764,9 +769,27 @@ pub async fn perform_chrome_http_request(
                                     &Default::default(),
                                     None,
                                 );
+                                if anti_bot_tech == AntiBotTech::Cloudflare {
+                                    if let Some(xframe_options) =
+                                        response_headers.get("x-frame-options")
+                                    {
+                                        if xframe_options == r#"\"DENY\""# {
+                                            firewall = true;
+                                        }
+                                    } else if let Some(encoding) =
+                                        response_headers.get("Accept-Encoding")
+                                    {
+                                        if encoding == r#"cf-ray"# {
+                                            firewall = true;
+                                        }
+                                    }
+                                } else {
+                                    firewall = true;
+                                }
                             }
                         };
-                        waf_check = !matches!(anti_bot_tech, AntiBotTech::None);
+
+                        waf_check = firewall && !matches!(anti_bot_tech, AntiBotTech::None);
 
                         if !waf_check {
                             waf_check = match response.protocol {

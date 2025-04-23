@@ -250,6 +250,8 @@ pub struct Configuration {
     pub concurrency_limit: Option<usize>,
     /// Normalize the html de-deplucating the content.
     pub normalize: bool,
+    /// Modify the headers to act like a real-browser
+    pub modify_headers: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -404,6 +406,7 @@ impl Configuration {
             redirect_limit: Box::new(7),
             request_timeout: Some(Box::new(Duration::from_secs(60))),
             only_html: true,
+            modify_headers: true,
             ..Default::default()
         }
     }
@@ -422,6 +425,7 @@ impl Configuration {
             user_agent: Some(Box::new(get_ua(true).into())),
             only_html: true,
             cache: true,
+            modify_headers: true,
             ..Default::default()
         }
     }
@@ -1172,9 +1176,15 @@ impl Configuration {
         self
     }
 
-    /// Block assets from loading from the network
+    /// Block assets from loading from the network.
     pub fn with_block_assets(&mut self, only_html: bool) -> &mut Self {
         self.only_html = only_html;
+        self
+    }
+
+    /// Modify the headers to mimic a real browser.
+    pub fn with_modify_headers(&mut self, modify_headers: bool) -> &mut Self {
+        self.modify_headers = modify_headers;
         self
     }
 

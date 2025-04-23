@@ -1209,18 +1209,19 @@ impl Website {
             _ => get_ua(self.configuration.only_chrome_agent()),
         };
 
-        crate::utils::header_utils::extend_headers(
-            &mut headers,
-            user_agent,
-            &self.configuration.headers,
-            &None,
-            &self.configuration.viewport,
-        );
-
-        if !headers.is_empty() {
-            self.configuration
-                .headers
-                .replace(Box::new(SerializableHeaderMap::from(headers)));
+        if self.configuration.modify_headers {
+            crate::utils::header_utils::extend_headers(
+                &mut headers,
+                user_agent,
+                &self.configuration.headers,
+                &None,
+                &self.configuration.viewport,
+            );
+            if !headers.is_empty() {
+                self.configuration
+                    .headers
+                    .replace(Box::new(SerializableHeaderMap::from(headers)));
+            }
         }
     }
 
@@ -6130,6 +6131,12 @@ impl Website {
         self
     }
 
+    /// Modify the headers to mimic a real browser.
+    pub fn with_modify_headers(&mut self, modify_headers: bool) -> &mut Self {
+        self.configuration.with_modify_headers(modify_headers);
+        self
+    }
+
     /// Set a crawl budget per path with levels support /a/b/c or for all paths with "*". This does nothing without the `budget` flag enabled.
     pub fn with_budget(&mut self, budget: Option<HashMap<&str, u32>>) -> &mut Self {
         self.configuration.with_budget(budget);
@@ -6424,6 +6431,13 @@ impl Website {
             Err(self.to_owned())
         } else {
             Ok(self.to_owned())
+        }
+    }
+
+    /// Clear the HTTP headers for the requests.
+    pub fn clear_headers(&mut self) {
+        if let Some(headers) = self.configuration.headers.as_mut() {
+            headers.0.clear();
         }
     }
 
