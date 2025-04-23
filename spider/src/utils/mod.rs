@@ -275,7 +275,6 @@ async fn cf_handle(
 pub struct PageResponse {
     /// The page response resource.
     pub content: Option<Box<Vec<u8>>>,
-    #[cfg(feature = "headers")]
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "remote_addr")]

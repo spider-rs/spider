@@ -635,6 +635,7 @@ impl NetworkManager {
                         && (event.resource_type == ResourceType::Xhr
                             || event.resource_type == ResourceType::Fetch
                             || event.resource_type == ResourceType::WebSocket);
+                    let mut replacer = None;
 
                     // block all of these events.
                     let skip_networking =
@@ -761,12 +762,13 @@ impl NetworkManager {
                         skip_networking
                     };
 
-                    let skip_networking =
-                        if !skip_networking && (javascript_resource || network_resource) {
-                            block_website(&event.request.url)
-                        } else {
-                            skip_networking
-                        };
+                    let skip_networking = if !skip_networking
+                        && (javascript_resource || network_resource)
+                    {
+                        crate::handler::blockers::block_websites::block_website(&event.request.url)
+                    } else {
+                        skip_networking
+                    };
 
                     if skip_networking {
                         tracing::debug!("Blocked: {:?} - {}", event.resource_type, current_url);
