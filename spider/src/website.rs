@@ -108,7 +108,28 @@ pub fn calc_limits(multiplier: usize) -> usize {
     sem_limit.max(sem_max)
 }
 
+/// Javascript challenge pages.
+static JS_SAFE_CHALLENGE_PATTERNS: &[&str] = &[
+    r#"<span id="challenge-error-text">Enable JavaScript and cookies to continue</span>"#, // Cloudflare
+    r#"To continue, please enable JavaScript in your browser settings"#, // Akamai, F5
+    r#"Please enable JavaScript to view the page content"#,              // AWS WAF
+];
+
+/// check if the page is a javascript challenge
+pub fn is_safe_javascript_challenge(page: &Page) -> bool {
+    let page = page.get_html_bytes_u8();
+
+    let page_size = page.len();
+
+    if page_size == 0 || page_size > 10_000 {
+        return false;
+    }
+
+    AC_JS_CHALLENGE.find(page).is_some()
+}
+
 lazy_static! {
+    static ref AC_JS_CHALLENGE: aho_corasick::AhoCorasick =  aho_corasick::AhoCorasick::new(JS_SAFE_CHALLENGE_PATTERNS).expect("safe challenges");
     /// The default Semaphore limits.
     static ref DEFAULT_PERMITS: usize = calc_limits(1);
     /// The shared global Semaphore.
@@ -300,6 +321,8 @@ pub struct Website {
     enable_sqlite: bool,
     /// Was the setup already configured for sync sendable thread use?
     send_configured: bool,
+    /// The website requires javascript to load. This will be sent as a hint when http request.
+    requires_javascript: bool,
 }
 
 impl Website {
@@ -408,6 +431,11 @@ impl Website {
     /// Get the robots.txt parser.
     pub fn get_robots_parser(&self) -> &Option<Box<RobotFileParser>> {
         &self.robot_file_parser
+    }
+
+    /// Does the website require javascript to run?
+    pub fn get_requires_javascript(&self) -> bool {
+        self.requires_javascript
     }
 
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
@@ -1975,6 +2003,9 @@ impl Website {
             self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
+                if is_safe_javascript_challenge(&page) {
+                    self.requires_javascript = true;
+                }
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
@@ -2710,6 +2741,9 @@ impl Website {
                 self.initial_anti_bot_tech = page.anti_bot_tech;
 
                 if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
+                    if is_safe_javascript_challenge(&page) {
+                        self.requires_javascript = true;
+                    }
                     self.status = CrawlStatus::Blocked;
                 } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     self.status = CrawlStatus::RateLimited;
@@ -2845,6 +2879,9 @@ impl Website {
             self.initial_anti_bot_tech = page.anti_bot_tech;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
+                if is_safe_javascript_challenge(&page) {
+                    self.requires_javascript = true;
+                }
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 self.status = CrawlStatus::RateLimited;
