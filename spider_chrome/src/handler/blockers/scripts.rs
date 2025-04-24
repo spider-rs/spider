@@ -31,6 +31,7 @@ lazy_static::lazy_static! {
             "https://s.pinimg.com/ct/core.js",
             "https://www.mongoosemetrics.com/",
             "https://geolocation-recommendations.shopifyapps.com/",
+            "https://consent.cookiebot.com/uc.js",
             "https://w.usabilla.com/",
             "https://consentcdn.cookiebot.com/",
             "https://plausible.io/api/event",
