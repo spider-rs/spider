@@ -80,7 +80,7 @@ enum Tier {
 fn build_stealth_script(tier: Tier) -> String {
     if tier == Tier::Basic {
         format!(
-            r#"{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF}"#
+            r#"{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF}"#
         )
     } else if tier == Tier::Mid {
         format!("{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{GPU_SPOOF_SCRIPT};")
