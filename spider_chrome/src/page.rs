@@ -44,15 +44,15 @@ pub struct Page {
 }
 
 // use https://github.com/spider-rs/headless-browser for ideal default settings.
+pub const NATIVE_GET_SCRIPT: &str = r#"const nativeGet = new Function("return true");"#;
 pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
 pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)' } return getParameter(parameter);};";
 pub const HIDE_PERMISSIONS: &str = "const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) };";
 pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>!1,configurable:!0,enumerable:!1});"#;
 pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
 pub const NAVIGATOR_SCRIPT: &str = r#"Object.defineProperty(nativeGet, 'toString', { value: () => "function get pdfViewerEnabled() { [native code] }" }); Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { get: nativeGet, configurable: true });"#;
-pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"const pdfMime={type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"};const pdfPlugin=name=>({name,filename:"internal-pdf-viewer",description:"Portable Document Format",0:pdfMime,length:1});const plugins=[pdfPlugin("PDF Viewer"),pdfPlugin("Chrome PDF Viewer"),pdfPlugin("Chromium PDF Viewer"),pdfPlugin("Microsoft Edge PDF Viewer"),pdfPlugin("WebKit built-in PDF")];Object.defineProperty(Navigator.prototype,"plugins",{get:()=>plugins,configurable:!0,enumerable:!1});Object.defineProperty(Navigator.prototype,'mimeTypes',{get:()=>{let o={...pdfMime,enabledPlugin:plugins[0]};o[0]=o;o.length=1;return o},configurable:!0,enumerable:!1});"#;
+pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"const pdfTypes=[{type:"application/pdf",suffixes:"pdf",description:"Portable Document Format"},{type:"text/pdf",suffixes:"pdf",description:"Portable Document Format"}],plugins=function(){let p=[];for(let n of["PDF Viewer","Chrome PDF Viewer","Chromium PDF Viewer","Microsoft Edge PDF Viewer","WebKit built-in PDF"]){let pl={name:n,filename:"internal-pdf-viewer",description:"Portable Document Format",0:pdfTypes[0],length:1,item:i=>i===0?pdfTypes[0]:null,namedItem:n=>n===pdfTypes[0].type?pdfTypes[0]:null};p.push(pl)}return p}(),gp=function(){return plugins};Object.defineProperty(gp,"toString",{value:()=>nativeGet.toString()});Object.defineProperty(Navigator.prototype,"plugins",{get:gp,configurable:!0,enumerable:!1});const gm=function(){let m={length:2};pdfTypes.forEach((mt,i)=>{m[i]=mt;m[mt.type]=mt;mt.enabledPlugin=plugins[0]});m.item=i=>m[i]??null;m.namedItem=n=>m[n]??null;return m};Object.defineProperty(gm,"toString",{value:()=>nativeGet.toString()});Object.defineProperty(Navigator.prototype,"mimeTypes",{get:gm,configurable:!0,enumerable:!1});"#;
 pub const GPU_SPOOF_SCRIPT: &str = r#"class WGSLanguageFeatures{constructor(){this.size=4}}class GPU{get wgslLanguageFeatures(){return new WGSLanguageFeatures()}requestAdapter(){return Promise.resolve({requestDevice:()=>Promise.resolve({})})}getPreferredCanvasFormat(){return'bgra8unorm'}get [Symbol.toStringTag](){return'GPU'}}Object.defineProperty(Navigator.prototype,'gpu',{get:()=>new GPU(),configurable:true,enumerable:false});"#;
-pub const NATIVE_GET_SCRIPT: &str = r#"const nativeGet = new Function("return true");"#;
 pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
 
 /// The outer HTML of a webpage.
@@ -80,7 +80,7 @@ enum Tier {
 fn build_stealth_script(tier: Tier) -> String {
     if tier == Tier::Basic {
         format!(
-            r#"{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};"#
+            r#"{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF}"#
         )
     } else if tier == Tier::Mid {
         format!("{NATIVE_GET_SCRIPT}{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{GPU_SPOOF_SCRIPT};")
