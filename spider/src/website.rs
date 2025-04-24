@@ -294,7 +294,10 @@ pub struct Website {
     client: Option<Client>,
     #[cfg(feature = "disk")]
     /// The disk handler to use.
-    sqlite: DatabaseHandler,
+    sqlite: Option<Box<DatabaseHandler>>,
+    #[cfg(feature = "disk")]
+    /// Configure sqlite on start
+    enable_sqlite: bool,
     /// Was the setup already configured for sync sendable thread use?
     send_configured: bool,
 }
@@ -323,6 +326,8 @@ impl Website {
             status,
             domain_parsed,
             url,
+            #[cfg(feature = "disk")]
+            enable_sqlite: true,
             ..Default::default()
         }
     }
@@ -335,6 +340,12 @@ impl Website {
     /// Initialize the Website with a starting link to crawl and check the firewall.
     pub fn new_with_firewall(url: &str, check_firewall: bool) -> Self {
         Website::_new(url, check_firewall)
+    }
+
+    #[cfg(feature = "disk")]
+    /// Setup the sqlist usage.
+    pub fn setup_sqlite(&mut self) {
+        self.sqlite = Some(Box::new(DatabaseHandler::new(&Some(self.target_id()))))
     }
 
     /// Set the url of the website to re-use configuration and data.
@@ -381,21 +392,18 @@ impl Website {
     /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub fn setup_disk(&mut self) {
-        if !self.sqlite.pool_inited() {
-            self.sqlite
-                .clone_from(&DatabaseHandler::new(&Some(self.target_id())));
+        if self.enable_sqlite {
+            if self.sqlite.is_none() {
+                let db_handler = Box::new(DatabaseHandler::new(&Some(self.target_id())));
+
+                self.sqlite = Some(db_handler);
+            }
         }
     }
 
     /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     pub fn setup_disk(&mut self) {}
-
-    /// Get the db pool. This does nothing with `disk` flag enabled.
-    #[cfg(feature = "disk")]
-    async fn get_db_pool(&self) -> &sqlx::SqlitePool {
-        self.sqlite.get_db_pool().await
-    }
 
     /// Get the robots.txt parser.
     pub fn get_robots_parser(&self) -> &Option<Box<RobotFileParser>> {
@@ -405,13 +413,17 @@ impl Website {
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
-        if !self.sqlite.ready() {
-            true
-        } else {
-            !self
-                .sqlite
-                .url_exists(self.get_db_pool().await, url_to_check)
-                .await
+        match &self.sqlite {
+            Some(sqlite) => {
+                if !sqlite.ready() {
+                    true
+                } else {
+                    let db_pool = sqlite.get_db_pool().await;
+
+                    !sqlite.url_exists(db_pool, url_to_check).await
+                }
+            }
+            _ => true,
         }
     }
 
@@ -424,13 +436,17 @@ impl Website {
     /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn is_allowed_signature_disk(&self, signature_to_check: u64) -> bool {
-        if !self.sqlite.ready() {
-            true
-        } else {
-            !self
-                .sqlite
-                .signature_exists(self.get_db_pool().await, signature_to_check)
-                .await
+        match &self.sqlite {
+            Some(sqlite) => {
+                if !sqlite.ready() {
+                    true
+                } else {
+                    let db_pool = sqlite.get_db_pool().await;
+
+                    !sqlite.signature_exists(db_pool, signature_to_check).await
+                }
+            }
+            _ => true,
         }
     }
 
@@ -448,8 +464,10 @@ impl Website {
     /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn clear_disk(&self) {
-        if self.sqlite.pool_inited() {
-            let _ = DatabaseHandler::clear_table(self.get_db_pool().await).await;
+        if let Some(sqlite) = &self.sqlite {
+            if sqlite.pool_inited() {
+                let _ = DatabaseHandler::clear_table(sqlite.get_db_pool().await).await;
+            }
         }
     }
 
@@ -460,17 +478,19 @@ impl Website {
     /// Insert a new URL to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn insert_url_disk(&self, new_url: &str) {
-        self.sqlite
-            .insert_url(self.get_db_pool().await, new_url)
-            .await
+        if let Some(sqlite) = &self.sqlite {
+            sqlite.insert_url(sqlite.get_db_pool().await, new_url).await
+        }
     }
 
     /// Insert a new signature to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     async fn insert_signature_disk(&self, signature: u64) {
-        self.sqlite
-            .insert_signature(self.get_db_pool().await, signature)
-            .await
+        if let Some(sqlite) = &self.sqlite {
+            sqlite
+                .insert_signature(sqlite.get_db_pool().await, signature)
+                .await
+        }
     }
 
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
@@ -480,8 +500,12 @@ impl Website {
         let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
-        if seed_check && !self.sqlite.ready() {
-            let _ = self.seed().await;
+        if seed_check {
+            if let Some(sqlite) = &self.sqlite {
+                if !sqlite.ready() {
+                    let _ = self.seed().await;
+                }
+            }
         }
 
         if mem_load == 2 || beyond_memory_limits {
@@ -510,8 +534,12 @@ impl Website {
         let beyond_memory_limits = self.signatures.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
-        if seed_check && !self.sqlite.ready() {
-            let _ = self.seed().await;
+        if seed_check {
+            if let Some(sqlite) = &self.sqlite {
+                if !sqlite.ready() {
+                    let _ = self.seed().await;
+                }
+            }
         }
 
         if mem_load == 2 || beyond_memory_limits {
@@ -538,14 +566,18 @@ impl Website {
     async fn seed(&mut self) -> Result<(), sqlx::Error> {
         let links = self.get_links();
 
-        if let Ok(links) = self.sqlite.seed(self.get_db_pool().await, links).await {
-            self.links_visited.clear();
+        if let Some(sqlite) = &self.sqlite {
+            if let Ok(links) = sqlite.seed(sqlite.get_db_pool().await, links).await {
+                self.links_visited.clear();
 
-            for link in links {
-                self.links_visited.insert(link);
+                for link in links {
+                    self.links_visited.insert(link);
+                }
+
+                if let Some(sqlite) = self.sqlite.as_mut() {
+                    sqlite.seeded = true;
+                }
             }
-
-            self.sqlite.seeded = true;
         }
 
         Ok(())
@@ -890,10 +922,14 @@ impl Website {
     /// Get the amount of resources collected.
     #[cfg(feature = "disk")]
     pub async fn get_size(&self) -> usize {
-        let disk_count = if self.sqlite.pool_inited() {
-            let disk_count = DatabaseHandler::count_records(self.get_db_pool().await).await;
-            let disk_count = disk_count.unwrap_or_default() as usize;
-            disk_count
+        let disk_count = if let Some(sqlite) = &self.sqlite {
+            if sqlite.pool_inited() {
+                let disk_count = DatabaseHandler::count_records(sqlite.get_db_pool().await).await;
+                let disk_count = disk_count.unwrap_or_default() as usize;
+                disk_count
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -1006,9 +1042,15 @@ impl Website {
     /// Links visited getter for disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub async fn get_links_disk(&self) -> HashSet<CaseInsensitiveString> {
-        if self.sqlite.pool_inited() {
-            if let Ok(links) = DatabaseHandler::get_all_resources(self.get_db_pool().await).await {
-                links
+        if let Some(sqlite) = &self.sqlite {
+            if sqlite.pool_inited() {
+                if let Ok(links) =
+                    DatabaseHandler::get_all_resources(sqlite.get_db_pool().await).await
+                {
+                    links
+                } else {
+                    Default::default()
+                }
             } else {
                 Default::default()
             }
@@ -5929,13 +5971,13 @@ impl Website {
         }
     }
 
-    /// get base link for crawl establishing
+    /// get base link for crawl establishing.
     #[cfg(feature = "regex")]
     fn get_base_link(&self) -> &CaseInsensitiveString {
         &self.url
     }
 
-    /// get base link for crawl establishing
+    /// get base link for crawl establishing.
     #[cfg(not(feature = "regex"))]
     fn get_base_link(&self) -> &CompactString {
         self.url.inner()
@@ -5952,7 +5994,7 @@ impl Website {
         }
     }
 
-    /// Launch or connect to browser with setup
+    /// Launch or connect to browser with setup.
     #[cfg(feature = "chrome")]
     pub(crate) async fn setup_browser_base(
         config: &Configuration,
@@ -5985,6 +6027,24 @@ impl Website {
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.configuration.with_subdomains(subdomains);
+        self
+    }
+
+    /// Use sqlite to store data and track large crawls. This does nothing without the [disk] flag enabled.
+    #[cfg(feature = "disk")]
+    pub fn with_sqlite(&mut self, sqlite: bool) -> &mut Self {
+        if sqlite {
+            self.enable_sqlite = true;
+        } else {
+            self.enable_sqlite = false;
+            self.sqlite = None
+        };
+        self
+    }
+
+    /// Use sqlite to store data and track large crawls.
+    #[cfg(not(feature = "disk"))]
+    pub fn with_sqlite(&mut self, _sqlite: bool) -> &mut Self {
         self
     }
 
