@@ -120,7 +120,7 @@ pub struct GPTConfigs {
     pub top_p: Option<f32>,
     /// Prompts to use for certain urls. If this is set only the urls that match exactly are ran.
     pub prompt_url_map:
-        Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, Self>>,
+        Option<Box<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, Box<Self>>>>,
     #[cfg_attr(feature = "serde", serde(default))]
     /// Extra data, this will merge the prompts and try to get the content for you. Example: extracting data from the page.
     pub extra_ai_data: bool,

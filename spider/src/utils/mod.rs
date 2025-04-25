@@ -861,7 +861,7 @@ pub async fn run_openai_request(
                     c
                 }
             }
-            _ => Some(gpt_configs).map(|v| &**v),
+            _ => Some(gpt_configs),
         };
 
         if let Some(gpt_configs) = gpt_configs {
