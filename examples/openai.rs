@@ -40,6 +40,8 @@ async fn main() {
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_screenshot(Some(screenshot_config))
         .with_limit(2)
+        .with_stealth(true)
+        .with_fingerprint(true)
         // .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .with_openai(Some(gpt_config))
         .build()

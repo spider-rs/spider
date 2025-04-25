@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.36.104"
+version = "2.36.105"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"

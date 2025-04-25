@@ -832,7 +832,7 @@ pub async fn run_openai_request(
     _source: &str,
     _page: &chromiumoxide::Page,
     _wait_for: &Option<crate::configuration::WaitFor>,
-    _openai_config: &Option<crate::configuration::GPTConfigs>,
+    _openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     _page_response: &mut PageResponse,
     _ok: bool,
 ) {
@@ -844,7 +844,7 @@ pub async fn run_openai_request(
     source: &str,
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     mut page_response: &mut PageResponse,
     ok: bool,
 ) {
@@ -861,7 +861,7 @@ pub async fn run_openai_request(
                     c
                 }
             }
-            _ => Some(gpt_configs),
+            _ => Some(gpt_configs).map(|v| &**v),
         };
 
         if let Some(gpt_configs) = gpt_configs {
@@ -1263,7 +1263,7 @@ pub async fn fetch_page_html_chrome_base(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     url_target: Option<&str>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
@@ -1800,20 +1800,21 @@ pub async fn fetch_page_html_chrome_base(
             .await;
 
             if openai_config.is_some() && !base_timeout.is_zero() {
-                let _ = tokio::time::timeout(
-                    base_timeout,
-                    run_openai_request(
-                        match url_target {
-                            Some(ref ut) => ut,
-                            _ => source,
-                        },
-                        page,
-                        wait_for,
-                        openai_config,
-                        &mut page_response,
-                        ok,
-                    ),
+                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+
+                let openai_request = run_openai_request(
+                    match url_target {
+                        Some(ref ut) => ut,
+                        _ => source,
+                    },
+                    page,
+                    wait_for,
+                    openai_config,
+                    &mut page_response,
+                    ok,
                 );
+
+                let _ = tokio::time::timeout(base_timeout, openai_request).await;
             }
 
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
@@ -2744,7 +2745,7 @@ pub async fn fetch_page_html(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
@@ -2907,7 +2908,7 @@ pub async fn fetch_page_html(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
@@ -2949,7 +2950,7 @@ pub async fn fetch_page_html_chrome(
     wait_for: &Option<crate::configuration::WaitFor>,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<crate::configuration::GPTConfigs>,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,

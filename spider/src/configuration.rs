@@ -213,7 +213,7 @@ pub struct Configuration {
     /// The auth challenge response. The 'chrome_intercept' flag is also required in order to intercept the response.
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
-    pub openai_config: Option<GPTConfigs>,
+    pub openai_config: Option<Box<GPTConfigs>>,
     /// Setup fingerprint ID on each document.
     #[cfg(feature = "chrome")]
     pub fingerprint: bool,
@@ -621,7 +621,7 @@ impl Configuration {
     #[cfg(feature = "openai")]
     pub fn with_openai(&mut self, openai_config: Option<GPTConfigs>) -> &mut Self {
         match openai_config {
-            Some(openai_config) => self.openai_config = Some(openai_config),
+            Some(openai_config) => self.openai_config = Some(Box::new(openai_config)),
             _ => self.openai_config = None,
         };
         self

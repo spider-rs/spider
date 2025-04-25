@@ -1213,7 +1213,7 @@ impl Page {
         wait_for: &Option<crate::configuration::WaitFor>,
         screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
-        openai_config: &Option<crate::configuration::GPTConfigs>,
+        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
