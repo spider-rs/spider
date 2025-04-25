@@ -6330,6 +6330,16 @@ impl Website {
         self
     }
 
+    #[cfg(feature = "chrome")]
+    /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
+    pub fn with_fingerprint_advanced(
+        &mut self,
+        fingerprint: crate::configuration::Fingerprint,
+    ) -> &mut Self {
+        self.configuration.with_fingerprint_advanced(fingerprint);
+        self
+    }
+
     /// Setup custom fingerprinting for chrome. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_fingerprint(&mut self, fingerprint: bool) -> &mut Self {
         self.configuration.with_fingerprint(fingerprint);

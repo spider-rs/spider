@@ -12,6 +12,33 @@ use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::time::Duration;
 
+/// The fingerprint type to use.
+#[cfg(feature = "chrome")]
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Fingerprint {
+    /// Basic finterprint that includes webgl and gpu attempt spoof.
+    Basic,
+    /// Basic fingerprint that does not spoof the gpu. Used for real gpu based headless instances.
+    /// This will bypass the most advanced anti-bots without the speed reduction of a virtual display.
+    NativeGPU,
+    /// None - no fingerprint,
+    #[default]
+    None,
+}
+
+#[cfg(feature = "chrome")]
+impl Fingerprint {
+    /// Fingerprint should be used.
+    #[cfg(feature = "chrome")]
+    pub fn valid(&self) -> bool {
+        match &self {
+            Self::Basic | Self::NativeGPU => true,
+            _ => false,
+        }
+    }
+}
+
 /// Redirect policy configuration for request
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -214,9 +241,9 @@ pub struct Configuration {
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
     pub openai_config: Option<Box<GPTConfigs>>,
-    /// Setup fingerprint ID on each document.
+    /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
     #[cfg(feature = "chrome")]
-    pub fingerprint: bool,
+    pub fingerprint: Fingerprint,
     /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
     #[cfg(feature = "chrome")]
     pub chrome_connection_url: Option<String>,
@@ -426,6 +453,7 @@ impl Configuration {
             only_html: true,
             cache: true,
             modify_headers: true,
+            fingerprint: Fingerprint::Basic,
             ..Default::default()
         }
     }
@@ -443,7 +471,7 @@ impl Configuration {
             || self.wait_for.is_some()
             || self.chrome_intercept.enabled
             || self.stealth_mode
-            || self.fingerprint
+            || self.fingerprint.valid()
     }
 
     #[cfg(feature = "regex")]
@@ -643,6 +671,17 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
     pub fn with_fingerprint(&mut self, fingerprint: bool) -> &mut Self {
+        if fingerprint {
+            self.fingerprint = Fingerprint::Basic;
+        } else {
+            self.fingerprint = Fingerprint::None;
+        }
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
+    pub fn with_fingerprint_advanced(&mut self, fingerprint: Fingerprint) -> &mut Self {
         self.fingerprint = fingerprint;
         self
     }

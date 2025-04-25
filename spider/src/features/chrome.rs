@@ -1,5 +1,8 @@
 use crate::utils::log;
-use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use crate::{
+    configuration::{Configuration, Fingerprint},
+    tokio_stream::StreamExt,
+};
 use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
@@ -650,12 +653,30 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         .map(|ua| ua.contains("Chrome") && ua.contains("Linux"))
         .unwrap_or(false);
 
-    let fp_script = if config.fingerprint {
+    let mut fingerprint_gpu = false;
+    let fingerprint = match config.fingerprint {
+        Fingerprint::Basic => true,
+        Fingerprint::NativeGPU => {
+            fingerprint_gpu = true;
+            true
+        }
+        _ => false,
+    };
+
+    let fp_script = if fingerprint {
         let fp_script = if linux {
             if dismiss_dialogs {
-                &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
+                if fingerprint_gpu {
+                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX_GPU
+                } else {
+                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
+                }
             } else {
-                &*crate::features::chrome::FP_JS_CHROME
+                if fingerprint_gpu {
+                    &*crate::features::chrome::FP_JS_CHROME_GPU
+                } else {
+                    &*crate::features::chrome::FP_JS_CHROME
+                }
             }
         } else {
             if dismiss_dialogs {
@@ -671,7 +692,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 
     // Final combined script to inject
     let merged_script = if let Some(script) = config.evaluate_on_new_document.as_deref() {
-        if config.fingerprint {
+        if fingerprint {
             Some(string_concat!(
                 chromiumoxide::page::wrap_eval_script(&fp_script),
                 chromiumoxide::page::wrap_eval_script(&script),
@@ -684,7 +705,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 if dismiss_dialogs { DISABLE_DIALOGS } else { "" }
             ))
         }
-    } else if config.fingerprint {
+    } else if fingerprint {
         Some(string_concat!(
             chromiumoxide::page::wrap_eval_script(&fp_script),
             chromiumoxide::page::wrap_eval_script(&spoof_script)
