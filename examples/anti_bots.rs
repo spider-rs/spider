@@ -1,10 +1,9 @@
 //! cargo run --example anti_bots --features="chrome chrome_intercept real_browser spider_utils/transformations"
 
 use spider::configuration::ChromeEventTracker;
-use spider::features::chrome_common::RequestInterceptConfiguration;
-use spider::features::chrome_common::WaitForDelay;
-use spider::features::chrome_common::WaitForIdleNetwork;
-use spider::features::chrome_common::WaitForSelector;
+use spider::features::chrome_common::{
+    RequestInterceptConfiguration, WaitForIdleNetwork, WaitForSelector,
+};
 use spider::features::chrome_viewport;
 use spider::tokio;
 use spider::tokio::io::AsyncWriteExt;
@@ -39,19 +38,18 @@ async fn crawl_website(url: &str) {
         .with_chrome_intercept(interception)
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(500)))))
         .with_wait_for_idle_dom(Some(WaitForSelector::new(
-            Some(Duration::from_millis(100)),
+            Some(Duration::from_millis(5000)),
             "body".into(),
         )))
         .with_screenshot(Some(screenshot_config))
         .with_block_assets(true)
         .with_viewport(Some(viewport))
-        .with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(10000)))))
         .with_user_agent(Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"))
         .with_stealth(true)
         .with_return_page_links(true)
         .with_fingerprint(true)
         .with_event_tracker(Some(tracker))
-        // .with_proxies(Some(vec!["http://localhost:8888".into()]))
+        .with_proxies(Some(vec!["http://localhost:8888".into()]))
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
         .unwrap();

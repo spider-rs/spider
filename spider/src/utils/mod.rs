@@ -421,15 +421,17 @@ pub async fn wait_for_dom(
             }
 
             let current_timeout = DOM_WAIT_TIMEOUTS[index];
-            let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout));
+            let result = page.evaluate(script.clone()).await;
 
-            tokio::select! {
-                _ = sleep => (),
-                result = page.evaluate(script.clone()) => {
-                    if let Ok(vv) = &result {
-                        if vv.value().is_none() {
-                            break
+            if let Ok(vv) = &result {
+                let value = vv.value();
+                if let Some(value) = value {
+                    if let Some(v) = value.as_bool() {
+                        if v {
+                            break;
                         } else {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout))
+                                .await;
                             deadline = tokio::time::Instant::now() + max_duration;
                         }
                     }
