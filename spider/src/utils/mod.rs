@@ -207,6 +207,30 @@ lazy_static! {
     static ref CF_JUST_A_MOMENT:&'static [u8; 81] = b"<!DOCTYPE html><html lang=\"en-US\" dir=\"ltr\"><head><title>Just a moment...</title>";
 }
 
+lazy_static! {
+    /// Apache server forbidden.
+    pub static ref APACHE_FORBIDDEN: &'static [u8; 317] = br#"<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>403 Forbidden</title>
+</head><body>
+<h1>Forbidden</h1>
+<p>You don't have permission to access this resource.</p>
+<p>Additionally, a 403 Forbidden
+error was encountered while trying to use an ErrorDocument to handle the request.</p>
+</body></html>"#;
+
+    /// Open Resty forbidden.
+    pub static ref OPEN_RESTY_FORBIDDEN: &'static [u8; 125] = br#"<html><head><title>403 Forbidden</title></head>
+<body>
+<center><h1>403 Forbidden</h1></center>
+<hr><center>openresty</center>"#;
+}
+
+/// Detect if a page is forbidden and should not retry.
+pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
+    b == *APACHE_FORBIDDEN || b.starts_with(*OPEN_RESTY_FORBIDDEN)
+}
+
 /// Is cloudflare turnstile page? This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 pub(crate) fn detect_cf_turnstyle(b: &Vec<u8>) -> bool {

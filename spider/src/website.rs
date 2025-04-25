@@ -5,6 +5,7 @@ use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
     SerializableHeaderMap,
 };
+
 #[cfg(feature = "smart")]
 use crate::features::chrome::OnceBrowser;
 use crate::features::chrome_common::RequestInterceptConfiguration;
@@ -260,6 +261,21 @@ pub enum CronType {
     Scrape,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Generic website meta info for handling retries.
+pub enum WebsiteMetaInfo {
+    /// The page requires Javascript.
+    RequiresJavascript,
+    /// Standard apache 403 page that requires a special http header for access like a custom iframe server.
+    Apache403,
+    /// Standard Open Resty 403 page that requires a special http header for access like a custom iframe server.
+    OpenResty403,
+    /// No meta info.
+    #[default]
+    None,
+}
+
 /// Represents a website to crawl and gather all links or page content.
 /// ```rust
 /// use spider::website::Website;
@@ -322,7 +338,7 @@ pub struct Website {
     /// Was the setup already configured for sync sendable thread use?
     send_configured: bool,
     /// The website requires javascript to load. This will be sent as a hint when http request.
-    requires_javascript: bool,
+    website_meta_info: WebsiteMetaInfo,
 }
 
 impl Website {
@@ -435,7 +451,12 @@ impl Website {
 
     /// Does the website require javascript to run?
     pub fn get_requires_javascript(&self) -> bool {
-        self.requires_javascript
+        self.website_meta_info == WebsiteMetaInfo::RequiresJavascript
+    }
+
+    /// Get the website meta information that can help with retry handling.
+    pub fn get_website_meta_info(&self) -> &WebsiteMetaInfo {
+        &self.website_meta_info
     }
 
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
@@ -1870,6 +1891,7 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
+        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
         if self
             .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -2004,7 +2026,11 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 if is_safe_javascript_challenge(&page) {
-                    self.requires_javascript = true;
+                    self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
+                } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
+                    self.website_meta_info = WebsiteMetaInfo::Apache403;
+                } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
+                    self.website_meta_info = WebsiteMetaInfo::OpenResty403;
                 }
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -2609,6 +2635,7 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
+        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.url.inner();
         let expanded = self.get_expanded_links(&domain_name.as_str());
@@ -2742,7 +2769,11 @@ impl Website {
 
                 if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
                     if is_safe_javascript_challenge(&page) {
-                        self.requires_javascript = true;
+                        self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
+                    } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
+                        self.website_meta_info = WebsiteMetaInfo::Apache403;
+                    } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
+                        self.website_meta_info = WebsiteMetaInfo::OpenResty403;
                     }
                     self.status = CrawlStatus::Blocked;
                 } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -2780,6 +2811,7 @@ impl Website {
         mut base: &mut RelativeSelectors,
         browser: &crate::features::chrome::OnceBrowser,
     ) -> HashSet<CaseInsensitiveString> {
+        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -2880,7 +2912,11 @@ impl Website {
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 if is_safe_javascript_challenge(&page) {
-                    self.requires_javascript = true;
+                    self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
+                } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
+                    self.website_meta_info = WebsiteMetaInfo::Apache403;
+                } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
+                    self.website_meta_info = WebsiteMetaInfo::OpenResty403;
                 }
                 self.status = CrawlStatus::Blocked;
             } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {

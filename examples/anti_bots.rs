@@ -1,8 +1,8 @@
 //! cargo run --example anti_bots --features="chrome chrome_intercept real_browser spider_utils/transformations"
 
-use spider::configuration::{Fingerprint, ChromeEventTracker};
+use spider::configuration::{ChromeEventTracker, Fingerprint};
 use spider::features::chrome_common::{
-    RequestInterceptConfiguration, WaitForIdleNetwork, WaitForSelector,
+    RequestInterceptConfiguration, WaitForDelay, WaitForIdleNetwork, WaitForSelector,
 };
 use spider::features::chrome_viewport;
 use spider::tokio;
@@ -20,7 +20,7 @@ async fn crawl_website(url: &str) {
     interception.block_stylesheets = false;
     interception.block_visuals = false;
     interception.block_ads = false;
-    interception.block_analytics = false;
+    interception.block_analytics = true;
 
     tracker.responses = true;
     tracker.requests = true;
@@ -32,14 +32,17 @@ async fn crawl_website(url: &str) {
 
     let viewport = chrome_viewport::randomize_viewport(&chrome_viewport::DeviceType::Desktop);
 
+    let creepjs = url == "https://abrahamjuliot.github.io/creepjs/";
+
     let mut website: Website = Website::new(url)
         .with_limit(1)
         .with_retry(0)
         .with_chrome_intercept(interception)
-        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(500)))))
+        .with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(if creepjs { 10000 } else { 200 })))))
+        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(2000)))))
         .with_wait_for_idle_dom(Some(WaitForSelector::new(
             Some(Duration::from_millis(5000)),
-            "body".into(),
+            if creepjs { "fingerprint".into()  } else { "body".into() },
         )))
         .with_screenshot(Some(screenshot_config))
         .with_block_assets(true)
