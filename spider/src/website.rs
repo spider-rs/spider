@@ -5456,10 +5456,9 @@ impl Website {
 
                                     drop(new_page);
 
-                                    let is_xml = page
-                                        .get_html_bytes_u8()
-                                        .starts_with(b"<?xml version=\"1.0\"")
-                                        && page.get_html_bytes_u8() == b"</html>";
+                                    let is_xml_entry = page.get_html_bytes_u8().starts_with(b"<?xml");
+                                    let is_xml = is_xml_entry
+                                        && !page.get_html_bytes_u8().ends_with(b"</html>");
 
                                     if is_xml {
                                         let reader = SiteMapReader::new(&*page.get_html_bytes_u8());
@@ -5578,10 +5577,13 @@ impl Website {
                                             }
                                         }
                                     } else {
-                                        if page.get_html_bytes_u8().starts_with(b"<?xml") {
+
+                                        if is_xml_entry {
                                             page.modify_xml_html();
                                         }
+
                                         let links = page.links(&shared.6, &shared.7).await;
+
                                         let mut stream = tokio_stream::iter(links);
 
                                         while let Some(link) = stream.next().await {

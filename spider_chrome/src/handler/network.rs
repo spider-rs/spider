@@ -526,7 +526,8 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        if self.xml_document && current_url.ends_with("sitemap-style.xsl") {
+                        // allow sitemap xml building xsl
+                        if self.xml_document && current_url.ends_with(".xsl") {
                             false
                         } else {
                             self.ignore_visuals
@@ -703,7 +704,8 @@ impl NetworkManager {
 
                     // main initial check
                     let skip_networking = if !skip_networking {
-                        if self.xml_document && current_url.ends_with("sitemap-style.xsl") {
+                        // allow sitemap xml building xsl
+                        if self.xml_document && current_url.ends_with(".xsl") {
                             false
                         } else {
                             self.ignore_visuals

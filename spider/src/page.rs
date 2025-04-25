@@ -3,6 +3,7 @@ use crate::compact_str::CompactString;
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
 use crate::utils::{
+    css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
     get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
 };
 use crate::CaseInsensitiveString;
@@ -34,90 +35,6 @@ pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE: usize =
 /// Allocate up to 16kb * 4 upfront for small pages.
 #[cfg(feature = "chrome")]
 pub(crate) const TURNSTILE_WALL_PAGE_SIZE: usize = MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE * 4;
-
-/// Base css selector to use for getting valid web pages.
-const BASE_CSS_SELECTORS: &str = concat!(
-    "a[href]",
-    ":not([href$=\".jpg\"])",
-    ":not([href$=\".jpeg\"])",
-    ":not([href$=\".png\"])",
-    ":not([href$=\".gif\"])",
-    ":not([href$=\".svg\"])",
-    ":not([href$=\".webp\"])",
-    ":not([href$=\".mp4\"])",
-    ":not([href$=\".avi\"])",
-    ":not([href$=\".mov\"])",
-    ":not([href$=\".wmv\"])",
-    ":not([href$=\".flv\"])",
-    ":not([href$=\".mp3\"])",
-    ":not([href$=\".wav\"])",
-    ":not([href$=\".wma\"])",
-    ":not([href$=\".wpl\"])",
-    ":not([href$=\".mpa\"])",
-    ":not([href$=\".ogg\"])",
-    ":not([href$=\".woff\"])",
-    ":not([href$=\".woff2\"])",
-    ":not([href$=\".ttf\"])",
-    ":not([href$=\".otf\"])",
-    ":not([href$=\".swf\"])",
-    ":not([href$=\".xap\"])",
-    ":not([href$=\".ico\"])",
-    ":not([href$=\".eot\"])",
-    ":not([href$=\".bmp\"])",
-    ":not([href$=\".psd\"])",
-    ":not([href$=\".tiff\"])",
-    ":not([href$=\".tif\"])",
-    ":not([href$=\".heic\"])",
-    ":not([href$=\".heif\"])",
-    ":not([href$=\".mkv\"])",
-    ":not([href$=\".webm\"])",
-    ":not([href$=\".m4v\"])",
-    ":not([href$=\".aac\"])",
-    ":not([href$=\".flac\"])",
-    ":not([href$=\".m4a\"])",
-    ":not([href$=\".aiff\"])",
-    ":not([href$=\".pdf\"])",
-    ":not([href$=\".rtf\"])",
-    ":not([href$=\".eps\"])",
-    ":not([href$=\".yaml\"])",
-    ":not([href$=\".yml\"])",
-    ":not([href$=\".xml\"])",
-    ":not([href$=\".css\"])",
-    ":not([href$=\".js\"])",
-    ":not([href$=\".txt\"])",
-    ":not([href$=\".tar\"])",
-    ":not([href$=\".doc\"])",
-    ":not([href$=\".docx\"])",
-    ":not([href$=\".zip\"])",
-    ":not([href$=\".deb\"])",
-    ":not([href$=\".pkg\"])",
-    ":not([href$=\".tar.gz\"])",
-    ":not([href$=\".rpm\"])",
-    ":not([href$=\".z\"])",
-    ":not([href$=\".7z\"])",
-    ":not([href$=\".arj\"])",
-    ":not([href$=\".rar\"])",
-    ":not([href$=\".bin\"])",
-    ":not([href$=\".msi\"])",
-    ":not([href$=\".sh\"])",
-    ":not([href$=\".bat\"])",
-    ":not([href$=\".dmg\"])",
-    ":not([href$=\".iso\"])",
-    ":not([href$=\".toast\"])",
-    ":not([href$=\".vcd\"])",
-    ":not([href$=\".csv\"])",
-    ":not([href$=\".log\"])",
-    ":not([href$=\".sql\"])",
-    ":not([href$=\".db\"])",
-    ":not([href$=\".exe\"])",
-    ":not([href$=\".rss\"])",
-    ":not([href$=\".key\"])",
-    ":not([href$=\".odp\"])",
-    ":not([href$=\".pps\"])",
-    ":not([href$=\".ptt\"])",
-    ":not([href$=\".pptx\"])",
-    ":not([href$=\".dump\"])",
-);
 
 lazy_static! {
     /// Wildcard match all domains.
@@ -1072,6 +989,7 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
+                let xml_file = target_url.ends_with(".xml");
 
                 let base_links_settings = if r_settings.full_resources {
                     lol_html::element!("a[href],script[src],link[href]", |el| {
@@ -1102,28 +1020,35 @@ impl Page {
                         Ok(())
                     })
                 } else {
-                    lol_html::element!(BASE_CSS_SELECTORS, |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page.as_ref()
-                            } else {
-                                base.as_deref()
-                            };
-                            push_link(
-                                &base,
-                                &href,
-                                map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &external_domains_caseless,
-                                links_pages,
-                            );
+                    lol_html::element!(
+                        if xml_file {
+                            BASE_CSS_SELECTORS_WITH_XML
+                        } else {
+                            BASE_CSS_SELECTORS
+                        },
+                        |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page.as_ref()
+                                } else {
+                                    base.as_deref()
+                                };
+                                push_link(
+                                    &base,
+                                    &href,
+                                    map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &external_domains_caseless,
+                                    links_pages,
+                                );
+                            }
+                            Ok(())
                         }
-                        Ok(())
-                    })
+                    )
                 };
 
                 let mut element_content_handlers =
@@ -1703,6 +1628,7 @@ impl Page {
             let stripped = if let Ok(xml_str) = std::str::from_utf8(xml) {
                 xml_str
                     .strip_prefix(XML_DECL)
+                    .map(|f| f.trim_start())
                     .unwrap_or(xml_str)
                     .as_bytes()
                     .to_vec()
@@ -1882,30 +1808,39 @@ impl Page {
                     self.get_url_parsed_ref().as_ref()
                 };
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![lol_html::element!(BASE_CSS_SELECTORS, |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page
-                            } else {
-                                base.as_deref()
-                            };
+                let xml_file = self.get_url().ends_with(".xml");
 
-                            push_link(
-                                &base,
-                                &href,
-                                &mut map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &self.external_domains_caseless,
-                                &mut links_pages,
-                            );
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers: vec![lol_html::element!(
+                        if xml_file {
+                            BASE_CSS_SELECTORS_WITH_XML
+                        } else {
+                            BASE_CSS_SELECTORS
+                        },
+                        |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page
+                                } else {
+                                    base.as_deref()
+                                };
+
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &self.external_domains_caseless,
+                                    &mut links_pages,
+                                );
+                            }
+                            Ok(())
                         }
-                        Ok(())
-                    })],
+                    )],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
@@ -1989,31 +1924,40 @@ impl Page {
                     self.get_url_parsed_ref().as_ref()
                 };
 
+                let xml_file = self.get_url().ends_with(".xml");
+
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
-                        lol_html::element!(BASE_CSS_SELECTORS, |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page
-                                } else {
-                                    base.as_deref()
-                                };
+                        lol_html::element!(
+                            if xml_file {
+                                BASE_CSS_SELECTORS_WITH_XML
+                            } else {
+                                BASE_CSS_SELECTORS
+                            },
+                            |el| {
+                                if let Some(href) = el.get_attribute("href") {
+                                    let base = if relative_directory_url(&href) || base.is_none() {
+                                        original_page
+                                    } else {
+                                        base.as_deref()
+                                    };
 
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &self.external_domains_caseless,
-                                    &mut links_pages,
-                                );
+                                    push_link(
+                                        &base,
+                                        &href,
+                                        &mut map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        &self.external_domains_caseless,
+                                        &mut links_pages,
+                                    );
+                                }
+                                Ok(())
                             }
-                            Ok(())
-                        }),
+                        ),
                         lol_html::element!("script[src]", |el| {
                             if let Some(source) = el.get_attribute("src") {
                                 if source.starts_with("/_next/static/")
@@ -2220,6 +2164,7 @@ impl Page {
                 let rerender = AtomicBool::new(false);
 
                 let mut static_app = false;
+                let xml_file = self.get_url().ends_with(".xml");
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers: vec![
@@ -2253,32 +2198,39 @@ impl Page {
                             }
                             Ok(())
                         }),
-                        element!(BASE_CSS_SELECTORS, |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base.as_deref()
-                                };
+                        element!(
+                            if xml_file {
+                                BASE_CSS_SELECTORS_WITH_XML
+                            } else {
+                                BASE_CSS_SELECTORS
+                            },
+                            |el| {
+                                if let Some(href) = el.get_attribute("href") {
+                                    let base = if relative_directory_url(&href) || base.is_none() {
+                                        original_page.as_ref()
+                                    } else {
+                                        base.as_deref()
+                                    };
 
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut inner_map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &external_domains_caseless,
-                                    &mut links_pages,
-                                );
+                                    push_link(
+                                        &base,
+                                        &href,
+                                        &mut inner_map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        &external_domains_caseless,
+                                        &mut links_pages,
+                                    );
+                                }
+
+                                el.remove();
+
+                                Ok(())
                             }
-
-                            el.remove();
-
-                            Ok(())
-                        }),
+                        ),
                         element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
                             el.remove();
                             Ok(())

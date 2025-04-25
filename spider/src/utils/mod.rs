@@ -2,6 +2,8 @@
 pub mod abs;
 /// Connect layer for reqwest.
 pub mod connect;
+/// Generic CSS selectors.
+pub mod css_selectors;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// String interner.
@@ -1816,7 +1818,7 @@ pub async fn fetch_page_html_chrome_base(
 
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
                 let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(30),
+                    base_timeout + tokio::time::Duration::from_secs(30),
                     perform_screenshot(source, page, screenshot, &mut page_response),
                 )
                 .await;
