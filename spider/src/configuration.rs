@@ -22,7 +22,7 @@ pub enum Fingerprint {
     /// Basic fingerprint that does not spoof the gpu. Used for real gpu based headless instances.
     /// This will bypass the most advanced anti-bots without the speed reduction of a virtual display.
     NativeGPU,
-    /// None - no fingerprint,
+    /// None - no fingerprint and use the default browser fingerprinting. This may be a good option to use at times.
     #[default]
     None,
 }

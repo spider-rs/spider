@@ -710,6 +710,8 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             chromiumoxide::page::wrap_eval_script(&fp_script),
             chromiumoxide::page::wrap_eval_script(&spoof_script)
         ))
+    } else if stealth_mode {
+        Some(chromiumoxide::page::wrap_eval_script(&spoof_script))
     } else {
         None
     };
@@ -1024,7 +1026,7 @@ lazy_static! {
     pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS
         .replace("Intel Open Source Technology Center", "Apple Inc.")
         .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1")
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1)
+        .replacen("{{CANVAS_FP}}", "", 1)
         .replacen("{{SPOOF_FINGERPRINT}}", "", 1)
         .replace("\n", "");
 }
@@ -1033,22 +1035,22 @@ lazy_static! {
 lazy_static! {
     /// The gpu is not enabled.
     pub(crate) static ref FP_JS: String = BASE_FP_JS
+        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)
         .replace("Intel Open Source Technology Center", "NVIDIA Corporation")
         .replace(
             "Mesa DRI Intel(R) Ivybridge Mobile",
             "NVIDIA GeForce GTX 1650/PCIe/SSE2"
         )
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)
         .replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1)
         .replace("\n", "");
     /// The gpu was enabled on the machine. The spoof is not required.
     pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS
+        .replacen("{{CANVAS_FP}}", "", 1)
         .replace("Intel Open Source Technology Center", "NVIDIA Corporation")
         .replace(
             "Mesa DRI Intel(R) Ivybridge Mobile",
             "NVIDIA GeForce GTX 1650/PCIe/SSE2"
         )
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)
         .replacen("{{SPOOF_FINGERPRINT}}", "", 1)
         .replace("\n", "");
 }
@@ -1058,7 +1060,7 @@ lazy_static! {
     /// The gpu is not enabled.
     pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
+    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", "", 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -1066,7 +1068,7 @@ lazy_static! {
     /// The gpu is not enabled.
     pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
+    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", "", 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
 }
 
 lazy_static! {

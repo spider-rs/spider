@@ -1,6 +1,6 @@
 //! cargo run --example anti_bots --features="chrome chrome_intercept real_browser spider_utils/transformations"
 
-use spider::configuration::ChromeEventTracker;
+use spider::configuration::{ChromeEventTracker, Fingerprint};
 use spider::features::chrome_common::{
     RequestInterceptConfiguration, WaitForIdleNetwork, WaitForSelector,
 };
@@ -47,8 +47,8 @@ async fn crawl_website(url: &str) {
         .with_user_agent(Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"))
         .with_stealth(true)
         .with_return_page_links(true)
-        .with_fingerprint(true)
         .with_event_tracker(Some(tracker))
+        .with_fingerprint_advanced(Fingerprint::None)
         .with_proxies(Some(vec!["http://localhost:8888".into()]))
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
