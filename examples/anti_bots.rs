@@ -51,7 +51,7 @@ async fn crawl_website(url: &str) {
         .with_stealth(true)
         .with_return_page_links(true)
         .with_event_tracker(Some(tracker))
-        .with_fingerprint_advanced(Fingerprint::None)
+        .with_fingerprint_advanced( Fingerprint::None  )
         .with_proxies(Some(vec!["http://localhost:8888".into()]))
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()

@@ -1,6 +1,8 @@
 /// Chrome utils
 #[cfg(feature = "chrome")]
 pub mod chrome;
+/// Chrome launch args.
+pub(crate) mod chrome_args;
 /// Common modules for Chrome
 pub mod chrome_common;
 #[cfg(feature = "real_browser")]
@@ -12,6 +14,7 @@ pub mod chrome_spoof;
 #[cfg(feature = "real_browser")]
 /// Viewport
 pub mod chrome_viewport;
+
 /// Decentralized header handling
 #[cfg(feature = "decentralized_headers")]
 pub mod decentralized_headers;

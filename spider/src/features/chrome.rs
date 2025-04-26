@@ -1,3 +1,4 @@
+use crate::features::chrome_args::CHROME_ARGS;
 use crate::utils::log;
 use crate::{
     configuration::{Configuration, Fingerprint},
@@ -11,7 +12,7 @@ use chromiumoxide::cdp::browser_protocol::{
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::page::DISABLE_DIALOGS;
+use chromiumoxide::javascript::spoofs::DISABLE_DIALOGS;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
@@ -632,26 +633,56 @@ pub async fn setup_chrome_interception_base(
     None
 }
 
+/// The user agent types of profiles we support for stealth.
+#[derive(PartialEq, Clone, Copy, Default)]
+enum AgentOs {
+    #[default]
+    /// Linux.
+    Linux,
+    /// Mac.
+    Mac,
+    /// Windows.
+    Windows,
+    /// Android.
+    Android,
+}
+
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
     let stealth_mode = cfg!(feature = "chrome_stealth") || config.stealth_mode;
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
 
     let spoof_script = if stealth_mode {
-        chromiumoxide::page::wrap_eval_script(
-            &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-                &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
-            ),
+        &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+            &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
+            crate::features::chrome_spoof::UserAgentDataSpoofDegree::Real,
         )
     } else {
-        "".into()
+        &Default::default()
     };
 
-    let linux = config
+    let agent_os = config
         .user_agent
         .as_deref()
-        .map(|ua| ua.contains("Chrome") && ua.contains("Linux"))
-        .unwrap_or(false);
+        .map(|ua| {
+            let mut agent_os = AgentOs::Linux;
+            if ua.contains("Chrome") {
+                if ua.contains("Linux") {
+                    agent_os = AgentOs::Linux;
+                } else if ua.contains("Mac") {
+                    agent_os = AgentOs::Mac;
+                } else if ua.contains("Windows") {
+                    agent_os = AgentOs::Windows;
+                } else if ua.contains("Android") {
+                    agent_os = AgentOs::Android;
+                }
+            }
+
+            agent_os
+        })
+        .unwrap_or(AgentOs::Linux);
+
+    let linux = agent_os == AgentOs::Linux;
 
     let mut fingerprint_gpu = false;
     let fingerprint = match config.fingerprint {
@@ -665,53 +696,53 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 
     let fp_script = if fingerprint {
         let fp_script = if linux {
-            if dismiss_dialogs {
-                if fingerprint_gpu {
-                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX_GPU
-                } else {
-                    &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS_LINUX
-                }
+            if fingerprint_gpu {
+                &*crate::features::chrome::FP_JS_GPU_LINUX
             } else {
-                if fingerprint_gpu {
-                    &*crate::features::chrome::FP_JS_CHROME_GPU
-                } else {
-                    &*crate::features::chrome::FP_JS_CHROME
-                }
+                &*crate::features::chrome::FP_JS_LINUX
+            }
+        } else if agent_os == AgentOs::Mac {
+            if fingerprint_gpu {
+                &*crate::features::chrome::FP_JS_GPU_MAC
+            } else {
+                &*crate::features::chrome::FP_JS_MAC
+            }
+        } else if agent_os == AgentOs::Windows {
+            if fingerprint_gpu {
+                &*crate::features::chrome::FP_JS_GPU_WINDOWS
+            } else {
+                &*crate::features::chrome::FP_JS_WINDOWS
             }
         } else {
-            if dismiss_dialogs {
-                &*crate::features::chrome::FP_JS_CHROME_DISABLE_DIALOGS
-            } else {
-                &*crate::features::chrome::FP_JS
-            }
+            &*crate::features::chrome::FP_JS
         };
         fp_script
     } else {
         &Default::default()
     };
 
+    let disable_dialogs = if dismiss_dialogs { DISABLE_DIALOGS } else { "" };
+
     // Final combined script to inject
     let merged_script = if let Some(script) = config.evaluate_on_new_document.as_deref() {
         if fingerprint {
             Some(string_concat!(
-                chromiumoxide::page::wrap_eval_script(&fp_script),
+                &fp_script,
                 chromiumoxide::page::wrap_eval_script(&script),
-                chromiumoxide::page::wrap_eval_script(&spoof_script)
+                &spoof_script,
+                disable_dialogs
             ))
         } else {
             Some(string_concat!(
                 chromiumoxide::page::wrap_eval_script(&script),
-                chromiumoxide::page::wrap_eval_script(&spoof_script),
-                if dismiss_dialogs { DISABLE_DIALOGS } else { "" }
+                &spoof_script,
+                disable_dialogs
             ))
         }
     } else if fingerprint {
-        Some(string_concat!(
-            chromiumoxide::page::wrap_eval_script(&fp_script),
-            chromiumoxide::page::wrap_eval_script(&spoof_script)
-        ))
+        Some(string_concat!(&fp_script, &spoof_script, disable_dialogs))
     } else if stealth_mode {
-        Some(chromiumoxide::page::wrap_eval_script(&spoof_script))
+        Some(string_concat!(&spoof_script, disable_dialogs))
     } else {
         None
     };
@@ -735,7 +766,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     ._enable_stealth_mode(merged_script.as_deref())
                     .await;
             }
-            None => {}
+            None => (),
         }
     };
 
@@ -791,268 +822,67 @@ impl Drop for BrowserController {
     }
 }
 
-/// static chrome arguments to start
-#[cfg(all(feature = "chrome_cpu", feature = "real_browser"))]
-pub static CHROME_ARGS: [&'static str; 27] = [
-    if cfg!(feature = "chrome_headless_new") {
-        "--headless=new"
-    } else {
-        "--headless"
-    },
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-client-side-phishing-detection",
-    "--disable-sync",
-    "--metrics-recording-only",
-    "--disable-default-apps",
-    "--mute-audio",
-    "--no-default-browser-check",
-    "--no-first-run",
-    "--disable-gpu",
-    "--disable-gpu-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling",
-    "--disable-ipc-flooding-protection",
-    "--password-store=basic",
-    "--use-mock-keychain",
-    "--force-fieldtrials=*BackgroundTracing/default/",
-    "--disable-hang-monitor",
-    "--disable-prompt-on-repost",
-    "--disable-domain-reliability",
-    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
-];
-
-/// static chrome arguments to start
-#[cfg(all(not(feature = "chrome_cpu"), feature = "real_browser"))]
-pub static CHROME_ARGS: [&'static str; 24] = [
-    if cfg!(feature = "chrome_headless_new") {
-        "--headless=new"
-    } else {
-        "--headless"
-    },
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-client-side-phishing-detection",
-    "--disable-sync",
-    "--disable-dev-shm-usage",
-    "--metrics-recording-only",
-    "--disable-default-apps",
-    "--mute-audio",
-    "--no-default-browser-check",
-    "--no-first-run",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling",
-    "--disable-ipc-flooding-protection",
-    "--password-store=basic",
-    "--use-mock-keychain",
-    "--force-fieldtrials=*BackgroundTracing/default/",
-    "--disable-hang-monitor",
-    "--disable-prompt-on-repost",
-    "--disable-domain-reliability",
-    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
-];
-
-// One of the configs below is detected by CF bots. We need to take a look at the optimal args 03/25/24.
-#[cfg(all(not(feature = "chrome_cpu"), not(feature = "real_browser")))]
-/// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
-static CHROME_ARGS: [&'static str; 60] = [
-    if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
-    "--no-sandbox",
-    "--no-first-run",
-    "--hide-scrollbars",
-    // "--allow-pre-commit-input",
-    // "--user-data-dir=~/.config/google-chrome",
-    "--allow-running-insecure-content",
-    "--autoplay-policy=user-gesture-required",
-    "--ignore-certificate-errors",
-    "--no-default-browser-check",
-    "--no-zygote",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage", // required or else docker containers may crash not enough memory
-    "--disable-threaded-scrolling",
-    "--disable-demo-mode",
-    "--disable-dinosaur-easter-egg",
-    "--disable-fetching-hints-at-navigation-start",
-    "--disable-site-isolation-trials",
-    "--disable-web-security",
-    "--disable-threaded-animation",
-    "--disable-sync",
-    "--disable-print-preview",
-    "--disable-partial-raster",
-    "--disable-in-process-stack-traces",
-    "--disable-v8-idle-tasks",
-    "--disable-low-res-tiling",
-    "--disable-speech-api",
-    "--disable-smooth-scrolling",
-    "--disable-default-apps",
-    "--disable-prompt-on-repost",
-    "--disable-domain-reliability",
-    "--disable-component-update",
-    "--disable-background-timer-throttling",
-    "--disable-breakpad",
-    "--disable-software-rasterizer",
-    "--disable-extensions",
-    "--disable-popup-blocking",
-    "--disable-hang-monitor",
-    "--disable-image-animation-resync",
-    "--disable-client-side-phishing-detection",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-ipc-flooding-protection",
-    "--disable-background-networking",
-    "--disable-renderer-backgrounding",
-    "--disable-field-trial-config",
-    "--disable-back-forward-cache",
-    "--disable-backgrounding-occluded-windows",
-    "--force-fieldtrials=*BackgroundTracing/default/",
-    // "--enable-automation",
-    "--log-level=3",
-    "--enable-logging=stderr",
-    "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
-    "--metrics-recording-only",
-    "--use-mock-keychain",
-    "--force-color-profile=srgb",
-    "--mute-audio",
-    "--no-service-autorun",
-    "--password-store=basic",
-    "--export-tagged-pdf",
-    "--no-pings",
-    "--use-gl=swiftshader",
-    "--window-size=1920,1080",
-    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
-];
-
-#[cfg(all(feature = "chrome_cpu", not(feature = "real_browser")))]
-/// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
-static CHROME_ARGS: [&'static str; 62] = [
-    if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
-    "--no-sandbox",
-    "--no-first-run",
-    "--hide-scrollbars",
-    // "--allow-pre-commit-input",
-    // "--user-data-dir=~/.config/google-chrome",
-    "--allow-running-insecure-content",
-    "--autoplay-policy=user-gesture-required",
-    "--ignore-certificate-errors",
-    "--no-default-browser-check",
-    "--no-zygote",
-    "--in-process-gpu",
-    "--disable-gpu",
-    "--disable-gpu-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage", // required or else docker containers may crash not enough memory
-    "--disable-threaded-scrolling",
-    "--disable-demo-mode",
-    "--disable-dinosaur-easter-egg",
-    "--disable-fetching-hints-at-navigation-start",
-    "--disable-site-isolation-trials",
-    "--disable-web-security",
-    "--disable-threaded-animation",
-    "--disable-sync",
-    "--disable-print-preview",
-    "--disable-in-process-stack-traces",
-    "--disable-v8-idle-tasks",
-    "--disable-low-res-tiling",
-    "--disable-speech-api",
-    "--disable-smooth-scrolling",
-    "--disable-default-apps",
-    "--disable-prompt-on-repost",
-    "--disable-domain-reliability",
-    "--disable-component-update",
-    "--disable-background-timer-throttling",
-    "--disable-breakpad",
-    "--disable-software-rasterizer",
-    "--disable-extensions",
-    "--disable-popup-blocking",
-    "--disable-hang-monitor",
-    "--disable-image-animation-resync",
-    "--disable-client-side-phishing-detection",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-ipc-flooding-protection",
-    "--disable-background-networking",
-    "--disable-renderer-backgrounding",
-    "--disable-field-trial-config",
-    "--disable-back-forward-cache",
-    "--disable-backgrounding-occluded-windows",
-    "--force-fieldtrials=*BackgroundTracing/default/",
-    // "--enable-automation",
-    "--log-level=3",
-    "--enable-logging=stderr",
-    "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
-    "--metrics-recording-only",
-    "--use-mock-keychain",
-    "--force-color-profile=srgb",
-    "--mute-audio",
-    "--no-service-autorun",
-    "--password-store=basic",
-    "--export-tagged-pdf",
-    "--no-pings",
-    "--use-gl=swiftshader",
-    "--window-size=1920,1080",
-    "--disable-features=InterestFeedContentSuggestions,PrivacySandboxSettings4,AutofillServerCommunication,CalculateNativeWinOcclusion,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls,DestroyProfileOnBrowserClose,MediaRouter,DialMediaRouteProvider,AcceptCHFrame,AutoExpandDetailsElement,CertificateTransparencyComponentUpdater,AvoidUnnecessaryBeforeUnloadCheckSync,Translate"
-];
-
-// pub static CANVAS_FP_LINUX_JS: &str = r#"const t=HTMLCanvasElement.prototype.toBlob,e=HTMLCanvasElement.prototype.toDataURL,o=CanvasRenderingContext2D.prototype.getImageData,n=(t,e)=>{const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},n=t.width,r=t.height,a=o=>{const a=o*4;return[a,a+1,a+2,a+3]},i=o=>{for(let a=0;a<r;a++)for(let i=0;i<n;i++){const[l,c,d,h]=a*n+i<<2;o.data[l]+=o.r,o.data[c]+=o.g,o.data[d]+=o.b,o.data[h]+=o.a}};let c=o.apply(e,[0,0,n,r]);i(c),e.putImageData(c,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,"toBlob",{value:function(){return n(this,this.getContext("2d")),t.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,"toDataURL",{value:function(){return n(this,this.getContext("2d")),e.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,"getImageData",{value:function(){return n(this.canvas,this),o.apply(this,arguments)}});"#;
 /// Mac canvas fingerprint.
-pub static CANVAS_FP_MAC: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_MAC: &str = r#"(()=>{const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let i=0;i<n;i++)for(let f=0;f<r;f++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}}); })();"#;
 /// Windows canvas fingerprint.
-pub static CANVAS_FP_WINDOWS: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(6*Math.random())-3,g:Math.floor(6*Math.random())-3,b:Math.floor(6*Math.random())-3,a:Math.floor(6*Math.random())-3},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let f=0;f<r;f++)for(let i=0;i<n;i++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_WINDOWS: &str = r#"(()=>{const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){let o={r:Math.floor(6*Math.random())-3,g:Math.floor(6*Math.random())-3,b:Math.floor(6*Math.random())-3,a:Math.floor(6*Math.random())-3},r=e.width,n=e.height,a=getImageData.apply(t,[0,0,r,n]);for(let f=0;f<r;f++)for(let i=0;i<n;i++){let l=i*(4*r)+4*f;a.data[l+0]+=o.r,a.data[l+1]+=o.g,a.data[l+2]+=o.b,a.data[l+3]+=o.a}t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}}); })();"#;
 /// Linux canvas fingerprint.
-pub static CANVAS_FP_LINUX: &str = r#"const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=t.getImageData(0,0,r,n);for(let i=0;i<r*n*4;i+=4)a.data[i]+=o.r,a.data[i+1]+=o.g,a.data[i+2]+=o.b,a.data[i+3]+=o.a;t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}});"#;
+pub static CANVAS_FP_LINUX: &str = r#"(()=>{const toBlob=HTMLCanvasElement.prototype.toBlob,toDataURL=HTMLCanvasElement.prototype.toDataURL,getImageData=CanvasRenderingContext2D.prototype.getImageData,noisify=function(e,t){const o={r:Math.floor(10*Math.random())-5,g:Math.floor(10*Math.random())-5,b:Math.floor(10*Math.random())-5,a:Math.floor(10*Math.random())-5},r=e.width,n=e.height,a=t.getImageData(0,0,r,n);for(let i=0;i<r*n*4;i+=4)a.data[i]+=o.r,a.data[i+1]+=o.g,a.data[i+2]+=o.b,a.data[i+3]+=o.a;t.putImageData(a,0,0)};Object.defineProperty(HTMLCanvasElement.prototype,'toBlob',{value:function(){return noisify(this,this.getContext('2d')),toBlob.apply(this,arguments)}}),Object.defineProperty(HTMLCanvasElement.prototype,'toDataURL',{value:function(){return noisify(this,this.getContext('2d')),toDataURL.apply(this,arguments)}}),Object.defineProperty(CanvasRenderingContext2D.prototype,'getImageData',{value:function(){return noisify(this.canvas,this),getImageData.apply(this,arguments)}}); })();"#;
 
 /// Fingerprint JS to spoof.
-pub static SPOOF_FINGERPRINT: &str = r###"const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let r=e.length,a=Array(t),n=Array(r);for(t>r&&(t=r);t--;){let o=Math.floor(Math.random()*r);a[t]=e[o in n?n[o]:o],n[o]=--r in n?n[r]:r}return a}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,"bufferData",{value:function(){let e=Math.floor(10*Math.random()),r=.1*Math.random()*arguments[1][e];return arguments[1][e]+=r,t.apply(this,arguments)}})},parameter:e=>{e.prototype.getParameter;Object.defineProperty(e.prototype,"getParameter",{value:function(){let e=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return e;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext),config.spoof.webgl.buffer(WebGL2RenderingContext),config.spoof.webgl.parameter(WebGLRenderingContext),config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,"offsetHeight",{get:function(){let e=Math.floor(this.getBoundingClientRect().height);return e&&1===rand.sign()?e+rand.noise():e}}),Object.defineProperty(HTMLElement.prototype,"offsetWidth",{get:function(){let e=Math.floor(this.getBoundingClientRect().width);return e&&1===rand.sign()?e+rand.noise():e}});const ctx={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,"getChannelData",{value:function(){let e=t.apply(this,arguments);if(ctx.BUFFER!==e){ctx.BUFFER=e;for(let t=0;t<e.length;t+=100){e[Math.floor(Math.random()*t)]+=1e-7*Math.random()}}return e}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,"createAnalyser",{value:function(){let e=t.apply(this,arguments),r=e.__proto__.getFloatFrequencyData;return Object.defineProperty(e.__proto__,"getFloatFrequencyData",{value:function(){let e=r.apply(this,arguments);for(let e=0;e<arguments[0].length;e+=100){let t=Math.floor(Math.random()*e);arguments[0][t]+=.1*Math.random()}return e}}),e}})}};ctx.getChannelData(AudioBuffer),ctx.createAnalyser(AudioContext),ctx.getChannelData(OfflineAudioContext),ctx.createAnalyser(OfflineAudioContext),window.webkitRTCPeerConnection=void 0,window.RTCPeerConnection=void 0,window.MediaStreamTrack=void 0;"###;
-
+pub static SPOOF_FINGERPRINT: &str = r###"(()=>{const config={random:{value:()=>Math.random(),item:e=>e[Math.floor(e.length*Math.random())],array:e=>new Int32Array([e[Math.floor(e.length*Math.random())],e[Math.floor(e.length*Math.random())]]),items:(e,t)=>{let r=e.length,a=Array(t),n=Array(r);for(t>r&&(t=r);t--;){let o=Math.floor(Math.random()*r);a[t]=e[o in n?n[o]:o],n[o]=--r in n?n[r]:r}return a}},spoof:{webgl:{buffer:e=>{let t=e.prototype.bufferData;Object.defineProperty(e.prototype,'bufferData',{value:function(){let e=Math.floor(10*Math.random()),r=.1*Math.random()*arguments[1][e];return arguments[1][e]+=r,t.apply(this,arguments)}})},parameter:e=>{Object.defineProperty(e.prototype,'getParameter',{value:function(){let a=new Float32Array([1,8192]);switch(arguments[0]){case 3415:return 0;case 3414:return 24;case 35661:return config.random.items([128,192,256]);case 3386:return config.random.array([8192,16384,32768]);case 36349:case 36347:return config.random.item([4096,8192]);case 34047:case 34921:return config.random.items([2,4,8,16]);case 7937:case 33901:case 33902:return a;case 34930:case 36348:case 35660:return config.random.item([16,32,64]);case 34076:case 34024:case 3379:return config.random.item([16384,32768]);case 3413:case 3412:case 3411:case 3410:case 34852:return config.random.item([2,4,8,16]);default:return config.random.item([0,2,4,8,16,32,64,128,256,512,1024,2048,4096])}}})}}}};config.spoof.webgl.buffer(WebGLRenderingContext);config.spoof.webgl.buffer(WebGL2RenderingContext);config.spoof.webgl.parameter(WebGLRenderingContext);config.spoof.webgl.parameter(WebGL2RenderingContext);const rand={noise:()=>Math.floor(Math.random()+(Math.random()<Math.random()?-1:1)*Math.random()),sign:()=>[-1,-1,-1,-1,-1,-1,1,-1,-1,-1][Math.floor(10*Math.random())]};Object.defineProperty(HTMLElement.prototype,'offsetHeight',{get:function(){let e=Math.floor(this.getBoundingClientRect().height);return e&&1===rand.sign()?e+rand.noise():e}});Object.defineProperty(HTMLElement.prototype,'offsetWidth',{get:function(){let e=Math.floor(this.getBoundingClientRect().width);return e&&1===rand.sign()?e+rand.noise():e}});const ctx={BUFFER:null,getChannelData:e=>{let t=e.prototype.getChannelData;Object.defineProperty(e.prototype,'getChannelData',{value:function(){let d=t.apply(this,arguments);if(ctx.BUFFER!==d){ctx.BUFFER=d;for(let i=0;i<d.length;i+=100){d[Math.floor(Math.random()*i)]+=1e-7*Math.random()}}return d}})},createAnalyser:e=>{let t=e.prototype.__proto__.createAnalyser;Object.defineProperty(e.prototype.__proto__,'createAnalyser',{value:function(){let a=t.apply(this,arguments),r=a.__proto__.getFloatFrequencyData;Object.defineProperty(a.__proto__,'getFloatFrequencyData',{value:function(){let arr=r.apply(this,arguments);for(let i=0;i<arguments[0].length;i+=100){arguments[0][Math.floor(Math.random()*i)]+=.1*Math.random()}return arr}});return a}})} };ctx.getChannelData(AudioBuffer);ctx.createAnalyser(AudioContext);ctx.getChannelData(OfflineAudioContext);ctx.createAnalyser(OfflineAudioContext);window.webkitRTCPeerConnection=void 0;window.RTCPeerConnection=void 0;window.MediaStreamTrack=void 0; })();"###;
 /// Base fingerprint JS.
 pub static BASE_FP_JS: &str = r#"{{CANVAS_FP}}{{SPOOF_FINGERPRINT}}"#;
+
+/// Spoof the m1 gpu from the code.
+pub(crate) fn spoof_m1_gpu(spoof: &str) -> String {
+    spoof
+        .replace("Intel Open Source Technology Center", "Apple Inc.")
+        .replace(
+            "Mesa DRI Intel(R) Ivybridge Mobile",
+            "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Max, Unspecified Version)",
+        )
+}
+
+/// Spoof the NVIDIA GeForce from the code..
+pub(crate) fn spoof_windows_nvidea_gpu(spoof: &str) -> String {
+    spoof
+        .replace("Intel Open Source Technology Center", "NVIDIA Corporation")
+        .replace(
+            "Mesa DRI Intel(R) Ivybridge Mobile",
+            "NVIDIA GeForce GTX 1650/PCIe/SSE2",
+        )
+}
+
+lazy_static! {
+    /// Fingerprint gpu is not enabled for Mac.
+    pub(crate) static ref FP_JS_MAC: String =  spoof_m1_gpu(&BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1)).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1).replace("\n", "");
+    /// Fingerprint gpu was enabled on the Mac. The full spoof is not required.
+    pub(crate) static ref FP_JS_GPU_MAC: String = spoof_m1_gpu(&BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1)).replacen("{{SPOOF_FINGERPRINT}}", "", 1).replace("\n", "");
+    /// Fingerprint gpu is not enabled for Linux.
+    pub(crate) static ref FP_JS_LINUX: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
+    /// Fingerprint gpu was enabled on the Linux. The full spoof is not required.
+    pub(crate) static ref FP_JS_GPU_LINUX: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
+    /// Fingerprint gpu is not enabled for WINDOWS.
+    pub(crate) static ref FP_JS_WINDOWS: String = spoof_windows_nvidea_gpu(&BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
+    /// Fingerprint gpu was enabled on the WINDOWS. The full spoof is not required.
+    pub(crate) static ref FP_JS_GPU_WINDOWS: String = spoof_windows_nvidea_gpu(&BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
+}
 
 #[cfg(target_os = "macos")]
 lazy_static! {
     /// The gpu is not enabled.
-    pub(crate) static ref FP_JS: String = BASE_FP_JS
-        .replace("Intel Open Source Technology Center", "Apple Inc.")
-        .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1")
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_MAC, 1)
-        .replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1)
-        .replace("\n", "");
+    pub(crate) static ref FP_JS: String = FP_JS_MAC.clone();
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS
-        .replace("Intel Open Source Technology Center", "Apple Inc.")
-        .replace("Mesa DRI Intel(R) Ivybridge Mobile", "Apple M1")
-        .replacen("{{CANVAS_FP}}", "", 1)
-        .replacen("{{SPOOF_FINGERPRINT}}", "", 1)
-        .replace("\n", "");
+    pub(crate) static ref FP_JS_GPU: String = FP_JS_GPU_MAC.clone();
 }
 
 #[cfg(target_os = "windows")]
 lazy_static! {
     /// The gpu is not enabled.
-    pub(crate) static ref FP_JS: String = BASE_FP_JS
-        .replacen("{{CANVAS_FP}}", CANVAS_FP_WINDOWS, 1)
-        .replace("Intel Open Source Technology Center", "NVIDIA Corporation")
-        .replace(
-            "Mesa DRI Intel(R) Ivybridge Mobile",
-            "NVIDIA GeForce GTX 1650/PCIe/SSE2"
-        )
-        .replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1)
-        .replace("\n", "");
+    pub(crate) static ref FP_JS: String = FP_JS_WINDOWS.clone();
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS
-        .replacen("{{CANVAS_FP}}", "", 1)
-        .replace("Intel Open Source Technology Center", "NVIDIA Corporation")
-        .replace(
-            "Mesa DRI Intel(R) Ivybridge Mobile",
-            "NVIDIA GeForce GTX 1650/PCIe/SSE2"
-        )
-        .replacen("{{SPOOF_FINGERPRINT}}", "", 1)
-        .replace("\n", "");
+    pub(crate) static ref FP_JS_GPU: String = FP_JS_GPU_WINDOWS.clone();
 }
 
 #[cfg(target_os = "linux")]
@@ -1060,7 +890,7 @@ lazy_static! {
     /// The gpu is not enabled.
     pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", "", 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
+    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -1068,36 +898,5 @@ lazy_static! {
     /// The gpu is not enabled.
     pub(crate) static ref FP_JS: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
     /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", "", 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
-}
-
-lazy_static! {
-    /// Fingerprint handling.
-    pub(crate) static ref FP_JS_CHROME: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", SPOOF_FINGERPRINT, 1) .replace("\n", "");
-    /// The gpu was enabled on the machine. The spoof is not required.
-    pub(crate) static ref FP_JS_CHROME_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}", CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
-    /// Fingerprint and dismiss Dom
-    pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS: String = string_concat!(
-        &FP_JS,
-        ";",
-        DISABLE_DIALOGS
-    );
-    /// Fingerprint and dismiss Dom
-    pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS_GPU: String = string_concat!(
-        &FP_JS_GPU,
-        ";",
-        DISABLE_DIALOGS
-    );
-    /// Fingerprint and dismiss Dom - Linux
-    pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS_LINUX: String = string_concat!(
-        &FP_JS_CHROME,
-        ";",
-        DISABLE_DIALOGS
-    );
-    /// Fingerprint and dismiss Dom - Linux
-    pub(crate) static ref FP_JS_CHROME_DISABLE_DIALOGS_LINUX_GPU: String = string_concat!(
-        &FP_JS_CHROME_GPU,
-        ";",
-        DISABLE_DIALOGS
-    );
+    pub(crate) static ref FP_JS_GPU: String = BASE_FP_JS.replacen("{{CANVAS_FP}}",CANVAS_FP_LINUX, 1).replacen("{{SPOOF_FINGERPRINT}}", "", 1) .replace("\n", "");
 }

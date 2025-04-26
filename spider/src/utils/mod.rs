@@ -2341,7 +2341,7 @@ pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
 }
 
 /// Block streaming
-fn block_streaming(res: &Response, only_html: bool) -> bool {
+pub(crate) fn block_streaming(res: &Response, only_html: bool) -> bool {
     let mut block_streaming = false;
 
     if only_html {
@@ -2353,6 +2353,7 @@ fn block_streaming(res: &Response, only_html: bool) -> bool {
             }
         }
     }
+
     block_streaming
 }
 
@@ -2450,7 +2451,7 @@ where
 {
     let u = res.url().as_str();
 
-    let final_url = if target_url != u {
+    let final_url: Option<String> = if target_url != u {
         Some(u.into())
     } else {
         None

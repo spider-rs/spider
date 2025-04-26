@@ -33,6 +33,13 @@ use crate::handler::domworld::DOMWorldKind;
 use crate::handler::httpfuture::HttpFuture;
 use crate::handler::target::{GetName, GetParent, GetUrl, TargetMessage};
 use crate::handler::PageInner;
+use crate::javascript::{
+    extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML},
+    spoofs::{
+        DISABLE_DIALOGS, GPU_SPOOF_SCRIPT, HIDE_CHROME, HIDE_PERMISSIONS, HIDE_WEBDRIVER,
+        HIDE_WEBGL, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
+    },
+};
 use crate::js::{Evaluation, EvaluationResult};
 use crate::layout::Point;
 use crate::listeners::{EventListenerRequest, EventStream};
@@ -41,27 +48,6 @@ use crate::{utils, ArcHttpRequest};
 #[derive(Debug, Clone)]
 pub struct Page {
     inner: Arc<PageInner>,
-}
-
-// use https://github.com/spider-rs/headless-browser for ideal default settings.
-pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
-pub const HIDE_WEBGL: &str = "const getParameter=WebGLRenderingContext.getParameter;WebGLRenderingContext.prototype.getParameter=function(parameter){ if (parameter === 37445) { return 'Google Inc. (NVIDIA)';} if (parameter === 37446) { return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Direct3D11 vs_5_0 ps_5_0, D3D11-27.21.14.5671)' } return getParameter(parameter);};";
-pub const HIDE_PERMISSIONS: &str = "(()=>{const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) }; })();";
-pub const HIDE_WEBDRIVER: &str = r#"Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>!1,configurable:!0,enumerable:!1});"#;
-pub const DISABLE_DIALOGS: &str  = "window.alert=function(){};window.confirm=function(){return true;};window.prompt=function(){return '';};";
-pub const NAVIGATOR_SCRIPT: &str = r#"(()=>{const nativeGet=new Function("return true");Object.defineProperty(nativeGet,"toString",{value:()=>"function get pdfViewerEnabled() { [native code] }"});Object.defineProperty(Navigator.prototype,"pdfViewerEnabled",{get:nativeGet,configurable:!0});})()"#;
-pub const PLUGIN_AND_MIMETYPE_SPOOF: &str = r#"(()=>{const m=[{type:'application/pdf',suffixes:'pdf',description:'Portable Document Format'},{type:'text/pdf',suffixes:'pdf',description:'Portable Document Format'}],names=['PDF Viewer','Chrome PDF Viewer','Chromium PDF Viewer','Microsoft Edge PDF Viewer','WebKit built-in PDF'],plugins=[],mimes=[(()=>{const mt={__proto__:MimeType.prototype};Object.defineProperties(mt,{type:{value:m[0].type,configurable:true},suffixes:{value:m[0].suffixes,configurable:true},description:{value:m[0].description,configurable:true}});return mt})(),(()=>{const mt={__proto__:MimeType.prototype};Object.defineProperties(mt,{type:{value:m[1].type,configurable:true},suffixes:{value:m[1].suffixes,configurable:true},description:{value:m[1].description,configurable:true}});return mt})()];names.forEach(name=>{const pl={__proto__:Plugin.prototype,length:2,name,filename:'internal-pdf-viewer',description:'Portable Document Format'};Object.defineProperty(mimes[0],'enabledPlugin',{value:pl,configurable:true});Object.defineProperty(mimes[1],'enabledPlugin',{value:pl,configurable:true});pl[0]=mimes[0];pl[1]=mimes[1];plugins.push(pl)});Object.defineProperty(PluginArray.prototype,'item',{value:function(i){return this[i]||null},configurable:true});Object.defineProperty(PluginArray.prototype,'namedItem',{value:function(n){return this[n]||null},configurable:true});Object.defineProperty(MimeTypeArray.prototype,'item',{value:function(i){return this[i]||null},configurable:true});Object.defineProperty(MimeTypeArray.prototype,'namedItem',{value:function(n){return this[n]||null},configurable:true});const pa=Object.create(PluginArray.prototype);plugins.forEach((p,i)=>{Object.defineProperty(pa,i,{value:p,configurable:true,enumerable:false});Object.defineProperty(pa,p.name,{value:p,configurable:true,enumerable:false})});Object.defineProperty(pa,'length',{value:plugins.length,configurable:true,enumerable:false});const ma=Object.create(MimeTypeArray.prototype);mimes.forEach((mt,i)=>{Object.defineProperty(ma,i,{value:mt,configurable:true,enumerable:false});Object.defineProperty(ma,mt.type,{value:mt,configurable:true,enumerable:false})});Object.defineProperty(ma,'length',{value:mimes.length,configurable:true,enumerable:false});function g(v,n){const f=()=>v;Object.defineProperty(f,'toString',{value:()=>`function get ${n}() { [native code] }`,configurable:true});return f}Object.defineProperties(Navigator.prototype,{plugins:{get:g(pa,'plugins'),configurable:true,enumerable:false},mimeTypes:{get:g(ma,'mimeTypes'),configurable:true,enumerable:false},pdfViewerEnabled:{get:g(true,'pdfViewerEnabled'),configurable:true,enumerable:false}})})()"#;
-pub const GPU_SPOOF_SCRIPT: &str = r#"class WGSLanguageFeatures{constructor(){this.size=4}}class GPU{get wgslLanguageFeatures(){return new WGSLanguageFeatures()}requestAdapter(){return Promise.resolve({requestDevice:()=>Promise.resolve({})})}getPreferredCanvasFormat(){return'bgra8unorm'}get [Symbol.toStringTag](){return'GPU'}}Object.defineProperty(Navigator.prototype,'gpu',{get:()=>new GPU(),configurable:true,enumerable:false});"#;
-pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
-
-/// The outer HTML of a webpage.
-const OUTER_HTML: &str = r###"{let rv = ''; if(document.doctype){rv+=new XMLSerializer().serializeToString(document.doctype);} if(document.documentElement){rv+=document.documentElement.outerHTML;} rv}"###;
-/// XML serializer for custom pages or testing.
-const FULL_XML_SERIALIZER_JS: &str = "(()=>{let e=document.querySelector('#webkit-xml-viewer-source-xml');let x=e?e.innerHTML:new XMLSerializer().serializeToString(document);return x.startsWith('<?xml')?x:'<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n'+x})()";
-
-/// Generate the hide plugins script.
-fn generate_hide_plugins() -> String {
-    format!("{}", PLUGIN_AND_MIMETYPE_SPOOF)
 }
 
 /// Tier of stealth to use.
@@ -88,6 +74,11 @@ fn build_stealth_script(tier: Tier) -> String {
     } else {
         Default::default()
     }
+}
+
+/// Generate the hide plugins script.
+fn generate_hide_plugins() -> String {
+    format!("{}{}", NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF)
 }
 
 /// Simple function to wrap the eval script safely.

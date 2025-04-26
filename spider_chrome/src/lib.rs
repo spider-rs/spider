@@ -62,6 +62,23 @@
 
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
+pub mod async_process;
+pub mod auth;
+pub mod browser;
+pub(crate) mod cmd;
+pub mod conn;
+pub mod detection;
+pub mod element;
+pub mod error;
+pub mod handler;
+pub mod javascript;
+pub mod js;
+pub mod keys;
+pub mod layout;
+pub mod listeners;
+pub mod page;
+pub mod utils;
+
 use crate::handler::http::HttpRequest;
 use std::sync::Arc;
 
@@ -78,25 +95,10 @@ pub use crate::fetcher::{BrowserFetcher, BrowserFetcherOptions};
 pub use crate::handler::Handler;
 pub use crate::page::Page;
 
-pub mod auth;
-pub mod browser;
-pub(crate) mod cmd;
-pub mod conn;
-pub mod detection;
-pub mod element;
-pub mod error;
 #[cfg(feature = "fetcher")]
 pub mod fetcher {
     pub use chromiumoxide_fetcher::*;
 }
-pub mod async_process;
-pub mod handler;
-pub mod js;
-pub mod keys;
-pub mod layout;
-pub mod listeners;
-pub mod page;
-pub mod utils;
 
 pub type ArcHttpRequest = Option<Arc<HttpRequest>>;
 

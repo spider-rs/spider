@@ -944,7 +944,10 @@ impl Page {
             AllowedDomainTypes,
         };
         let page_response: PageResponse = match client.get(url).send().await {
-            Ok(res) if crate::utils::valid_parsing_status(&res) => {
+            Ok(res)
+                if crate::utils::valid_parsing_status(&res)
+                    && !crate::utils::block_streaming(&res, only_html) =>
+            {
                 let cell = if r_settings.ssg_build {
                     Some(tokio::sync::OnceCell::new())
                 } else {
