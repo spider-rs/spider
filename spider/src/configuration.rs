@@ -141,6 +141,7 @@ pub struct RequestProxy {
     derive(PartialEq)
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files. This may slow down crawls if robots.txt file has a delay included.
     pub respect_robots_txt: bool,
