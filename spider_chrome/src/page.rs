@@ -36,8 +36,8 @@ use crate::handler::PageInner;
 use crate::javascript::{
     extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML},
     spoofs::{
-        DISABLE_DIALOGS, GPU_SPOOF_SCRIPT, HIDE_CHROME, HIDE_PERMISSIONS, HIDE_WEBDRIVER,
-        HIDE_WEBGL, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
+        DISABLE_DIALOGS, GPU_SPOOF_SCRIPT, GPU_SPOOF_SCRIPT_MAC, HIDE_CHROME, HIDE_PERMISSIONS,
+        HIDE_WEBDRIVER, HIDE_WEBGL, HIDE_WEBGL_MAC, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
     },
 };
 use crate::js::{Evaluation, EvaluationResult};
@@ -55,22 +55,56 @@ pub struct Page {
 enum Tier {
     /// Basic spoofing.
     Basic,
+    /// Basic spoofing without webgl.
+    BasicNoWebgl,
     /// Mid spoofing.
     Mid,
     /// Full spoofing.
     Full,
 }
 
+/// The user agent types of profiles we support for stealth.
+#[derive(PartialEq, Clone, Copy, Default, Debug)]
+pub enum AgentOs {
+    #[default]
+    /// Linux.
+    Linux,
+    /// Mac.
+    Mac,
+    /// Windows.
+    Windows,
+    /// Android.
+    Android,
+}
+
 /// Generate the initial stealth script to send in one command.
-fn build_stealth_script(tier: Tier) -> String {
+fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
+    let spoof_gpu = if os == AgentOs::Mac {
+        GPU_SPOOF_SCRIPT_MAC
+    } else {
+        GPU_SPOOF_SCRIPT
+    };
+
+    let spoof_webgl = if os == AgentOs::Mac {
+        HIDE_WEBGL_MAC
+    } else {
+        HIDE_WEBGL
+    };
+
     if tier == Tier::Basic {
         format!(
-            r#"{HIDE_CHROME};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF}"#
+            r#"{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+        )
+    } else if tier == Tier::BasicNoWebgl {
+        format!(
+            r#"{HIDE_CHROME};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
         )
     } else if tier == Tier::Mid {
-        format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{GPU_SPOOF_SCRIPT};")
+        format!(
+            r#"{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+        )
     } else if tier == Tier::Full {
-        format!("{HIDE_CHROME};{HIDE_WEBGL};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{GPU_SPOOF_SCRIPT};")
+        format!("{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
     } else {
         Default::default()
     }
@@ -111,11 +145,16 @@ impl Page {
     /// Removes the `navigator.webdriver` property
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
-    pub async fn _enable_stealth_mode(&self, custom_script: Option<&str>) -> Result<()> {
+    pub async fn _enable_stealth_mode(
+        &self,
+        custom_script: Option<&str>,
+        os: Option<AgentOs>,
+    ) -> Result<()> {
+        let os = os.unwrap_or_default();
         let source = if let Some(cs) = custom_script {
-            format!("{};{cs}", build_stealth_script(Tier::Basic))
+            format!("{};{cs}", build_stealth_script(Tier::Basic, os))
         } else {
-            build_stealth_script(Tier::Basic)
+            build_stealth_script(Tier::Basic, os)
         };
         let source = wrap_eval_script(&source);
 
@@ -129,7 +168,16 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode(&self) -> Result<()> {
-        let _ = self._enable_stealth_mode(None).await;
+        let _ = self._enable_stealth_mode(None, None).await;
+
+        Ok(())
+    }
+
+    /// Changes your user_agent, removes the `navigator.webdriver` property
+    /// changes permissions, pluggins rendering contexts and the `window.chrome`
+    /// property to make it harder to detect the scraper as a bot
+    pub async fn enable_stealth_mode_os(&self, os: Option<AgentOs>) -> Result<()> {
+        let _ = self._enable_stealth_mode(None, os).await;
 
         Ok(())
     }
@@ -138,7 +186,10 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode_with_agent(&self, ua: &str) -> Result<()> {
-        let _ = tokio::join!(self._enable_stealth_mode(None), self.set_user_agent(ua));
+        let _ = tokio::join!(
+            self._enable_stealth_mode(None, None),
+            self.set_user_agent(ua)
+        );
         Ok(())
     }
 
@@ -147,7 +198,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS)),
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None),
             self.set_user_agent(ua)
         );
         Ok(())
@@ -158,7 +209,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_agent_and_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS)),
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None),
             self.set_user_agent(ua)
         );
         Ok(())

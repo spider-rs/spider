@@ -633,22 +633,9 @@ pub async fn setup_chrome_interception_base(
     None
 }
 
-/// The user agent types of profiles we support for stealth.
-#[derive(PartialEq, Clone, Copy, Default)]
-enum AgentOs {
-    #[default]
-    /// Linux.
-    Linux,
-    /// Mac.
-    Mac,
-    /// Windows.
-    Windows,
-    /// Android.
-    Android,
-}
-
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+    use chromiumoxide::page::AgentOs;
     let stealth_mode = cfg!(feature = "chrome_stealth") || config.stealth_mode;
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
 
@@ -751,7 +738,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         match config.user_agent.as_deref() {
             Some(agent) if stealth_mode => {
                 let _ = tokio::join!(
-                    chrome_page._enable_stealth_mode(merged_script.as_deref()),
+                    chrome_page._enable_stealth_mode(merged_script.as_deref(), Some(agent_os)),
                     chrome_page.set_user_agent(agent.as_str())
                 );
             }
@@ -763,7 +750,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             }
             None if stealth_mode => {
                 let _ = chrome_page
-                    ._enable_stealth_mode(merged_script.as_deref())
+                    ._enable_stealth_mode(merged_script.as_deref(), Some(agent_os))
                     .await;
             }
             None => (),
