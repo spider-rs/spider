@@ -36,8 +36,9 @@ use crate::handler::PageInner;
 use crate::javascript::{
     extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML},
     spoofs::{
-        DISABLE_DIALOGS, GPU_SPOOF_SCRIPT, GPU_SPOOF_SCRIPT_MAC, HIDE_CHROME, HIDE_PERMISSIONS,
-        HIDE_WEBDRIVER, HIDE_WEBGL, HIDE_WEBGL_MAC, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
+        DISABLE_DIALOGS, GPU_REQUEST_ADAPTER, GPU_REQUEST_ADAPTER_MAC, GPU_SPOOF_SCRIPT,
+        GPU_SPOOF_SCRIPT_MAC, HIDE_CHROME, HIDE_PERMISSIONS, HIDE_WEBDRIVER, HIDE_WEBGL,
+        HIDE_WEBGL_MAC, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
     },
 };
 use crate::js::{Evaluation, EvaluationResult};
@@ -79,21 +80,29 @@ pub enum AgentOs {
 
 /// Generate the initial stealth script to send in one command.
 fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
-    let spoof_gpu = if os == AgentOs::Mac {
+    let mac_spoof = os == AgentOs::Mac;
+
+    let spoof_gpu = if mac_spoof {
         GPU_SPOOF_SCRIPT_MAC
     } else {
         GPU_SPOOF_SCRIPT
     };
 
-    let spoof_webgl = if os == AgentOs::Mac {
+    let spoof_webgl = if mac_spoof {
         HIDE_WEBGL_MAC
     } else {
         HIDE_WEBGL
     };
 
+    let spoof_gpu_adapter = if mac_spoof {
+        GPU_REQUEST_ADAPTER_MAC
+    } else {
+        GPU_REQUEST_ADAPTER
+    };
+
     if tier == Tier::Basic {
         format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
         )
     } else if tier == Tier::BasicNoWebgl {
         format!(
@@ -101,10 +110,10 @@ fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
         )
     } else if tier == Tier::Mid {
         format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
         )
     } else if tier == Tier::Full {
-        format!("{HIDE_CHROME};{spoof_webgl};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
+        format!("{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
     } else {
         Default::default()
     }
