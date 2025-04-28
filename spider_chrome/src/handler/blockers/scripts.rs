@@ -10,6 +10,7 @@ lazy_static::lazy_static! {
             "https://www.googletagmanager.com/",
             "https://googletagmanager.com/",
             "https://cm.g.doubleclick.net/",
+            "https://www.googleoptimize.com/optimize.js?id=GTM",
             "https://ads.pubmatic.com/AdServer/",
             "https://js.hsadspixel.net",
             "https://www.google.com/adsense/",
