@@ -636,10 +636,11 @@ pub async fn setup_chrome_interception_base(
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
     use chromiumoxide::page::AgentOs;
-    let stealth_mode = cfg!(feature = "chrome_stealth") || config.stealth_mode;
+    let stealth_mode = config.stealth_mode;
+    let stealth = stealth_mode.stealth();
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
 
-    let spoof_script = if stealth_mode {
+    let spoof_script = if stealth {
         &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
             &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
             crate::features::chrome_spoof::UserAgentDataSpoofDegree::Real,
@@ -715,20 +716,20 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         if fingerprint {
             Some(string_concat!(
                 &fp_script,
-                chromiumoxide::page::wrap_eval_script(&script),
                 &spoof_script,
-                disable_dialogs
+                disable_dialogs,
+                chromiumoxide::page::wrap_eval_script(&script)
             ))
         } else {
             Some(string_concat!(
-                chromiumoxide::page::wrap_eval_script(&script),
                 &spoof_script,
-                disable_dialogs
+                disable_dialogs,
+                chromiumoxide::page::wrap_eval_script(&script)
             ))
         }
     } else if fingerprint {
         Some(string_concat!(&fp_script, &spoof_script, disable_dialogs))
-    } else if stealth_mode {
+    } else if stealth {
         Some(string_concat!(&spoof_script, disable_dialogs))
     } else {
         None
@@ -736,9 +737,13 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 
     let stealth = async {
         match config.user_agent.as_deref() {
-            Some(agent) if stealth_mode => {
+            Some(agent) if stealth => {
                 let _ = tokio::join!(
-                    chrome_page._enable_stealth_mode(merged_script.as_deref(), Some(agent_os)),
+                    chrome_page._enable_stealth_mode(
+                        merged_script.as_deref(),
+                        Some(agent_os),
+                        Some(stealth_mode)
+                    ),
                     chrome_page.set_user_agent(agent.as_str())
                 );
             }
@@ -748,9 +753,13 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     chrome_page.add_script_to_evaluate_on_new_document(merged_script)
                 );
             }
-            None if stealth_mode => {
+            None if stealth => {
                 let _ = chrome_page
-                    ._enable_stealth_mode(merged_script.as_deref(), Some(agent_os))
+                    ._enable_stealth_mode(
+                        merged_script.as_deref(),
+                        Some(agent_os),
+                        Some(stealth_mode),
+                    )
                     .await;
             }
             None => (),

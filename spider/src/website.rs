@@ -6348,6 +6348,13 @@ impl Website {
         self
     }
 
+    /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_stealth_advanced(&mut self, stealth_mode: chromiumoxide::page::Tier) -> &mut Self {
+        self.configuration.with_stealth_advanced(stealth_mode);
+        self
+    }
+
     /// Use OpenAI to get dynamic javascript to drive the browser. This does nothing without the `openai` flag enabled.
     pub fn with_openai(&mut self, openai_configs: Option<configuration::GPTConfigs>) -> &mut Self {
         self.configuration.with_openai(openai_configs);

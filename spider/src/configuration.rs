@@ -203,7 +203,7 @@ pub struct Configuration {
     pub service_worker_enabled: bool,
     #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
-    pub stealth_mode: bool,
+    pub stealth_mode: chromiumoxide::page::Tier,
     /// Configure the viewport for chrome and viewport headers.
     pub viewport: Option<Viewport>,
     /// Overrides default host system timezone with the specified one.
@@ -471,7 +471,7 @@ impl Configuration {
         self.chrome_connection_url.is_some()
             || self.wait_for.is_some()
             || self.chrome_intercept.enabled
-            || self.stealth_mode
+            || self.stealth_mode.stealth()
             || self.fingerprint.valid()
     }
 
@@ -915,6 +915,17 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     pub fn with_stealth(&mut self, stealth_mode: bool) -> &mut Self {
+        if stealth_mode {
+            self.stealth_mode = chromiumoxide::page::Tier::Basic;
+        } else {
+            self.stealth_mode = chromiumoxide::page::Tier::None;
+        }
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
+    pub fn with_stealth_advanced(&mut self, stealth_mode: chromiumoxide::page::Tier) -> &mut Self {
         self.stealth_mode = stealth_mode;
         self
     }

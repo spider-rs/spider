@@ -52,8 +52,9 @@ pub struct Page {
 }
 
 /// Tier of stealth to use.
-#[derive(PartialEq)]
-enum Tier {
+#[derive(PartialEq, Debug, Default, Copy, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Tier {
+    #[default]
     /// Basic spoofing.
     Basic,
     /// Basic spoofing without webgl.
@@ -62,6 +63,18 @@ enum Tier {
     Mid,
     /// Full spoofing.
     Full,
+    /// No spoofing
+    None,
+}
+
+impl Tier {
+    /// Stealth mode enabled.
+    pub fn stealth(&self) -> bool {
+        match &self {
+            Tier::None => false,
+            _ => true,
+        }
+    }
 }
 
 /// The user agent types of profiles we support for stealth.
@@ -158,12 +171,18 @@ impl Page {
         &self,
         custom_script: Option<&str>,
         os: Option<AgentOs>,
+        tier: Option<Tier>,
     ) -> Result<()> {
         let os = os.unwrap_or_default();
+        let tier = match tier {
+            Some(tier) => tier,
+            _ => Tier::Basic,
+        };
+
         let source = if let Some(cs) = custom_script {
-            format!("{};{cs}", build_stealth_script(Tier::Basic, os))
+            format!("{};{cs}", build_stealth_script(tier, os))
         } else {
-            build_stealth_script(Tier::Basic, os)
+            build_stealth_script(tier, os)
         };
         let source = wrap_eval_script(&source);
 
@@ -177,7 +196,7 @@ impl Page {
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode(&self) -> Result<()> {
-        let _ = self._enable_stealth_mode(None, None).await;
+        let _ = self._enable_stealth_mode(None, None, None).await;
 
         Ok(())
     }
@@ -185,8 +204,12 @@ impl Page {
     /// Changes your user_agent, removes the `navigator.webdriver` property
     /// changes permissions, pluggins rendering contexts and the `window.chrome`
     /// property to make it harder to detect the scraper as a bot
-    pub async fn enable_stealth_mode_os(&self, os: Option<AgentOs>) -> Result<()> {
-        let _ = self._enable_stealth_mode(None, os).await;
+    pub async fn enable_stealth_mode_os(
+        &self,
+        os: Option<AgentOs>,
+        tier: Option<Tier>,
+    ) -> Result<()> {
+        let _ = self._enable_stealth_mode(None, os, tier).await;
 
         Ok(())
     }
@@ -196,7 +219,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot
     pub async fn enable_stealth_mode_with_agent(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(None, None),
+            self._enable_stealth_mode(None, None, None),
             self.set_user_agent(ua)
         );
         Ok(())
@@ -207,7 +230,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None),
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None, None),
             self.set_user_agent(ua)
         );
         Ok(())
@@ -218,7 +241,7 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_agent_and_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None),
+            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None, None),
             self.set_user_agent(ua)
         );
         Ok(())
