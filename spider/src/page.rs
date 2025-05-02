@@ -41,10 +41,71 @@ lazy_static! {
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
     static ref SSG_CAPTURE: Regex =  Regex::new(r#""(.*?)""#).unwrap();
     static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
-    /// Unkown status code.
-    pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(599).expect("valid status code");
-    /// Chrome error status code.
-    pub(crate) static ref CHROME_UNKNOWN_STATUS_ERROR: StatusCode = StatusCode::from_u16(598).expect("valid status code");
+    /// Unknown status (generic fallback)
+    pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode =
+        StatusCode::from_u16(599).expect("valid status code");
+    /// Chrome-style timeout / network unknown
+    pub(crate) static ref CHROME_UNKNOWN_STATUS_ERROR: StatusCode =
+        StatusCode::from_u16(598).expect("valid status code");
+    /// Connection timeout
+    pub(crate) static ref CONNECTION_TIMEOUT_ERROR: StatusCode =
+        StatusCode::from_u16(524).expect("valid status code");
+    /// Connection refused (origin down)
+    pub(crate) static ref CONNECTION_REFUSED_ERROR: StatusCode =
+        StatusCode::from_u16(521).expect("valid status code");
+    /// Connection aborted
+    pub(crate) static ref CONNECTION_ABORTED_ERROR: StatusCode =
+        StatusCode::from_u16(522).expect("valid status code");
+    /// Connection reset
+    pub(crate) static ref CONNECTION_RESET_ERROR: StatusCode =
+        StatusCode::from_u16(523).expect("valid status code");
+    /// DNS failure
+    pub(crate) static ref DNS_RESOLVE_ERROR: StatusCode =
+        StatusCode::from_u16(525).expect("valid status code");
+    /// Body decode failure
+    pub(crate) static ref BODY_DECODE_ERROR: StatusCode =
+        StatusCode::from_u16(400).expect("valid status code");
+    /// Request malformed or unreachable
+    pub(crate) static ref UNREACHABLE_REQUEST_ERROR: StatusCode =
+        StatusCode::from_u16(524).expect("valid status code");
+}
+
+/// Get the HTTP status code of errors.
+pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCode {
+    use std::error::Error;
+    use std::io;
+
+    if let Some(status) = err.status() {
+        return status;
+    }
+
+    if err.is_timeout() {
+        return *CONNECTION_TIMEOUT_ERROR;
+    }
+
+    if err.is_connect() {
+        if let Some(io_err) = err.source().and_then(|e| e.downcast_ref::<io::Error>()) {
+            match io_err.kind() {
+                io::ErrorKind::ConnectionRefused => return *CONNECTION_REFUSED_ERROR,
+                io::ErrorKind::ConnectionAborted => return *CONNECTION_ABORTED_ERROR,
+                io::ErrorKind::ConnectionReset => return *CONNECTION_RESET_ERROR,
+                io::ErrorKind::NotFound => return *DNS_RESOLVE_ERROR,
+                io::ErrorKind::TimedOut => return *CONNECTION_TIMEOUT_ERROR,
+                _ => (),
+            }
+        }
+        return *UNREACHABLE_REQUEST_ERROR;
+    }
+
+    if err.is_body() {
+        return *BODY_DECODE_ERROR;
+    }
+
+    if err.is_request() {
+        return *UNREACHABLE_REQUEST_ERROR;
+    }
+
+    *UNKNOWN_STATUS_ERROR
 }
 
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
@@ -1179,7 +1240,7 @@ impl Page {
                 if let Some(status_code) = err.status() {
                     page_response.status_code = status_code;
                 } else {
-                    page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                    page_response.status_code = crate::page::get_error_http_status_code(&err);
                 }
 
                 page_response.error_for_status = Some(Err(err));

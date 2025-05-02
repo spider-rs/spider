@@ -16,7 +16,7 @@ pub mod trie;
 pub mod detect_system;
 use crate::page::AntiBotTech;
 use crate::{
-    page::{STREAMING_CHUNK_SIZE, UNKNOWN_STATUS_ERROR},
+    page::STREAMING_CHUNK_SIZE,
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
@@ -1297,7 +1297,7 @@ pub async fn fetch_page_html_chrome_base(
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
-    use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES};
+    use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
             EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived,
@@ -2552,7 +2552,7 @@ async fn fetch_page_html_raw_base(
             if let Some(status_code) = err.status() {
                 page_response.status_code = status_code;
             } else {
-                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                page_response.status_code = crate::page::get_error_http_status_code(&err);
             }
 
             page_response.error_for_status = Some(Err(err));
@@ -2753,7 +2753,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             if let Some(status_code) = err.status() {
                 page_response.status_code = status_code;
             } else {
-                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                page_response.status_code = crate::page::get_error_http_status_code(&err);
             }
 
             page_response.error_for_status = Some(Err(err));
@@ -2913,7 +2913,8 @@ pub async fn fetch_page_html(
                             if let Some(status_code) = err.status() {
                                 page_response.status_code = status_code;
                             } else {
-                                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                                page_response.status_code =
+                                    crate::page::get_error_http_status_code(&err);
                             }
 
                             page_response.error_for_status = Some(Err(err));
@@ -3071,7 +3072,8 @@ pub async fn fetch_page_html_chrome(
                             if let Some(status_code) = err.status() {
                                 page_response.status_code = status_code;
                             } else {
-                                page_response.status_code = *UNKNOWN_STATUS_ERROR;
+                                page_response.status_code =
+                                    crate::page::get_error_http_status_code(&err);
                             }
 
                             page_response.error_for_status = Some(Err(err));
