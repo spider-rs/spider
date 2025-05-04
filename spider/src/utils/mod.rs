@@ -15,10 +15,7 @@ pub mod trie;
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
 use crate::page::AntiBotTech;
-use crate::{
-    page::STREAMING_CHUNK_SIZE,
-    RelativeSelectors,
-};
+use crate::{page::STREAMING_CHUNK_SIZE, RelativeSelectors};
 use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;

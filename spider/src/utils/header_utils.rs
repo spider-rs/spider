@@ -239,8 +239,6 @@ pub fn get_mimic_headers(
         PRAGMA, TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
     };
 
-    use crate::features::chrome_viewport::randomize_viewport;
-
     let browser = if user_agent.contains("Chrome/") {
         BrowserKind::Chrome
     } else if user_agent.contains("Firefox/") {
@@ -283,6 +281,7 @@ pub fn get_mimic_headers(
     match browser {
         BrowserKind::Chrome => {
             let linux_agent = user_agent.contains("Linux");
+            let mut thread_rng = rng();
 
             // if not a chrome request we should stick to the headers from request to prevent duplications.
             let (
@@ -325,9 +324,9 @@ pub fn get_mimic_headers(
             };
 
             let memory_levels = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
-            let device_memory = memory_levels[rng().random_range(0..memory_levels.len())];
+            let device_memory = memory_levels[thread_rng.random_range(0..memory_levels.len())];
             let device_memory_str = format!("{}", device_memory);
-            let downlink_mbps = rng().random_range(0.1..=10.0);
+            let downlink_mbps = thread_rng.random_range(0.1..=10.0);
             let downlink_str = format!("{:.1}", downlink_mbps);
 
             // 1. Host
@@ -426,8 +425,11 @@ pub fn get_mimic_headers(
                 } else {
                     format!(
                         "{}",
-                        randomize_viewport(&crate::features::chrome_viewport::DeviceType::Desktop)
-                            .width
+                        crate::features::chrome_viewport::randomize_viewport_rng(
+                            &crate::features::chrome_viewport::DeviceType::Desktop,
+                            &mut thread_rng
+                        )
+                        .width
                     )
                 };
 
@@ -477,11 +479,15 @@ pub fn get_mimic_headers(
             insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
             insert_or_default!(
                 "sec-ch-prefers-reduced-motion",
-                HeaderValue::from_static("no-preference")
+                HeaderValue::from_static(if thread_rng.random() {
+                    "no-preference"
+                } else {
+                    "reduced"
+                })
             );
             insert_or_default!(
                 "sec-ch-prefers-color-scheme",
-                HeaderValue::from_static("light")
+                HeaderValue::from_static(if thread_rng.random() { "light" } else { "dark" })
             );
         }
         BrowserKind::Firefox => {
@@ -545,7 +551,7 @@ pub fn get_mimic_headers(
 
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
         }
-        BrowserKind::Other => {}
+        BrowserKind::Other => (),
     }
 
     headers
