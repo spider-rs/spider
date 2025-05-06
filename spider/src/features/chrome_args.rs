@@ -35,7 +35,7 @@ pub(crate) static CHROME_ARGS: [&'static str; 27] = [
 ];
 
 /// static chrome arguments to start
-#[cfg(all(not(feature = "chrome_cpu"), feature = "real_browser"))]
+#[cfg(all(not(feature = "chrome_cpu"), feature = "chrome", feature = "real_browser"))]
 pub(crate) static CHROME_ARGS: [&'static str; 24] = [
     if cfg!(feature = "chrome_headless_new") {
         "--headless=new"

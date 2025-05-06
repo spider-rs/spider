@@ -1,6 +1,7 @@
 /// Chrome utils
 #[cfg(feature = "chrome")]
 pub mod chrome;
+#[cfg(feature = "chrome")]
 /// Chrome launch args.
 pub(crate) mod chrome_args;
 /// Common modules for Chrome
