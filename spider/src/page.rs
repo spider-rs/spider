@@ -204,7 +204,6 @@ lazy_static! {
 
 /// The AI data returned from a GPT.
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AIResults {
     /// The prompt used for the GPT.
     pub input: String,
@@ -216,6 +215,62 @@ pub struct AIResults {
     pub screenshot_output: Option<Vec<u8>>,
     /// The error of the occured if any.
     pub error: Option<String>,
+}
+
+/// Page-level metadata extracted from HTML.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Metadata {
+    /// The `<title>` text from the page.
+    pub title: Option<String>,
+    /// The `<meta name="description">` content.
+    pub description: Option<String>,
+    /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub og: Option<Box<OpenGraph>>,
+}
+
+impl Metadata {
+    /// Does metadata exist?
+    pub fn exist(&self) -> bool {
+        self.title.is_some() || self.description.is_some() || self.og.is_some()
+    }
+}
+
+/// Open Graph metadata extracted from `<meta property="og:*">` tags.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct OpenGraph {
+    /// The Open Graph title (`og:title`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub title: Option<String>,
+    /// The Open Graph description (`og:description`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub description: Option<String>,
+    /// The Open Graph image URL (`og:image`).
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub image: Option<String>,
+    /// The canonical page URL (`og:url`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub url: Option<String>,
+    /// The content type (`og:type`, e.g., "article", "website"). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub content_type: Option<String>,
+    /// The site name (`og:site_name`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub site_name: Option<String>,
+    /// The locale of the content (`og:locale`, e.g., "en_US"). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub locale: Option<String>,
+    /// The author's name (`article:author` or `og:author`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub author: Option<String>,
+    /// The time the content was first published (`article:published_time`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub published_time: Option<String>,
+    /// The time the content was last modified (`article:modified_time`). NOT USED.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub modified_time: Option<String>,
 }
 
 /// Enumeration of known anti-bot and fraud prevention technologies.
@@ -332,6 +387,8 @@ pub struct Page {
     pub request_map: Option<hashbrown::HashMap<String, f64>>,
     /// The anti-bot tech used.
     pub anti_bot_tech: AntiBotTech,
+    /// Page metadata.
+    pub metadata: Option<Box<Metadata>>,
 }
 
 /// Represent a page visited.
@@ -377,6 +434,8 @@ pub struct Page {
     pub signature: Option<u64>,
     /// The anti-bot tech used.
     pub anti_bot_tech: AntiBotTech,
+    /// Page metadata.
+    pub metadata: Option<Box<Metadata>>,
 }
 
 /// Validate link and push into the map
@@ -796,11 +855,9 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         remote_addr: res.remote_addr,
         #[cfg(feature = "cookies")]
         cookies: res.cookies,
-        base: None,
         url: url.into(),
         #[cfg(feature = "time")]
         duration: Some(Instant::now()),
-        external_domains_caseless: Default::default(),
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         error_status: get_error_status(&mut should_retry, res.error_for_status),
@@ -812,7 +869,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         openai_credits_used: res.openai_credits_used,
         #[cfg(feature = "openai")]
         extra_ai_data: res.extra_ai_data,
-        page_links: None,
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
@@ -823,6 +879,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         #[cfg(feature = "chrome")]
         request_map: res.request_map,
         anti_bot_tech: res.anti_bot_tech,
+        metadata: res.metadata,
+        ..Default::default()
     }
 }
 
@@ -843,6 +901,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         cookies: res.cookies,
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
+        metadata: res.metadata,
         error_status: match res.error_for_status {
             Some(e) => match e {
                 Ok(_) => None,
@@ -975,6 +1034,43 @@ fn strip_trailing_slash(s: &str) -> &str {
     }
 }
 
+/// metadata handlers
+pub(crate) fn metadata_handlers<'h>(
+    meta_title: &'h mut Option<String>,
+    meta_description: &'h mut Option<String>,
+    meta_og_image: &'h mut Option<String>,
+) -> Vec<(
+    std::borrow::Cow<'static, lol_html::Selector>,
+    lol_html::send::ElementContentHandlers<'h>,
+)> {
+    vec![
+        lol_html::text!("title", |el| {
+            let t = el.as_str();
+            if !t.is_empty() {
+                *meta_title = Some(t.to_string());
+            }
+
+            Ok(())
+        }),
+        lol_html::element!(r#"meta[name="description"]"#, |el| {
+            if let Some(content) = el.get_attribute("content") {
+                if !content.is_empty() {
+                    *meta_description = Some(content);
+                }
+            }
+            Ok(())
+        }),
+        lol_html::element!(r#"meta[property="og:image"]"#, |el| {
+            if let Some(content) = el.get_attribute("content") {
+                if !content.is_empty() {
+                    *meta_og_image = Some(content);
+                }
+            }
+            Ok(())
+        }),
+    ]
+}
+
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -1005,7 +1101,13 @@ impl Page {
             handle_response_bytes, handle_response_bytes_writer, modify_selectors,
             AllowedDomainTypes,
         };
-        let page_response: PageResponse = match client.get(url).send().await {
+
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
+
+        let mut page_response: PageResponse = match client.get(url).send().await {
             Ok(res)
                 if crate::utils::valid_parsing_status(&res)
                     && !crate::utils::block_streaming(&res, only_html) =>
@@ -1117,9 +1219,15 @@ impl Page {
                 };
 
                 let mut element_content_handlers =
-                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 });
+                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 3);
 
                 element_content_handlers.push(base_links_settings);
+
+                element_content_handlers.extend(metadata_handlers(
+                    &mut meta_title,
+                    &mut meta_description,
+                    &mut meta_og_image,
+                ));
 
                 if r_settings.ssg_build {
                     element_content_handlers.push(lol_html::element!("script", |el| {
@@ -1249,6 +1357,28 @@ impl Page {
                 page_response
             }
         };
+
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                page_response.metadata = metadata;
+            }
+        }
 
         build(url, page_response)
     }
@@ -1713,6 +1843,11 @@ impl Page {
         &self.response_map
     }
 
+    /// Get the metadata found on the page.
+    pub fn get_metadata(&self) -> &Option<Box<Metadata>> {
+        &self.metadata
+    }
+
     /// Get the response events mapped.
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     pub fn get_request(&self) -> &Option<hashbrown::HashMap<String, f64>> {
@@ -1854,6 +1989,11 @@ impl Page {
             None
         };
 
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
+
         if !html.is_empty() {
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
@@ -1875,37 +2015,42 @@ impl Page {
 
                 let xml_file = self.get_url().ends_with(".xml");
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![lol_html::element!(
-                        if xml_file {
-                            BASE_CSS_SELECTORS_WITH_XML
-                        } else {
-                            BASE_CSS_SELECTORS
-                        },
-                        |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page
-                                } else {
-                                    base.as_deref()
-                                };
+                let mut element_content_handlers =
+                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &self.external_domains_caseless,
-                                    &mut links_pages,
-                                );
-                            }
-                            Ok(())
+                element_content_handlers.push(lol_html::element!(
+                    if xml_file {
+                        BASE_CSS_SELECTORS_WITH_XML
+                    } else {
+                        BASE_CSS_SELECTORS
+                    },
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            let base = if relative_directory_url(&href) || base.is_none() {
+                                original_page
+                            } else {
+                                base.as_deref()
+                            };
+
+                            push_link(
+                                &base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &self.external_domains_caseless,
+                                &mut links_pages,
+                            );
                         }
-                    )],
+                        Ok(())
+                    }
+                ));
+
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers,
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
@@ -1941,6 +2086,28 @@ impl Page {
             );
         }
 
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
         map
     }
 
@@ -1967,6 +2134,11 @@ impl Page {
             None
         };
 
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
+
         if !html.is_empty() {
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
@@ -1991,53 +2163,55 @@ impl Page {
 
                 let xml_file = self.get_url().ends_with(".xml");
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![
-                        lol_html::element!(
-                            if xml_file {
-                                BASE_CSS_SELECTORS_WITH_XML
-                            } else {
-                                BASE_CSS_SELECTORS
-                            },
-                            |el| {
-                                if let Some(href) = el.get_attribute("href") {
-                                    let base = if relative_directory_url(&href) || base.is_none() {
-                                        original_page
-                                    } else {
-                                        base.as_deref()
-                                    };
+                let mut element_content_handlers =
+                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                                    push_link(
-                                        &base,
-                                        &href,
-                                        &mut map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                        &self.external_domains_caseless,
-                                        &mut links_pages,
-                                    );
-                                }
-                                Ok(())
+                element_content_handlers.push(lol_html::element!(
+                    if xml_file {
+                        BASE_CSS_SELECTORS_WITH_XML
+                    } else {
+                        BASE_CSS_SELECTORS
+                    },
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            let base = if relative_directory_url(&href) || base.is_none() {
+                                original_page
+                            } else {
+                                base.as_deref()
+                            };
+
+                            push_link(
+                                &base,
+                                &href,
+                                &mut map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &self.external_domains_caseless,
+                                &mut links_pages,
+                            );
+                        }
+                        Ok(())
+                    }
+                ));
+
+                element_content_handlers.push(lol_html::element!("script[src]", |el| {
+                    if let Some(source) = el.get_attribute("src") {
+                        if source.starts_with("/_next/static/")
+                            && source.ends_with("/_ssgManifest.js")
+                        {
+                            if let Some(build_path) = base.map(|b| convert_abs_path(&b, &source)) {
+                                let _ = cell.set(build_path.to_string());
                             }
-                        ),
-                        lol_html::element!("script[src]", |el| {
-                            if let Some(source) = el.get_attribute("src") {
-                                if source.starts_with("/_next/static/")
-                                    && source.ends_with("/_ssgManifest.js")
-                                {
-                                    if let Some(build_path) =
-                                        base.map(|b| convert_abs_path(&b, &source))
-                                    {
-                                        let _ = cell.set(build_path.to_string());
-                                    }
-                                }
-                            }
-                            Ok(())
-                        }),
-                    ],
+                        }
+                    }
+                    Ok(())
+                }));
+
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers,
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
@@ -2109,6 +2283,28 @@ impl Page {
                 lp.into_iter()
                     .map(|item| CaseInsensitiveString::from(item.to_string())),
             );
+        }
+
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
         }
 
         map.extend(map_ssg);
@@ -2201,6 +2397,11 @@ impl Page {
             None
         };
 
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
+
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
 
@@ -2231,76 +2432,85 @@ impl Page {
                 let mut static_app = false;
                 let xml_file = self.get_url().ends_with(".xml");
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![
-                        element!("script", |element| {
-                            if !static_app {
-                                if let Some(src) = element.get_attribute("src") {
-                                    if src.starts_with("/") {
-                                        if src.starts_with("/_next/static/chunks/pages/")
-                                            || src.starts_with("/webpack-runtime-")
-                                            || element.get_attribute("id").eq(&*GATSBY)
-                                        {
-                                            static_app = true;
-                                        }
+                let mut element_content_handlers =
+                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                                        if let Some(ref base) = base1 {
-                                            let abs = convert_abs_path(&base, &src);
+                element_content_handlers.push(element!("script", |element| {
+                    if !static_app {
+                        if let Some(src) = element.get_attribute("src") {
+                            if src.starts_with("/") {
+                                if src.starts_with("/_next/static/chunks/pages/")
+                                    || src.starts_with("/webpack-runtime-")
+                                    || element.get_attribute("id").eq(&*GATSBY)
+                                {
+                                    static_app = true;
+                                }
 
-                                            if let Ok(mut paths) =
-                                                abs.path_segments().ok_or_else(|| "cannot be base")
+                                if let Some(ref base) = base1 {
+                                    let abs = convert_abs_path(&base, &src);
+
+                                    if let Ok(mut paths) =
+                                        abs.path_segments().ok_or_else(|| "cannot be base")
+                                    {
+                                        while let Some(p) = paths.next() {
+                                            if chromiumoxide::handler::network::ALLOWED_MATCHER
+                                                .is_match(&p)
                                             {
-                                                while let Some(p) = paths.next() {
-                                                    if chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(&p)
-                                                    {
-                                                        rerender.swap(true, Ordering::Relaxed);
-                                                    }
-                                                }
+                                                rerender.swap(true, Ordering::Relaxed);
                                             }
                                         }
                                     }
                                 }
                             }
-                            Ok(())
-                        }),
-                        element!(
-                            if xml_file {
-                                BASE_CSS_SELECTORS_WITH_XML
+                        }
+                    }
+                    Ok(())
+                }));
+
+                element_content_handlers.push(element!(
+                    if xml_file {
+                        BASE_CSS_SELECTORS_WITH_XML
+                    } else {
+                        BASE_CSS_SELECTORS
+                    },
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            let base = if relative_directory_url(&href) || base.is_none() {
+                                original_page.as_ref()
                             } else {
-                                BASE_CSS_SELECTORS
-                            },
-                            |el| {
-                                if let Some(href) = el.get_attribute("href") {
-                                    let base = if relative_directory_url(&href) || base.is_none() {
-                                        original_page.as_ref()
-                                    } else {
-                                        base.as_deref()
-                                    };
+                                base.as_deref()
+                            };
 
-                                    push_link(
-                                        &base,
-                                        &href,
-                                        &mut inner_map,
-                                        &selectors.0,
-                                        parent_host,
-                                        parent_host_scheme,
-                                        base_input_domain,
-                                        sub_matcher,
-                                        &external_domains_caseless,
-                                        &mut links_pages,
-                                    );
-                                }
+                            push_link(
+                                &base,
+                                &href,
+                                &mut inner_map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &external_domains_caseless,
+                                &mut links_pages,
+                            );
+                        }
 
-                                el.remove();
+                        el.remove();
 
-                                Ok(())
-                            }
-                        ),
-                        element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
-                            el.remove();
-                            Ok(())
-                        }),
-                    ],
+                        Ok(())
+                    }
+                ));
+
+                element_content_handlers.push(element!(
+                    "*:not(script):not(a):not(body):not(head):not(html)",
+                    |el| {
+                        el.remove();
+                        Ok(())
+                    }
+                ));
+
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers,
                     document_content_handlers: vec![doc_comments!(|c| {
                         c.remove();
                         Ok(())
@@ -2486,6 +2696,28 @@ impl Page {
             );
         }
 
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
         (map, bytes_transferred)
     }
 
@@ -2520,6 +2752,11 @@ impl Page {
             None
         };
 
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
+
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
 
@@ -2549,74 +2786,83 @@ impl Page {
 
                 let mut static_app = false;
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers: vec![
-                        element!("script", |element| {
-                            if !static_app {
-                                if let Some(src) = element.get_attribute("src") {
-                                    if src.starts_with("/") {
-                                        if src.starts_with("/_next/static/chunks/pages/")
-                                            || src.starts_with("/webpack-runtime-")
-                                            || element.get_attribute("id").eq(&*GATSBY)
+                let mut element_content_handlers = vec![
+                    element!("script", |element| {
+                        if !static_app {
+                            if let Some(src) = element.get_attribute("src") {
+                                if src.starts_with("/") {
+                                    if src.starts_with("/_next/static/chunks/pages/")
+                                        || src.starts_with("/webpack-runtime-")
+                                        || element.get_attribute("id").eq(&*GATSBY)
+                                    {
+                                        static_app = true;
+                                    }
+
+                                    if let Some(ref base) = base1 {
+                                        let abs = convert_abs_path(&base, &src);
+
+                                        if let Ok(mut paths) =
+                                            abs.path_segments().ok_or_else(|| "cannot be base")
                                         {
-                                            static_app = true;
-                                        }
-
-                                        if let Some(ref base) = base1 {
-                                            let abs = convert_abs_path(&base, &src);
-
-                                            if let Ok(mut paths) =
-                                                abs.path_segments().ok_or_else(|| "cannot be base")
-                                            {
-                                                while let Some(p) = paths.next() {
-                                                    if chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(&p)
-                                                        {
-                                                            rerender.swap(true, Ordering::Relaxed);
-                                                        }
+                                            while let Some(p) = paths.next() {
+                                                if chromiumoxide::handler::network::ALLOWED_MATCHER
+                                                    .is_match(&p)
+                                                {
+                                                    rerender.swap(true, Ordering::Relaxed);
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
-                            Ok(())
-                        }),
-                        element!("a[href],script[src],link[href]", |el| {
-                            let attribute = if el.tag_name() == "script" {
-                                "src"
+                        }
+                        Ok(())
+                    }),
+                    element!("a[href],script[src],link[href]", |el| {
+                        let attribute = if el.tag_name() == "script" {
+                            "src"
+                        } else {
+                            "href"
+                        };
+                        if let Some(href) = el.get_attribute(attribute) {
+                            let base = if relative_directory_url(&href) || base.is_none() {
+                                original_page.as_ref()
                             } else {
-                                "href"
+                                base.as_deref()
                             };
-                            if let Some(href) = el.get_attribute(attribute) {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base.as_deref()
-                                };
 
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut inner_map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &external_domains_caseless,
-                                    &mut links_pages,
-                                );
-                            }
+                            push_link(
+                                &base,
+                                &href,
+                                &mut inner_map,
+                                &selectors.0,
+                                parent_host,
+                                parent_host_scheme,
+                                base_input_domain,
+                                sub_matcher,
+                                &external_domains_caseless,
+                                &mut links_pages,
+                            );
+                        }
 
-                            el.remove();
+                        el.remove();
 
-                            Ok(())
-                        }),
-                        element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
-                            el.remove();
-                            Ok(())
-                        }),
-                    ],
+                        Ok(())
+                    }),
+                    element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                        el.remove();
+                        Ok(())
+                    }),
+                ];
+
+                element_content_handlers.extend(&metadata_handlers(
+                    &mut meta_title,
+                    &mut meta_description,
+                    &mut meta_og_image,
+                ));
+
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers,
                     document_content_handlers: vec![doc_comments!(|c| {
                         c.remove();
                         Ok(())
@@ -2802,6 +3048,28 @@ impl Page {
             );
         }
 
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
         (map, bytes_transferred)
     }
 
@@ -2822,6 +3090,11 @@ impl Page {
         } else {
             None
         };
+
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<String> = None;
+        let mut meta_description: Option<String> = None;
+        let mut meta_og_image: Option<String> = None;
 
         if !self.is_empty() {
             let html = Box::new(self.get_html());
@@ -2877,7 +3150,10 @@ impl Page {
                         Ok(())
                     });
 
-                let element_content_handlers = vec![base_links_settings];
+                let mut element_content_handlers =
+                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+
+                element_content_handlers.push(base_links_settings);
 
                 let settings = lol_html::send::Settings {
                     element_content_handlers,
@@ -2905,6 +3181,29 @@ impl Page {
                 }
             }
         }
+
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+
+            let mut open_graph = OpenGraph::default();
+            open_graph.image = meta_og_image;
+
+            metadata_inner.og = Some(Box::new(open_graph));
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
         map
     }
 

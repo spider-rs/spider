@@ -14,7 +14,7 @@ pub mod trie;
 #[cfg(feature = "balance")]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
-use crate::page::AntiBotTech;
+use crate::page::{AntiBotTech, Metadata};
 use crate::{page::STREAMING_CHUNK_SIZE, RelativeSelectors};
 use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
@@ -342,6 +342,8 @@ pub struct PageResponse {
     pub request_map: Option<HashMap<String, f64>>,
     /// The anti-bot tech used.
     pub anti_bot_tech: crate::page::AntiBotTech,
+    /// The metadata of the page.
+    pub metadata: Option<Box<Metadata>>,
 }
 
 /// wait for event with timeout
