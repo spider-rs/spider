@@ -99,6 +99,24 @@ impl ChromeEventTracker {
     }
 }
 
+#[cfg(feature = "sitemap")]
+#[derive(Debug, Default)]
+/// Determine if the sitemap modified to the whitelist.
+pub(crate) struct SitemapWhitelistChanges {
+    /// Added the default sitemap.xml whitelist.
+    pub added_default: bool,
+    /// Added the custom whitelist path.
+    pub added_custom: bool,
+}
+
+#[cfg(feature = "sitemap")]
+impl SitemapWhitelistChanges {
+    /// Was the whitelist modified?
+    pub(crate) fn modified(&self) -> bool {
+        self.added_default || self.added_custom
+    }
+}
+
 /// Determine allow proxy
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -545,6 +563,61 @@ impl Configuration {
         match &self.whitelist_url {
             Some(whitelist) => whitelist.to_owned(),
             _ => Default::default(),
+        }
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Add sitemap paths to the whitelist and track what was added.
+    pub(crate) fn add_sitemap_to_whitelist(&mut self) -> SitemapWhitelistChanges {
+        let mut changes = SitemapWhitelistChanges::default();
+
+        if self.ignore_sitemap && !self.whitelist_url.is_some() {
+            return changes;
+        }
+
+        if let Some(list) = self.whitelist_url.as_mut() {
+            if list.is_empty() {
+                return changes;
+            }
+
+            let default = CompactString::from("sitemap.xml");
+
+            if !list.contains(&default) {
+                list.push(default);
+                changes.added_default = true;
+            }
+
+            if let Some(custom) = &self.sitemap_url {
+                if !list.contains(custom) {
+                    list.push(*custom.clone());
+                    changes.added_custom = true;
+                }
+            }
+        }
+
+        changes
+    }
+
+    #[cfg(feature = "sitemap")]
+    /// Revert any changes made to the whitelist by `add_sitemap_to_whitelist`.
+    pub(crate) fn remove_sitemap_from_whitelist(&mut self, changes: SitemapWhitelistChanges) {
+        if let Some(list) = self.whitelist_url.as_mut() {
+            if changes.added_default {
+                let default = CompactString::from("sitemap.xml");
+                if let Some(pos) = list.iter().position(|s| s == &default) {
+                    list.remove(pos);
+                }
+            }
+            if changes.added_custom {
+                if let Some(custom) = &self.sitemap_url {
+                    if let Some(pos) = list.iter().position(|s| *s == **custom) {
+                        list.remove(pos);
+                    }
+                }
+            }
+            if list.is_empty() {
+                self.whitelist_url = None;
+            }
         }
     }
 

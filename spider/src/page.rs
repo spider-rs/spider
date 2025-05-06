@@ -477,6 +477,7 @@ pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         external_domains_caseless,
         links_pages,
     );
+
     if let Some(mut abs) = abs {
         if abs.scheme() != parent_host_scheme.as_str() {
             let _ = abs.set_scheme(parent_host_scheme.as_str());

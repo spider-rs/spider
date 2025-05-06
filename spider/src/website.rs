@@ -678,13 +678,11 @@ impl Website {
 
         if status.eq(&ProcessLinkStatus::Allowed) {
             if self.is_over_budget(link) {
-                ProcessLinkStatus::BudgetExceeded
-            } else {
-                status
+                return ProcessLinkStatus::BudgetExceeded;
             }
-        } else {
-            status
         }
+
+        status
     }
 
     /// return `true` if URL:
@@ -702,13 +700,10 @@ impl Website {
 
         if status.eq(&ProcessLinkStatus::Allowed) {
             if self.is_over_budget(link) {
-                ProcessLinkStatus::BudgetExceeded
-            } else {
-                status
+                return ProcessLinkStatus::BudgetExceeded;
             }
-        } else {
-            status
         }
+        status
     }
 
     /// return `true` if URL:
@@ -728,13 +723,11 @@ impl Website {
 
             if status.eq(&ProcessLinkStatus::Allowed) {
                 if self.is_over_depth(link) {
-                    ProcessLinkStatus::Blocked
-                } else {
-                    status
+                    return ProcessLinkStatus::Blocked;
                 }
-            } else {
-                status
             }
+
+            status
         }
     }
 
@@ -754,13 +747,10 @@ impl Website {
             let status = self.is_allowed_default(link);
             if status.eq(&ProcessLinkStatus::Allowed) {
                 if self.is_over_depth(link) {
-                    ProcessLinkStatus::Blocked
-                } else {
-                    status
+                    return ProcessLinkStatus::Blocked;
                 }
-            } else {
-                status
             }
+            status
         }
     }
 
@@ -811,19 +801,18 @@ impl Website {
     /// - is not forbidden in robot.txt file (if parameter is defined)
     pub fn is_allowed_robots(&self, link: &str) -> bool {
         if self.configuration.respect_robots_txt {
-            match self.robot_file_parser.as_ref() {
-                Some(r) => r.can_fetch(
+            if let Some(r) = &self.robot_file_parser {
+                return r.can_fetch(
                     match self.configuration.user_agent {
                         Some(ref ua) => ua,
                         _ => "*",
                     },
                     link,
-                ),
-                _ => true,
+                );
             }
-        } else {
-            true
         }
+
+        true
     }
 
     /// Detect if the inner budget is exceeded
@@ -5195,6 +5184,12 @@ impl Website {
                 .await;
             self.extra_links.clone_from(&extra_links);
 
+            let whitelist_changes = self.configuration.add_sitemap_to_whitelist();
+
+            if whitelist_changes.modified() {
+                self.configuration.set_whitelist();
+            }
+
             'outer: loop {
                 let stream =
                     tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
@@ -5351,6 +5346,9 @@ impl Website {
                     break;
                 }
             }
+
+            self.configuration
+                .remove_sitemap_from_whitelist(whitelist_changes);
         }
     }
 
@@ -5424,6 +5422,12 @@ impl Website {
                     .await;
                 self.extra_links.clone_from(&extra_links);
                 let mut set: JoinSet<Option<Page>> = JoinSet::new();
+
+                let whitelist_changes = self.configuration.add_sitemap_to_whitelist();
+
+                if whitelist_changes.modified() {
+                    self.configuration.set_whitelist();
+                }
 
                 'outer: loop {
                     let stream: tokio_stream::Iter<std::vec::IntoIter<Box<CompactString>>> =
@@ -5511,12 +5515,12 @@ impl Website {
 
                                                         let allowed = self.is_allowed(&link);
 
+                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
+                                                            continue;
+                                                        }
                                                         if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                                                             exceeded_budget = true;
                                                             break;
-                                                        }
-                                                        if allowed.eq(&ProcessLinkStatus::Blocked) {
-                                                            continue;
                                                         }
 
                                                         self.insert_link(link.clone()).await;
@@ -5634,12 +5638,10 @@ impl Website {
 
                                             let allowed = self.is_allowed(&link);
 
-                                            // because of the sitemap allow the budget to process first.
                                             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                                                 exceeded_budget = true;
                                                 break;
                                             }
-
                                             if allowed.eq(&ProcessLinkStatus::Blocked) {
                                                 continue;
                                             }
@@ -5818,6 +5820,8 @@ impl Website {
                     }
                 }
                 b.dispose();
+                self.configuration
+                    .remove_sitemap_from_whitelist(whitelist_changes);
             }
         }
     }
@@ -5994,12 +5998,13 @@ impl Website {
 
                         let allowed = self.is_allowed(&link);
 
-                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
-                            *exceeded_budget = true;
-                        }
-
                         if allowed.eq(&ProcessLinkStatus::Blocked) {
                             continue;
+                        }
+
+                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                            *exceeded_budget = true;
+                            break;
                         }
 
                         self.insert_link(link.clone()).await;
