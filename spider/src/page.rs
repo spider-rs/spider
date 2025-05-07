@@ -226,53 +226,55 @@ pub struct Metadata {
     pub title: Option<CompactString>,
     /// The `<meta name="description">` content.
     pub description: Option<CompactString>,
-    /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub og: Option<Box<OpenGraph>>,
+    /// The Open Graph image URL (`og:image`).
+    pub image: Option<CompactString>,
+    // /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
+    // #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    // pub og: Option<Box<OpenGraph>>,
 }
 
 impl Metadata {
     /// Does metadata exist?
     pub fn exist(&self) -> bool {
-        self.title.is_some() || self.description.is_some() || self.og.is_some()
+        self.title.is_some() || self.description.is_some() || self.image.is_some()
     }
 }
 
-/// Open Graph metadata extracted from `<meta property="og:*">` tags.
-#[derive(Debug, Default, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OpenGraph {
-    /// The Open Graph title (`og:title`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub title: Option<CompactString>,
-    /// The Open Graph description (`og:description`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub description: Option<CompactString>,
-    /// The Open Graph image URL (`og:image`).
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub image: Option<CompactString>,
-    /// The canonical page URL (`og:url`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub url: Option<CompactString>,
-    /// The content type (`og:type`, e.g., "article", "website"). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub content_type: Option<CompactString>,
-    /// The site name (`og:site_name`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub site_name: Option<CompactString>,
-    /// The locale of the content (`og:locale`, e.g., "en_US"). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub locale: Option<CompactString>,
-    /// The author's name (`article:author` or `og:author`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub author: Option<CompactString>,
-    /// The time the content was first published (`article:published_time`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub published_time: Option<CompactString>,
-    /// The time the content was last modified (`article:modified_time`). NOT USED.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub modified_time: Option<CompactString>,
-}
+// /// Open Graph metadata extracted from `<meta property="og:*">` tags.
+// #[derive(Debug, Default, Clone)]
+// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// pub struct OpenGraph {
+//     /// The Open Graph title (`og:title`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub title: Option<CompactString>,
+//     /// The Open Graph description (`og:description`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub description: Option<CompactString>,
+//     /// The Open Graph image URL (`og:image`).
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub image: Option<CompactString>,
+//     /// The canonical page URL (`og:url`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub url: Option<CompactString>,
+//     /// The content type (`og:type`, e.g., "article", "website"). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub content_type: Option<CompactString>,
+//     /// The site name (`og:site_name`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub site_name: Option<CompactString>,
+//     /// The locale of the content (`og:locale`, e.g., "en_US"). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub locale: Option<CompactString>,
+//     /// The author's name (`article:author` or `og:author`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub author: Option<CompactString>,
+//     /// The time the content was first published (`article:published_time`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub published_time: Option<CompactString>,
+//     /// The time the content was last modified (`article:modified_time`). NOT USED.
+//     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+//     pub modified_time: Option<CompactString>,
+// }
 
 /// Enumeration of known anti-bot and fraud prevention technologies.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -1366,11 +1368,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
@@ -2094,11 +2092,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
@@ -2293,11 +2287,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
@@ -2704,11 +2694,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
@@ -3056,11 +3042,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
@@ -3190,11 +3172,7 @@ impl Page {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
-
-            let mut open_graph = OpenGraph::default();
-            open_graph.image = meta_og_image;
-
-            metadata_inner.og = Some(Box::new(open_graph));
+            metadata_inner.image = meta_og_image;
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));
