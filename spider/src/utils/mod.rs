@@ -745,13 +745,15 @@ pub async fn perform_chrome_http_request(
     let mut protocol = String::from("http/1.1");
     let mut anti_bot_tech = AntiBotTech::default();
 
+    let frame_id = page.mainframe().await?;
+
     let page_base =
         page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
             transition_type: Some(
                 chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
             ),
-            frame_id: None,
+            frame_id,
             referrer: None,
             referrer_policy: None,
         })?;
