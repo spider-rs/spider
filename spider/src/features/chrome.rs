@@ -388,7 +388,7 @@ pub async fn launch_browser(
     match browser_configuration {
         Some(c) => {
             let (mut browser, mut handler) = c;
-            let mut context_id = handler.default_browser_context().id().cloned();
+            let mut context_id = None;
 
             // Spawn a new task that continuously polls the handler
             // we might need a select with closing in case handler stalls.
@@ -410,69 +410,67 @@ pub async fn launch_browser(
                 }
             });
 
-            if !context_id.is_some() {
-                let mut create_content = CreateBrowserContextParams::default();
-                create_content.dispose_on_detach = Some(true);
+            let mut create_content = CreateBrowserContextParams::default();
+            create_content.dispose_on_detach = Some(true);
 
-                if let Some(ref proxies) = config.proxies {
-                    let use_plain_http = proxies.len() >= 2;
+            if let Some(ref proxies) = config.proxies {
+                let use_plain_http = proxies.len() >= 2;
 
-                    for proxie in proxies.iter() {
-                        if proxie.ignore == crate::configuration::ProxyIgnore::Chrome {
-                            continue;
+                for proxie in proxies.iter() {
+                    if proxie.ignore == crate::configuration::ProxyIgnore::Chrome {
+                        continue;
+                    }
+
+                    let proxie = &proxie.addr;
+
+                    if !proxie.is_empty() {
+                        // pick the socks:// proxy over http if found.
+                        if proxie.starts_with("socks://") {
+                            create_content.proxy_server =
+                                Some(proxie.replacen("socks://", "http://", 1).into());
+                            // pref this connection
+                            if use_plain_http {
+                                break;
+                            }
                         }
 
-                        let proxie = &proxie.addr;
-
-                        if !proxie.is_empty() {
-                            // pick the socks:// proxy over http if found.
-                            if proxie.starts_with("socks://") {
-                                create_content.proxy_server =
-                                    Some(proxie.replacen("socks://", "http://", 1).into());
-                                // pref this connection
-                                if use_plain_http {
-                                    break;
-                                }
-                            }
-
-                            if *LOOP_BACK_PROXY && proxie.starts_with("http://localhost") {
-                                create_content.proxy_bypass_list =
+                        if *LOOP_BACK_PROXY && proxie.starts_with("http://localhost") {
+                            create_content.proxy_bypass_list =
                                     // https://source.chromium.org/chromium/chromium/src/+/main:net/proxy_resolution/proxy_bypass_rules.cc
                                     Some("<-loopback>;localhost;[::1]".into());
-                            }
-
-                            create_content.proxy_server = Some(proxie.into());
                         }
+
+                        create_content.proxy_server = Some(proxie.into());
                     }
                 }
+            }
 
-                if let Ok(c) = browser.create_browser_context(create_content).await {
-                    let _ = browser.send_new_context(c.clone()).await;
-                    let _ = context_id.insert(c);
-                    if !config.cookie_str.is_empty() {
-                        if let Some(parsed) = url_parsed {
-                            let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
-                            if let Ok(co) = cookies {
-                                let _ = browser.set_cookies(co).await;
-                            };
+            if let Ok(c) = browser.create_browser_context(create_content).await {
+                let _ = browser.send_new_context(c.clone()).await;
+                let _ = context_id.insert(c);
+                if !config.cookie_str.is_empty() {
+                    if let Some(parsed) = url_parsed {
+                        let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
+                        if let Ok(co) = cookies {
+                            let _ = browser.set_cookies(co).await;
                         };
-                    }
-
-                    if let Some(id) = &browser.browser_context.id {
-                        let cmd = SetDownloadBehaviorParamsBuilder::default();
-
-                        if let Ok(cmd) = cmd
-                            .behavior(SetDownloadBehaviorBehavior::Deny)
-                            .events_enabled(false)
-                            .browser_context_id(id.clone())
-                            .build()
-                        {
-                            let _ = browser.execute(cmd).await;
-                        }
-                    }
-                } else {
-                    handle.abort();
+                    };
                 }
+
+                if let Some(id) = &browser.browser_context.id {
+                    let cmd = SetDownloadBehaviorParamsBuilder::default();
+
+                    if let Ok(cmd) = cmd
+                        .behavior(SetDownloadBehaviorBehavior::Deny)
+                        .events_enabled(false)
+                        .browser_context_id(id.clone())
+                        .build()
+                    {
+                        let _ = browser.execute(cmd).await;
+                    }
+                }
+            } else {
+                handle.abort();
             }
 
             Some((browser, handle, context_id))
