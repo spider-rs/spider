@@ -223,9 +223,9 @@ pub struct AIResults {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Metadata {
     /// The `<title>` text from the page.
-    pub title: Option<String>,
+    pub title: Option<CompactString>,
     /// The `<meta name="description">` content.
-    pub description: Option<String>,
+    pub description: Option<CompactString>,
     /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub og: Option<Box<OpenGraph>>,
@@ -244,34 +244,34 @@ impl Metadata {
 pub struct OpenGraph {
     /// The Open Graph title (`og:title`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub title: Option<String>,
+    pub title: Option<CompactString>,
     /// The Open Graph description (`og:description`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub description: Option<String>,
+    pub description: Option<CompactString>,
     /// The Open Graph image URL (`og:image`).
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub image: Option<String>,
+    pub image: Option<CompactString>,
     /// The canonical page URL (`og:url`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub url: Option<String>,
+    pub url: Option<CompactString>,
     /// The content type (`og:type`, e.g., "article", "website"). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub content_type: Option<String>,
+    pub content_type: Option<CompactString>,
     /// The site name (`og:site_name`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub site_name: Option<String>,
+    pub site_name: Option<CompactString>,
     /// The locale of the content (`og:locale`, e.g., "en_US"). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub locale: Option<String>,
+    pub locale: Option<CompactString>,
     /// The author's name (`article:author` or `og:author`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub author: Option<String>,
+    pub author: Option<CompactString>,
     /// The time the content was first published (`article:published_time`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub published_time: Option<String>,
+    pub published_time: Option<CompactString>,
     /// The time the content was last modified (`article:modified_time`). NOT USED.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub modified_time: Option<String>,
+    pub modified_time: Option<CompactString>,
 }
 
 /// Enumeration of known anti-bot and fraud prevention technologies.
@@ -1037,9 +1037,9 @@ fn strip_trailing_slash(s: &str) -> &str {
 
 /// metadata handlers
 pub(crate) fn metadata_handlers<'h>(
-    meta_title: &'h mut Option<String>,
-    meta_description: &'h mut Option<String>,
-    meta_og_image: &'h mut Option<String>,
+    meta_title: &'h mut Option<CompactString>,
+    meta_description: &'h mut Option<CompactString>,
+    meta_og_image: &'h mut Option<CompactString>,
 ) -> Vec<(
     std::borrow::Cow<'static, lol_html::Selector>,
     lol_html::send::ElementContentHandlers<'h>,
@@ -1048,7 +1048,7 @@ pub(crate) fn metadata_handlers<'h>(
         lol_html::text!("title", |el| {
             let t = el.as_str();
             if !t.is_empty() {
-                *meta_title = Some(t.to_string());
+                *meta_title = Some(t.into());
             }
 
             Ok(())
@@ -1056,7 +1056,7 @@ pub(crate) fn metadata_handlers<'h>(
         lol_html::element!(r#"meta[name="description"]"#, |el| {
             if let Some(content) = el.get_attribute("content") {
                 if !content.is_empty() {
-                    *meta_description = Some(content);
+                    *meta_description = Some(content.into());
                 }
             }
             Ok(())
@@ -1064,7 +1064,7 @@ pub(crate) fn metadata_handlers<'h>(
         lol_html::element!(r#"meta[property="og:image"]"#, |el| {
             if let Some(content) = el.get_attribute("content") {
                 if !content.is_empty() {
-                    *meta_og_image = Some(content);
+                    *meta_og_image = Some(content.into());
                 }
             }
             Ok(())
@@ -1104,9 +1104,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         let mut page_response: PageResponse = match client.get(url).send().await {
             Ok(res)
@@ -1991,9 +1991,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
@@ -2136,9 +2136,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         if !html.is_empty() {
             if html.starts_with("<?xml") {
@@ -2399,9 +2399,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
@@ -2754,9 +2754,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
             let html_resource = Box::new(self.get_html());
@@ -3093,9 +3093,9 @@ impl Page {
         };
 
         let mut metadata: Option<Box<Metadata>> = None;
-        let mut meta_title: Option<String> = None;
-        let mut meta_description: Option<String> = None;
-        let mut meta_og_image: Option<String> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
             let html = Box::new(self.get_html());
