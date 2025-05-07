@@ -57,14 +57,14 @@ pub mod viewport;
 #[must_use = "streams do nothing unless polled"]
 #[derive(Debug)]
 pub struct Handler {
+    pub default_browser_context: BrowserContext,
+    pub browser_contexts: HashSet<BrowserContext>,
     /// Commands that are being processed and awaiting a response from the
     /// chromium instance together with the timestamp when the request
     /// started.
     pending_commands: FnvHashMap<CallId, (PendingRequest, MethodId, Instant)>,
     /// Connection to the browser instance
     from_browser: Fuse<Receiver<HandlerMessage>>,
-    pub default_browser_context: BrowserContext,
-    pub browser_contexts: HashSet<BrowserContext>,
     /// Used to loop over all targets in a consistent manner
     target_ids: Vec<TargetId>,
     /// The created and attached targets
@@ -154,16 +154,6 @@ impl Handler {
 
     /// The default Browser context
     pub fn default_browser_context(&self) -> &BrowserContext {
-        &self.default_browser_context
-    }
-
-    /// The default Browser context
-    pub fn set_default_browser_context(&mut self, context_id: BrowserContextId) -> &BrowserContext {
-        let browser_context = BrowserContext {
-            id: Some(context_id),
-        };
-        self.browser_contexts.insert(browser_context.clone());
-        self.default_browser_context = browser_context;
         &self.default_browser_context
     }
 
@@ -608,9 +598,7 @@ impl Stream for Handler {
                         let _ = tx.send(pages);
                     }
                     HandlerMessage::InsertContext(ctx) => {
-                        if pin.default_browser_context.id.is_none() {
-                            pin.default_browser_context = ctx.clone();
-                        }
+                        pin.default_browser_context = ctx.clone();
                         pin.browser_contexts.insert(ctx);
                     }
                     HandlerMessage::DisposeContext(ctx) => {
