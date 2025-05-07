@@ -204,6 +204,7 @@ lazy_static! {
 
 /// The AI data returned from a GPT.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AIResults {
     /// The prompt used for the GPT.
     pub input: String,
