@@ -328,6 +328,11 @@ pub fn get_mimic_headers(
             let device_memory_str = format!("{}", device_memory);
             let downlink_mbps = thread_rng.random_range(0.1..=10.0);
             let downlink_str = format!("{:.1}", downlink_mbps);
+            let is_mobile = if let Some(vp) = viewport {
+                vp.emulating_mobile
+            } else {
+                false
+            };
 
             // 1. Host
             // Note: do not set the host header for the client in case of redirects to prevent mismatches.
@@ -353,7 +358,10 @@ pub fn get_mimic_headers(
             {
                 insert_or_default!("sec-ch-ua", sec_ch_ua);
             }
-            insert_or_default!("sec-ch-ua-mobile", HeaderValue::from_static("?0"));
+            insert_or_default!(
+                "sec-ch-ua-mobile",
+                HeaderValue::from_static(if is_mobile { "?1" } else { "?0" })
+            );
             insert_or_default!(
                 "sec-ch-ua-platform",
                 HeaderValue::from_static(if linux_agent {
@@ -474,7 +482,11 @@ pub fn get_mimic_headers(
             // TODO: parse the user-agent for mobile or desktop
             insert_or_default!(
                 "sec-ch-ua-form-factors",
-                HeaderValue::from_static(r#""Desktop""#)
+                HeaderValue::from_static(if is_mobile {
+                    r#""Mobile""#
+                } else {
+                    r#""Desktop""#
+                })
             );
             insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
             insert_or_default!(
