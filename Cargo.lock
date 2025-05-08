@@ -704,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "backtrace"
-version = "0.3.74"
+version = "0.3.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d82cb332cdfaed17ae235a638438ac4d4839913cc2af585c3c6746e8f8bee1a"
+checksum = "6806a6321ec58106fea15becdad98371e28d92ccbc7c8f1b3b6dd724fe8f1002"
 dependencies = [
  "addr2line",
  "cfg-if",
@@ -1415,9 +1415,9 @@ checksum = "dcb25d077389e53838a8158c8e99174c5a9d902dee4904320db714f3c653ffba"
 
 [[package]]
 name = "crc"
-version = "3.2.1"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69e6e4d7b33a94f0991c26729976b10ebde1d34c3ee82408fb536164fa10d636"
+checksum = "9710d3b3739c2e349eb44fe848ad0b7c8cb1e42bd87ee49371df2f7acaf3e675"
 dependencies = [
  "crc-catalog",
 ]
@@ -3476,9 +3476,9 @@ dependencies = [
 
 [[package]]
 name = "libm"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a25169bd5913a4b437588a7e3d127cd6e90127b60e0ffbd834a38f1599e016b8"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libredox"
@@ -5430,11 +5430,12 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "917ce264624a4b4db1c364dcc35bfca9ded014d0a958cd47ad3e960e988ea51c"
+checksum = "229a4a4c221013e7e1f1a043678c5cc39fe5171437c88fb47151a21e6f5b5c79"
 dependencies = [
  "web-time",
+ "zeroize",
 ]
 
 [[package]]
@@ -5941,7 +5942,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -6009,7 +6010,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6102,7 +6103,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "clap",
  "env_logger",
@@ -6161,7 +6162,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6184,7 +6185,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6201,7 +6202,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.8"
+version = "2.37.9"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -7154,7 +7155,7 @@ dependencies = [
  "serde_spanned",
  "toml_datetime",
  "toml_write",
- "winnow 0.7.9",
+ "winnow 0.7.10",
 ]
 
 [[package]]
@@ -8365,9 +8366,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.9"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9fb597c990f03753e08d3c29efbfcf2019a003b4bf4ba19225c158e1549f0f3"
+checksum = "c06928c8748d81b05c9be96aad92e1b6ff01833332f281e8cfca3be4b35fc9ec"
 dependencies = [
  "memchr",
 ]

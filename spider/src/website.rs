@@ -3696,7 +3696,7 @@ impl Website {
                                 .await;
                             drop(new_page);
                             self.subscription_guard().await;
-                            b.dispose().await;
+                            b.dispose();
                         } else {
                             let semaphore: Arc<Semaphore> = self.setup_semaphore();
                             let (mut interval, throttle) = self.setup_crawl();
@@ -3988,11 +3988,11 @@ impl Website {
                                 }
                             }
 
-                            b.dispose().await;
+                            b.dispose();
                         }
                     }
                     Err(err) => {
-                        b.dispose().await;
+                        b.dispose();
                         log::error!("{}", err)
                     }
                 }
@@ -4338,7 +4338,7 @@ impl Website {
 
                         if self.single_page() {
                             website.subscription_guard().await;
-                            b.dispose().await;
+                            b.dispose();
                             website
                         } else {
                             let semaphore: Arc<Semaphore> = self.setup_semaphore();
@@ -4628,12 +4628,12 @@ impl Website {
                                 }
                             }
 
-                            b.dispose().await;
+                            b.dispose();
                             website
                         }
                     }
                     Err(err) => {
-                        b.dispose().await;
+                        b.dispose();
                         log::error!("{}", err);
                         self.clone()
                     }
@@ -4668,10 +4668,10 @@ impl Website {
                         self.crawl_establish_chrome_one(&client, &mut selectors, url, &new_page)
                             .await;
                         self.subscription_guard().await;
-                        b.dispose().await;
+                        b.dispose();
                     }
                     Err(err) => {
-                        b.dispose().await;
+                        b.dispose();
                         log::error!("{}", err);
                     }
                 }
@@ -5819,7 +5819,7 @@ impl Website {
                         }
                     }
                 }
-                b.dispose().await;
+                b.dispose();
                 self.configuration
                     .remove_sitemap_from_whitelist(whitelist_changes);
             }

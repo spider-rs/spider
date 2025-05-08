@@ -782,6 +782,7 @@ pub(crate) type BrowserControl = (
 /// Once cell browser
 #[cfg(feature = "smart")]
 pub(crate) type OnceBrowser = tokio::sync::OnceCell<Option<BrowserController>>;
+
 /// Create the browser controller to auto drop connections.
 pub struct BrowserController {
     /// The browser.
@@ -799,17 +800,11 @@ impl BrowserController {
         }
     }
     /// Dispose the browser context and join handler.
-    pub async fn dispose(&mut self) {
+    pub fn dispose(&mut self) {
         if !self.closed {
-            // assume close will always happen.
             self.closed = true;
-            if let Some(id) = self.browser.2.take() {
-                let _ = self.browser.0.quit_incognito_context_base(id).await;
-                if let Some(handler) = self.browser.1.take() {
-                    // we have to quit the context until https://chromedevtools.github.io/devtools-protocol/tot/Target/#method-createBrowserContext
-                    // disposeOnDetach comes out of Experimental.
-                    handler.abort();
-                }
+            if let Some(handler) = self.browser.1.take() {
+                handler.abort();
             }
         }
     }
@@ -817,18 +812,7 @@ impl BrowserController {
 
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        if !self.closed {
-            self.closed = true;
-            if let Some(id) = self.browser.2.take() {
-                if let Some(handler) = self.browser.1.take() {
-                    let browser = self.browser.0.to_owned();
-                    tokio::task::spawn(async move {
-                        let _ = browser.quit_incognito_context_base(id).await;
-                        handler.abort();
-                    });
-                }
-            }
-        }
+        self.dispose();
     }
 }
 
