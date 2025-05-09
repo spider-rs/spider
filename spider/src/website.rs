@@ -323,8 +323,12 @@ pub struct Website {
     status: CrawlStatus,
     /// The initial status code of the first request.
     initial_status_code: StatusCode,
-    /// The initial anti-bot tech found
+    /// The initial anti-bot tech found.
     initial_anti_bot_tech: AntiBotTech,
+    /// The initial page had a waf detection.
+    initial_page_waf_check: bool,
+    /// The initial page should retry.
+    initial_page_should_retry: bool,
     /// The website was manually stopped.
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
@@ -994,6 +998,16 @@ impl Website {
     /// Get the initial anti-bot tech code used for the intitial request
     pub fn get_initial_anti_bot_tech(&self) -> &AntiBotTech {
         &self.initial_anti_bot_tech
+    }
+
+    /// Get the initial waf detected used for the intitial request
+    pub fn get_initial_page_waf_check(&self) -> bool {
+        self.initial_page_waf_check
+    }
+
+    /// Get the initial page should retry determination used for the intitial request
+    pub fn get_initial_page_should_retry(&self) -> bool {
+        self.initial_page_should_retry
     }
 
     /// Drain the links visited.
@@ -2018,6 +2032,8 @@ impl Website {
 
             self.initial_status_code = page.status_code;
             self.initial_anti_bot_tech = page.anti_bot_tech;
+            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_waf_check = page.waf_check;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 if is_safe_javascript_challenge(&page) {
@@ -2228,6 +2244,8 @@ impl Website {
 
             self.initial_status_code = page.status_code;
             self.initial_anti_bot_tech = page.anti_bot_tech;
+            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_waf_check = page.waf_check;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
@@ -2464,6 +2482,8 @@ impl Website {
 
             self.initial_status_code = page.status_code;
             self.initial_anti_bot_tech = page.anti_bot_tech;
+            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_waf_check = page.waf_check;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 self.status = CrawlStatus::Blocked;
@@ -2761,6 +2781,8 @@ impl Website {
 
                 self.initial_status_code = page.status_code;
                 self.initial_anti_bot_tech = page.anti_bot_tech;
+                self.initial_page_should_retry = page.should_retry;
+                self.initial_page_waf_check = page.waf_check;
 
                 if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
                     if is_safe_javascript_challenge(&page) {
@@ -2904,6 +2926,8 @@ impl Website {
 
             self.initial_status_code = page.status_code;
             self.initial_anti_bot_tech = page.anti_bot_tech;
+            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_waf_check = page.waf_check;
 
             if page.status_code == reqwest::StatusCode::FORBIDDEN {
                 if is_safe_javascript_challenge(&page) {
