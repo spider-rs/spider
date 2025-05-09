@@ -1139,6 +1139,12 @@ impl Website {
         &self.status
     }
 
+    /// Set the active crawl status. This is helpful when chaining crawls concurrently.
+    pub fn set_status(&mut self, status: CrawlStatus) -> &CrawlStatus {
+        self.status = status;
+        &self.status
+    }
+
     /// Reset the active crawl status to bypass websites that are blocked.
     pub fn reset_status(&mut self) -> &CrawlStatus {
         self.status = CrawlStatus::Start;
