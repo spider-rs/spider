@@ -70,6 +70,8 @@ lazy_static::lazy_static! {
             "https://www.google-analytics.com/g/collect",
             "https://api-2-0.spot.im/v1.0.0/",
             "https://static.hotjar.com/",
+            "https://www.youtube.com/youtubei/v1/log_event?alt=json",
+            "https://play.google.com/log?hasfast=true&authuser=0&format=json",
             "https://matchadsrvr.yieldmo.com/track/",
             "https://translate.googleapis.com/element/log",
             "https://sentry.io/api/",
