@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.14"
+version = "2.37.15"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -26,9 +26,7 @@ url = "2"
 base64 = "0.22"
 fnv = "1"
 futures-timer = "3"
-cfg-if = "1"
 tokio = { version = "1", features = [
-    "rt",
     "rt-multi-thread",
     "time",
     "fs",
