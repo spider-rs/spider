@@ -67,6 +67,7 @@ lazy_static::lazy_static! {
             "https://disney.my.sentry.io/api/",
             "https://www.redditstatic.com/ads",
             "https://logx.optimizely.com/v1/events",
+            "https://www.google-analytics.com/g/collect",
             "https://api-2-0.spot.im/v1.0.0/",
             "https://static.hotjar.com/",
             "https://matchadsrvr.yieldmo.com/track/",
