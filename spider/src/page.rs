@@ -841,7 +841,7 @@ pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {
-    let success = res.status_code.is_success();
+    let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
     let resource_found = validate_empty(&res.content, success);
 
     let mut should_retry = resource_found && !success
@@ -851,7 +851,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         || res.status_code == StatusCode::REQUEST_TIMEOUT;
 
     Page {
-        html: if resource_found { res.content } else { None },
+        html: res.content,
         #[cfg(feature = "headers")]
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
@@ -891,11 +891,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 #[cfg(feature = "decentralized")]
 pub fn build(_: &str, res: PageResponse) -> Page {
     Page {
-        html: if res.content.is_some() {
-            res.content
-        } else {
-            None
-        },
+        html: res.content,
         #[cfg(feature = "headers")]
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
