@@ -28,8 +28,8 @@ pub mod revision;
 // browser can be used. Apart from breaking changes, using an older CDP
 // is generally a good idea.
 
-/// Currently built CDP revision
-pub const CURRENT_REVISION: Revision = Revision(1354347);
+/// Currently built CDP revision. The last stable version was 1354347.
+pub const CURRENT_REVISION: Revision = Revision(1457408);
 
 /// convenience fixups
 impl Default for CreateTargetParams {

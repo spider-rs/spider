@@ -958,10 +958,12 @@ impl NetworkManager {
                     if let Some(location) = redirect_resp.headers.inner()["Location"].as_str() {
                         if redirect_resp.url != location {
                             let fixed_location = location.replace(&redirect_resp.url, "");
+
                             request.response.as_mut().map(|resp| {
                                 resp.headers.0["Location"] =
                                     serde_json::Value::String(fixed_location.clone());
                             });
+
                             redirect_location = Some(fixed_location);
                         }
                     }
@@ -971,8 +973,10 @@ impl NetworkManager {
                     &mut request,
                     if let Some(redirect_location) = redirect_location {
                         let mut redirect_resp = redirect_resp.clone();
+
                         redirect_resp.headers.0["Location"] =
                             serde_json::Value::String(redirect_location);
+
                         redirect_resp
                     } else {
                         redirect_resp.clone()

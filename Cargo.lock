@@ -5926,7 +5926,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5994,7 +5994,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6035,7 +6035,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chromiumoxide_cdp"
-version = "0.7.2"
+version = "0.7.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -6047,7 +6047,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chromiumoxide_fetcher"
-version = "0.7.2"
+version = "0.7.4"
 dependencies = [
  "anyhow",
  "async-std",
@@ -6063,7 +6063,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chromiumoxide_pdl"
-version = "0.7.2"
+version = "0.7.4"
 dependencies = [
  "either",
  "heck 0.4.1",
@@ -6078,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chromiumoxide_types"
-version = "0.7.2"
+version = "0.7.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -6086,7 +6086,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "clap",
  "env_logger",
@@ -6145,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6185,7 +6185,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.16"
+version = "2.37.18"
 dependencies = [
  "env_logger",
  "lazy_static",

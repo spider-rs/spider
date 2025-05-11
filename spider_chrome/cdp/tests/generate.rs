@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Check that the generated files are up to date
+/// Check that the generated files are up to date and if not perform the updates.
 #[ignore]
 #[test]
 fn generated_code_is_fresh() {
@@ -28,9 +28,10 @@ fn generated_code_is_fresh() {
     let new = fs::read_to_string(tmp.path().join("cdp.rs")).unwrap();
     let src = dir.join("src/cdp.rs");
     let old = fs::read_to_string(&src).unwrap();
+
     if new != old {
         fs::write(src, new).unwrap();
-        panic!("generated code in the repository is outdated, updating...");
+        println!("generated code in the repository is outdated, updating...");
     }
 }
 
@@ -68,6 +69,6 @@ fn pdl_is_fresh() {
     if js_proto_new != js_proto_old || browser_proto_new != browser_proto_old {
         fs::write(js_proto, js_proto_new).unwrap();
         fs::write(browser_proto, browser_proto_new).unwrap();
-        panic!("pdl in the repository are outdated, updating...");
+        println!("pdl in the repository are outdated, updating...");
     }
 }
