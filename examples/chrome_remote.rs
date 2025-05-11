@@ -1,5 +1,8 @@
 //! cargo run --example chrome_remote --features="chrome chrome_intercept"
 
+// May 11th, 2025: Highly recommend you use the headless-browser project ( https://github.com/spider-rs/headless-browser/tree/main ) for remote Chrome.
+//                 See https://github.com/spider-rs/spider/issues/294#issuecomment-2869870886
+
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
 use spider::features::chrome_common::RequestInterceptConfiguration;
