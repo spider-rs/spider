@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.19"
+version = "2.37.20"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -144,16 +144,22 @@ reqwest = { version = "0.12", features = [
 
 [features]
 default = ["basic", "io_uring"]
-basic = [
+__basic = [
     "sync",
-    "reqwest_native_tls_native_roots",
-    "disk_native_tls",
     "cookies",
     "ua_generator",
     "encoding",
     "string_interner_buffer_backend",
     "balance",
     "real_browser"
+]
+basic_tls = [
+    "reqwest_native_tls_native_roots",
+    "disk_native_tls",
+]
+basic = [
+    "__basic",
+    "basic_tls"
 ]
 disk = ["dep:sqlx"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
