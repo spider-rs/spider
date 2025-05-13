@@ -282,7 +282,16 @@ pub fn get_mimic_headers(
     };
     let mut headers = HeaderMap::with_capacity(cap);
     let binding = reqwest::header::HeaderMap::with_capacity(cap);
-    let header_map = header_map.as_ref().map(|h| h.inner()).unwrap_or(&binding);
+    let mut map_exist = false;
+
+    let header_map = header_map
+        .as_ref()
+        .map(|h| {
+            let m = h.inner();
+            map_exist = !m.is_empty();
+            m
+        })
+        .unwrap_or(&binding);
 
     macro_rules! insert_or_default {
         ($key:expr, $default:expr) => {
@@ -581,6 +590,21 @@ pub fn get_mimic_headers(
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
         }
         BrowserKind::Other => (),
+    }
+
+    // re-merge the existing keys.
+    if map_exist {
+        for h in header_map {
+            if !headers.contains_key(h.0) {
+                headers.insert(h.0, h.1.clone());
+            }
+        }
+    }
+
+    if let Some(val) = headers.get(REFERER) {
+        if val.as_bytes().is_empty() {
+            headers.remove(REFERER);
+        }
     }
 
     headers
