@@ -1316,6 +1316,7 @@ impl Website {
                 &self.configuration.headers,
                 &None,
                 &self.configuration.viewport,
+                &self.domain_parsed,
             );
             if !headers.is_empty() {
                 self.configuration

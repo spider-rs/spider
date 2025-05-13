@@ -220,3 +220,120 @@ pub fn spoof_referrer() -> &'static str {
 pub fn spoof_referrer() -> &'static str {
     ""
 }
+
+/// Takes a URL and returns a convincing Google referer URL using the domain name or IP.
+///
+/// Handles:
+/// - Domain names with or without subdomains
+/// - IP addresses (removes periods)
+///
+/// # Examples
+/// ```
+/// let url = Url::parse("https://www.example.com/test").unwrap();
+/// assert_eq!(spoof_referrer_google(&url), Some("https://www.google.com/search?q=example".to_string()));
+///
+/// let url = Url::parse("http://192.168.1.1/").unwrap();
+/// assert_eq!(spoof_referrer_google(&url), Some("https://www.google.com/search?q=19216811".to_string()));
+/// ```
+pub fn spoof_referrer_google(parsed: &url::Url) -> Option<String> {
+    let host = parsed.host_str()?;
+
+    // Strip www. if present
+    let stripped = host.strip_prefix("www.").unwrap_or(host);
+
+    // Handle IPv4
+    if stripped.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return Some(format!(
+            "https://www.google.com/search?q={}",
+            stripped.replace('.', "")
+        ));
+    }
+
+    // Handle IPv6: remove colons and brackets
+    if stripped.contains(':') {
+        let cleaned = stripped.replace(['[', ']', ':'], "");
+        if !cleaned.is_empty() {
+            return Some(format!("https://www.google.com/search?q={}", cleaned));
+        } else {
+            return None;
+        }
+    }
+
+    // Handle domain names
+    let labels: Vec<&str> = stripped.split('.').collect();
+    if labels.len() >= 2 {
+        Some(format!("https://www.google.com/search?q={}", labels[0]))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    #[test]
+    fn test_standard_domain() {
+        let url = Url::parse("https://www.example.com/test").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(
+            result,
+            Some("https://www.google.com/search?q=example".to_string())
+        );
+    }
+
+    #[test]
+    fn test_domain_without_www() {
+        let url = Url::parse("https://example.com").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(
+            result,
+            Some("https://www.google.com/search?q=example".to_string())
+        );
+    }
+
+    #[test]
+    fn test_subdomain() {
+        let url = Url::parse("https://blog.shop.site.org").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(
+            result,
+            Some("https://www.google.com/search?q=blog".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ip_address() {
+        let url = Url::parse("http://192.168.1.1/").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(
+            result,
+            Some("https://www.google.com/search?q=19216811".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ipv6_address() {
+        let url = Url::parse("http://[::1]/").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(
+            result,
+            Some("https://www.google.com/search?q=1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_localhost() {
+        let url = Url::parse("http://localhost").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_invalid_url() {
+        let url = Url::parse("http:///invalid").unwrap();
+        let result = spoof_referrer_google(&url);
+        assert_eq!(result, None);
+    }
+}

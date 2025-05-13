@@ -1137,9 +1137,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.37"
+version = "4.5.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eccb054f56cbd38340b380d4a8e69ef1f02f1af43db2f0cc817a4774d80ae071"
+checksum = "ed93b9805f8ba930df42c2590f05453d5ec36cbb85d018868a5b24d31f6ac000"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1147,9 +1147,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.37"
+version = "4.5.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efd9466fac8543255d3b1fcad4762c5e116ffe808c8a3043d4263cd4fd4862a2"
+checksum = "379026ff283facf611b0ea629334361c4211d1b12ee01024eec1591133b04120"
 dependencies = [
  "anstream",
  "anstyle",
@@ -3434,12 +3434,12 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libloading"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
+checksum = "6a793df0d7afeac54f95b471d3af7f0d4fb975699f972341a4b76988d49cdf0c"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.53.0",
 ]
 
 [[package]]
@@ -3668,9 +3668,9 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "matrixmultiply"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9380b911e3e96d10c1f415da0876389aaf1b56759054eeb0de7df940c456ba1a"
+checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
 dependencies = [
  "autocfg",
  "rawpointer",
@@ -4141,9 +4141,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "os_info"
-version = "3.10.0"
+version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a604e53c24761286860eba4e2c8b23a0161526476b1de520139d69cdb85a6b5"
+checksum = "41fc863e2ca13dc2d5c34fb22ea4a588248ac14db929616ba65c45f21744b1e9"
 dependencies = [
  "log",
  "windows-sys 0.52.0",
@@ -4632,9 +4632,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.107"
+version = "2.1.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36d3257075f822569e43169391d51c0483196d37dc21c14807228f4dd1a76545"
+checksum = "b4d0b873458f19667df558849359edcc4786da36ce54c8668fd5d1c36c22b080"
 dependencies = [
  "psl-types",
 ]
@@ -5111,9 +5111,9 @@ dependencies = [
 
 [[package]]
 name = "resolv-conf"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc7c8f7f733062b66dc1c63f9db168ac0b97a9210e247fa90fdc9ad08f51b302"
+checksum = "95325155c684b1c89f7765e30bc1c42e4a6da51ca513615660cb8a62ef9a88e3"
 
 [[package]]
 name = "ring"
@@ -5243,9 +5243,9 @@ dependencies = [
 
 [[package]]
 name = "rquest-util"
-version = "2.2.0"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e314659bb735312dbc8fbb7291e9c551e17732ea55fa8b7ecb7bf8b9a4a6b675"
+checksum = "d3e3762f6e3e0d1674a6e74ebcbcb3b8d56c895757fc2cc2aa0d5e62ccfcb21e"
 dependencies = [
  "rquest",
  "serde",
@@ -5926,7 +5926,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5994,7 +5994,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6086,7 +6086,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "clap",
  "env_logger",
@@ -6145,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6185,7 +6185,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.20"
+version = "2.37.23"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -6735,9 +6735,9 @@ checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
 name = "tempfile"
-version = "3.19.1"
+version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
+checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
 dependencies = [
  "fastrand 2.3.0",
  "getrandom 0.3.3",

@@ -224,6 +224,28 @@ impl HeaderKey {
     }
 }
 
+#[cfg(feature = "real_browser")]
+/// Add the spoofed header from google or a real domain.
+pub fn maybe_insert_spoofed_referer(
+    domain_parsed: Option<&url::Url>,
+    rng: &mut rand::rngs::ThreadRng,
+) -> Option<reqwest::header::HeaderValue> {
+    use crate::client::header::HeaderValue;
+
+    if domain_parsed.is_some() && rng.random_bool(0.75) {
+        domain_parsed
+            .and_then(crate::features::spoof_referrer::spoof_referrer_google)
+            .and_then(|s| HeaderValue::from_str(&s).ok())
+            .or_else(|| {
+                let fallback = crate::features::spoof_referrer::spoof_referrer();
+                HeaderValue::from_static(fallback).into()
+            })
+    } else {
+        let fallback = crate::features::spoof_referrer::spoof_referrer();
+        HeaderValue::from_static(fallback).into()
+    }
+}
+
 /// Build the headers to use to act like a browser.
 #[cfg(feature = "real_browser")]
 pub fn get_mimic_headers(
@@ -233,6 +255,7 @@ pub fn get_mimic_headers(
     hostname: &Option<&str>,
     chrome: bool,
     viewport: &Option<crate::features::chrome_common::Viewport>,
+    domain_parsed: &Option<Box<url::Url>>,
 ) -> reqwest::header::HeaderMap {
     use reqwest::header::{
         HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, HOST,
@@ -392,12 +415,10 @@ pub fn get_mimic_headers(
 
             // 8. Referer (if spoofing enabled and missing)
             if add_ref && !header_map.contains_key(REFERER) {
-                let spoof_ref = crate::features::spoof_referrer::spoof_referrer();
-                if !spoof_ref.is_empty() {
-                    insert_or_default!(
-                        &refererer_header.as_header_name(),
-                        HeaderValue::from_static(spoof_ref)
-                    );
+                if let Some(ref_header) =
+                    maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut thread_rng)
+                {
+                    insert_or_default!(&refererer_header.as_header_name(), ref_header);
                 }
             }
 
@@ -532,12 +553,10 @@ pub fn get_mimic_headers(
             );
 
             if add_ref && !header_map.contains_key(REFERER) {
-                if let Ok(ref_value) =
-                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                if let Some(ref_header) =
+                    maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rng())
                 {
-                    if !ref_value.is_empty() {
-                        headers.insert(REFERER, ref_value);
-                    }
+                    insert_or_default!(REFERER, ref_header);
                 }
             }
 
@@ -552,12 +571,10 @@ pub fn get_mimic_headers(
             );
 
             if add_ref && !header_map.contains_key(REFERER) {
-                if let Ok(ref_value) =
-                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                if let Some(ref_header) =
+                    maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rng())
                 {
-                    if !ref_value.is_empty() {
-                        headers.insert(REFERER, ref_value);
-                    }
+                    insert_or_default!(REFERER, ref_header);
                 }
             }
 
@@ -578,6 +595,7 @@ pub fn get_mimic_headers(
     _hostname: &Option<&str>,
     _chrome: bool,
     _viewport: &Option<crate::features::chrome_common::Viewport>,
+    _domain_parsed: &Option<Box<url::Url>>,
 ) -> reqwest::header::HeaderMap {
     Default::default()
 }
@@ -604,6 +622,7 @@ pub fn extend_headers(
     headers: &std::option::Option<Box<SerializableHeaderMap>>,
     hostname: &Option<&str>,
     viewport: &Option<crate::features::chrome_common::Viewport>,
+    domain_parsed: &Option<Box<url::Url>>,
 ) {
     header_map.extend(crate::utils::header_utils::get_mimic_headers(
         user_agent,
@@ -612,6 +631,7 @@ pub fn extend_headers(
         hostname,
         true,
         viewport,
+        domain_parsed,
     ));
 }
 
@@ -623,6 +643,7 @@ pub fn extend_headers(
     headers: &std::option::Option<Box<SerializableHeaderMap>>,
     _hostname: &Option<&str>,
     _viewport: &Option<crate::features::chrome_common::Viewport>,
+    _domain_parsed: &Option<Box<url::Url>>,
 ) {
     if let Some(_headers) = headers {
         header_map.extend(_headers.0.clone());
