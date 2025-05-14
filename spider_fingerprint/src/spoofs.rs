@@ -24,6 +24,21 @@ pub const SPOOF_PERMISSIONS_QUERY: &str = r#"(()=>{const map={accelerometer:"gra
 /// Shallow hide-permission spoof. (use SPOOF_PERMISSIONS_QUERY instead.)
 pub const HIDE_PERMISSIONS: &str = "(()=>{const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) }; })();";
 
+/// Spoof Media labels. This will update fake media labels with real ones.
+pub fn spoof_media_labels_script(agent_os: AgentOs) -> String {
+    let camera_label = match agent_os {
+        AgentOs::Mac => "FaceTime HD Camera",
+        AgentOs::Windows => "Integrated Webcam",
+        AgentOs::Linux => "Integrated Camera",
+        AgentOs::Android => "Front Camera",
+    };
+
+    format!(
+        r#"(()=>{{const e=navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);navigator.mediaDevices.enumerateDevices=()=>e().then(d=>d.map(v=>{{let l=v.label;if(typeof l==="string"){{if(l.startsWith("Fake "))l=l.replace(/^Fake\s+/i,"");if(v.kind==="videoinput"&&/^fake(_device)?/i.test(l))l="{label}";const g=new Function(`return "${{l}}"`);Object.defineProperty(g,"toString",{{value:()=>`function get label() {{ [native code] }}`}});Object.defineProperty(v,"label",{{get:g,configurable:true}})}}return v}}))}})()"#,
+        label = camera_label
+    )
+}
+
 /// Spoof the screen dimensions.
 pub fn spoof_screen_script(
     screen_width: u32,

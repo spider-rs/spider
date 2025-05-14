@@ -19,7 +19,7 @@ use reqwest::cookie::{CookieStore, Jar};
 use spider_fingerprint::builder::AgentOs;
 use spider_fingerprint::spoofs::{
     resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_screen_script_rng,
-    DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
+    DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY, spoof_media_labels_script
 };
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -748,6 +748,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_media_labels_script(agent_os),
                 spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
         } else {
@@ -759,6 +760,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_media_labels_script(agent_os),
                 spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
         }
@@ -771,6 +773,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
     } else if stealth {
@@ -781,6 +784,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
     } else {
