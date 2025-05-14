@@ -48,6 +48,7 @@ lazy_static::lazy_static! {
             "https://tools.luckyorange.com/",
             "https://cdn.piano.io",
             "https://px.ads.linkedin.com",
+            "https://cdn.sift.com/s.js",
             "https://connect.facebook.net",
             "https://static-tracking.klaviyo.com/onsite/js/",
             "https://tags.tiqcdn.com",
@@ -88,8 +89,13 @@ lazy_static::lazy_static! {
             "https://static.ads-twitter.com/uwt.js",
             "https://js.hsadspixel.net/fb.js",
             "https://js.hs-banner.com/v2/",
+            "https://browser.sentry-cdn.com/",
+            "https://wix-engage-visitors-prod-13.firebaseio.com/",
+            "https://www.clarity.ms/tag/",
             "https://cdn.callrail.com/companies/",
             "https://js.zi-scripts.com/zi-tag.js",
+            "https://img1.wsimg.com/traffic-assets/js/tccl-tti.min.js",
+            "https://img1.wsimg.com/signals/js/clients/scc-c2/scc-c2.min.js",
             "https://connect.facebook.net/en_US/fbevents.js",
             "https://cdn.shopify.com/shopifycloud/boomerang/shopify-boomerang-1.0.0.min.js",
             "https://tag.marinsm.com/serve/",
@@ -253,6 +259,7 @@ lazy_static::lazy_static! {
             "https://cdn.taboola.com/libtrc/static/topics/",
             "https://pm-widget.taboola.com/",
             "https://gum.criteo.com/syncframe",
+
             // "https://www.youtube.com/s/player/", // Youtube player not needed usually since iframe_api is used mainly
             // vercel live
             "https://vercel.live/api/",

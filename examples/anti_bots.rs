@@ -117,5 +117,6 @@ async fn main() {
         crawl_website("https://deviceandbrowserinfo.com/are_you_a_bot"),
         crawl_website("https://abrahamjuliot.github.io/creepjs/"),
         crawl_website("https://bot.sannysoft.com/"),
+        crawl_website("https://fingerprint-scan.com/"),
     );
 }
