@@ -12,7 +12,9 @@ use chromiumoxide::cdp::browser_protocol::{
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::javascript::spoofs::{resolve_dpr, spoof_screen_script, DISABLE_DIALOGS};
+use chromiumoxide::javascript::spoofs::{
+    resolve_dpr, spoof_media_codecs_script, spoof_screen_script, DISABLE_DIALOGS,
+};
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
@@ -638,14 +640,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     let stealth = stealth_mode.stealth();
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
 
-    let spoof_script = if stealth {
-        &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-            &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
-            crate::features::chrome_spoof::UserAgentDataSpoofDegree::Real,
-        )
-    } else {
-        &Default::default()
-    };
+    let mut firefox_agent = false;
 
     let agent_os = config
         .user_agent
@@ -662,11 +657,22 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 } else if ua.contains("Android") {
                     agent_os = AgentOs::Android;
                 }
+            } else {
+                firefox_agent = ua.contains("Firefox");
             }
 
             agent_os
         })
         .unwrap_or(AgentOs::Linux);
+
+    let spoof_script = if stealth && !firefox_agent {
+        &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
+            &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
+            crate::features::chrome_spoof::UserAgentDataSpoofDegree::Real,
+        )
+    } else {
+        &Default::default()
+    };
 
     let linux = agent_os == AgentOs::Linux;
 
@@ -729,14 +735,16 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 &spoof_script,
                 disable_dialogs,
                 chromiumoxide::page::wrap_eval_script(&script),
-                screen_spoof
+                screen_spoof,
+                spoof_media_codecs_script()
             ))
         } else {
             Some(string_concat!(
                 &spoof_script,
                 disable_dialogs,
                 chromiumoxide::page::wrap_eval_script(&script),
-                screen_spoof
+                screen_spoof,
+                spoof_media_codecs_script()
             ))
         }
     } else if fingerprint {
@@ -744,10 +752,16 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             &fp_script,
             &spoof_script,
             disable_dialogs,
-            screen_spoof
+            screen_spoof,
+            spoof_media_codecs_script()
         ))
     } else if stealth {
-        Some(string_concat!(&spoof_script, disable_dialogs, screen_spoof))
+        Some(string_concat!(
+            &spoof_script,
+            disable_dialogs,
+            screen_spoof,
+            spoof_media_codecs_script()
+        ))
     } else {
         None
     };

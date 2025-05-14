@@ -28,16 +28,12 @@ pub fn spoof_screen_script(
     let inner_height = rng.random_range((screen_height as f32 * 0.75) as u32..=screen_height);
 
     // outer is typically 60-100px more in height, 0-40 in width
-    let outer_width = inner_width + rng.random_range(0..=40);
     let outer_height = inner_height + rng.random_range(60..=100);
+    let outer_width = inner_width;
 
     // available screen height might exclude menu bar, taskbar etc.
     let avail_width = screen_width;
-    let avail_height = if rng.random() {
-        screen_height
-    } else {
-        screen_height - rng.random_range(40..=120)
-    };
+    let avail_height = screen_height;
 
     // offset of window on screen
     let screen_x = rng.random_range(0..=screen_width - inner_width);
@@ -102,10 +98,15 @@ pub fn resolve_dpr(
 /// Spoof whether this is a touch screen or not.
 pub fn spoof_touch_script(has_touch: bool) -> &'static str {
     if has_touch {
-        r#"(()=>{const mtp=new Function('return 1');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{window.TouchEvent=window.TouchEvent||function(){};Object.defineProperty(window,'ontouchstart',{get:()=>null,configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>null,configurable:true});}catch{}})()"#
+        r#"(()=>{const mtp=new Function('return 1');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{window.TouchEvent=window.TouchEvent||function(){};Object.defineProperty(window,'ontouchstart',{get:()=>null,configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>null,configurable:true});}catch{}})();"#
     } else {
-        r#"(()=>{const mtp=new Function('return 0');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{Object.defineProperty(window,'TouchEvent',{get:()=>{throw new ReferenceError('TouchEvent is not defined')}, configurable:true});Object.defineProperty(window,'ontouchstart',{get:()=>undefined, configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>undefined, configurable:true});}catch{}})()"#
+        r#"(()=>{const mtp=new Function('return 0');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{Object.defineProperty(window,'TouchEvent',{get:()=>{throw new ReferenceError('TouchEvent is not defined')}, configurable:true});Object.defineProperty(window,'ontouchstart',{get:()=>undefined, configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>undefined, configurable:true});}catch{}})();"#
     }
+}
+
+/// Spoof the media codecs scripts.
+pub fn spoof_media_codecs_script() -> &'static str {
+    r#"(()=>{try{const a={"audio/ogg":"probably","audio/mp4":"probably","audio/webm":"probably","audio/wav":"probably"},v={"video/webm":"probably","video/mp4":"probably","video/ogg":"probably"};const c={...a,...v},f=s=>{const[t]=s.split(";");if(t==="video/mp4"&&s.includes("avc1.42E01E"))return{name:t,state:"probably"};const e=Object.entries(c).find(([k])=>k===t);return e?{name:e[0],state:e[1]}:undefined};const h=HTMLMediaElement.prototype,p=h.canPlayType;Object.defineProperty(h,"canPlayType",{value:function(t){if(!t)return p.apply(this,arguments);const r=f(t);return r?r.state:p.apply(this,arguments)},configurable:!0});}catch(e){console.warn(e);}})();"#
 }
 
 // spoof unused atm for headless browser settings entry.
