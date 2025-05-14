@@ -222,13 +222,16 @@ pub fn spoof_referrer() -> &'static str {
 }
 
 /// Takes a URL and returns a convincing Google referer URL using the domain name or IP.
-///
+/// 
 /// Handles:
 /// - Domain names with or without subdomains
 /// - IP addresses (removes periods)
 ///
 /// # Examples
 /// ```
+/// use spider::features::spoof_referrer::spoof_referrer_google;
+/// use url::Url;
+/// 
 /// let url = Url::parse("https://www.example.com/test").unwrap();
 /// assert_eq!(spoof_referrer_google(&url), Some("https://www.google.com/search?q=example".to_string()));
 ///
