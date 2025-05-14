@@ -115,18 +115,16 @@ fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
 
     if tier == Tier::Basic {
         format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
         )
     } else if tier == Tier::BasicNoWebgl {
-        format!(
-            r#"{HIDE_CHROME};{HIDE_PERMISSIONS};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
-        )
+        format!(r#"{HIDE_CHROME};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#)
     } else if tier == Tier::Mid {
         format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
         )
     } else if tier == Tier::Full {
-        format!("{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_PERMISSIONS};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
+        format!("{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
     } else {
         Default::default()
     }

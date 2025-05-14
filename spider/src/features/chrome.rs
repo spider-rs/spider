@@ -14,6 +14,7 @@ use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
 use chromiumoxide::javascript::spoofs::{
     resolve_dpr, spoof_media_codecs_script, spoof_screen_script, DISABLE_DIALOGS,
+    SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
 };
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
@@ -722,7 +723,12 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             agent_os,
         );
 
-        spoof_screen_script(viewport.width, viewport.height, dpr)
+        spoof_screen_script(
+            viewport.width,
+            viewport.height,
+            dpr,
+            viewport.emulating_mobile,
+        )
     } else {
         Default::default()
     };
@@ -735,8 +741,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 &spoof_script,
                 disable_dialogs,
                 chromiumoxide::page::wrap_eval_script(&script),
-                screen_spoof,
-                spoof_media_codecs_script()
+                screen_spoof // spoof_media_codecs_script(),
+                             // SPOOF_NOTIFICATIONS,
+                             // SPOOF_PERMISSIONS_QUERY
             ))
         } else {
             Some(string_concat!(
@@ -744,7 +751,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 disable_dialogs,
                 chromiumoxide::page::wrap_eval_script(&script),
                 screen_spoof,
-                spoof_media_codecs_script()
+                spoof_media_codecs_script(),
+                SPOOF_NOTIFICATIONS,
+                SPOOF_PERMISSIONS_QUERY
             ))
         }
     } else if fingerprint {
@@ -753,14 +762,18 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             &spoof_script,
             disable_dialogs,
             screen_spoof,
-            spoof_media_codecs_script()
+            spoof_media_codecs_script(),
+            SPOOF_NOTIFICATIONS,
+            SPOOF_PERMISSIONS_QUERY
         ))
     } else if stealth {
         Some(string_concat!(
             &spoof_script,
             disable_dialogs,
             screen_spoof,
-            spoof_media_codecs_script()
+            spoof_media_codecs_script(),
+            SPOOF_NOTIFICATIONS,
+            SPOOF_PERMISSIONS_QUERY
         ))
     } else {
         None
