@@ -1,9 +1,47 @@
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-use statrs::function::gamma::gamma;
 use std::vec::Vec;
 
 /// Represents mouse movements generated using Bézier curves.
 pub struct BezierMouse {}
+
+/// Computes the gamma function with an accuracy
+/// of 16 floating point digits. "An Analysis Of The Lanczos Gamma Approximation", Glendon Ralph Pugh, 2004.
+pub(crate) fn gamma(z: f64) -> f64 {
+    const GAMMA_DK: &[f64] = &[
+        2.48574089138753565546e-5,
+        1.05142378581721974210,
+        -3.45687097222016235469,
+        4.51227709466894823700,
+        -2.98285225323576655721,
+        1.05639711577126713077,
+        -1.95428773191645869583e-1,
+        1.70970543404441224307e-2,
+        -5.71926117404305781283e-4,
+        4.63399473359905636708e-6,
+        -2.71994908488607703910e-9,
+    ];
+    const TWO_SQRT_E_OVER_PI: f64 = 1.8603827342052657173362492472666631120594218414085755;
+    const GAMMA_R: f64 = 10.900511;
+    if z < 0.5 {
+        std::f64::consts::PI
+            / ((std::f64::consts::PI * z).sin()
+                * GAMMA_DK
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .fold(GAMMA_DK[0], |s, i| s + i.1 / (i.0 as f64 - z))
+                * TWO_SQRT_E_OVER_PI
+                * ((0.5 - z + GAMMA_R) / std::f64::consts::E).powf(0.5 - z))
+    } else {
+        GAMMA_DK
+            .iter()
+            .enumerate()
+            .skip(1)
+            .fold(GAMMA_DK[0], |s, i| s + i.1 / (z + i.0 as f64 - 1.0))
+            * TWO_SQRT_E_OVER_PI
+            * ((z - 0.5 + GAMMA_R) / std::f64::consts::E).powf(z - 0.5)
+    }
+}
 
 impl BezierMouse {
     /// The Bernstein polynomial of n, i as a function of t.
@@ -410,8 +448,8 @@ impl GaussianMouse {
     }
 }
 
-#[tokio::test]
-async fn random_cord() {
+#[test]
+fn random_cord() {
     let cords = BezierMouse::generate_random_coordinates(1280.0, 720.0);
     assert!(cords.len() >= 2, "random bezier cords did not generate");
     let cords = GaussianMouse::generate_random_coordinates(1280.0, 720.0);

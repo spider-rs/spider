@@ -230,19 +230,17 @@ pub fn maybe_insert_spoofed_referer(
     domain_parsed: Option<&url::Url>,
     rng: &mut rand::rngs::ThreadRng,
 ) -> Option<reqwest::header::HeaderValue> {
+    use spider_fingerprint::spoof_refererer::{spoof_referrer, spoof_referrer_google};
+
     use crate::client::header::HeaderValue;
 
     if domain_parsed.is_some() && rng.random_bool(0.75) {
         domain_parsed
-            .and_then(crate::features::spoof_referrer::spoof_referrer_google)
+            .and_then(spoof_referrer_google)
             .and_then(|s| HeaderValue::from_str(&s).ok())
-            .or_else(|| {
-                let fallback = crate::features::spoof_referrer::spoof_referrer();
-                HeaderValue::from_static(fallback).into()
-            })
+            .or_else(|| HeaderValue::from_static(spoof_referrer()).into())
     } else {
-        let fallback = crate::features::spoof_referrer::spoof_referrer();
-        HeaderValue::from_static(fallback).into()
+        HeaderValue::from_static(spoof_referrer()).into()
     }
 }
 
@@ -541,12 +539,10 @@ pub fn get_mimic_headers(
             );
 
             if add_ref && !header_map.contains_key(REFERER) {
-                if let Ok(ref_value) =
-                    HeaderValue::from_str(crate::features::spoof_referrer::spoof_referrer())
+                if let Some(ref_header) =
+                    maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rand::rng())
                 {
-                    if !ref_value.is_empty() {
-                        headers.insert(REFERER, ref_value);
-                    }
+                    insert_or_default!(REFERER, ref_header);
                 }
             }
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));

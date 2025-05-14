@@ -12,14 +12,15 @@ use chromiumoxide::cdp::browser_protocol::{
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::javascript::spoofs::{
-    resolve_dpr, spoof_media_codecs_script, spoof_screen_script, DISABLE_DIALOGS,
-    SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
-};
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
+use spider_fingerprint::builder::AgentOs;
+use spider_fingerprint::spoofs::{
+    resolve_dpr, spoof_media_codecs_script, spoof_screen_script, DISABLE_DIALOGS,
+    SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
+};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -636,7 +637,6 @@ pub async fn setup_chrome_interception_base(
 
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
-    use chromiumoxide::page::AgentOs;
     let stealth_mode = config.stealth_mode;
     let stealth = stealth_mode.stealth();
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
@@ -667,9 +667,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         .unwrap_or(AgentOs::Linux);
 
     let spoof_script = if stealth && !firefox_agent {
-        &crate::features::chrome_spoof::spoof_user_agent_data_high_entropy_values(
-            &crate::features::chrome_spoof::build_high_entropy_data(&config.user_agent),
-            crate::features::chrome_spoof::UserAgentDataSpoofDegree::Real,
+        &spider_fingerprint::spoof_user_agent::spoof_user_agent_data_high_entropy_values(
+            &spider_fingerprint::spoof_user_agent::build_high_entropy_data(&config.user_agent),
+            spider_fingerprint::spoof_user_agent::UserAgentDataSpoofDegree::Real,
         )
     } else {
         &Default::default()
@@ -740,16 +740,17 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 &fp_script,
                 &spoof_script,
                 disable_dialogs,
-                chromiumoxide::page::wrap_eval_script(&script),
-                screen_spoof // spoof_media_codecs_script(),
-                             // SPOOF_NOTIFICATIONS,
-                             // SPOOF_PERMISSIONS_QUERY
+                spider_fingerprint::wrap_eval_script(&script),
+                screen_spoof,
+                spoof_media_codecs_script(),
+                SPOOF_NOTIFICATIONS,
+                SPOOF_PERMISSIONS_QUERY
             ))
         } else {
             Some(string_concat!(
                 &spoof_script,
                 disable_dialogs,
-                chromiumoxide::page::wrap_eval_script(&script),
+                spider_fingerprint::wrap_eval_script(&script),
                 screen_spoof,
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,

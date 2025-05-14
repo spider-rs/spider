@@ -1,3 +1,5 @@
+use crate::builder::AgentOs;
+
 // use https://github.com/spider-rs/headless-browser for ideal default settings.
 pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
 pub const DISABLE_DIALOGS: &str  = "(()=>{const a=window.alert.toString(),c=window.confirm.toString(),p=window.prompt.toString();window.alert=function alert(){};Object.defineProperty(window.alert,'toString',{value:()=>a,configurable:true});window.confirm=function confirm(){return true};Object.defineProperty(window.confirm,'toString',{value:()=>c,configurable:true});window.prompt=function prompt(){return ''};Object.defineProperty(window.prompt,'toString',{value:()=>p,configurable:true});})();";
@@ -93,9 +95,8 @@ pub fn spoof_screen_script(
 pub fn resolve_dpr(
     emulating_mobile: bool,
     device_scale_factor: Option<f64>,
-    platform: crate::page::AgentOs,
+    platform: AgentOs,
 ) -> f64 {
-    use crate::page::AgentOs;
     device_scale_factor.unwrap_or_else(|| {
         if emulating_mobile {
             2.0

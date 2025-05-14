@@ -1,8 +1,9 @@
-#[cfg(feature = "spoof")]
-lazy_static! {
+use rand::Rng;
+
+lazy_static::lazy_static! {
     /// A list of websites that are common
     // we may want to move this to a new repo like ua_generator.
-    static ref WEBSITES: [&'static str; 203] = [
+    static ref WEBSITES: [&'static str; 257] = [
         "https://google.com/",
         "https://msn.com/",
         "https://search.brave.com/",
@@ -206,19 +207,66 @@ lazy_static! {
         "https://memrise.com/",
         "https://busuu.com/",
         "https://livemocha.com/",
+        "https://cloud.google.com/",
+        "https://developers.google.com/",
+        "https://openai.com/",
+        "https://stackoverflow.com/",
+        "https://stackexchange.com/",
+        "https://mathworks.com/",
+        "https://oracle.com/",
+        "https://ibm.com/",
+        "https://nvidia.com/",
+        "https://amd.com/",
+        "https://intel.com/",
+        "https://cisco.com/",
+        "https://salesforce.com/",
+        "https://zoom.us/",
+        "https://slack.com/",
+        "https://asana.com/",
+        "https://trello.com/",
+        "https://notion.so/",
+        "https://figma.com/",
+        "https://canva.com/",
+        "https://dribbble.com/",
+        "https://behance.net/",
+        "https://unsplash.com/",
+        "https://pexels.com/",
+        "https://producthunt.com/",
+        "https://crunchbase.com/",
+        "https://angel.co/",
+        "https://glassdoor.ca/",
+        "https://indeed.ca/",
+        "https://scholastic.com/",
+        "https://intuit.com/",
+        "https://quickbooks.intuit.com/",
+        "https://mint.intuit.com/",
+        "https://bankofamerica.com/",
+        "https://chase.com/",
+        "https://wellsfargo.com/",
+        "https://capitalone.com/",
+        "https://americanexpress.com/",
+        "https://td.com/",
+        "https://hsbc.com/",
+        "https://barclays.co.uk/",
+        "https://bbc.co.uk/",
+        "https://ft.com/",
+        "https://economist.com/",
+        "https://nature.org/",
+        "https://nasa.gov/",
+        "https://esa.int/",
+        "https://noaa.gov/",
+        "https://mit.edu/",
+        "https://stanford.edu/",
+        "https://harvard.edu/",
+        "https://berkeley.edu/",
+        "https://ox.ac.uk/",
+        "https://cam.ac.uk/",
     ];
 }
 
-#[cfg(feature = "spoof")]
 /// Get a random website from a static precompiled list.
 pub fn spoof_referrer() -> &'static str {
-    WEBSITES[fastrand::usize(..WEBSITES.len())]
-}
-
-#[cfg(not(feature = "spoof"))]
-/// Get a random website from a static precompiled list.
-pub fn spoof_referrer() -> &'static str {
-    ""
+    WEBSITES[rand::rng().random_range(..WEBSITES.len())]
 }
 
 /// Takes a URL and returns a convincing Google referer URL using the domain name or IP.

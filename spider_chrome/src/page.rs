@@ -24,6 +24,7 @@ use chromiumoxide_types::*;
 use futures::channel::mpsc::unbounded;
 use futures::channel::oneshot::channel as oneshot_channel;
 use futures::{stream, SinkExt, StreamExt};
+use spider_fingerprint::builder::{AgentOs, Tier};
 
 use crate::auth::Credentials;
 use crate::element::Element;
@@ -33,14 +34,7 @@ use crate::handler::domworld::DOMWorldKind;
 use crate::handler::httpfuture::HttpFuture;
 use crate::handler::target::{GetName, GetParent, GetUrl, TargetMessage};
 use crate::handler::PageInner;
-use crate::javascript::{
-    extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML},
-    spoofs::{
-        DISABLE_DIALOGS, GPU_REQUEST_ADAPTER, GPU_REQUEST_ADAPTER_MAC, GPU_SPOOF_SCRIPT,
-        GPU_SPOOF_SCRIPT_MAC, HIDE_CHROME, HIDE_PERMISSIONS, HIDE_WEBDRIVER, HIDE_WEBGL,
-        HIDE_WEBGL_MAC, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
-    },
-};
+use crate::javascript::extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML};
 use crate::js::{Evaluation, EvaluationResult};
 use crate::layout::Point;
 use crate::listeners::{EventListenerRequest, EventStream};
@@ -49,95 +43,6 @@ use crate::{utils, ArcHttpRequest};
 #[derive(Debug, Clone)]
 pub struct Page {
     inner: Arc<PageInner>,
-}
-
-/// Tier of stealth to use.
-#[derive(PartialEq, Debug, Default, Copy, Clone, serde::Serialize, serde::Deserialize)]
-pub enum Tier {
-    #[default]
-    /// Basic spoofing.
-    Basic,
-    /// Basic spoofing without webgl.
-    BasicNoWebgl,
-    /// Mid spoofing.
-    Mid,
-    /// Full spoofing.
-    Full,
-    /// No spoofing
-    None,
-}
-
-impl Tier {
-    /// Stealth mode enabled.
-    pub fn stealth(&self) -> bool {
-        match &self {
-            Tier::None => false,
-            _ => true,
-        }
-    }
-}
-
-/// The user agent types of profiles we support for stealth.
-#[derive(PartialEq, Clone, Copy, Default, Debug)]
-pub enum AgentOs {
-    #[default]
-    /// Linux.
-    Linux,
-    /// Mac.
-    Mac,
-    /// Windows.
-    Windows,
-    /// Android.
-    Android,
-}
-
-/// Generate the initial stealth script to send in one command.
-fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
-    let mac_spoof = os == AgentOs::Mac;
-
-    let spoof_gpu = if mac_spoof {
-        GPU_SPOOF_SCRIPT_MAC
-    } else {
-        GPU_SPOOF_SCRIPT
-    };
-
-    let spoof_webgl = if mac_spoof {
-        HIDE_WEBGL_MAC
-    } else {
-        HIDE_WEBGL
-    };
-
-    let spoof_gpu_adapter = if mac_spoof {
-        GPU_REQUEST_ADAPTER_MAC
-    } else {
-        GPU_REQUEST_ADAPTER
-    };
-
-    if tier == Tier::Basic {
-        format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
-        )
-    } else if tier == Tier::BasicNoWebgl {
-        format!(r#"{HIDE_CHROME};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#)
-    } else if tier == Tier::Mid {
-        format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
-        )
-    } else if tier == Tier::Full {
-        format!("{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
-    } else {
-        Default::default()
-    }
-}
-
-/// Generate the hide plugins script.
-fn generate_hide_plugins() -> String {
-    format!("{}{}", NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF)
-}
-
-/// Simple function to wrap the eval script safely.
-pub fn wrap_eval_script(source: &str) -> String {
-    format!(r#"(()=>{{{}}})();"#, source)
 }
 
 impl Page {
@@ -178,11 +83,14 @@ impl Page {
         };
 
         let source = if let Some(cs) = custom_script {
-            format!("{};{cs}", build_stealth_script(tier, os))
+            format!(
+                "{};{cs}",
+                spider_fingerprint::build_stealth_script(tier, os)
+            )
         } else {
-            build_stealth_script(tier, os)
+            spider_fingerprint::build_stealth_script(tier, os)
         };
-        let source = wrap_eval_script(&source);
+        let source = spider_fingerprint::wrap_eval_script(&source);
 
         self.add_script_to_evaluate_on_new_document(Some(source))
             .await?;
@@ -228,7 +136,11 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None, None),
+            self._enable_stealth_mode(
+                Some(spider_fingerprint::spoofs::DISABLE_DIALOGS),
+                None,
+                None
+            ),
             self.set_user_agent(ua)
         );
         Ok(())
@@ -239,7 +151,11 @@ impl Page {
     /// property to make it harder to detect the scraper as a bot. Also add dialog polyfill to prevent blocking the page.
     pub async fn enable_stealth_mode_with_agent_and_dimiss_dialogs(&self, ua: &str) -> Result<()> {
         let _ = tokio::join!(
-            self._enable_stealth_mode(Some(DISABLE_DIALOGS), None, None),
+            self._enable_stealth_mode(
+                Some(spider_fingerprint::spoofs::DISABLE_DIALOGS),
+                None,
+                None
+            ),
             self.set_user_agent(ua)
         );
         Ok(())
@@ -248,7 +164,7 @@ impl Page {
     /// Sets `window.chrome` on frame creation and console.log methods.
     pub async fn hide_chrome(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: HIDE_CHROME.to_string(),
+            source: spider_fingerprint::spoofs::HIDE_CHROME.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -260,7 +176,7 @@ impl Page {
     /// Obfuscates WebGL vendor on frame creation
     pub async fn hide_webgl_vendor(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: HIDE_WEBGL.to_string(),
+            source: spider_fingerprint::spoofs::HIDE_WEBGL.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -272,7 +188,7 @@ impl Page {
     /// Obfuscates browser plugins and hides the navigator object on frame creation
     pub async fn hide_plugins(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: generate_hide_plugins(),
+            source: spider_fingerprint::generate_hide_plugins(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -285,7 +201,7 @@ impl Page {
     /// Obfuscates browser permissions on frame creation
     pub async fn hide_permissions(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: HIDE_PERMISSIONS.to_string(),
+            source: spider_fingerprint::spoofs::HIDE_PERMISSIONS.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,
@@ -297,7 +213,7 @@ impl Page {
     /// Removes the `navigator.webdriver` property on frame creation
     pub async fn hide_webdriver(&self) -> Result<(), CdpError> {
         self.execute(AddScriptToEvaluateOnNewDocumentParams {
-            source: HIDE_WEBDRIVER.to_string(),
+            source: spider_fingerprint::spoofs::HIDE_WEBDRIVER.to_string(),
             world_name: None,
             include_command_line_api: None,
             run_immediately: None,

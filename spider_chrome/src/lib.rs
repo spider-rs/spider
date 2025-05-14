@@ -82,9 +82,8 @@ pub mod utils;
 use crate::handler::http::HttpRequest;
 use std::sync::Arc;
 
-/// reexport the generated cdp types
-pub use chromiumoxide_cdp::cdp;
-pub use chromiumoxide_types::{self as types, Binary, Command, Method, MethodType};
+/// re-export fingerprint management.
+pub use spider_fingerprint;
 
 pub use crate::browser::{Browser, BrowserConfig};
 pub use crate::conn::Connection;
@@ -94,6 +93,9 @@ pub use crate::error::Result;
 pub use crate::fetcher::{BrowserFetcher, BrowserFetcherOptions};
 pub use crate::handler::Handler;
 pub use crate::page::Page;
+/// re-export the generated cdp types
+pub use chromiumoxide_cdp::cdp;
+pub use chromiumoxide_types::{self as types, Binary, Command, Method, MethodType};
 
 #[cfg(feature = "fetcher")]
 pub mod fetcher {

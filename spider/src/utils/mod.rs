@@ -1195,8 +1195,8 @@ async fn perform_smart_mouse_movement(
     page: &chromiumoxide::Page,
     viewport: &Option<crate::configuration::Viewport>,
 ) {
-    use crate::features::chrome_mouse_movements::GaussianMouse;
     use chromiumoxide::layout::Point;
+    use spider_fingerprint::spoof_mouse_movement::GaussianMouse;
     let (viewport_width, viewport_height) = match viewport {
         Some(vp) => (vp.width as f64, vp.height as f64),
         _ => (1280.0, 720.0),

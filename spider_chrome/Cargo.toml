@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.27"
+version = "2.37.28"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -52,6 +52,12 @@ sonic-rs = { version = "0.5", optional = true, features = ["utf8_lossy"] }
 spider_chromiumoxide_types = { path = "types", version = "0.7" }
 spider_chromiumoxide_cdp = { path = "cdp", version = "0.7" }
 spider_chromiumoxide_fetcher = { path = "fetcher", version = "0.7", default-features = false, optional = true }
+
+[dependencies.spider_fingerprint]
+version = "2"
+path = "../spider_fingerprint"
+default-features = false
+features = ["serde"]
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

@@ -5921,7 +5921,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5970,6 +5970,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_chrome",
+ "spider_fingerprint",
  "spider_firewall",
  "sqlx",
  "statrs",
@@ -5989,7 +5990,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6017,6 +6018,7 @@ dependencies = [
  "spider_chromiumoxide_cdp",
  "spider_chromiumoxide_fetcher",
  "spider_chromiumoxide_types",
+ "spider_fingerprint",
  "spider_firewall",
  "thiserror 1.0.69",
  "tokio",
@@ -6081,7 +6083,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "clap",
  "env_logger",
@@ -6103,6 +6105,18 @@ dependencies = [
  "htr",
  "spider",
  "spider_utils",
+]
+
+[[package]]
+name = "spider_fingerprint"
+version = "2.37.28"
+dependencies = [
+ "case_insensitive_string",
+ "lazy_static",
+ "rand 0.9.1",
+ "serde",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -6140,7 +6154,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6163,7 +6177,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6180,7 +6194,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.27"
+version = "2.37.28"
 dependencies = [
  "env_logger",
  "lazy_static",

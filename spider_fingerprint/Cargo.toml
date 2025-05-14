@@ -1,0 +1,26 @@
+[package]
+name = "spider_fingerprint"
+version = "2.37.28"
+authors = ["j-mendez <jeff@spider.cloud>"]
+description = "Fingerprint library for Rust."
+repository = "https://github.com/spider-rs/spider"
+readme = "README.md"
+keywords = ["fingerprint", "browser"]
+categories = ["web-programming", "command-line-utilities"]
+license = "MIT"
+documentation = "https://docs.rs/spider"
+edition = "2018"
+
+[dependencies]
+rand = "0.9"
+lazy_static = "1"
+url = "2"
+case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]

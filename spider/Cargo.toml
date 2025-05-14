@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.27"
+version = "2.37.28"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -106,6 +106,12 @@ features = ["bytes", "stream"]
 [dependencies.spider_firewall]
 version = "2"
 optional = true
+
+[dependencies.spider_fingerprint]
+version = "2"
+path = "../spider_fingerprint"
+default-features = false
+features = ["serde"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.4", optional = true }

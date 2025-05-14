@@ -6386,7 +6386,10 @@ impl Website {
 
     /// Use stealth mode for the request. This does nothing without the `chrome` flag enabled.
     #[cfg(feature = "chrome")]
-    pub fn with_stealth_advanced(&mut self, stealth_mode: chromiumoxide::page::Tier) -> &mut Self {
+    pub fn with_stealth_advanced(
+        &mut self,
+        stealth_mode: spider_fingerprint::builder::Tier,
+    ) -> &mut Self {
         self.configuration.with_stealth_advanced(stealth_mode);
         self
     }
