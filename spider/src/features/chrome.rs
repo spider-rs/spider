@@ -18,7 +18,7 @@ use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
 use spider_fingerprint::builder::AgentOs;
 use spider_fingerprint::spoofs::{
-    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_screen_script,
+    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_screen_script_rng,
     DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
 };
 use std::time::Duration;
@@ -638,6 +638,7 @@ pub async fn setup_chrome_interception_base(
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
     use rand::Rng;
+
     let stealth_mode = config.stealth_mode;
     let stealth = stealth_mode.stealth();
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
@@ -724,11 +725,12 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             agent_os,
         );
 
-        spoof_screen_script(
+        spoof_screen_script_rng(
             viewport.width,
             viewport.height,
             dpr,
             viewport.emulating_mobile,
+            &mut rand::rng(),
         )
     } else {
         Default::default()

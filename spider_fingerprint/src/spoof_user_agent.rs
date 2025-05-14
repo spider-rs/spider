@@ -1,6 +1,8 @@
 use case_insensitive_string::compact_str;
 
 /// Represents a browser brand and its version, used for spoofing `userAgentData.fullVersionList`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BrandEntry {
     /// The name of the browser brand (e.g., "Chromium", "Not-A.Brand").
     pub brand: String,
@@ -9,6 +11,8 @@ pub struct BrandEntry {
 }
 
 /// Represents the high-entropy values returned by `navigator.userAgentData.getHighEntropyValues()`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HighEntropyUaData {
     /// The CPU architecture of the device (e.g., "x86", "arm").
     pub architecture: String,

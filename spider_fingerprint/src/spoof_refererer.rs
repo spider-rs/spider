@@ -266,7 +266,12 @@ lazy_static::lazy_static! {
 
 /// Get a random website from a static precompiled list.
 pub fn spoof_referrer() -> &'static str {
-    WEBSITES[rand::rng().random_range(..WEBSITES.len())]
+    spoof_referrer_rng(&mut rand::rng())
+}
+
+/// Get a random website from a static precompiled list.
+pub fn spoof_referrer_rng<R: Rng>(rng: &mut R) -> &'static str {
+    WEBSITES[rng.random_range(..WEBSITES.len())]
 }
 
 /// Takes a URL and returns a convincing Google referer URL using the domain name or IP.

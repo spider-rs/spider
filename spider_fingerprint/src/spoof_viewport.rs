@@ -99,9 +99,7 @@ pub enum DeviceType {
 
 /// Randomize viewport dimensions based on device type
 pub fn randomize_viewport(device: &DeviceType) -> Viewport {
-    let mut rng = rand::rng();
-
-    randomize_viewport_rng(device, &mut rng)
+    randomize_viewport_rng(device, &mut rand::rng())
 }
 
 /// Randomize viewport dimensions based on device type.
@@ -124,16 +122,19 @@ pub fn randomize_viewport_rng(device: &DeviceType, rng: &mut ThreadRng) -> Viewp
         }
     }
 }
+
 /// Get a random viewport by selecting a random device type first. The weights are aligned in favor of desktop.
 pub fn get_random_viewport() -> Viewport {
-    let mut rng = rand::rng();
+    get_random_viewport_rng(&mut rand::rng())
+}
+
+/// Get a random viewport by selecting a random device type first. The weights are aligned in favor of desktop.
+pub fn get_random_viewport_rng(rng: &mut ThreadRng) -> Viewport {
     let device_types = [DeviceType::Mobile, DeviceType::Tablet, DeviceType::Desktop];
 
     randomize_viewport(if let Ok(dist) = WeightedIndex::new(&[1, 1, 3]) {
-        &device_types[dist.sample(&mut rng)]
+        &device_types[dist.sample(rng)]
     } else {
-        device_types
-            .choose(&mut rng)
-            .unwrap_or(&DeviceType::Desktop)
+        device_types.choose(rng).unwrap_or(&DeviceType::Desktop)
     })
 }

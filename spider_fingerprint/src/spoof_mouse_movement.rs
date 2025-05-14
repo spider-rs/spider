@@ -1,4 +1,4 @@
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::Rng;
 use std::vec::Vec;
 
 /// Represents mouse movements generated using Bézier curves.
@@ -143,7 +143,7 @@ impl BezierMouse {
         let complexity = usize::max(4, complexity);
         let mut control_points = vec![(start_x, start_y)];
 
-        let mut rng = SmallRng::from_os_rng();
+        let mut rng = rand::rng();
 
         for _ in 0..complexity - 2 {
             let cx = rng.random_range(start_x..=end_x);
@@ -191,8 +191,10 @@ impl BezierMouse {
     ) -> Vec<(f64, f64)> {
         let start_x = 0.0;
         let start_y = 0.0;
-        let end_x = SmallRng::from_os_rng().random_range(0.0..=viewport_width);
-        let end_y = SmallRng::from_os_rng().random_range(0.0..=viewport_height);
+        let mut rng = rand::rng();
+
+        let end_x = rng.random_range(0.0..=viewport_width);
+        let end_y = rng.random_range(0.0..=viewport_height);
 
         Self::generate_bezier_mouse_movements(start_x, start_y, end_x, end_y, 1.0, 4, 1.0)
     }
@@ -230,7 +232,7 @@ impl GaussianMouse {
     ///
     /// A vector representing the cumulative sum of random values.
     fn random_walk(length: usize, stddev: f64) -> Vec<f64> {
-        let mut rng = SmallRng::from_os_rng();
+        let mut rng = rand::rng();
         let mut walk = Vec::with_capacity(length);
         let mut current = 0.0;
 

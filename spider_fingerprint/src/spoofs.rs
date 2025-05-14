@@ -1,4 +1,5 @@
 use crate::builder::AgentOs;
+use rand::Rng;
 
 // use https://github.com/spider-rs/headless-browser for ideal default settings.
 pub const HIDE_CHROME: &str = "window.chrome={runtime:{}};['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
@@ -30,9 +31,23 @@ pub fn spoof_screen_script(
     device_pixel_ratio: f64,
     emulating_mobile: bool,
 ) -> String {
-    use rand::{rng, Rng};
-    let mut rng = rng();
+    spoof_screen_script_rng(
+        screen_width,
+        screen_height,
+        device_pixel_ratio,
+        emulating_mobile,
+        &mut rand::rng(),
+    )
+}
 
+/// Spoof the screen dimensions.
+pub fn spoof_screen_script_rng<R: Rng>(
+    screen_width: u32,
+    screen_height: u32,
+    device_pixel_ratio: f64,
+    emulating_mobile: bool,
+    rng: &mut R,
+) -> String {
     // inner size is ~75-90% of screen width/height
     let inner_width =
         rng.random_range((screen_width as f32 * 0.70) as u32..=screen_width.min(1920));
