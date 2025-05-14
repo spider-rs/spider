@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.24"
+version = "2.37.25"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -44,7 +44,7 @@ adblock = { version = "0.9", optional = true, default-features = false, features
     "embedded-domain-resolver",
     "full-regex-handling",
 ] }
-rand = "0.8"
+rand = "0.9"
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 hashbrown = { version = "0.15", default-features = true }
 aho-corasick = "1"

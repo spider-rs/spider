@@ -14,5 +14,99 @@ pub const GPU_REQUEST_ADAPTER_MAC: &str = r#"(()=>{const def=(o,m)=>Object.defin
 /// Hide the webdriver from being enabled. You should not need this if you use the cli args to launch chrome - disabled-features=AutomationEnabled
 pub const HIDE_WEBDRIVER: &str = r#"(()=>{const r=Function.prototype.toString,g=()=>false;Function.prototype.toString=function(){return this===g?'function get webdriver() { [native code] }':r.call(this)};Object.defineProperty(Navigator.prototype,'webdriver',{get:g,enumerable:false,configurable:true})})();"#;
 
+/// Spoof the screen dimensions.
+pub fn spoof_screen_script(
+    screen_width: u32,
+    screen_height: u32,
+    device_pixel_ratio: f64,
+) -> String {
+    use rand::{rng, Rng};
+    let mut rng = rng();
+
+    // inner size is ~75-90% of screen width/height
+    let inner_width = rng.random_range((screen_width as f32 * 0.75) as u32..=screen_width);
+    let inner_height = rng.random_range((screen_height as f32 * 0.75) as u32..=screen_height);
+
+    // outer is typically 60-100px more in height, 0-40 in width
+    let outer_width = inner_width + rng.random_range(0..=40);
+    let outer_height = inner_height + rng.random_range(60..=100);
+
+    // available screen height might exclude menu bar, taskbar etc.
+    let avail_width = screen_width;
+    let avail_height = if rng.random() {
+        screen_height
+    } else {
+        screen_height - rng.random_range(40..=120)
+    };
+
+    // offset of window on screen
+    let screen_x = rng.random_range(0..=screen_width - inner_width);
+    let screen_y = rng.random_range(0..=screen_height - inner_height);
+
+    // color depth
+    let color_depth = 30;
+
+    format!(
+        "(()=>{{const iw=new Function('return {iw}'),ih=new Function('return {ih}'),ow=new Function('return {ow}'),oh=new Function('return {oh}'),sw=new Function('return {sw}'),sh=new Function('return {sh}'),aw=new Function('return {aw}'),ah=new Function('return {ah}'),sx=new Function('return {sx}'),sy=new Function('return {sy}'),cd=new Function('return {cd}'),pd=new Function('return {cd}'),dpr=new Function('return {dpr}');\
+        [iw,ih,ow,oh,sw,sh,aw,ah,sx,sy,cd,pd,dpr].forEach((f,i)=>Object.defineProperty(f,'toString',{{value:()=>`function get ${{['innerWidth','innerHeight','outerWidth','outerHeight','width','height','availWidth','availHeight','screenX','screenY','colorDepth','pixelDepth','devicePixelRatio'][i]}}() {{ [native code] }}`}}));\
+        Object.defineProperty(window,'innerWidth',{{get:iw,configurable:!0}});\
+        Object.defineProperty(window,'innerHeight',{{get:ih,configurable:!0}});\
+        Object.defineProperty(window,'outerWidth',{{get:ow,configurable:!0}});\
+        Object.defineProperty(window,'outerHeight',{{get:oh,configurable:!0}});\
+        Object.defineProperty(window,'screenX',{{get:sx,configurable:!0}});\
+        Object.defineProperty(window,'screenY',{{get:sy,configurable:!0}});\
+        Object.defineProperty(window,'devicePixelRatio',{{get:dpr,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'width',{{get:sw,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'height',{{get:sh,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'availWidth',{{get:aw,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'availHeight',{{get:ah,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'colorDepth',{{get:cd,configurable:!0}});\
+        Object.defineProperty(Screen.prototype,'pixelDepth',{{get:pd,configurable:!0}});\
+        }})();",
+        iw = inner_width,
+        ih = inner_height,
+        ow = outer_width,
+        oh = outer_height,
+        sw = screen_width,
+        sh = screen_height,
+        aw = avail_width,
+        ah = avail_height,
+        sx = screen_x,
+        sy = screen_y,
+        cd = color_depth,
+        dpr = device_pixel_ratio
+    )
+}
+
+/// Resolve the DRP
+pub fn resolve_dpr(
+    emulating_mobile: bool,
+    device_scale_factor: Option<f64>,
+    platform: crate::page::AgentOs,
+) -> f64 {
+    use crate::page::AgentOs;
+    device_scale_factor.unwrap_or_else(|| {
+        if emulating_mobile {
+            2.0
+        } else {
+            match platform {
+                AgentOs::Mac => 2.0,
+                AgentOs::Linux => 1.0,
+                AgentOs::Windows => 1.0,
+                AgentOs::Android => 2.0, // can be 3.0+ on some phones, but 2.0 is safe default
+            }
+        }
+    })
+}
+
+/// Spoof whether this is a touch screen or not.
+pub fn spoof_touch_script(has_touch: bool) -> &'static str {
+    if has_touch {
+        r#"(()=>{const mtp=new Function('return 1');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{window.TouchEvent=window.TouchEvent||function(){};Object.defineProperty(window,'ontouchstart',{get:()=>null,configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>null,configurable:true});}catch{}})()"#
+    } else {
+        r#"(()=>{const mtp=new Function('return 0');Object.defineProperty(mtp,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:mtp,configurable:true});Object.defineProperty(Navigator.prototype,'msMaxTouchPoints',{get:mtp,configurable:true});try{Object.defineProperty(window,'TouchEvent',{get:()=>{throw new ReferenceError('TouchEvent is not defined')}, configurable:true});Object.defineProperty(window,'ontouchstart',{get:()=>undefined, configurable:true});Object.defineProperty(document,'ontouchstart',{get:()=>undefined, configurable:true});}catch{}})()"#
+    }
+}
+
 // spoof unused atm for headless browser settings entry.
 // pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;

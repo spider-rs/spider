@@ -12,7 +12,7 @@ use chromiumoxide::cdp::browser_protocol::{
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::javascript::spoofs::DISABLE_DIALOGS;
+use chromiumoxide::javascript::spoofs::{resolve_dpr, spoof_screen_script, DISABLE_DIALOGS};
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
@@ -709,6 +709,18 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 
     let disable_dialogs = if dismiss_dialogs { DISABLE_DIALOGS } else { "" };
 
+    let screen_spoof = if let Some(viewport) = &config.viewport {
+        let dpr = resolve_dpr(
+            viewport.emulating_mobile,
+            viewport.device_scale_factor,
+            agent_os,
+        );
+
+        spoof_screen_script(viewport.width, viewport.height, dpr)
+    } else {
+        Default::default()
+    };
+
     // Final combined script to inject
     let merged_script = if let Some(script) = config.evaluate_on_new_document.as_deref() {
         if fingerprint {
@@ -716,19 +728,26 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 &fp_script,
                 &spoof_script,
                 disable_dialogs,
-                chromiumoxide::page::wrap_eval_script(&script)
+                chromiumoxide::page::wrap_eval_script(&script),
+                screen_spoof
             ))
         } else {
             Some(string_concat!(
                 &spoof_script,
                 disable_dialogs,
-                chromiumoxide::page::wrap_eval_script(&script)
+                chromiumoxide::page::wrap_eval_script(&script),
+                screen_spoof
             ))
         }
     } else if fingerprint {
-        Some(string_concat!(&fp_script, &spoof_script, disable_dialogs))
+        Some(string_concat!(
+            &fp_script,
+            &spoof_script,
+            disable_dialogs,
+            screen_spoof
+        ))
     } else if stealth {
-        Some(string_concat!(&spoof_script, disable_dialogs))
+        Some(string_concat!(&spoof_script, disable_dialogs, screen_spoof))
     } else {
         None
     };
@@ -763,7 +782,6 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             None => (),
         }
     };
-
     if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
         tokio::join!(stealth, configure_browser(&chrome_page, &config))
     })

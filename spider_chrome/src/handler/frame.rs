@@ -37,8 +37,8 @@ const EVALUATION_SCRIPT_URL: &str = "____chromiumoxide_utility_world___evaluatio
 /// Generate a collision-resistant world name using `id` + randomness.
 pub fn random_world_name(id: &str) -> String {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let rand_len = rng.gen_range(6..=12);
+    let mut rng = rand::rng();
+    let rand_len = rng.random_range(6..=12);
 
     // Convert first few chars of id into base36-compatible chars
     let id_part: String = id
@@ -58,11 +58,11 @@ pub fn random_world_name(id: &str) -> String {
 
     // Generate random base36 tail
     let rand_part: String = (0..rand_len)
-        .filter_map(|_| std::char::from_digit(rng.gen_range(0..36), 36))
+        .filter_map(|_| std::char::from_digit(rng.random_range(0..36), 36))
         .collect();
 
     // Ensure first char is always a letter (10–35 => a–z)
-    let first = std::char::from_digit(rng.gen_range(10..36), 36).unwrap_or('a');
+    let first = std::char::from_digit(rng.random_range(10..36), 36).unwrap_or('a');
 
     format!("{first}{id_part}{rand_part}")
 }
