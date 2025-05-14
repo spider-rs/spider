@@ -18,8 +18,8 @@ use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
 use spider_fingerprint::builder::AgentOs;
 use spider_fingerprint::spoofs::{
-    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_screen_script_rng,
-    DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY, spoof_media_labels_script
+    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_media_labels_script,
+    spoof_screen_script_rng, DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
 };
 use std::time::Duration;
 use tokio::task::JoinHandle;
