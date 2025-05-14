@@ -47,6 +47,7 @@ pub fn spoof_screen_script(
     screen_height: u32,
     device_pixel_ratio: f64,
     emulating_mobile: bool,
+    agent_os: AgentOs,
 ) -> String {
     spoof_screen_script_rng(
         screen_width,
@@ -54,6 +55,7 @@ pub fn spoof_screen_script(
         device_pixel_ratio,
         emulating_mobile,
         &mut rand::rng(),
+        agent_os,
     )
 }
 
@@ -64,6 +66,7 @@ pub fn spoof_screen_script_rng<R: Rng>(
     device_pixel_ratio: f64,
     emulating_mobile: bool,
     rng: &mut R,
+    agent_os: AgentOs,
 ) -> String {
     // inner size is ~75-90% of screen width/height
     let inner_width =
@@ -88,8 +91,19 @@ pub fn spoof_screen_script_rng<R: Rng>(
         )
     };
 
-    // color depth
-    let color_depth = 30;
+    let simulate_hdr = screen_width >= 2560 && device_pixel_ratio >= 2.0;
+    let high_end_display = simulate_hdr && matches!(agent_os, AgentOs::Mac | AgentOs::Windows);
+
+    let color_depth = match agent_os {
+        AgentOs::Mac | AgentOs::Windows | AgentOs::Linux => {
+            if simulate_hdr || high_end_display {
+                30
+            } else {
+                24
+            }
+        }
+        AgentOs::Android => 24,
+    };
 
     format!(
         "(()=>{{const iw=new Function('return {iw}'),ih=new Function('return {ih}'),ow=new Function('return {ow}'),oh=new Function('return {oh}'),sw=new Function('return {sw}'),sh=new Function('return {sh}'),aw=new Function('return {aw}'),ah=new Function('return {ah}'),sx=new Function('return {sx}'),sy=new Function('return {sy}'),cd=new Function('return {cd}'),pd=new Function('return {cd}'),dpr=new Function('return {dpr}');\

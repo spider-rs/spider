@@ -731,6 +731,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             dpr,
             viewport.emulating_mobile,
             &mut rand::rng(),
+            agent_os
         )
     } else {
         Default::default()
