@@ -18,8 +18,8 @@ use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
 use spider_fingerprint::builder::AgentOs;
 use spider_fingerprint::spoofs::{
-    resolve_dpr, spoof_media_codecs_script, spoof_screen_script, DISABLE_DIALOGS,
-    SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
+    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_screen_script,
+    DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
 };
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -637,6 +637,7 @@ pub async fn setup_chrome_interception_base(
 
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+    use rand::Rng;
     let stealth_mode = config.stealth_mode;
     let stealth = stealth_mode.stealth();
     let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
@@ -744,7 +745,8 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 screen_spoof,
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
-                SPOOF_PERMISSIONS_QUERY
+                SPOOF_PERMISSIONS_QUERY,
+                spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
         } else {
             Some(string_concat!(
@@ -754,7 +756,8 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 screen_spoof,
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
-                SPOOF_PERMISSIONS_QUERY
+                SPOOF_PERMISSIONS_QUERY,
+                spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
         }
     } else if fingerprint {
@@ -765,7 +768,8 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             screen_spoof,
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
-            SPOOF_PERMISSIONS_QUERY
+            SPOOF_PERMISSIONS_QUERY,
+            spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
     } else if stealth {
         Some(string_concat!(
@@ -774,7 +778,8 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             screen_spoof,
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
-            SPOOF_PERMISSIONS_QUERY
+            SPOOF_PERMISSIONS_QUERY,
+            spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
     } else {
         None

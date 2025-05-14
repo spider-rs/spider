@@ -119,6 +119,7 @@ pub extern crate percent_encoding;
 pub extern crate quick_xml;
 pub extern crate reqwest;
 pub extern crate smallvec;
+pub extern crate spider_fingerprint;
 pub extern crate tokio;
 pub extern crate tokio_stream;
 pub extern crate url;

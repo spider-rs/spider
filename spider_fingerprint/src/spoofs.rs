@@ -125,5 +125,13 @@ pub fn spoof_media_codecs_script() -> &'static str {
     r#"(()=>{try{const a={"audio/ogg":"probably","audio/mp4":"probably","audio/webm":"probably","audio/wav":"probably"},v={"video/webm":"probably","video/mp4":"probably","video/ogg":"probably"};const c={...a,...v},f=s=>{const[t]=s.split(";");if(t==="video/mp4"&&s.includes("avc1.42E01E"))return{name:t,state:"probably"};const e=Object.entries(c).find(([k])=>k===t);return e?{name:e[0],state:e[1]}:undefined};const h=HTMLMediaElement.prototype,p=h.canPlayType;Object.defineProperty(h,"canPlayType",{value:function(t){if(!t)return p.apply(this,arguments);const r=f(t);return r?r.state:p.apply(this,arguments)},configurable:!0});}catch(e){console.warn(e);}})();"#
 }
 
+/// Spoof the history length.
+pub fn spoof_history_length_script(length: u32) -> String {
+    format!(
+        "(()=>{{const h=new Function('return {length}');Object.defineProperty(h,'toString',{{value:()=>`function get length() {{ [native code] }}`}});Object.defineProperty(History.prototype,'length',{{get:h,configurable:!0}});}})()",
+        length = length
+    )
+}
+
 // spoof unused atm for headless browser settings entry.
 // pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
