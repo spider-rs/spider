@@ -277,7 +277,7 @@ pub fn spoof_referrer() -> &'static str {
 ///
 /// # Examples
 /// ```
-/// use spider::features::spoof_referrer::spoof_referrer_google;
+/// use spider_fingerprint::spoof_refererer::spoof_referrer_google;
 /// use url::Url;
 ///
 /// let url = Url::parse("https://www.example.com/test").unwrap();
