@@ -84,13 +84,13 @@ impl Page {
 
         let source = if let Some(cs) = custom_script {
             format!(
-                "{};{cs}",
-                spider_fingerprint::build_stealth_script(tier, os)
+                "{};{};",
+                spider_fingerprint::build_stealth_script(tier, os),
+                spider_fingerprint::wrap_eval_script(&cs)
             )
         } else {
             spider_fingerprint::build_stealth_script(tier, os)
         };
-        let source = spider_fingerprint::wrap_eval_script(&source);
 
         self.add_script_to_evaluate_on_new_document(Some(source))
             .await?;
