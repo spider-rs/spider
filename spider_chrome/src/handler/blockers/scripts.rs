@@ -195,7 +195,8 @@ lazy_static::lazy_static! {
             "https://d7d3cf2e81d293050033-3dfc0615b0fd7b49143049256703bfce.ssl.cf1.rackcdn.com/stf.js",
             "https://geo.privacymanager.io/",
             "https://script.dotmetrics.net/",
-            "//d2wy8f7a9ursnm.cloudfront.net/v8/bugsnag.min.js",
+            "https://delivery.consentmanager.net/delivery/",
+            "/eu_cookie_compliance/js/eu_cookie_compliance.min.js",
             ".siteintercept.qualtrics.com",
             ".sharethis.com",
             ".newrelic.com",
@@ -215,6 +216,8 @@ lazy_static::lazy_static! {
             "privacy-notice.js",
             "tracking.js",
             "privacy_cookie.js",
+            "eu_cookie_compliance.js",
+            "eu_cookie_compliance.min.js",
             "plugins/cookie-law-info/legacy/",
             "ads.js",
             "insight.min.js",
@@ -265,6 +268,7 @@ lazy_static::lazy_static! {
             "https://pm-widget.taboola.com/",
             "https://gum.criteo.com/syncframe",
 
+            "https://td.doubleclick.net/td/",
             // "https://www.youtube.com/s/player/", // Youtube player not needed usually since iframe_api is used mainly
             // vercel live
             "https://vercel.live/api/",
