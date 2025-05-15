@@ -213,26 +213,10 @@ pub struct Configuration {
     pub depth: usize,
     /// The depth to crawl pertaining to the root.
     pub depth_distance: usize,
-    /// Cache the page following HTTP caching rules.
-    #[cfg(any(feature = "cache_request", feature = "chrome"))]
-    pub cache: bool,
-    /// Enable or disable service workers. Disabled by default.
-    #[cfg(feature = "chrome")]
-    pub service_worker_enabled: bool,
-    #[cfg(feature = "chrome")]
     /// Use stealth mode for requests.
     pub stealth_mode: spider_fingerprint::builder::Tier,
     /// Configure the viewport for chrome and viewport headers.
     pub viewport: Option<Viewport>,
-    /// Overrides default host system timezone with the specified one.
-    #[cfg(feature = "chrome")]
-    pub timezone_id: Option<Box<String>>,
-    /// Overrides default host system locale with the specified one.
-    #[cfg(feature = "chrome")]
-    pub locale: Option<Box<String>>,
-    /// Set a custom script to eval on each new document.
-    #[cfg(feature = "chrome")]
-    pub evaluate_on_new_document: Option<Box<String>>,
     /// Crawl budget for the paths. This helps prevent crawling extra pages and limiting the amount.
     pub budget: Option<hashbrown::HashMap<case_insensitive_string::CaseInsensitiveString, u32>>,
     /// If wild card budgeting is found for the website.
@@ -242,36 +226,12 @@ pub struct Configuration {
         Box<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
     /// Collect all the resources found on the page.
     pub full_resources: bool,
-    #[cfg(feature = "chrome")]
-    /// Dismiss dialogs.
-    pub dismiss_dialogs: Option<bool>,
-    #[cfg(feature = "chrome")]
-    /// Wait for options for the page.
-    pub wait_for: Option<WaitFor>,
-    #[cfg(feature = "chrome")]
-    /// Take a screenshot of the page.
-    pub screenshot: Option<ScreenShotConfig>,
     /// Dangerously accept invalid certficates.
     pub accept_invalid_certs: bool,
-    /// Track the events made via chrome.
-    #[cfg(feature = "chrome")]
-    pub track_events: Option<ChromeEventTracker>,
     /// The auth challenge response. The 'chrome_intercept' flag is also required in order to intercept the response.
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
     pub openai_config: Option<Box<GPTConfigs>>,
-    /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
-    #[cfg(feature = "chrome")]
-    pub fingerprint: Fingerprint,
-    /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
-    #[cfg(feature = "chrome")]
-    pub chrome_connection_url: Option<String>,
-    /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
-    #[cfg(feature = "chrome")]
-    pub execution_scripts: Option<ExecutionScripts>,
-    /// Web automation scripts to run up to a duration of 60 seconds.
-    #[cfg(feature = "chrome")]
-    pub automation_scripts: Option<AutomationScripts>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
     /// Return the page links in the subscription channels. This does nothing without the flag `sync` enabled.
@@ -280,9 +240,6 @@ pub struct Configuration {
     pub retry: u8,
     /// Skip spawning a control thread that can pause, start, and shutdown the crawl.
     pub no_control_thread: bool,
-    /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
-    #[cfg(feature = "chrome")]
-    pub chrome_intercept: RequestInterceptConfiguration,
     /// The blacklist urls.
     blacklist: AllowListSet,
     /// The whitelist urls.
@@ -298,6 +255,49 @@ pub struct Configuration {
     pub normalize: bool,
     /// Modify the headers to act like a real-browser
     pub modify_headers: bool,
+    /// Cache the page following HTTP caching rules.
+    #[cfg(any(feature = "cache_request", feature = "chrome"))]
+    pub cache: bool,
+    #[cfg(feature = "chrome")]
+    /// Enable or disable service workers. Enabled by default.
+    pub service_worker_enabled: bool,
+    #[cfg(feature = "chrome")]
+    /// Overrides default host system timezone with the specified one.
+    #[cfg(feature = "chrome")]
+    pub timezone_id: Option<Box<String>>,
+    /// Overrides default host system locale with the specified one.
+    #[cfg(feature = "chrome")]
+    pub locale: Option<Box<String>>,
+    /// Set a custom script to eval on each new document.
+    #[cfg(feature = "chrome")]
+    pub evaluate_on_new_document: Option<Box<String>>,
+    #[cfg(feature = "chrome")]
+    /// Dismiss dialogs.
+    pub dismiss_dialogs: Option<bool>,
+    #[cfg(feature = "chrome")]
+    /// Wait for options for the page.
+    pub wait_for: Option<WaitFor>,
+    #[cfg(feature = "chrome")]
+    /// Take a screenshot of the page.
+    pub screenshot: Option<ScreenShotConfig>,
+    #[cfg(feature = "chrome")]
+    /// Track the events made via chrome.
+    pub track_events: Option<ChromeEventTracker>,
+    #[cfg(feature = "chrome")]
+    /// Setup fingerprint ID on each document. This does nothing without the flag `chrome` enabled.
+    pub fingerprint: Fingerprint,
+    #[cfg(feature = "chrome")]
+    /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
+    pub chrome_connection_url: Option<String>,
+    /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
+    #[cfg(feature = "chrome")]
+    pub execution_scripts: Option<ExecutionScripts>,
+    /// Web automation scripts to run up to a duration of 60 seconds.
+    #[cfg(feature = "chrome")]
+    pub automation_scripts: Option<AutomationScripts>,
+    /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
+    #[cfg(feature = "chrome")]
+    pub chrome_intercept: RequestInterceptConfiguration,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -472,6 +472,7 @@ impl Configuration {
             only_html: true,
             cache: true,
             modify_headers: true,
+            service_worker_enabled: true,
             fingerprint: Fingerprint::Basic,
             ..Default::default()
         }
