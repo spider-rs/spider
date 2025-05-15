@@ -193,6 +193,7 @@ lazy_static::lazy_static! {
             "https://app.popt.in/pixel.js",
             "https://js-agent.newrelic.com",
             "https://d7d3cf2e81d293050033-3dfc0615b0fd7b49143049256703bfce.ssl.cf1.rackcdn.com/stf.js",
+            "https://code.etracker.com/code/e.js",
             "https://geo.privacymanager.io/",
             "https://script.dotmetrics.net/",
             "https://delivery.consentmanager.net/delivery/",
@@ -214,6 +215,7 @@ lazy_static::lazy_static! {
             ".lab.amplitude.",
             // explicit ignore tracking.js and ad files
             "privacy-notice.js",
+            "cookie_consent.js",
             "tracking.js",
             "privacy_cookie.js",
             "eu_cookie_compliance.js",

@@ -26,6 +26,16 @@ pub const SPOOF_PERMISSIONS_QUERY: &str = r#"(()=>{const map={accelerometer:"gra
 /// Shallow hide-permission spoof. (use SPOOF_PERMISSIONS_QUERY instead.)
 pub const HIDE_PERMISSIONS: &str = "(()=>{const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) }; })();";
 
+/// Spoof the touch screen.
+pub fn spoof_touch_screen(mobile: bool) -> &'static str {
+    // headless already defaults to a touch screen. Spoof for virtual display and real proxy connections.
+    if mobile {
+        r#"(()=>{const one=()=>1;Object.defineProperty(one,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperties(Navigator.prototype,{maxTouchPoints:{get:one,configurable:true},msMaxTouchPoints:{get:one,configurable:true}});try{window.TouchEvent=class TouchEvent extends UIEvent{};document.createEvent=(type)=>(type==='TouchEvent'?new TouchEvent('touchstart'):(Document.prototype.createEvent.call(document,type)));if(!('ontouchstart'in window)){Object.defineProperty(Window.prototype,'ontouchstart',{value:null,writable:true,enumerable:true,configurable:true})}}catch{}})();"#
+    } else {
+        r#"(()=>{const zero=()=>0;Object.defineProperty(zero,'toString',{value:()=>`function get maxTouchPoints() { [native code] }`});Object.defineProperties(Navigator.prototype,{maxTouchPoints:{get:zero,configurable:true},msMaxTouchPoints:{get:zero,configurable:true}});try{delete window.TouchEvent;Object.defineProperty(window,'TouchEvent',{get:()=>{throw new ReferenceError("TouchEvent is not defined")},configurable:true});document.createEvent=(type)=>{if(type==='TouchEvent'){throw new Error('NotSupportedError')}return Document.prototype.createEvent.call(document,type)};if('ontouchstart'in window){delete window.ontouchstart}if('ontouchstart'in Window.prototype){delete Window.prototype.ontouchstart;Object.defineProperty(Window.prototype,'ontouchstart',{value:undefined,writable:false,enumerable:false,configurable:false})}}catch{}})();"#
+    }
+}
+
 /// Spoof Media labels. This will update fake media labels with real ones.
 pub fn spoof_media_labels_script(agent_os: AgentOs) -> String {
     let camera_label = match agent_os {
@@ -174,7 +184,7 @@ pub fn spoof_media_codecs_script() -> &'static str {
 /// Spoof the history length.
 pub fn spoof_history_length_script(length: u32) -> String {
     format!(
-        "(()=>{{const h=new Function('return {length}');Object.defineProperty(h,'toString',{{value:()=>`function get length() {{ [native code] }}`}});Object.defineProperty(History.prototype,'length',{{get:h,configurable:!0}});}})()",
+        "(()=>{{const h=new Function('return {length}');Object.defineProperty(h,'toString',{{value:()=>`function get length() {{ [native code] }}`}});Object.defineProperty(History.prototype,'length',{{get:h,configurable:!0}});}})();",
         length = length
     )
 }

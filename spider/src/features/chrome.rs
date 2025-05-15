@@ -19,7 +19,8 @@ use reqwest::cookie::{CookieStore, Jar};
 use spider_fingerprint::builder::AgentOs;
 use spider_fingerprint::spoofs::{
     resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_media_labels_script,
-    spoof_screen_script_rng, DISABLE_DIALOGS, SPOOF_NOTIFICATIONS, SPOOF_PERMISSIONS_QUERY,
+    spoof_screen_script_rng, spoof_touch_screen, DISABLE_DIALOGS, SPOOF_NOTIFICATIONS,
+    SPOOF_PERMISSIONS_QUERY,
 };
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -717,8 +718,10 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     };
 
     let disable_dialogs = if dismiss_dialogs { DISABLE_DIALOGS } else { "" };
+    let mut mobile_device = false;
 
     let screen_spoof = if let Some(viewport) = &config.viewport {
+        mobile_device = viewport.emulating_mobile;
         let dpr = resolve_dpr(
             viewport.emulating_mobile,
             viewport.device_scale_factor,
@@ -749,6 +752,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_touch_screen(mobile_device),
                 spoof_media_labels_script(agent_os),
                 spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
@@ -761,6 +765,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_touch_screen(mobile_device),
                 spoof_media_labels_script(agent_os),
                 spoof_history_length_script(rand::rng().random_range(1..=6))
             ))
@@ -774,6 +779,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_touch_screen(mobile_device),
             spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
@@ -785,6 +791,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_touch_screen(mobile_device),
             spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))
         ))
