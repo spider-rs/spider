@@ -38,7 +38,7 @@ pub fn build_high_entropy_data(
         .split_whitespace()
         .find(|s| s.starts_with("Chrome/"))
         .and_then(|s| s.strip_prefix("Chrome/"))
-        .unwrap_or("135.0.0.0");
+        .unwrap_or("136.0.0.0");
 
     let (architecture, model, platform, platform_version, bitness): (
         &str,
@@ -93,9 +93,9 @@ pub fn build_high_entropy_data(
             .split('.')
             .next()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(135);
+            .unwrap_or(136);
 
-        let base_chrome = 135;
+        let base_chrome = 136;
         let base_mac = 14.6;
         let delta = if chrome_major > base_chrome {
             ((chrome_major - base_chrome) as f32 * 0.1).round()

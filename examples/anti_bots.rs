@@ -38,7 +38,7 @@ async fn crawl_website(url: &str) {
         .with_limit(1)
         .with_retry(0)
         .with_chrome_intercept(interception)
-        .with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(if creepjs { 10000 } else { 200 })))))
+        .with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(if creepjs { 10_000 } else { 200 })))))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(2000)))))
         .with_wait_for_idle_dom(Some(WaitForSelector::new(
             Some(Duration::from_millis(5000)),
