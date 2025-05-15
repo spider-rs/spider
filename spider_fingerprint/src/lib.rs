@@ -1,5 +1,9 @@
 /// Builder types.
 pub mod builder;
+/// Custom static profiles.
+pub mod profiles;
+/// GPU spoofs.
+pub mod spoof_gpu;
 /// Spoof mouse-movement.
 pub mod spoof_mouse_movement;
 /// Referer headers.
@@ -8,6 +12,8 @@ pub mod spoof_refererer;
 pub mod spoof_user_agent;
 /// Spoof viewport.
 pub mod spoof_viewport;
+/// WebGL spoofs.
+pub mod spoof_webgl;
 /// Generic spoofs.
 pub mod spoofs;
 
