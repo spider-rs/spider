@@ -197,6 +197,7 @@ lazy_static::lazy_static! {
             "https://geo.privacymanager.io/",
             "https://script.dotmetrics.net/",
             "https://delivery.consentmanager.net/delivery/",
+            "https://mc.yandex.ru/metrika/tag.js",
             "/eu_cookie_compliance/js/eu_cookie_compliance.min.js",
             ".siteintercept.qualtrics.com",
             ".sharethis.com",
