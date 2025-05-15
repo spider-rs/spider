@@ -1,5 +1,7 @@
 use case_insensitive_string::compact_str;
 
+use crate::BASE_CHROME_VERSION;
+
 /// Represents a browser brand and its version, used for spoofing `userAgentData.fullVersionList`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -36,9 +38,10 @@ pub fn build_high_entropy_data(
 
     let full_version = user_agent
         .split_whitespace()
-        .find(|s| s.starts_with("Chrome/"))
-        .and_then(|s| s.strip_prefix("Chrome/"))
-        .unwrap_or("136.0.0.0");
+        .find_map(|s| s.strip_prefix("Chrome/"))
+        .unwrap_or("136.0.7103.93");
+
+    let mut older_brand = true;
 
     let (architecture, model, platform, platform_version, bitness): (
         &str,
@@ -93,17 +96,22 @@ pub fn build_high_entropy_data(
             .split('.')
             .next()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(136);
+            .unwrap_or(*BASE_CHROME_VERSION);
 
-        let base_chrome = 136;
         let base_mac = 14.6;
-        let delta = if chrome_major > base_chrome {
-            ((chrome_major - base_chrome) as f32 * 0.1).round()
+
+        let delta = if chrome_major > *BASE_CHROME_VERSION {
+            ((chrome_major - *BASE_CHROME_VERSION) as f32 * 0.1).round()
         } else {
             0.0
         };
 
         let mac_major = base_mac + delta;
+
+        if mac_major >= 136.0 {
+            older_brand = false;
+        }
+
         let platform_version = format!("{:.1}.1", mac_major);
 
         ("arm", "".to_string(), "macOS", platform_version, "64")
@@ -128,43 +136,43 @@ pub fn build_high_entropy_data(
         ("x86", "".to_string(), "Unknown", "1.0.0".to_string(), "64")
     };
 
+    // chrome canary order - Not, Chromium, and "Google Chrome ( use a flag for it. )
+    // base canary is released 2 versions ahead of chrome.
+    // canary not a brand starts at 8.0 while normal chrome "99"
+    // we need to spoof this for firefox.
+    let full_version_list = vec![
+        BrandEntry {
+            brand: "Chromium".into(),
+            version: full_version.into(),
+        },
+        BrandEntry {
+            brand: "Google Chrome".into(),
+            version: full_version.into(),
+        },
+        BrandEntry {
+            // canary use Not)A;Brand
+            brand: if older_brand {
+                "Not-A.Brand"
+            } else {
+                "Not.A/Brand"
+            }
+            .into(),
+            version: "99.0.0.0".into(),
+        },
+    ];
+
     HighEntropyUaData {
         architecture: architecture.to_string(),
         bitness: bitness.to_string(),
         model,
         platform: platform.to_string(),
         platform_version,
-        full_version_list: vec![
-            BrandEntry {
-                brand: "Google Chrome".into(),
-                version: full_version.into(),
-            },
-            BrandEntry {
-                brand: "Not-A.Brand".into(),
-                version: "8.0.0.0".into(),
-            },
-            BrandEntry {
-                brand: "Chromium".into(),
-                version: full_version.into(),
-            },
-        ],
+        full_version_list,
     }
 }
 
-/// The degree of spoofing
-#[derive(PartialEq)]
-pub enum UserAgentDataSpoofDegree {
-    /// Basic mock shape.
-    Basic,
-    /// Real shape, types, and prototypes.
-    Real,
-}
-
 /// Spoof to a js snippet.
-pub fn spoof_user_agent_data_high_entropy_values(
-    data: &HighEntropyUaData,
-    degree: UserAgentDataSpoofDegree,
-) -> String {
+pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> String {
     let brands = data
         .full_version_list
         .iter()
@@ -186,29 +194,7 @@ pub fn spoof_user_agent_data_high_entropy_values(
     let model = &data.model;
     let plat = &data.platform_version;
 
-    let spoof_script = if degree == UserAgentDataSpoofDegree::Basic {
-        format!(
-            "(()=>{{const v={{brands:[{brands}],mobile:!1,platform:'{platform}',getHighEntropyValues:h=>Promise.resolve(Object.fromEntries(h.map(k=>[k,{{architecture:'{arch}',model:'{model}',bitness:'{bitness}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null])))}};const f=function(){{return v}};Object.defineProperty(f,'toString',{{value:()=>\"function get userAgentData() {{ [native code] }}\"}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();",
-            brands = brands,
-            full_versions = full_versions,
-            platform = platform,
-            arch = arch,
-            bitness = bitness,
-            model = model,
-            plat = plat,
-        )
-    } else {
-        format!(
-            r#"(()=>{{if(typeof NavigatorUAData==='undefined')window.NavigatorUAData=function NavigatorUAData(){{}};const p=NavigatorUAData.prototype,v=Object.create(p);Object.defineProperties(v,{{brands:{{value:[{brands}],enumerable:!0,configurable:!0}},mobile:{{value:!1,enumerable:!0,configurable:!0}},platform:{{value:'{platform}',enumerable:!0,configurable:!0}}}});var getHighEntropyValues=function getHighEntropyValues(keys){{return Promise.resolve(Object.fromEntries(keys.map(k=>[k,({{architecture:'{arch}',model:'{model}',bitness:'{bitness}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}})[k]||null])));}};Object.defineProperty(getHighEntropyValues,'toString',{{value:()=>`function get getHighEntropyValues() {{ [native code] }}`,configurable:!0}});Object.defineProperty(getHighEntropyValues,'toString',{{value:()=>`function get getHighEntropyValues() {{ [native code] }}`,configurable:!0}});Object.defineProperty(p,'getHighEntropyValues',{{value:getHighEntropyValues,enumerable:!1,configurable:!0}});Object.defineProperty(p,'toJSON',{{value:function(){{return{{brands:this.brands,mobile:this.mobile,platform:this.platform}};}},configurable:!0}});const f=()=>v;Object.defineProperty(f,'toString',{{value:()=>`function get userAgentData() {{ [native code] }}`,configurable:!0}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();"#,
-            brands = brands,
-            full_versions = full_versions,
-            platform = platform,
-            arch = arch,
-            bitness = bitness,
-            model = model,
-            plat = plat,
-        )
-    };
-
-    spoof_script
+    format!(
+        r#"(()=>{{if(typeof NavigatorUAData==='undefined')window.NavigatorUAData=function NavigatorUAData(){{}};const p=NavigatorUAData.prototype,v=Object.create(p);Object.defineProperties(v,{{brands:{{value:[{brands}],enumerable:!0}},mobile:{{value:!1,enumerable:!0}},platform:{{value:'{platform}',enumerable:!0}}}});Object.defineProperties(p,{{brands:{{get:function brands(){{return this.brands}}}},mobile:{{get:function mobile(){{return this.mobile}}}},platform:{{get:function platform(){{return this.platform}}}}}});function getHighEntropyValues(keys){{return Promise.resolve(Object.fromEntries(keys.map(k=>[k,{{architecture:'{arch}',model:'{model}',bitness:'{bitness}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null])));}}Object.defineProperty(p,'getHighEntropyValues',{{value:getHighEntropyValues}});function toJSON(){{return{{brands:this.brands,mobile:this.mobile,platform:this.platform}}}}Object.defineProperty(p,'toJSON',{{value:toJSON}});const f=()=>v;Object.defineProperty(f,'toString',{{value:()=>`function get userAgentData() {{ [native code] }}`}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();"#
+    )
 }

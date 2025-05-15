@@ -71,3 +71,11 @@ pub fn generate_hide_plugins() -> String {
 pub fn wrap_eval_script(source: &str) -> String {
     format!(r#"(()=>{{{}}})();"#, source)
 }
+
+lazy_static::lazy_static! {
+    /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.
+    pub static ref BASE_CHROME_VERSION: u32 = std::env::var("CHROME_VERSION")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(136);
+}

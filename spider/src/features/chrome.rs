@@ -672,7 +672,6 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     let spoof_script = if stealth && !firefox_agent {
         &spider_fingerprint::spoof_user_agent::spoof_user_agent_data_high_entropy_values(
             &spider_fingerprint::spoof_user_agent::build_high_entropy_data(&config.user_agent),
-            spider_fingerprint::spoof_user_agent::UserAgentDataSpoofDegree::Real,
         )
     } else {
         &Default::default()
