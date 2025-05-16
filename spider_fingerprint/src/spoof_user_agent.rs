@@ -171,7 +171,7 @@ pub fn build_high_entropy_data(
     }
 }
 
-/// Spoof to a js snippet.
+/// Spoof navigator.userAgentData.
 pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> String {
     let brands = data
         .full_version_list
@@ -188,13 +188,15 @@ pub fn spoof_user_agent_data_high_entropy_values(data: &HighEntropyUaData) -> St
         .map(|b| format!("{{brand:'{}',version:'{}'}}", b.brand, b.version))
         .collect::<Vec<_>>()
         .join(",");
-    let platform = &data.platform;
-    let arch = &data.architecture;
-    let bitness = &data.bitness;
-    let model = &data.model;
-    let plat = &data.platform_version;
 
     format!(
-        r#"(()=>{{if(typeof NavigatorUAData==='undefined')window.NavigatorUAData=function NavigatorUAData(){{}};const p=NavigatorUAData.prototype,v=Object.create(p);Object.defineProperties(v,{{brands:{{value:[{brands}],enumerable:!0}},mobile:{{value:!1,enumerable:!0}},platform:{{value:'{platform}',enumerable:!0}}}});Object.defineProperties(p,{{brands:{{get:function brands(){{return this.brands}}}},mobile:{{get:function mobile(){{return this.mobile}}}},platform:{{get:function platform(){{return this.platform}}}}}});function getHighEntropyValues(keys){{return Promise.resolve(Object.fromEntries(keys.map(k=>[k,{{architecture:'{arch}',model:'{model}',bitness:'{bitness}',platformVersion:'{plat}',fullVersionList:[{full_versions}]}}[k]??null])));}}Object.defineProperty(p,'getHighEntropyValues',{{value:getHighEntropyValues}});function toJSON(){{return{{brands:this.brands,mobile:this.mobile,platform:this.platform}}}}Object.defineProperty(p,'toJSON',{{value:toJSON}});const f=()=>v;Object.defineProperty(f,'toString',{{value:()=>`function get userAgentData() {{ [native code] }}`}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();"#
+        r#"(()=>{{if(typeof NavigatorUAData==='undefined')window.NavigatorUAData=function NavigatorUAData(){{}};const p=NavigatorUAData.prototype,v=Object.create(p),d={{architecture:'{}',bitness:'{}',model:'{}',platformVersion:'{}',fullVersionList:[{}],brands:[{}],mobile:!1,platform:'{}'}};Object.defineProperties(v,{{brands:{{value:d.brands,enumerable:true}},mobile:{{value:d.mobile,enumerable:true}},platform:{{value:d.platform,enumerable:true}}}});Object.defineProperties(p,{{brands:{{get:function brands(){{return this.brands}}}},mobile:{{get:function mobile(){{return this.mobile}}}},platform:{{get:function platform(){{return this.platform}}}}}});function getHighEntropyValues(keys){{return Promise.resolve(Object.assign({{brands:d.brands,mobile:d.mobile,platform:d.platform}},...keys.map(k=>k in d?{{[k]:d[k]}}:{{}})));}}Object.defineProperty(p,'getHighEntropyValues',{{value:getHighEntropyValues}});function toJSON(){{return{{brands:this.brands,mobile:this.mobile,platform:this.platform}}}}Object.defineProperty(p,'toJSON',{{value:toJSON}});const f=()=>v;Object.defineProperty(f,'toString',{{value:()=>`function get userAgentData() {{ [native code] }}`}});Object.defineProperty(Navigator.prototype,'userAgentData',{{get:f,configurable:!0}});}})();"#,
+        data.architecture,
+        data.bitness,
+        data.model,
+        data.platform_version,
+        full_versions,
+        brands,
+        data.platform
     )
 }

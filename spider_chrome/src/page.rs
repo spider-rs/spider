@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use chromiumoxide_cdp::cdp::browser_protocol::dom::*;
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
-    MediaFeature, SetEmulatedMediaParams, SetGeolocationOverrideParams, SetLocaleOverrideParams,
-    SetTimezoneOverrideParams,
+    MediaFeature, SetDeviceMetricsOverrideParams, SetEmulatedMediaParams,
+    SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
     Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams,
@@ -734,6 +734,15 @@ impl Page {
         locale: impl Into<SetLocaleOverrideParams>,
     ) -> Result<&Self> {
         self.execute(locale.into()).await?;
+        Ok(self)
+    }
+
+    /// Overrides default viewport
+    pub async fn emulate_viewport(
+        &self,
+        viewport: impl Into<SetDeviceMetricsOverrideParams>,
+    ) -> Result<&Self> {
+        self.execute(viewport.into()).await?;
         Ok(self)
     }
 

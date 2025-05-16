@@ -27,27 +27,25 @@ impl EmulationManager {
     }
 
     pub fn init_commands(&mut self, viewport: &Viewport) -> CommandChain {
+        let mut chains = Vec::with_capacity(2);
+        let set_touch = SetTouchEmulationEnabledParams::new(true);
         let orientation = if viewport.is_landscape {
             ScreenOrientation::new(ScreenOrientationType::LandscapePrimary, 90)
         } else {
             ScreenOrientation::new(ScreenOrientationType::PortraitPrimary, 0)
         };
 
-        let set_device = SetDeviceMetricsOverrideParams::builder()
+        if let Ok(set_device) = SetDeviceMetricsOverrideParams::builder()
             .mobile(viewport.emulating_mobile)
             .width(viewport.width)
             .height(viewport.height)
             .device_scale_factor(viewport.device_scale_factor.unwrap_or(1.))
             .screen_orientation(orientation)
             .build()
-            .unwrap();
-
-        let set_touch = SetTouchEmulationEnabledParams::new(true);
-
-        let mut chains = Vec::with_capacity(2);
-
-        if let Ok(set_device_value) = serde_json::to_value(&set_device) {
-            chains.push((set_device.identifier(), set_device_value));
+        {
+            if let Ok(set_device_value) = serde_json::to_value(&set_device) {
+                chains.push((set_device.identifier(), set_device_value));
+            }
         }
 
         if let Ok(set_touch_value) = serde_json::to_value(&set_touch) {
