@@ -9,7 +9,7 @@ pub const HIDE_CHROME: &str = r#"(()=>{try{const c=navigator.userAgentData?.bran
 
 /// No console methods.
 pub const HIDE_CONSOLE: &str =
-    "['log','warn','error','info','debug','table'].forEach((method)=>{console[method]=()=>{}});";
+    "['log','warn','error','info','debug','table', 'dir'].forEach((method)=>{console[method]=()=>{}});";
 
 pub const DISABLE_DIALOGS: &str  = "(()=>{const a=window.alert.toString(),c=window.confirm.toString(),p=window.prompt.toString();window.alert=function alert(){};Object.defineProperty(window.alert,'toString',{value:()=>a,configurable:true});window.confirm=function confirm(){return true};Object.defineProperty(window.confirm,'toString',{value:()=>c,configurable:true});window.prompt=function prompt(){return ''};Object.defineProperty(window.prompt,'toString',{value:()=>p,configurable:true});})();";
 
@@ -107,11 +107,10 @@ pub fn spoof_screen_script_rng<R: Rng>(
     };
 
     let simulate_hdr = screen_width >= 2560 && device_pixel_ratio >= 2.0;
-    let high_end_display = simulate_hdr && matches!(agent_os, AgentOs::Mac | AgentOs::Windows);
 
     let color_depth = match agent_os {
         AgentOs::Mac | AgentOs::Windows | AgentOs::Linux => {
-            if simulate_hdr || high_end_display {
+            if simulate_hdr {
                 30
             } else {
                 24
@@ -163,9 +162,7 @@ pub fn resolve_dpr(
             2.0
         } else {
             match platform {
-                AgentOs::Mac => 2.0,
-                AgentOs::Linux => 1.0,
-                AgentOs::Windows => 1.0,
+                AgentOs::Mac | AgentOs::Linux | AgentOs::Windows => 1.0,
                 AgentOs::Android => 2.0, // can be 3.0+ on some phones, but 2.0 is safe default
             }
         }
