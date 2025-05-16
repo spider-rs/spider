@@ -157,7 +157,7 @@ pub fn build_high_entropy_data(
                 "Not.A/Brand"
             }
             .into(),
-            version: "99.0.0.0".into(),
+            version: crate::CHROME_NOT_A_BRAND_VERSION.clone(),
         },
     ];
 

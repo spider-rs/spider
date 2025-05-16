@@ -1,5 +1,5 @@
 /// Builder types.
-pub mod builder;
+pub mod configs;
 /// Custom static profiles.
 pub mod profiles;
 /// GPU spoofs.
@@ -17,7 +17,20 @@ pub mod spoof_webgl;
 /// Generic spoofs.
 pub mod spoofs;
 
-use crate::builder::{AgentOs, Tier};
+use crate::configs::{AgentOs, Tier};
+
+lazy_static::lazy_static! {
+    /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.
+    pub static ref BASE_CHROME_VERSION: u32 = std::env::var("CHROME_VERSION")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(136);
+    /// The latest Chrome not a brand version, configurable via the `CHROME_NOT_A_BRAND_VERSION` env variable.
+    pub static ref CHROME_NOT_A_BRAND_VERSION: String = std::env::var("CHROME_NOT_A_BRAND_VERSION")
+        .ok()
+        .and_then(|v| if v.is_empty() { None } else { Some(v) })
+        .unwrap_or("99.0.0.0".into());
+}
 
 /// Generate the initial stealth script to send in one command.
 pub fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
@@ -76,12 +89,4 @@ pub fn generate_hide_plugins() -> String {
 /// Simple function to wrap the eval script safely.
 pub fn wrap_eval_script(source: &str) -> String {
     format!(r#"(()=>{{{}}})();"#, source)
-}
-
-lazy_static::lazy_static! {
-    /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.
-    pub static ref BASE_CHROME_VERSION: u32 = std::env::var("CHROME_VERSION")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(136);
 }

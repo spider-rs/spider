@@ -16,7 +16,7 @@ use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
-use spider_fingerprint::builder::AgentOs;
+use spider_fingerprint::configs::AgentOs;
 use spider_fingerprint::spoofs::{
     resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_media_labels_script,
     spoof_screen_script_rng, spoof_touch_screen, DISABLE_DIALOGS, SPOOF_NOTIFICATIONS,

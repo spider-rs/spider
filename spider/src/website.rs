@@ -6388,7 +6388,7 @@ impl Website {
     #[cfg(feature = "chrome")]
     pub fn with_stealth_advanced(
         &mut self,
-        stealth_mode: spider_fingerprint::builder::Tier,
+        stealth_mode: spider_fingerprint::configs::Tier,
     ) -> &mut Self {
         self.configuration.with_stealth_advanced(stealth_mode);
         self

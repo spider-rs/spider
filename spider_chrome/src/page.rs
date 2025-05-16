@@ -24,7 +24,7 @@ use chromiumoxide_types::*;
 use futures::channel::mpsc::unbounded;
 use futures::channel::oneshot::channel as oneshot_channel;
 use futures::{stream, SinkExt, StreamExt};
-use spider_fingerprint::builder::{AgentOs, Tier};
+use spider_fingerprint::configs::{AgentOs, Tier};
 
 use crate::auth::Credentials;
 use crate::element::Element;

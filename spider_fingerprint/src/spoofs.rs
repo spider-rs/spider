@@ -2,7 +2,7 @@ pub use super::spoof_gpu::{
     GPU_REQUEST_ADAPTER, GPU_REQUEST_ADAPTER_MAC, GPU_SPOOF_SCRIPT, GPU_SPOOF_SCRIPT_MAC,
 };
 pub use super::spoof_webgl::{HIDE_WEBGL, HIDE_WEBGL_MAC};
-use crate::builder::AgentOs;
+use crate::configs::AgentOs;
 use rand::Rng;
 
 // use https://github.com/spider-rs/headless-browser for ideal default settings.

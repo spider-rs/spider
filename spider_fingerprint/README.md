@@ -1,11 +1,58 @@
 # spider_fingerprint
 
-Fingerprint library for Rust. Docs coming soon.
+A Rust crate to generate stealth JavaScript that spoofs browser fingerprinting features. Useful for emulateting real browser profiles across different platforms.
 
-`cargo add spider_fingerprint`
+## Purpose
 
-## Generates
+- Mimic real user fingerprints using static profiles
+- Help avoid common browser automation detection methods
+- Generate scripts for injection into browser environments
 
-### Headers
+## Features
 
-### Profiles
+- Tiered spoofing levels (basic to full)
+- WebGL and GPU spoofing (WIP)
+- `navigator.userAgentData` high entropy value support
+- Plugin and mimeType spoofing
+- Optional mouse and viewport spoofing
+- Platform-specific variants (macOS, Windows, Linux)
+
+## Example
+
+```rust
+use spider_fingerprint::{build_stealth_script, builder::{Tier, AgentOs}};
+
+let script = build_stealth_script(Tier::Full, AgentOs::Mac);
+// Inject `script` into a browser context
+```
+
+---
+
+### `TIERS.md`
+
+```markdown
+# Spoofing Tiers
+
+This crate provides multiple spoofing levels depending on the desired realism and complexity.
+
+## Tiers
+
+| Tier            | Description                                               |
+|-----------------|-----------------------------------------------------------|
+| `Basic`         | Chrome props, WebGL spoofing, plugins/mimeTypes           |
+| `BasicNoWebgl`  | Same as Basic but skips WebGL spoofing                    |
+| `Mid`           | Adds WebDriver hiding (`navigator.webdriver = false`)     |
+| `Full`          | All spoofing including WebGPU adapter spoof               |
+
+## Configuration
+
+You can override the default Chrome versions with the env configs:
+
+```sh
+CHROME_VERSION=135 
+CHROME_NOT_A_BRAND_VERSION="99.0.0.0" 
+```
+
+## License
+
+MIT
