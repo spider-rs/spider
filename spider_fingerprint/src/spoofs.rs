@@ -1,6 +1,3 @@
-pub use super::spoof_gpu::{
-    GPU_REQUEST_ADAPTER, GPU_REQUEST_ADAPTER_MAC, GPU_SPOOF_SCRIPT, GPU_SPOOF_SCRIPT_MAC,
-};
 pub use super::spoof_webgl::{HIDE_WEBGL, HIDE_WEBGL_MAC};
 use crate::configs::AgentOs;
 use rand::Rng;
@@ -23,6 +20,9 @@ pub const SPOOF_PERMISSIONS_QUERY: &str = r#"(()=>{const map={accelerometer:"gra
 
 /// Shallow hide-permission spoof. (use SPOOF_PERMISSIONS_QUERY instead.)
 pub const HIDE_PERMISSIONS: &str = "(()=>{const originalQuery=window.navigator.permissions.query;window.navigator.permissions.__proto__.query=parameters=>{ return parameters.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : originalQuery(parameters) }; })();";
+
+/// Patch the default en-US local - WIP.
+pub const SPOOF_LANGUAGE: &str = r#"(()=>{const v=['en-US','en'],d=Object.getPrototypeOf(navigator),p='languages',g=function(){return v};g.toString=()=>`function get languages() { [native code] }`;try{Object.defineProperty(d,p,{get:g,enumerable:false,configurable:true})}catch(e){}if(typeof WorkerNavigator!=='undefined'){const wd=WorkerNavigator.prototype;if(wd&&wd!==d){try{Object.defineProperty(wd,p,{get:g,enumerable:false,configurable:true})}catch(e){}}}})();"#;
 
 /// Spoof the touch screen.
 pub fn spoof_touch_screen(mobile: bool) -> &'static str {

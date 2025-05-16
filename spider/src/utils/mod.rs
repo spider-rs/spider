@@ -1196,13 +1196,29 @@ async fn perform_smart_mouse_movement(
     viewport: &Option<crate::configuration::Viewport>,
 ) {
     use chromiumoxide::layout::Point;
+    use fastrand::Rng;
     use spider_fingerprint::spoof_mouse_movement::GaussianMouse;
+    use tokio::time::{sleep, Duration};
+
     let (viewport_width, viewport_height) = match viewport {
         Some(vp) => (vp.width as f64, vp.height as f64),
-        _ => (1280.0, 720.0),
+        None => (800.0, 600.0),
     };
+
+    let mut rng = Rng::new();
+
     for (x, y) in GaussianMouse::generate_random_coordinates(viewport_width, viewport_height) {
         let _ = page.move_mouse(Point::new(x, y)).await;
+
+        // Occasionally introduce a short pause (~25%)
+        if rng.f32() < 0.25 {
+            let delay_micros = if rng.f32() < 0.9 {
+                rng.u64(300..=1200) // 0.3–1.2 ms
+            } else {
+                rng.u64(2000..=8000) // rare 2–8 ms (real hesitation)
+            };
+            sleep(Duration::from_micros(delay_micros)).await;
+        }
     }
 }
 

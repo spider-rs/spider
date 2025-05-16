@@ -17,6 +17,13 @@ pub mod spoof_webgl;
 /// Generic spoofs.
 pub mod spoofs;
 
+use profiles::{
+    gpu::select_random_gpu_profile,
+    gpu_limits::{build_gpu_request_adapter_script_from_limits, GpuLimits},
+};
+use spoof_gpu::build_gpu_spoof_script_wgsl;
+use spoof_webgl::hide_webgl_gpu_spoof;
+
 use crate::configs::{AgentOs, Tier};
 
 lazy_static::lazy_static! {
@@ -34,31 +41,27 @@ lazy_static::lazy_static! {
 
 /// Generate the initial stealth script to send in one command.
 pub fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
-    use crate::spoofs::{
-        GPU_REQUEST_ADAPTER, GPU_REQUEST_ADAPTER_MAC, GPU_SPOOF_SCRIPT, GPU_SPOOF_SCRIPT_MAC,
-        HIDE_CHROME, HIDE_WEBDRIVER, HIDE_WEBGL, HIDE_WEBGL_MAC, NAVIGATOR_SCRIPT,
-        PLUGIN_AND_MIMETYPE_SPOOF,
-    };
+    use crate::spoofs::{HIDE_CHROME, HIDE_WEBDRIVER, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF};
 
-    let mac_spoof = os == AgentOs::Mac;
+    let gpu_profile = select_random_gpu_profile(os);
+    let spoof_gpu = build_gpu_spoof_script_wgsl(gpu_profile.canvas_format);
+    let spoof_webgl = hide_webgl_gpu_spoof(gpu_profile.webgl_vendor, gpu_profile.webgl_renderer);
 
-    let spoof_gpu = if mac_spoof {
-        GPU_SPOOF_SCRIPT_MAC
-    } else {
-        GPU_SPOOF_SCRIPT
-    };
+    let mut gpu_limit = GpuLimits::for_os(os);
 
-    let spoof_webgl = if mac_spoof {
-        HIDE_WEBGL_MAC
-    } else {
-        HIDE_WEBGL
-    };
+    if gpu_profile.webgl_renderer
+        != "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)"
+    {
+        gpu_limit = gpu_limit.with_variation(gpu_profile.hardware_concurrency);
+    }
 
-    let spoof_gpu_adapter = if mac_spoof {
-        GPU_REQUEST_ADAPTER_MAC
-    } else {
-        GPU_REQUEST_ADAPTER
-    };
+    let spoof_gpu_adapter = build_gpu_request_adapter_script_from_limits(
+        gpu_profile.webgpu_vendor,
+        gpu_profile.webgpu_architecture,
+        "",
+        "",
+        &gpu_limit,
+    );
 
     if tier == Tier::Basic {
         format!(

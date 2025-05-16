@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.46"
+version = "2.37.48"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -229,7 +229,7 @@ smart = ["chrome", "dep:rand", "chrome_intercept"]
 encoding = []
 headers = ["dep:httpdate"]
 remote_addr = []
-real_browser = ["dep:statrs", "dep:rand"]
+real_browser = ["dep:statrs", "dep:rand", "dep:fastrand"]
 openai = [
     "chrome",
     "serde",

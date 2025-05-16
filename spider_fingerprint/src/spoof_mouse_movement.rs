@@ -452,8 +452,8 @@ impl GaussianMouse {
 
 #[test]
 fn random_cord() {
-    let cords = BezierMouse::generate_random_coordinates(1280.0, 720.0);
+    let cords = BezierMouse::generate_random_coordinates(800.0, 600.0);
     assert!(cords.len() >= 2, "random bezier cords did not generate");
-    let cords = GaussianMouse::generate_random_coordinates(1280.0, 720.0);
+    let cords = GaussianMouse::generate_random_coordinates(800.0, 600.0);
     assert!(cords.len() >= 2, "random gaussian cords did not generate");
 }

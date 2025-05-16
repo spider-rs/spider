@@ -3,9 +3,19 @@ pub const HIDE_WEBGL_MAC: &str = r#"(()=>{const v='Google Inc. (Apple)',r='ANGLE
 
 /// Hide the webgl gpu spoof.
 pub fn hide_webgl_gpu_spoof(vendor: &str, renderer: &str) -> String {
+    let escaped_vendor = vendor.replace('\'', "\\'");
+    let escaped_renderer = renderer.replace('\'', "\\'");
+
+    let worker_script = format!(
+        r#"const v='{vendor}',r='{renderer}',f=p=>p===37445?v:p===37446?r:null;for(const k of['WebGLRenderingContext','WebGL2RenderingContext']){{const o=self[k]?.prototype?.getParameter;if(o){{Object.defineProperty(self[k].prototype,'getParameter',{{value:function(p){{const s=f(p);return s??o.call(this,p);}},configurable:true}});}}}}"#,
+        vendor = escaped_vendor,
+        renderer = escaped_renderer
+    );
+
     format!(
-        r#"(()=>{{const v={vendor:?},r={renderer:?},f=p=>p===37445?v:p===37446?r:null;for(const k of['WebGLRenderingContext','WebGL2RenderingContext']){{const o=globalThis[k]?.prototype?.getParameter;if(o){{Object.defineProperty(globalThis[k].prototype,'getParameter',{{value:function(p){{const spoof=f(p);return spoof??o.call(this,p);}},configurable:true}});}}}}const wrap=W=>function(u,...a){{const abs=new URL(u,location.href).toString(),b=`(()=>{{const v=${vendor:?},r=${renderer:?},f=p=>p===37445?v:p===37446?r:null;for(const k of['WebGLRenderingContext','WebGL2RenderingContext']){{const o=self[k]?.prototype?.getParameter;if(o){{Object.defineProperty(self[k].prototype,'getParameter',{{value:function(p){{const s=f(p);return s??o.call(this,p);}},configurable:true}});}}}}fetch("${{abs}}").then(r=>r.text()).then(t=>(0,eval)(t));}})();`;return new W(URL.createObjectURL(new Blob([b],{{type:'application/javascript'}})),...a)}};window.Worker=wrap(window.Worker);window.SharedWorker=wrap(window.SharedWorker);}})();"#,
-        vendor = vendor,
-        renderer = renderer
+        r#"(()=>{{const v='{vendor}',r='{renderer}',f=p=>p===37445?v:p===37446?r:null;for(const k of['WebGLRenderingContext','WebGL2RenderingContext']){{const o=globalThis[k]?.prototype?.getParameter;if(o){{Object.defineProperty(globalThis[k].prototype,'getParameter',{{value:function(p){{const spoof=f(p);return spoof??o.call(this,p);}},configurable:true}});}}}}const wrap=W=>function(u,...a){{const abs=new URL(u,location.href).toString(),b=`(()=>{{{worker_script};fetch("${{abs}}").then(r=>r.text()).then(t=>(0,eval)(t));}})();`;return new W(URL.createObjectURL(new Blob([b],{{type:'application/javascript'}})),...a)}};window.Worker=wrap(window.Worker);window.SharedWorker=wrap(window.SharedWorker);}})();"#,
+        vendor = escaped_vendor,
+        renderer = escaped_renderer,
+        worker_script = worker_script
     )
 }
