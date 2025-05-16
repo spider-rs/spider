@@ -5,6 +5,8 @@ pub enum Tier {
     #[default]
     /// Basic spoofing.
     Basic,
+    /// Basic spoofing with console.
+    BasicWithConsole,
     /// Basic spoofing without webgl.
     BasicNoWebgl,
     /// Mid spoofing.

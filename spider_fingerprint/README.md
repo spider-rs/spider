@@ -1,6 +1,7 @@
 # spider_fingerprint
 
 A Rust crate to generate stealth JavaScript that spoofs browser fingerprinting features. Useful for emulateting real browser profiles across different platforms.
+It is recommended to use this project with [headless-browser](https://github.com/spider-rs/headless-browser) for real profiles and the latest chrome versions.
 
 ## Purpose
 
