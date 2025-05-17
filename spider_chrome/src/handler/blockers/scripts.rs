@@ -219,6 +219,8 @@ lazy_static::lazy_static! {
             "cookie_consent.js",
             "tracking.js",
             "privacy_cookie.js",
+            // google cast not required
+            "cast_sender.js",
             "eu_cookie_compliance.js",
             "eu_cookie_compliance.min.js",
             "plugins/cookie-law-info/legacy/",

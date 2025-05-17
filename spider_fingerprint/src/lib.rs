@@ -22,7 +22,6 @@ use profiles::{
     gpu_limits::{build_gpu_request_adapter_script_from_limits, GpuLimits},
 };
 use spoof_gpu::build_gpu_spoof_script_wgsl;
-use spoof_webgl::hide_webgl_gpu_spoof;
 
 use crate::configs::{AgentOs, Tier};
 
@@ -42,12 +41,18 @@ lazy_static::lazy_static! {
 /// Generate the initial stealth script to send in one command.
 pub fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
     use crate::spoofs::{
-        HIDE_CHROME, HIDE_CONSOLE, HIDE_WEBDRIVER, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
+        spoof_hardware_concurrency, unified_worker_override, HIDE_CHROME, HIDE_CONSOLE,
+        HIDE_WEBDRIVER, NAVIGATOR_SCRIPT, PLUGIN_AND_MIMETYPE_SPOOF,
     };
 
     let gpu_profile = select_random_gpu_profile(os);
     let spoof_gpu = build_gpu_spoof_script_wgsl(gpu_profile.canvas_format);
-    let spoof_webgl = hide_webgl_gpu_spoof(gpu_profile.webgl_vendor, gpu_profile.webgl_renderer);
+    let spoof_webgl = unified_worker_override(
+        gpu_profile.hardware_concurrency,
+        gpu_profile.webgl_vendor,
+        gpu_profile.webgl_renderer,
+    );
+    let spoof_concurrency = spoof_hardware_concurrency(gpu_profile.hardware_concurrency);
 
     let mut gpu_limit = GpuLimits::for_os(os);
 
@@ -67,20 +72,22 @@ pub fn build_stealth_script(tier: Tier, os: AgentOs) -> String {
 
     if tier == Tier::Basic {
         format!(
-            r#"{HIDE_CHROME};{HIDE_CONSOLE};{spoof_webgl};{spoof_gpu_adapter};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME}{HIDE_CONSOLE}{spoof_webgl}{spoof_gpu_adapter}{NAVIGATOR_SCRIPT}{PLUGIN_AND_MIMETYPE_SPOOF}"#
         )
     } else if tier == Tier::BasicWithConsole {
         format!(
-            r#"{HIDE_CHROME};{spoof_webgl};{spoof_gpu_adapter};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME}{spoof_webgl}{spoof_gpu_adapter}{NAVIGATOR_SCRIPT}{PLUGIN_AND_MIMETYPE_SPOOF}"#
         )
     } else if tier == Tier::BasicNoWebgl {
-        format!(r#"{HIDE_CHROME};{HIDE_CONSOLE};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#)
+        format!(
+            r#"{HIDE_CHROME}{HIDE_CONSOLE}{spoof_concurrency}{NAVIGATOR_SCRIPT}{PLUGIN_AND_MIMETYPE_SPOOF}"#
+        )
     } else if tier == Tier::Mid {
         format!(
-            r#"{HIDE_CHROME};{HIDE_CONSOLE};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};"#
+            r#"{HIDE_CHROME}{HIDE_CONSOLE}{spoof_webgl}{spoof_gpu_adapter}{HIDE_WEBDRIVER}{NAVIGATOR_SCRIPT}{PLUGIN_AND_MIMETYPE_SPOOF}"#
         )
     } else if tier == Tier::Full {
-        format!("{HIDE_CHROME};{HIDE_CONSOLE};{spoof_webgl};{spoof_gpu_adapter};{HIDE_WEBDRIVER};{NAVIGATOR_SCRIPT};{PLUGIN_AND_MIMETYPE_SPOOF};{spoof_gpu};")
+        format!("{HIDE_CHROME}{HIDE_CONSOLE}{spoof_webgl}{spoof_gpu_adapter}{HIDE_WEBDRIVER}{NAVIGATOR_SCRIPT}{PLUGIN_AND_MIMETYPE_SPOOF}{spoof_gpu}")
     } else {
         Default::default()
     }

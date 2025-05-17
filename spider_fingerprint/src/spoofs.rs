@@ -1,7 +1,7 @@
 // use https://github.com/spider-rs/headless-browser for ideal default settings.
 
 pub use super::spoof_webgl::{HIDE_WEBGL, HIDE_WEBGL_MAC};
-use crate::configs::AgentOs;
+use crate::{configs::AgentOs, spoof_webgl::hide_webgl_worker_script};
 use rand::Rng;
 
 /// Spoof window.chrome identical.
@@ -191,5 +191,36 @@ pub fn spoof_history_length_script(length: u32) -> String {
     )
 }
 
+/// Spoof the hardware concurrency limit.
+pub fn spoof_hardware_concurrency(concurrency: usize) -> String {
+    format!(
+        r#"const c={c};function hc(){{return c}}hc.toString=()=>'function get hardwareConcurrency() {{ [native code] }}';const spoof=()=>{{try{{Object.defineProperty(Navigator.prototype,'hardwareConcurrency',{{get:hc,enumerable:!0,configurable:!0}})}}catch{{}}try{{Object.defineProperty(WorkerNavigator.prototype,'hardwareConcurrency',{{get:hc,enumerable:!0,configurable:!0}})}}catch{{}}}};spoof();"#,
+        c = concurrency
+    )
+}
+
+/// Unified worker hardware and webgl.
+pub fn unified_worker_override(concurrency: usize, vendor: &str, renderer: &str) -> String {
+    let escaped_vendor = vendor.replace('\'', "\\'");
+    let escaped_renderer = renderer.replace('\'', "\\'");
+
+    let hc_worker_script = spoof_hardware_concurrency(concurrency);
+    let gpu_worker_script = hide_webgl_worker_script(&escaped_vendor, &escaped_renderer);
+
+    // Combined worker script injection (both spoofs at once)
+    let combined_worker_script = format!(
+        "{hc_script};{gpu_script};",
+        hc_script = hc_worker_script,
+        gpu_script = gpu_worker_script
+    );
+
+    format!(
+        r#"(()=>{{{hc_script};{gpu_script};const wrap=W=>function(u,...a){{const abs=new URL(u,location.href).toString(),b=`(()=>{{{combined_script};fetch("${{abs}}").then(r=>r.text()).then(t=>(0,eval)(t));}})();`;return new W(URL.createObjectURL(new Blob([b],{{type:'application/javascript'}})),...a)}};window.Worker=wrap(window.Worker);window.SharedWorker=wrap(window.SharedWorker);}})();"#,
+        hc_script = hc_worker_script,
+        gpu_script = gpu_worker_script,
+        combined_script = combined_worker_script
+    )
+}
+
 // spoof unused atm for headless browser settings entry.
-// pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
+pub const SPOOF_MEDIA: &str = r#"Object.defineProperty(Navigator.prototype,'mediaDevices',{get:()=>({getUserMedia:undefined}),configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'webkitGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'mozGetUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1}),Object.defineProperty(Navigator.prototype,'getUserMedia',{get:()=>undefined,configurable:!0,enumerable:!1});"#;
