@@ -1,10 +1,11 @@
-fork of chromiumoxide for spider.
-=====================
-![Build](https://github.com/mattsse/chromiumoxide/workflows/Continuous%20integration/badge.svg)
-[![Crates.io](https://img.shields.io/crates/v/chromiumoxide.svg)](https://crates.io/crates/chromiumoxide)
-[![Documentation](https://docs.rs/chromiumoxide/badge.svg)](https://docs.rs/chromiumoxide)
+# spider_chrome
 
-chromiumoxide provides a high-level and async API to control Chrome or Chromium over the [DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/). It comes with support for all types of the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) and can launch a [headless](https://developers.google.com/web/updates/2017/04/headless-chrome) or full (non-headless) Chrome or Chromium instance or connect to an already running instance.
+[![Crates.io](https://img.shields.io/crates/v/spider_chrome.svg)](https://crates.io/crates/spider_chrome)
+[![Documentation](https://docs.rs/spider_chrome/badge.svg)](https://docs.rs/spider_chrome)
+
+A concurrent high-level API to control Chrome or Firefox over the DevTools Protocol.
+
+This project is a fork of [chromiumoxide](https://github.com/mattsse/chromiumoxide) that primarily keeps CDP up to date, applies bug fixes, improves emulation, performance, and enables high-concurrency CDP capabilities.
 
 ## Usage
 

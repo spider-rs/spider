@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-A fast command line spider or crawler.
+A fast command-line spider (web crawler) for high-performance website scraping.
 
 ## Dependencies
 
