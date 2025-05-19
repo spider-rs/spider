@@ -750,27 +750,27 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                 &fp_script,
                 &spoof_script,
                 disable_dialogs,
-                spider_fingerprint::wrap_eval_script(&script),
                 screen_spoof,
-                spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_media_codecs_script(),
                 spoof_touch_screen(mobile_device),
                 spoof_media_labels_script(agent_os),
-                spoof_history_length_script(rand::rng().random_range(1..=6))
+                spoof_history_length_script(rand::rng().random_range(1..=6)),
+                spider_fingerprint::wrap_eval_script(&script)
             ))
         } else {
             Some(string_concat!(
                 &spoof_script,
                 disable_dialogs,
-                spider_fingerprint::wrap_eval_script(&script),
                 screen_spoof,
-                spoof_media_codecs_script(),
                 SPOOF_NOTIFICATIONS,
                 SPOOF_PERMISSIONS_QUERY,
+                spoof_media_codecs_script(),
                 spoof_touch_screen(mobile_device),
                 spoof_media_labels_script(agent_os),
-                spoof_history_length_script(rand::rng().random_range(1..=6))
+                spoof_history_length_script(rand::rng().random_range(1..=6)),
+                spider_fingerprint::wrap_eval_script(&script)
             ))
         }
     } else if fingerprint {
@@ -779,9 +779,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             &spoof_script,
             disable_dialogs,
             screen_spoof,
-            spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_media_codecs_script(),
             spoof_touch_screen(mobile_device),
             spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))
@@ -791,9 +791,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             &spoof_script,
             disable_dialogs,
             screen_spoof,
-            spoof_media_codecs_script(),
             SPOOF_NOTIFICATIONS,
             SPOOF_PERMISSIONS_QUERY,
+            spoof_media_codecs_script(),
             spoof_touch_screen(mobile_device),
             spoof_media_labels_script(agent_os),
             spoof_history_length_script(rand::rng().random_range(1..=6))

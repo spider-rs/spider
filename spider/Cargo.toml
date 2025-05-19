@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.52"
+version = "2.37.53"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -57,7 +57,6 @@ http-cache-semantics = { version = "2", optional = true }
 http-cache = { version = "0.20", optional = true, default-features = false }
 http = { version = "1", optional = true }
 phf = "0.11"
-phf_codegen = "0.11"
 auto_encoder = { version = "0.1" }
 base64 = { version = "0.22", optional = true }
 string-interner = { version = "0.19", default-features = false, features = [
