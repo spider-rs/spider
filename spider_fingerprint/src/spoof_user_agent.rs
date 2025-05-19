@@ -25,7 +25,7 @@ impl ChromeVersion {
     /// # Example
     /// ```
     /// use spider_fingerprint::spoof_user_agent::ChromeVersion;
-    /// 
+    ///
     /// let v = ChromeVersion::new(136, 0, 7103, 114);
     /// assert_eq!(v.major, 136);
     /// ```
