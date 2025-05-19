@@ -1,3 +1,5 @@
+include!(concat!(env!("OUT_DIR"), "/chrome_versions.rs"));
+
 /// Builder types.
 pub mod configs;
 /// Custom static profiles.
@@ -31,6 +33,12 @@ lazy_static::lazy_static! {
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(136);
+
+    pub(crate) static ref LATEST_FULL_VERSION_FULL: &'static str = CHROME_VERSIONS_BY_MAJOR
+        .get("latest")
+        .and_then(|arr| arr.first().copied())
+        .unwrap_or("136.0.7103.114");
+
     /// The latest Chrome not a brand version, configurable via the `CHROME_NOT_A_BRAND_VERSION` env variable.
     pub static ref CHROME_NOT_A_BRAND_VERSION: String = std::env::var("CHROME_NOT_A_BRAND_VERSION")
         .ok()

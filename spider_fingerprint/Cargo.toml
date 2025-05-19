@@ -1,6 +1,6 @@
 [package]
 name = "spider_fingerprint"
-version = "2.37.52"
+version = "2.37.53"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Fingerprint library for Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -17,6 +17,7 @@ lazy_static = "1"
 url = "2"
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 serde = { version = "1", features = ["derive"], optional = true }
+phf = { version = "0.11", features = ["macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -24,3 +25,9 @@ tokio = { version = "1", features = ["full"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
+
+[build-dependencies]
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+phf_codegen = "0.11"
