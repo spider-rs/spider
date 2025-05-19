@@ -1,9 +1,6 @@
 use crate::features::chrome_args::CHROME_ARGS;
 use crate::utils::log;
-use crate::{
-    configuration::{Configuration, Fingerprint},
-    tokio_stream::StreamExt,
-};
+use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
@@ -16,12 +13,6 @@ use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 use reqwest::cookie::{CookieStore, Jar};
-use spider_fingerprint::configs::AgentOs;
-use spider_fingerprint::spoofs::{
-    resolve_dpr, spoof_history_length_script, spoof_media_codecs_script, spoof_media_labels_script,
-    spoof_screen_script_rng, spoof_touch_screen, DISABLE_DIALOGS, SPOOF_NOTIFICATIONS,
-    SPOOF_PERMISSIONS_QUERY,
-};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -638,179 +629,37 @@ pub async fn setup_chrome_interception_base(
 
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
-    use rand::Rng;
-    use spider_fingerprint::spoof_gpu::{
-        FP_JS, FP_JS_GPU_LINUX, FP_JS_GPU_MAC, FP_JS_GPU_WINDOWS, FP_JS_LINUX, FP_JS_MAC,
-        FP_JS_WINDOWS,
-    };
+    let ua = config
+        .user_agent
+        .as_deref()
+        .map(|a| a.as_str())
+        .unwrap_or("");
+
+    let mut emulation_config = spider_fingerprint::EmulationConfiguration::setup_defaults(&ua);
 
     let stealth_mode = config.stealth_mode;
     let stealth = stealth_mode.stealth();
-    let dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
 
-    let mut firefox_agent = false;
+    emulation_config.dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
+    emulation_config.fingerprint = config.fingerprint;
+    emulation_config.tier = stealth_mode;
 
-    let agent_os = config
-        .user_agent
-        .as_deref()
-        .map(|ua| {
-            let mut agent_os = AgentOs::Linux;
-            if ua.contains("Chrome") {
-                if ua.contains("Linux") {
-                    agent_os = AgentOs::Linux;
-                } else if ua.contains("Mac") {
-                    agent_os = AgentOs::Mac;
-                } else if ua.contains("Windows") {
-                    agent_os = AgentOs::Windows;
-                } else if ua.contains("Android") {
-                    agent_os = AgentOs::Android;
-                }
-            } else {
-                firefox_agent = ua.contains("Firefox");
-            }
-
-            agent_os
-        })
-        .unwrap_or(AgentOs::Linux);
-
-    let spoof_script = if stealth && !firefox_agent {
-        &spider_fingerprint::spoof_user_agent::spoof_user_agent_data_high_entropy_values(
-            &spider_fingerprint::spoof_user_agent::build_high_entropy_data(&config.user_agent),
-        )
-    } else {
-        &Default::default()
-    };
-
-    let linux = agent_os == AgentOs::Linux;
-
-    let mut fingerprint_gpu = false;
-    let fingerprint = match config.fingerprint {
-        Fingerprint::Basic => true,
-        Fingerprint::NativeGPU => {
-            fingerprint_gpu = true;
-            true
-        }
-        _ => false,
-    };
-
-    let fp_script = if fingerprint {
-        let fp_script = if linux {
-            if fingerprint_gpu {
-                &*FP_JS_GPU_LINUX
-            } else {
-                &*FP_JS_LINUX
-            }
-        } else if agent_os == AgentOs::Mac {
-            if fingerprint_gpu {
-                &*FP_JS_GPU_MAC
-            } else {
-                &*FP_JS_MAC
-            }
-        } else if agent_os == AgentOs::Windows {
-            if fingerprint_gpu {
-                &*FP_JS_GPU_WINDOWS
-            } else {
-                &*FP_JS_WINDOWS
-            }
+    let merged_script = spider_fingerprint::emulate(
+        ua,
+        &emulation_config,
+        &if let Some(vp) = &config.viewport {
+            Some((*vp).into())
         } else {
-            &*FP_JS
-        };
-        fp_script
-    } else {
-        &Default::default()
-    };
-
-    let disable_dialogs = if dismiss_dialogs { DISABLE_DIALOGS } else { "" };
-    let mut mobile_device = false;
-
-    let screen_spoof = if let Some(viewport) = &config.viewport {
-        mobile_device = viewport.emulating_mobile;
-        let dpr = resolve_dpr(
-            viewport.emulating_mobile,
-            viewport.device_scale_factor,
-            agent_os,
-        );
-
-        spoof_screen_script_rng(
-            viewport.width,
-            viewport.height,
-            dpr,
-            viewport.emulating_mobile,
-            &mut rand::rng(),
-            agent_os,
-        )
-    } else {
-        Default::default()
-    };
-
-    // Final combined script to inject
-    let merged_script = if let Some(script) = config.evaluate_on_new_document.as_deref() {
-        if fingerprint {
-            Some(string_concat!(
-                &fp_script,
-                &spoof_script,
-                disable_dialogs,
-                screen_spoof,
-                SPOOF_NOTIFICATIONS,
-                SPOOF_PERMISSIONS_QUERY,
-                spoof_media_codecs_script(),
-                spoof_touch_screen(mobile_device),
-                spoof_media_labels_script(agent_os),
-                spoof_history_length_script(rand::rng().random_range(1..=6)),
-                spider_fingerprint::wrap_eval_script(&script)
-            ))
-        } else {
-            Some(string_concat!(
-                &spoof_script,
-                disable_dialogs,
-                screen_spoof,
-                SPOOF_NOTIFICATIONS,
-                SPOOF_PERMISSIONS_QUERY,
-                spoof_media_codecs_script(),
-                spoof_touch_screen(mobile_device),
-                spoof_media_labels_script(agent_os),
-                spoof_history_length_script(rand::rng().random_range(1..=6)),
-                spider_fingerprint::wrap_eval_script(&script)
-            ))
-        }
-    } else if fingerprint {
-        Some(string_concat!(
-            &fp_script,
-            &spoof_script,
-            disable_dialogs,
-            screen_spoof,
-            SPOOF_NOTIFICATIONS,
-            SPOOF_PERMISSIONS_QUERY,
-            spoof_media_codecs_script(),
-            spoof_touch_screen(mobile_device),
-            spoof_media_labels_script(agent_os),
-            spoof_history_length_script(rand::rng().random_range(1..=6))
-        ))
-    } else if stealth {
-        Some(string_concat!(
-            &spoof_script,
-            disable_dialogs,
-            screen_spoof,
-            SPOOF_NOTIFICATIONS,
-            SPOOF_PERMISSIONS_QUERY,
-            spoof_media_codecs_script(),
-            spoof_touch_screen(mobile_device),
-            spoof_media_labels_script(agent_os),
-            spoof_history_length_script(rand::rng().random_range(1..=6))
-        ))
-    } else {
-        None
-    };
+            None
+        },
+        &config.evaluate_on_new_document,
+    );
 
     let stealth = async {
         match config.user_agent.as_deref() {
             Some(agent) if stealth => {
                 let _ = tokio::join!(
-                    chrome_page._enable_stealth_mode(
-                        merged_script.as_deref(),
-                        Some(agent_os),
-                        Some(stealth_mode)
-                    ),
+                    chrome_page.add_script_to_evaluate_on_new_document(merged_script,),
                     chrome_page.set_user_agent(agent.as_str())
                 );
             }
@@ -822,16 +671,13 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
             }
             None if stealth => {
                 let _ = chrome_page
-                    ._enable_stealth_mode(
-                        merged_script.as_deref(),
-                        Some(agent_os),
-                        Some(stealth_mode),
-                    )
+                    .add_script_to_evaluate_on_new_document(merged_script)
                     .await;
             }
             None => (),
         }
     };
+
     if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
         tokio::join!(stealth, configure_browser(&chrome_page, &config))
     })

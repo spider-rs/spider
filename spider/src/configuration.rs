@@ -12,32 +12,8 @@ use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::time::Duration;
 
-/// The fingerprint type to use.
 #[cfg(feature = "chrome")]
-#[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Fingerprint {
-    /// Basic finterprint that includes webgl and gpu attempt spoof.
-    Basic,
-    /// Basic fingerprint that does not spoof the gpu. Used for real gpu based headless instances.
-    /// This will bypass the most advanced anti-bots without the speed reduction of a virtual display.
-    NativeGPU,
-    /// None - no fingerprint and use the default browser fingerprinting. This may be a good option to use at times.
-    #[default]
-    None,
-}
-
-#[cfg(feature = "chrome")]
-impl Fingerprint {
-    /// Fingerprint should be used.
-    #[cfg(feature = "chrome")]
-    pub fn valid(&self) -> bool {
-        match &self {
-            Self::Basic | Self::NativeGPU => true,
-            _ => false,
-        }
-    }
-}
+pub use spider_fingerprint::Fingerprint;
 
 /// Redirect policy configuration for request
 #[derive(Debug, Default, Clone, PartialEq)]

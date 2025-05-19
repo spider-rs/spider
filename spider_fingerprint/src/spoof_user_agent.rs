@@ -1,5 +1,4 @@
 use crate::{BASE_CHROME_VERSION, CHROME_VERSIONS_BY_MAJOR};
-use case_insensitive_string::compact_str;
 use rand::prelude::IndexedRandom;
 use rand::{rng, Rng};
 
@@ -158,9 +157,7 @@ pub struct HighEntropyUaData {
 }
 
 /// Build the entropy data.
-pub fn build_high_entropy_data(
-    user_agent: &Option<Box<compact_str::CompactString>>,
-) -> HighEntropyUaData {
+pub fn build_high_entropy_data(user_agent: &Option<&str>) -> HighEntropyUaData {
     let user_agent: &str = user_agent.as_deref().map_or("", |v| v);
 
     let full_version = user_agent

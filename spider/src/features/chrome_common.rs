@@ -150,7 +150,7 @@ impl From<CaptureScreenshotFormat>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// View port handling for chrome.
 pub struct Viewport {
@@ -210,6 +210,19 @@ impl Viewport {
 
 #[cfg(feature = "chrome")]
 impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
+    fn from(viewport: Viewport) -> Self {
+        Self {
+            width: viewport.width,
+            height: viewport.height,
+            device_scale_factor: viewport.device_scale_factor,
+            emulating_mobile: viewport.emulating_mobile,
+            is_landscape: viewport.is_landscape,
+            has_touch: viewport.has_touch,
+        }
+    }
+}
+
+impl From<Viewport> for spider_fingerprint::spoof_viewport::Viewport {
     fn from(viewport: Viewport) -> Self {
         Self {
             width: viewport.width,
