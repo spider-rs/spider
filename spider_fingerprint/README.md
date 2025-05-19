@@ -27,23 +27,19 @@ let script = build_stealth_script(Tier::Full, AgentOs::Mac);
 // Inject `script` into a browser context
 ```
 
----
-
-### `TIERS.md`
-
-```markdown
-# Spoofing Tiers
+## Spoofing Tiers
 
 This crate provides multiple spoofing levels depending on the desired realism and complexity.
 
-## Tiers
+```md
 
 | Tier            | Description                                               |
 |-----------------|-----------------------------------------------------------|
 | `Basic`         | Chrome props, WebGL spoofing, plugins/mimeTypes           |
 | `BasicNoWebgl`  | Same as Basic but skips WebGL spoofing                    |
-| `Mid`           | Adds WebDriver hiding (`navigator.webdriver = false`)     |
+| `Mid`           | Adds WebDriver hiding                                     |
 | `Full`          | All spoofing including WebGPU adapter spoof               |
+```
 
 ## Configuration
 
