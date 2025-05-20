@@ -599,7 +599,7 @@ pub fn is_title_case_browser_header(header: &str) -> bool {
 }
 
 /// Capitalizes each part of a hyphenated header: `user-agent` → `User-Agent`
-fn title_case_header(key: &str) -> String {
+pub fn title_case_header(key: &str) -> String {
     let is_leading_hyphen = key.starts_with('-');
 
     key.split('-')
@@ -636,4 +636,122 @@ pub fn rewrite_headers_to_title_case(headers: &mut std::collections::HashMap<Str
     }
 
     *headers = new_headers;
+}
+
+
+/// Detect the browser type.
+fn detect_browser(ua: &str) -> &'static str {
+    let ua = ua.to_ascii_lowercase();
+    if ua.contains("chrome") && !ua.contains("edge") {
+        "chrome"
+    } else if ua.contains("safari") && !ua.contains("chrome") {
+        "safari"
+    } else if ua.contains("firefox") {
+        "firefox"
+    } else {
+        "chrome" // default fallback
+    }
+}
+
+/// Real header order map.
+pub static HEADER_ORDER_MAP: phf::Map<&'static str, &'static [&'static str]> = phf::phf_map! {
+    "safari" => &[
+        "Referer", "Origin", "Content-Type", "Accept", "Upgrade-Insecure-Requests",
+        "User-Agent", "Content-Length", "Accept-Encoding", "Accept-Language", "Connection",
+        "Host", "Cookie", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site", ":method",
+        ":scheme", ":authority", ":path", "referer", "origin", "content-type", "accept",
+        "user-agent", "content-length", "accept-encoding", "accept-language", "cookie",
+        "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site",
+    ],
+    "chrome" => &[
+        "Content-Type",
+        "Content-Length",
+        "Host",
+        "Pragma",
+        "Cache-Control",
+        "Device-Memory",
+        "DPR",
+        "Viewport-Width",
+        "RTT",
+        "Downlink",
+        "ECT",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "Sec-CH-UA-Full-Version",
+        "Sec-CH-UA-Arch",
+        "sec-ch-ua-platform",
+        "Sec-CH-UA-Platform-Version",
+        "Sec-CH-UA-Model",
+        "Sec-CH-Prefers-Color-Scheme",
+        "Sec-CH-Prefers-Reduced-Motion",
+        "Upgrade-Insecure-Requests",
+        "Origin",
+        "User-Agent",
+        "Accept",
+        "Sec-Fetch-Site",
+        "Sec-Fetch-Mode",
+        "Sec-Fetch-User",
+        "Sec-Fetch-Dest",
+        "Referer",
+        "Accept-Encoding",
+        "Accept-Language",
+        "Priority",
+        "Cookie",
+        ":method",
+        ":authority",
+        ":scheme",
+        ":path",
+        "content-length",
+        "cache-control",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "origin",
+        "content-type",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "referer",
+        "accept-encoding",
+        "accept-language",
+        "cookie",
+    ],
+    "firefox" => &[
+        "Host", "User-Agent", "Accept", "Accept-Language", "Accept-Encoding", "Content-Type",
+        "Content-Length", "Origin", "Connection", "Referer", "Cookie",
+        "Upgrade-Insecure-Requests", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site",
+        "Sec-Fetch-User", ":method", ":path", ":authority", ":scheme", "user-agent", "accept",
+        "accept-language", "accept-encoding", "content-type", "content-length", "origin",
+        "referer", "cookie", "upgrade-insecure-requests", "sec-fetch-dest", "sec-fetch-mode",
+        "sec-fetch-site", "sec-fetch-user", "te",
+    ],
+};
+
+/// Sort the headers in custom order based on detected browser.
+pub fn sort_headers_by_custom_order(user_agent: &str, original: &HeaderMap) -> HeaderMap {
+    let mut sorted = HeaderMap::with_capacity(original.capacity());
+    let browser = detect_browser(user_agent);
+
+    if let Some(sort_order) = HEADER_ORDER_MAP.get(browser) {
+        for &key in *sort_order {
+            if let Ok(header_name) = key.parse::<HeaderName>() {
+                if let Some(value) = original.get(&header_name) {
+                    sorted.insert(header_name, value.clone());
+                }
+            }
+        }
+
+        // Add remaining headers not already inserted
+        for (k, v) in original.iter() {
+            if !sorted.contains_key(k) {
+                sorted.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    sorted
 }
