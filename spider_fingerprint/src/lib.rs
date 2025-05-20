@@ -6,6 +6,8 @@ pub mod configs;
 pub mod profiles;
 /// GPU spoofs.
 pub mod spoof_gpu;
+/// Spoof HTTP headers.
+pub mod spoof_headers;
 /// Spoof mouse-movement.
 pub mod spoof_mouse_movement;
 /// Referer headers.
@@ -26,6 +28,10 @@ use profiles::{
 use spoof_gpu::build_gpu_spoof_script_wgsl;
 
 use crate::configs::{AgentOs, Tier};
+pub use spoof_headers::emulate_headers;
+
+pub use url;
+pub use http;
 
 lazy_static::lazy_static! {
     /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.
