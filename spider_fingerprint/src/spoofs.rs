@@ -31,6 +31,9 @@ pub const HIDE_PERMISSIONS: &str = "(()=>{const originalQuery=window.navigator.p
 /// Patch the default en-US local - WIP.
 pub const SPOOF_LANGUAGE: &str = r#"(()=>{const v=['en-US','en'],d=Object.getPrototypeOf(navigator),p='languages',g=function(){return v};g.toString=()=>`function get languages() { [native code] }`;try{Object.defineProperty(d,p,{get:g,enumerable:false,configurable:true})}catch(e){}if(typeof WorkerNavigator!=='undefined'){const wd=WorkerNavigator.prototype;if(wd&&wd!==d){try{Object.defineProperty(wd,p,{get:g,enumerable:false,configurable:true})}catch(e){}}}})();"#;
 
+/// Spoof __pwInitScripts - only required when using playwright. 
+pub const PW_INIT_SCRIPTS_SPOOF: &str = r#"(()=>{try{if('__pwInitScripts'in window){try{delete window.__pwInitScripts}catch{}try{Object.defineProperty(window,'__pwInitScripts',{get:()=>undefined,set:()=>{},configurable:!0})}catch{}}if('__pwInitScripts'in globalThis){try{delete globalThis.__pwInitScripts}catch{}try{Object.defineProperty(globalThis,'__pwInitScripts',{get:()=>undefined,set:()=>{},configurable:!0})}catch{}}}catch{}})();"#;
+
 /// Spoof the touch screen.
 pub fn spoof_touch_screen(mobile: bool) -> &'static str {
     // headless already defaults to a touch screen. Spoof for virtual display and real proxy connections.
