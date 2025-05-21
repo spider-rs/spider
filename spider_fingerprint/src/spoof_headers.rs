@@ -644,7 +644,7 @@ pub fn emulate_headers(
                 insert_or_default!(USER_AGENT, ua);
             }
         }
-        BrowserKind::Edge => {
+        BrowserKind::Edge | BrowserKind::Other => {
             insert_or_default!(
                 ACCEPT,
                 HeaderValue::from_static(
@@ -666,7 +666,6 @@ pub fn emulate_headers(
                 insert_or_default!(USER_AGENT, ua);
             }
         }
-        BrowserKind::Other => (),
     }
 
     // re-merge the existing keys.
