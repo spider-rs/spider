@@ -644,14 +644,25 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     emulation_config.fingerprint = config.fingerprint;
     emulation_config.tier = stealth_mode;
 
+    let viewport = if let Some(vp) = &config.viewport {
+        let vp = spider_fingerprint::spoof_viewport::Viewport {
+            width: vp.width,
+            height: vp.height,
+            device_scale_factor: vp.device_scale_factor,
+            emulating_mobile: vp.emulating_mobile,
+            is_landscape: vp.is_landscape,
+            has_touch: vp.has_touch,
+        };
+
+        Some(vp)
+    } else {
+        None
+    };
+
     let merged_script = spider_fingerprint::emulate(
         ua,
         &emulation_config,
-        &if let Some(vp) = &config.viewport {
-            Some((*vp).into())
-        } else {
-            None
-        },
+        &viewport.as_ref(),
         &config.evaluate_on_new_document,
     );
 

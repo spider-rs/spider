@@ -215,7 +215,7 @@ fn join_scripts<I: IntoIterator<Item = impl AsRef<str>>>(parts: I) -> String {
 pub fn emulate(
     user_agent: &str,
     config: &EmulationConfiguration,
-    viewport: &Option<crate::spoof_viewport::Viewport>,
+    viewport: &Option<&crate::spoof_viewport::Viewport>,
     evaluate_on_new_document: &Option<Box<String>>,
 ) -> Option<String> {
     use crate::spoof_gpu::{
