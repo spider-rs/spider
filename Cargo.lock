@@ -4627,9 +4627,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.109"
+version = "2.1.110"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d5edb8aa3e0c6ff819a7cd2b755c49787a3e0b84d672415558ea26852bf150e"
+checksum = "4144f2d1b026b120add2779629682939e5d1352cd8b39d0a13f44b9d3097027d"
 dependencies = [
  "psl-types",
 ]
@@ -5921,7 +5921,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5934,7 +5934,7 @@ dependencies = [
  "case_insensitive_string",
  "chrono",
  "const_format",
- "cookie 0.18.1",
+ "cookie 0.14.4",
  "cron 0.15.0",
  "fastrand 2.3.0",
  "flexbuffers",
@@ -5989,7 +5989,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6082,7 +6082,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "clap",
  "env_logger",
@@ -6108,7 +6108,7 @@ dependencies = [
 
 [[package]]
 name = "spider_fingerprint"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "case_insensitive_string",
  "http 1.3.1",
@@ -6158,7 +6158,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6181,7 +6181,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6198,7 +6198,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.63"
+version = "2.37.65"
 dependencies = [
  "env_logger",
  "lazy_static",

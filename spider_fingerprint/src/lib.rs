@@ -29,6 +29,7 @@ use spoof_gpu::build_gpu_spoof_script_wgsl;
 
 use crate::configs::{AgentOs, Tier};
 pub use spoof_headers::emulate_headers;
+pub use spoof_refererer::spoof_referrer;
 
 pub use http;
 pub use url;
@@ -160,30 +161,36 @@ pub struct EmulationConfiguration {
     pub firefox_agent: bool,
 }
 
+/// Get the OS being used.
+pub fn get_agent_os(user_agent: &str) -> AgentOs {
+    let mut agent_os = AgentOs::Unknown;
+
+    if user_agent.contains("Chrome") {
+        if user_agent.contains("Linux") {
+            agent_os = AgentOs::Linux;
+        } else if user_agent.contains("Mac") {
+            agent_os = AgentOs::Mac;
+        } else if user_agent.contains("Windows") {
+            agent_os = AgentOs::Windows;
+        } else if user_agent.contains("Android") {
+            agent_os = AgentOs::Android;
+        }
+    }
+
+    agent_os
+}
+
 /// Setup the emulation defaults.
 impl EmulationConfiguration {
     /// Setup the defaults.
     pub fn setup_defaults(user_agent: &str) -> EmulationConfiguration {
         let mut firefox_agent = false;
 
-        let agent_os = {
-            let mut agent_os = AgentOs::Linux;
-            if user_agent.contains("Chrome") {
-                if user_agent.contains("Linux") {
-                    agent_os = AgentOs::Linux;
-                } else if user_agent.contains("Mac") {
-                    agent_os = AgentOs::Mac;
-                } else if user_agent.contains("Windows") {
-                    agent_os = AgentOs::Windows;
-                } else if user_agent.contains("Android") {
-                    agent_os = AgentOs::Android;
-                }
-            } else {
-                firefox_agent = user_agent.contains("Firefox");
-            }
+        let agent_os = get_agent_os(user_agent);
 
-            agent_os
-        };
+        if agent_os == AgentOs::Unknown {
+            firefox_agent = user_agent.contains("Firefox");
+        }
 
         let mut emulation_config = Self::default();
 

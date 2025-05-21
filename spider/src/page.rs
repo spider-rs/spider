@@ -1409,6 +1409,7 @@ impl Page {
         viewport: &Option<crate::configuration::Viewport>,
         request_timeout: &Option<Box<Duration>>,
         track_events: &Option<crate::configuration::ChromeEventTracker>,
+        referrer: Option<String>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -1423,6 +1424,7 @@ impl Page {
             viewport,
             &request_timeout,
             track_events,
+            referrer,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -2592,6 +2594,7 @@ impl Page {
                                     &configuration.viewport,
                                     &configuration.request_timeout,
                                     &configuration.track_events,
+                                    crate::configuration::get_referer(&configuration.headers),
                                 )
                                 .await;
 
@@ -2941,6 +2944,7 @@ impl Page {
                                     &configuration.viewport,
                                     &configuration.request_timeout,
                                     &configuration.track_events,
+                                    get_referer(&configuration.headers),
                                 )
                                 .await;
 

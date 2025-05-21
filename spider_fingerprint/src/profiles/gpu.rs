@@ -230,7 +230,7 @@ pub fn select_random_gpu_profile(os: crate::AgentOs) -> &'static GpuProfile {
         AgentOs::Windows => GPU_PROFILES_WINDOWS
             .choose(&mut rand::rng())
             .unwrap_or(&FALLBACK_GPU_PROFILE),
-        AgentOs::Linux => GPU_PROFILES_LINUX
+        AgentOs::Linux | AgentOs::Unknown => GPU_PROFILES_LINUX
             .choose(&mut rand::rng())
             .unwrap_or(&FALLBACK_GPU_PROFILE),
         AgentOs::Android => GPU_PROFILES_ANDROID

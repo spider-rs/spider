@@ -220,7 +220,7 @@ impl GpuLimits {
                 max_compute_workgroup_size_z: 64,
                 max_compute_workgroups_per_dimension: 65535,
             },
-            AgentOs::Linux | AgentOs::Windows | AgentOs::Android => Self {
+            AgentOs::Linux | AgentOs::Windows | AgentOs::Android | AgentOs::Unknown => Self {
                 max_texture_dimension_1d: 16384,
                 max_texture_dimension_2d: 16384,
                 max_texture_dimension_3d: 2048,

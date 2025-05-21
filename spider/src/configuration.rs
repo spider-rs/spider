@@ -312,6 +312,20 @@ impl SerializableHeaderMap {
     }
 }
 
+/// Get a cloned copy of the `Referer` header as a `String` (if it exists and is valid UTF-8).
+pub fn get_referer(header_map: &Option<Box<SerializableHeaderMap>>) -> Option<String> {
+    match header_map {
+        Some(header_map) => {
+            header_map
+                .0
+                .get(crate::client::header::REFERER) // Retrieves the "Referer" HeaderValue if it exists
+                .and_then(|value| value.to_str().ok()) // &str from HeaderValue
+                .map(String::from) // Convert &str to String (owned)
+        }
+        _ => None,
+    }
+}
+
 impl From<HeaderMap> for SerializableHeaderMap {
     fn from(header_map: HeaderMap) -> Self {
         SerializableHeaderMap(header_map)

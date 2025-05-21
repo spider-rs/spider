@@ -274,7 +274,7 @@ pub fn spoof_referrer_rng<R: Rng>(rng: &mut R) -> &'static str {
     WEBSITES[rng.random_range(..WEBSITES.len())]
 }
 
-/// Takes a URL and returns a convincing Google referer URL using the domain name or IP.
+/// Takes a URL and returns a convincing Google referer URL using the domain name or IP. Not used in latest chrome versions.
 ///
 /// Handles:
 /// - Domain names with or without subdomains

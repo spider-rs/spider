@@ -6,6 +6,7 @@ use crate::configuration::{
     SerializableHeaderMap,
 };
 
+use crate::configuration::get_referer;
 #[cfg(feature = "smart")]
 use crate::features::chrome::OnceBrowser;
 use crate::features::chrome_common::RequestInterceptConfiguration;
@@ -2104,6 +2105,7 @@ impl Website {
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
+                get_referer(&self.configuration.headers),
             )
             .await;
 
@@ -2141,6 +2143,7 @@ impl Website {
                             &self.configuration.viewport,
                             &self.configuration.request_timeout,
                             &self.configuration.track_events,
+                            get_referer(&self.configuration.headers),
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2163,6 +2166,7 @@ impl Website {
                         &self.configuration.viewport,
                         &self.configuration.request_timeout,
                         &self.configuration.track_events,
+                        get_referer(&self.configuration.headers),
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2305,6 +2309,7 @@ impl Website {
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
+                get_referer(&self.configuration.headers),
             )
             .await;
 
@@ -2342,6 +2347,7 @@ impl Website {
                             &self.configuration.viewport,
                             &self.configuration.request_timeout,
                             &self.configuration.track_events,
+                            get_referer(&self.configuration.headers),
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2364,6 +2370,7 @@ impl Website {
                         &self.configuration.viewport,
                         &self.configuration.request_timeout,
                         &self.configuration.track_events,
+                        get_referer(&self.configuration.headers),
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2609,6 +2616,7 @@ impl Website {
                 &self.configuration.viewport,
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
+                get_referer(&self.configuration.headers),
             )
             .await;
             let u = page.get_url();
@@ -3024,6 +3032,7 @@ impl Website {
                     &config.viewport,
                     &config.request_timeout,
                     &config.track_events,
+                    get_referer(&config.headers),
                 )
                 .await;
 
@@ -3870,6 +3879,7 @@ impl Website {
                                                                 &shared.6.viewport,
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
+                                                                get_referer(&shared.6.headers)
                                                             )
                                                             .await;
 
@@ -3895,6 +3905,7 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
+                                                                            get_referer(&shared.6.headers)
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -3916,6 +3927,7 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
+                                                                            get_referer(&shared.6.headers)
                                                                         )
                                                                         .await,
                                                                     );
@@ -4507,6 +4519,7 @@ impl Website {
                                                                 &shared.6.viewport,
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
+                                                                get_referer(&shared.6.headers)
                                                             )
                                                             .await;
 
@@ -4532,6 +4545,7 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
+                                                                            get_referer(&shared.6.headers)
 
                                                                         ).await;
                                                                         page.clone_from(&p);
@@ -4554,6 +4568,7 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
+                                                                            get_referer(&shared.6.headers)
                                                                         )
                                                                         .await,
                                                                     );
@@ -5512,6 +5527,7 @@ impl Website {
                                         &self.configuration.viewport,
                                         &self.configuration.request_timeout,
                                         &self.configuration.track_events,
+                                        get_referer(&self.configuration.headers)
                                     )
                                     .await;
 
@@ -5595,6 +5611,7 @@ impl Website {
                                                                     &shared.3.viewport,
                                                                     &shared.3.request_timeout,
                                                                     &shared.3.track_events,
+                                                                    get_referer(&shared.3.headers)
                                                                 )
                                                                 .await;
 
@@ -5718,6 +5735,7 @@ impl Website {
                                                             &shared.3.viewport,
                                                             &shared.3.request_timeout,
                                                             &shared.3.track_events,
+                                                            get_referer(&shared.3.headers)
                                                         )
                                                         .await;
 

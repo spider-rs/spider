@@ -5,6 +5,9 @@ use http::header::{
 use http::{HeaderMap, HeaderName};
 use rand::{rng, Rng};
 
+use crate::configs::AgentOs;
+use crate::get_agent_os;
+
 lazy_static::lazy_static! {
     /// The brand version of google chrome. Use the env var 'NOT_A_BRAND_VERSION'.
     static ref NOT_A_BRAND_VERSION: String = {
@@ -200,20 +203,46 @@ impl HeaderKey {
     }
 }
 
-/// Add the spoofed header from google or a real domain.
+/// Add a spoofed Referer header from Google or a realistic domain,
+/// or sometimes intentionally omit it entirely for privacy realism.
 pub fn maybe_insert_spoofed_referer(
     domain_parsed: Option<&url::Url>,
     rng: &mut rand::rngs::ThreadRng,
 ) -> Option<HeaderValue> {
     use crate::spoof_refererer::{spoof_referrer, spoof_referrer_google};
+    let chance: f64 = rng.random();
 
-    if domain_parsed.is_some() && rng.random_bool(0.75) {
-        domain_parsed
-            .and_then(spoof_referrer_google)
-            .and_then(|s| HeaderValue::from_str(&s).ok())
-            .or_else(|| HeaderValue::from_static(spoof_referrer()).into())
+    if chance < 0.50 {
+        if let Some(parsed_domain) = domain_parsed {
+            // prioritize spoofed Google referer if available
+            if let Some(google_ref) = spoof_referrer_google(parsed_domain) {
+                return HeaderValue::from_str(&google_ref).ok();
+            }
+        }
+        if rng.random_bool(0.50) {
+            HeaderValue::from_static("https://google.com/").into()
+        } else {
+            HeaderValue::from_static(spoof_referrer()).into()
+        }
     } else {
-        HeaderValue::from_static(spoof_referrer()).into()
+        None
+    }
+}
+
+/// Add a spoofed Referer header from Google or a realistic domain,
+/// or sometimes intentionally omit it entirely for privacy realism.
+pub fn maybe_insert_spoofed_referer_simple(rng: &mut rand::rngs::ThreadRng) -> Option<HeaderValue> {
+    use crate::spoof_refererer::spoof_referrer;
+    let chance: f64 = rng.random();
+
+    if chance < 0.50 {
+        if rng.random_bool(0.35) {
+            HeaderValue::from_static("https://google.com/").into()
+        } else {
+            HeaderValue::from_static(spoof_referrer()).into()
+        }
+    } else {
+        None
     }
 }
 
@@ -225,9 +254,15 @@ pub enum HeaderDetailLevel {
     Light,
     /// Include a moderate set of headers.
     Mild,
+    /// Include a moderate set of headers without the referrer header.
+    MildNoRef,
     #[default]
     /// Include the full, extensive set of headers.
     Extensive,
+    /// Include the full, extensive set of headers without the referrer header.
+    ExtensiveNoRef,
+    /// Return nothing.
+    Empty,
 }
 
 /// Emulate real HTTP chrome headers.
@@ -240,6 +275,12 @@ pub fn emulate_headers(
     domain_parsed: &Option<Box<url::Url>>,
     detail_level: &Option<HeaderDetailLevel>,
 ) -> HeaderMap {
+    let empty = matches!(detail_level, Some(HeaderDetailLevel::Empty));
+
+    if empty {
+        return Default::default();
+    }
+
     let browser = if user_agent.contains("Chrome/") {
         BrowserKind::Chrome
     } else if user_agent.contains("Firefox/") {
@@ -258,12 +299,17 @@ pub fn emulate_headers(
         10
     };
 
-    let light = detail_level.is_some();
     let mild = matches!(
         detail_level,
-        Some(HeaderDetailLevel::Mild) | Some(HeaderDetailLevel::Extensive) | None
+        Some(HeaderDetailLevel::Mild)
+            | Some(HeaderDetailLevel::MildNoRef)
+            | Some(HeaderDetailLevel::Extensive)
+            | None
     );
-    let extensive = matches!(detail_level, Some(HeaderDetailLevel::Extensive) | None);
+    let extensive = matches!(
+        detail_level,
+        Some(HeaderDetailLevel::Extensive) | Some(HeaderDetailLevel::ExtensiveNoRef) | None
+    );
 
     let mut headers = HeaderMap::with_capacity(cap);
     let binding = HeaderMap::with_capacity(cap);
@@ -278,7 +324,11 @@ pub fn emulate_headers(
         _ => &binding,
     };
 
-    let add_ref = !header_map.contains_key(REFERER);
+    let add_ref = !header_map.contains_key(REFERER)
+        && !matches!(
+            detail_level,
+            Some(HeaderDetailLevel::ExtensiveNoRef) | Some(HeaderDetailLevel::MildNoRef)
+        );
 
     macro_rules! insert_or_default {
         ($key:expr, $default:expr) => {
@@ -299,7 +349,10 @@ pub fn emulate_headers(
 
     match browser {
         BrowserKind::Chrome => {
-            let linux_agent = user_agent.contains("Linux");
+            let agent_os = get_agent_os(user_agent);
+
+            let linux_agent = agent_os == AgentOs::Linux;
+
             let mut thread_rng = rng();
 
             // if not a chrome request we should stick to the headers from request to prevent duplications.
@@ -385,6 +438,12 @@ pub fn emulate_headers(
                 "sec-ch-ua-platform",
                 HeaderValue::from_static(if linux_agent {
                     "\"Linux\""
+                } else if agent_os == AgentOs::Mac {
+                    "\"macOS\""
+                } else if agent_os == AgentOs::Windows {
+                    "\"Windows\""
+                } else if agent_os == AgentOs::Android {
+                    "\"Android\""
                 } else {
                     get_sec_ch_ua_platform()
                 })
@@ -411,10 +470,16 @@ pub fn emulate_headers(
 
             // 8. Referer (if spoofing enabled and missing)
             if add_ref {
-                if let Some(ref_header) =
-                    maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut thread_rng)
-                {
-                    insert_or_default!(&refererer_header.as_header_name(), ref_header);
+                if chrome {
+                    if let Some(ref_header) = maybe_insert_spoofed_referer_simple(&mut thread_rng) {
+                        insert_or_default!(&refererer_header.as_header_name(), ref_header);
+                    }
+                } else {
+                    if let Some(ref_header) =
+                        maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut thread_rng)
+                    {
+                        insert_or_default!(&refererer_header.as_header_name(), ref_header);
+                    }
                 }
             }
 
@@ -492,7 +557,7 @@ pub fn emulate_headers(
                 }
             }
 
-            if !light || linux_agent {
+            if mild || linux_agent {
                 insert_or_default!("sec-ch-ua-model", HeaderValue::from_static("\"\""));
                 insert_or_default!(
                     "sec-ch-ua-arc",

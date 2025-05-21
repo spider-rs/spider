@@ -40,4 +40,6 @@ pub enum AgentOs {
     Windows,
     /// Android.
     Android,
+    /// Unknown.
+    Unknown,
 }

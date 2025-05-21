@@ -735,6 +735,7 @@ pub struct ChromeHTTPReqRes {
 pub async fn perform_chrome_http_request(
     page: &chromiumoxide::Page,
     source: &str,
+    referrer: Option<String>,
 ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
     let mut waf_check = false;
     let mut status_code = StatusCode::OK;
@@ -754,7 +755,7 @@ pub async fn perform_chrome_http_request(
                 chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
             ),
             frame_id,
-            referrer: None,
+            referrer,
             referrer_policy: None,
         })?;
 
@@ -1184,8 +1185,9 @@ async fn navigate(
     page: &chromiumoxide::Page,
     url: &str,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
-    *chrome_http_req_res = perform_chrome_http_request(page, url).await?;
+    *chrome_http_req_res = perform_chrome_http_request(page, url, referrer).await?;
     Ok(())
 }
 
@@ -1313,6 +1315,7 @@ pub async fn fetch_page_html_chrome_base(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -1591,7 +1594,7 @@ pub async fn fetch_page_html_chrome_base(
                     }
                 }
             } else {
-                if let Err(e) = navigate(page, source, &mut chrome_http_req_res).await {
+                if let Err(e) = navigate(page, source, &mut chrome_http_req_res, referrer).await {
                     log::info!(
                         "Navigation Error({:?}) - {:?}",
                         e,
@@ -2795,6 +2798,7 @@ pub async fn fetch_page_html(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -2816,6 +2820,7 @@ pub async fn fetch_page_html(
                 &viewport,
                 &request_timeout,
                 &track_events,
+                referrer,
             )
             .await
             {
@@ -2959,6 +2964,7 @@ pub async fn fetch_page_html(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -2975,6 +2981,7 @@ pub async fn fetch_page_html(
         viewport,
         request_timeout,
         track_events,
+        referrer,
     )
     .await
     {
@@ -3001,6 +3008,7 @@ pub async fn fetch_page_html_chrome(
     viewport: &Option<crate::configuration::Viewport>,
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -3019,6 +3027,7 @@ pub async fn fetch_page_html_chrome(
                 viewport,
                 request_timeout,
                 track_events,
+                referrer,
             )
             .await
             {

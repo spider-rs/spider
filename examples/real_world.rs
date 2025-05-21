@@ -9,7 +9,7 @@ use spider::tokio;
 use spider::website::Website;
 use spider::{
     configuration::{ChromeEventTracker, WaitForIdleNetwork},
-    features::{chrome_common::RequestInterceptConfiguration, spoof_referrer::spoof_referrer},
+    features::chrome_common::RequestInterceptConfiguration,
 };
 use std::io::Result;
 use std::iter::FromIterator;
@@ -35,7 +35,10 @@ async fn crawl_website(url: &str) -> Result<()> {
             "body".into(),
         )))
         .with_headers(Some(HeaderMap::from_iter([
-            (REFERER, HeaderValue::from_static(spoof_referrer())),
+            (
+                REFERER,
+                HeaderValue::from_static(spider::spider_fingerprint::spoof_referrer()),
+            ),
             (REFERRER_POLICY, HeaderValue::from_static("strict-origin")),
         ])))
         .with_block_assets(true)
