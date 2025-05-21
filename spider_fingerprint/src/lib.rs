@@ -30,8 +30,8 @@ use spoof_gpu::build_gpu_spoof_script_wgsl;
 use crate::configs::{AgentOs, Tier};
 pub use spoof_headers::emulate_headers;
 
-pub use url;
 pub use http;
+pub use url;
 
 lazy_static::lazy_static! {
     /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.

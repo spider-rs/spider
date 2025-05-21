@@ -217,6 +217,19 @@ pub fn maybe_insert_spoofed_referer(
     }
 }
 
+/// The extent of emulation to build.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum HeaderDetailLevel {
+    /// Include only basic headers.
+    Light,
+    /// Include a moderate set of headers.
+    Mild,
+    #[default]
+    /// Include the full, extensive set of headers.
+    Extensive,
+}
+
 /// Emulate real HTTP chrome headers.
 pub fn emulate_headers(
     user_agent: &str,
@@ -225,6 +238,7 @@ pub fn emulate_headers(
     chrome: bool, // incase HeaderMap allows case handling.
     viewport: &Option<crate::spoof_viewport::Viewport>,
     domain_parsed: &Option<Box<url::Url>>,
+    detail_level: &Option<HeaderDetailLevel>,
 ) -> HeaderMap {
     let browser = if user_agent.contains("Chrome/") {
         BrowserKind::Chrome
@@ -243,6 +257,14 @@ pub fn emulate_headers(
     } else {
         10
     };
+
+    let light = detail_level.is_some();
+    let mild = matches!(
+        detail_level,
+        Some(HeaderDetailLevel::Mild) | Some(HeaderDetailLevel::Extensive) | None
+    );
+    let extensive = matches!(detail_level, Some(HeaderDetailLevel::Extensive) | None);
+
     let mut headers = HeaderMap::with_capacity(cap);
     let binding = HeaderMap::with_capacity(cap);
     let mut map_exist = false;
@@ -388,7 +410,7 @@ pub fn emulate_headers(
             insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
 
             // 8. Referer (if spoofing enabled and missing)
-            if add_ref && !header_map.contains_key(REFERER) {
+            if add_ref {
                 if let Some(ref_header) =
                     maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut thread_rng)
                 {
@@ -410,8 +432,10 @@ pub fn emulate_headers(
                 HeaderValue::from_static("no-cache")
             );
 
-            if let Ok(device_memory_str) = HeaderValue::from_str(&device_memory_str) {
-                insert_or_default!("Device-Memory", device_memory_str);
+            if extensive || linux_agent {
+                if let Ok(device_memory_str) = HeaderValue::from_str(&device_memory_str) {
+                    insert_or_default!("Device-Memory", device_memory_str);
+                }
             }
 
             // 10. Optional behavior/diagnostic headers
@@ -420,84 +444,100 @@ pub fn emulate_headers(
                 HeaderValue::from_static("max-age=0")
             );
 
-            insert_or_default!("Dpr", HeaderValue::from_static("2"));
-
-            if let Some(vp) = viewport {
-                let width = if vp.width > 0 {
-                    format!("{}", vp.width)
-                } else {
-                    format!(
-                        "{}",
-                        crate::spoof_viewport::randomize_viewport_rng(
-                            &crate::spoof_viewport::DeviceType::Desktop,
-                            &mut thread_rng
+            if extensive || linux_agent {
+                insert_or_default!("Dpr", HeaderValue::from_static("2"));
+                if let Some(vp) = viewport {
+                    let width = if vp.width > 0 {
+                        format!("{}", vp.width)
+                    } else {
+                        format!(
+                            "{}",
+                            crate::spoof_viewport::randomize_viewport_rng(
+                                &crate::spoof_viewport::DeviceType::Desktop,
+                                &mut thread_rng
+                            )
+                            .width
                         )
-                        .width
-                    )
-                };
+                    };
 
-                if let Ok(width) = HeaderValue::from_str(&width) {
-                    insert_or_default!("Viewport-Width", width);
+                    if let Ok(width) = HeaderValue::from_str(&width) {
+                        insert_or_default!("Viewport-Width", width);
+                    }
                 }
             }
 
             insert_or_default!("Priority", HeaderValue::from_static("u=0, i"));
-            insert_or_default!("Ect", HeaderValue::from_static("4g"));
-            insert_or_default!("Rtt", HeaderValue::from_static("50"));
 
-            if let Ok(dl) = HeaderValue::from_str(&downlink_str) {
-                insert_or_default!("Downlink", dl);
+            if mild {
+                insert_or_default!("Ect", HeaderValue::from_static("4g"));
+                insert_or_default!("Rtt", HeaderValue::from_static("50"));
+                if let Ok(dl) = HeaderValue::from_str(&downlink_str) {
+                    insert_or_default!("Downlink", dl);
+                }
             }
-            // 11. Extra client hints (real Chrome includes some of these)
-            if let Ok(ua_full_list) =
-                HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
-            {
-                insert_or_default!("sec-ch-ua-full-version-list", ua_full_list);
+
+            if extensive || linux_agent {
+                // 11. Extra client hints (real Chrome includes some of these)
+                if let Ok(ua_full_list) =
+                    HeaderValue::from_str(&parse_user_agent_to_ch_ua(user_agent, true, linux_agent))
+                {
+                    insert_or_default!("sec-ch-ua-full-version-list", ua_full_list);
+                }
+                if let Ok(sec_ch_platform) = HeaderValue::from_str(if linux_agent {
+                    &CHROME_PLATFORM_LINUX_VERSION
+                } else {
+                    &CHROME_PLATFORM_VERSION
+                }) {
+                    insert_or_default!("sec-ch-ua-platform-version", sec_ch_platform);
+                }
             }
-            if let Ok(sec_ch_platform) = HeaderValue::from_str(if linux_agent {
-                &CHROME_PLATFORM_LINUX_VERSION
-            } else {
-                &CHROME_PLATFORM_VERSION
-            }) {
-                insert_or_default!("sec-ch-ua-platform-version", sec_ch_platform);
+
+            if !light || linux_agent {
+                insert_or_default!("sec-ch-ua-model", HeaderValue::from_static("\"\""));
+                insert_or_default!(
+                    "sec-ch-ua-arc",
+                    HeaderValue::from_static(if linux_agent {
+                        "x86_64"
+                    } else {
+                        get_sec_ch_ua_arch()
+                    })
+                );
+                insert_or_default!(
+                    "sec-ch-ua-bitness",
+                    HeaderValue::from_static(get_sec_ch_ua_bitness())
+                );
+                // TODO: parse the user-agent for mobile or desktop
+                insert_or_default!(
+                    "sec-ch-ua-form-factors",
+                    HeaderValue::from_static(if is_mobile {
+                        r#""Mobile""#
+                    } else {
+                        r#""Desktop""#
+                    })
+                );
             }
-            insert_or_default!("sec-ch-ua-model", HeaderValue::from_static("\"\""));
-            insert_or_default!(
-                "sec-ch-ua-arc",
-                HeaderValue::from_static(if linux_agent {
-                    "x86_64"
-                } else {
-                    get_sec_ch_ua_arch()
-                })
-            );
-            insert_or_default!(
-                "sec-ch-ua-bitness",
-                HeaderValue::from_static(get_sec_ch_ua_bitness())
-            );
-            // TODO: parse the user-agent for mobile or desktop
-            insert_or_default!(
-                "sec-ch-ua-form-factors",
-                HeaderValue::from_static(if is_mobile {
-                    r#""Mobile""#
-                } else {
-                    r#""Desktop""#
-                })
-            );
-            insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
-            insert_or_default!(
-                "sec-ch-prefers-reduced-motion",
-                HeaderValue::from_static(if thread_rng.random() {
-                    "no-preference"
-                } else {
-                    "reduced"
-                })
-            );
-            insert_or_default!(
-                "sec-ch-prefers-color-scheme",
-                HeaderValue::from_static(if thread_rng.random() { "light" } else { "dark" })
-            );
+
+            if extensive || linux_agent {
+                insert_or_default!("sec-ch-ua-wow64", HeaderValue::from_static("?0"));
+                insert_or_default!(
+                    "sec-ch-prefers-reduced-motion",
+                    HeaderValue::from_static(if thread_rng.random() {
+                        "no-preference"
+                    } else {
+                        "reduced"
+                    })
+                );
+                insert_or_default!(
+                    "sec-ch-prefers-color-scheme",
+                    HeaderValue::from_static(if thread_rng.random() { "light" } else { "dark" })
+                );
+            }
         }
         BrowserKind::Firefox => {
+            if let Ok(ua) = HeaderValue::from_str(user_agent) {
+                insert_or_default!(USER_AGENT, ua);
+            }
+
             insert_or_default!(
                 ACCEPT,
                 HeaderValue::from_static(
@@ -505,13 +545,14 @@ pub fn emulate_headers(
                 )
             );
 
-            if add_ref && !header_map.contains_key(REFERER) {
+            if add_ref {
                 if let Some(ref_header) =
                     maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rand::rng())
                 {
                     insert_or_default!(REFERER, ref_header);
                 }
             }
+
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
             insert_or_default!(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
             insert_or_default!(TE, HeaderValue::from_static("trailers"));
@@ -524,7 +565,7 @@ pub fn emulate_headers(
                 )
             );
 
-            if add_ref && !header_map.contains_key(REFERER) {
+            if add_ref {
                 if let Some(ref_header) =
                     maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rng())
                 {
@@ -533,6 +574,10 @@ pub fn emulate_headers(
             }
 
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+
+            if let Ok(ua) = HeaderValue::from_str(user_agent) {
+                insert_or_default!(USER_AGENT, ua);
+            }
         }
         BrowserKind::Edge => {
             insert_or_default!(
@@ -542,7 +587,7 @@ pub fn emulate_headers(
                 )
             );
 
-            if add_ref && !header_map.contains_key(REFERER) {
+            if add_ref {
                 if let Some(ref_header) =
                     maybe_insert_spoofed_referer(domain_parsed.as_deref(), &mut rng())
                 {
@@ -551,6 +596,10 @@ pub fn emulate_headers(
             }
 
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+
+            if let Ok(ua) = HeaderValue::from_str(user_agent) {
+                insert_or_default!(USER_AGENT, ua);
+            }
         }
         BrowserKind::Other => (),
     }
@@ -637,7 +686,6 @@ pub fn rewrite_headers_to_title_case(headers: &mut std::collections::HashMap<Str
 
     *headers = new_headers;
 }
-
 
 /// Detect the browser type.
 fn detect_browser(ua: &str) -> &'static str {
@@ -754,4 +802,109 @@ pub fn sort_headers_by_custom_order(user_agent: &str, original: &HeaderMap) -> H
     }
 
     sorted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spoof_viewport::Viewport;
+    use http::header::{ACCEPT, HOST, USER_AGENT};
+    use http::HeaderMap;
+    use url::Url;
+
+    #[test]
+    fn test_emulate_headers_chrome_basic() {
+        let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
+        let hostname = Some("example.com");
+        let viewport = Some(Viewport {
+            width: 1920,
+            height: 1080,
+            emulating_mobile: false,
+            ..Viewport::default()
+        });
+
+        let domain_parsed = Url::parse("https://example.com").ok().map(Box::new);
+
+        let headers = emulate_headers(
+            user_agent,
+            &None, // No initial headers
+            &hostname,
+            true, // chrome headers enabled
+            &viewport,
+            &domain_parsed,
+            &None, // default to extensive headers
+        );
+
+        // Check host header
+        assert_eq!(headers.get(HOST).unwrap(), "example.com");
+
+        // Check user-agent header
+        assert_eq!(headers.get(USER_AGENT).unwrap(), user_agent);
+
+        // Check Accept header exists with a reasonable default
+        assert!(headers.contains_key(ACCEPT));
+
+        // Check Sec-Fetch headers exist
+        assert!(headers.contains_key("Sec-Fetch-Site"));
+        assert!(headers.contains_key("Sec-Fetch-Mode"));
+        assert!(headers.contains_key("Sec-Fetch-User"));
+        assert!(headers.contains_key("Sec-Fetch-Dest"));
+
+        // Check Chrome-specific headers like sec-ch-ua
+        assert!(headers.contains_key("sec-ch-ua"));
+        assert!(headers.contains_key("sec-ch-ua-mobile"));
+        assert!(headers.contains_key("sec-ch-ua-platform"));
+
+        // Ensure viewport headers are set
+        assert_eq!(headers.get("Viewport-Width").unwrap(), "1920");
+    }
+
+    #[test]
+    fn test_emulate_headers_existing_headers_merging() {
+        let user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15";
+        let hostname = Some("example.org");
+        let viewport = Some(Viewport {
+            width: 1024,
+            height: 768,
+            emulating_mobile: false,
+            ..Viewport::default()
+        });
+        let existing_url = Url::parse("https://example.org").ok().map(Box::new);
+
+        // Existing headers supplied by the user
+        let mut existing_headers = HeaderMap::new();
+        existing_headers.insert("Accept-Language", HeaderValue::from_static("en-US"));
+        existing_headers.insert("Custom-Header", HeaderValue::from_static("CustomValue"));
+
+        let headers = emulate_headers(
+            user_agent,
+            &Some(&existing_headers),
+            &hostname,
+            false, // chrome=false, use existing naming
+            &viewport,
+            &existing_url,
+            &Some(HeaderDetailLevel::Mild),
+        );
+
+        // Existing headers retained or merged correctly
+        assert_eq!(headers.get("Accept-Language").unwrap(), "en-US");
+        assert_eq!(headers.get("Custom-Header").unwrap(), "CustomValue");
+
+        // Default headers added
+        assert_eq!(headers.get(USER_AGENT).unwrap(), user_agent);
+        assert!(headers.contains_key(ACCEPT));
+
+        // Referer header populated by spoofing logic if missing
+        assert!(headers.contains_key(REFERER));
+    }
+
+    #[test]
+    fn test_emulate_headers_default_handling() {
+        // This tests emulate_headers behavior with minimum parameters to ensure graceful defaults
+        let user_agent = "";
+        let headers = emulate_headers(user_agent, &None, &None, false, &None, &None, &None);
+
+        // Check that empty or default values handled gracefully without crashing
+        assert!(!headers.is_empty()); // Should produce something safely without panics
+    }
 }

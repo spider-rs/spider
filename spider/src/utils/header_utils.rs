@@ -48,6 +48,7 @@ pub fn extend_headers(
         true,
         &viewport.map(|f| f.into()),
         domain_parsed,
+        &Some(spider_fingerprint::spoof_headers::HeaderDetailLevel::Extensive),
     ));
 }
 
