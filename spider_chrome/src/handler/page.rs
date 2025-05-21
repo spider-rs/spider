@@ -205,6 +205,17 @@ impl PageInner {
         Ok(self)
     }
 
+    /// Moves the mouse to this point (dispatches a mouseWheel event)
+    pub async fn scroll(&self, point: Point) -> Result<&Self> {
+        self.execute(DispatchMouseEventParams::new(
+            DispatchMouseEventType::MouseWheel,
+            point.x,
+            point.y,
+        ))
+        .await?;
+        Ok(self)
+    }
+
     /// Performs a mouse click event at the point's location
     pub async fn click(&self, point: Point) -> Result<&Self> {
         let cmd = DispatchMouseEventParams::builder()

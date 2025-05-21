@@ -616,11 +616,26 @@ impl Page {
         Ok(self)
     }
 
-    /// Dispatches a `mousemove` event and moves the mouse to the position of
+    /// Dispatches a `mouseMoved` event and moves the mouse to the position of
     /// the `point` where `Point.x` is the horizontal position of the mouse and
     /// `Point.y` the vertical position of the mouse.
     pub async fn move_mouse(&self, point: Point) -> Result<&Self> {
         self.inner.move_mouse(point).await?;
+        Ok(self)
+    }
+
+    /// Uses the `DispatchKeyEvent` mechanism to simulate pressing keyboard
+    /// keys.
+    pub async fn press_key(&self, input: impl AsRef<str>) -> Result<&Self> {
+        self.inner.press_key(input).await?;
+        Ok(self)
+    }
+
+    /// Dispatches a `mouseWheel` event and moves the mouse to the position of
+    /// the `point` where `Point.x` is the horizontal position of the mouse and
+    /// `Point.y` the vertical position of the mouse.
+    pub async fn scroll(&self, point: Point) -> Result<&Self> {
+        self.inner.scroll(point).await?;
         Ok(self)
     }
 
