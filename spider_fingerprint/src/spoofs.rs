@@ -1,7 +1,7 @@
 // use https://github.com/spider-rs/headless-browser for ideal default settings.
 
 pub use super::spoof_webgl::{HIDE_WEBGL, HIDE_WEBGL_MAC};
-use crate::{configs::AgentOs, spoof_webgl::hide_webgl_worker_script};
+use crate::{configs::AgentOs, spoof_referrer, spoof_webgl::hide_webgl_worker_script};
 use rand::Rng;
 
 /// Spoof window.chrome identical.
@@ -223,6 +223,34 @@ pub fn unified_worker_override(concurrency: usize, vendor: &str, renderer: &str)
         gpu_script = gpu_worker_script,
         combined_script = combined_worker_script
     )
+}
+
+/// Spoof the referer for the document.
+pub fn spoof_referer_script(referer: &str) -> String {
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let value = esc(referer);
+    format!(
+        "(()=>{{var r=Object.getOwnPropertyDescriptor(Document.prototype,'referrer');Object.defineProperty(document,'referrer',{{get:function(){{return \"{val}\"}},configurable:!0}});Object.defineProperty(Object.getOwnPropertyDescriptor(document,'referrer').get,'toString',{{value:function(){{return 'function get referrer() {{ [native code] }}'}},configurable:!0}});}})();",
+        val = value
+    )
+}
+
+/// Spoof the referer for the document.
+pub fn spoof_referer_script_randomized() -> String {
+    spoof_referer_script(spoof_referrer())
+}
+
+/// Spoof the referer for the document with google search referencing.
+pub fn spoof_referer_script_randomized_domain(domain_parsed: &url::Url) -> String {
+    use rand::Rng;
+    if rand::rng().random_bool(0.5) {
+        spoof_referer_script(
+            &crate::spoof_refererer::spoof_referrer_google(&domain_parsed)
+                .unwrap_or_else(|| spoof_referrer().into()),
+        )
+    } else {
+        spoof_referer_script(spoof_referrer())
+    }
 }
 
 // spoof unused atm for headless browser settings entry.

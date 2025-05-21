@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, SerializableHeaderMap};
-use reqwest::header::{HeaderMap, REFERER};
+use reqwest::header::{HeaderMap, HeaderValue, REFERER};
 pub use spider_fingerprint::spoof_headers::{
     is_title_case_browser_header, rewrite_headers_to_title_case,
 };
@@ -9,10 +9,18 @@ pub fn setup_default_headers(
     client_builder: crate::client::ClientBuilder,
     configuration: &Configuration,
 ) -> crate::client::ClientBuilder {
-    let headers = match configuration.headers {
+    let mut headers = match configuration.headers {
         Some(ref h) => *h.clone(),
         None => crate::configuration::SerializableHeaderMap::default(),
     };
+
+    if let Some(referer) = &configuration.referer {
+        if !referer.is_empty() {
+            if let Ok(hv) = HeaderValue::from_str(&referer) {
+                headers.insert(REFERER, hv);
+            }
+        }
+    }
 
     client_builder.default_headers(headers.0)
 }
@@ -48,7 +56,7 @@ pub fn extend_headers(
         true,
         &viewport.map(|f| f.into()),
         domain_parsed,
-        &Some(spider_fingerprint::spoof_headers::HeaderDetailLevel::Light),
+        &Some(spider_fingerprint::spoof_headers::HeaderDetailLevel::Extensive),
     ));
 }
 

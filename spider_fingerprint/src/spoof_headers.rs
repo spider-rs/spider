@@ -213,12 +213,15 @@ pub fn maybe_insert_spoofed_referer(
     let chance: f64 = rng.random();
 
     if chance < 0.50 {
-        if let Some(parsed_domain) = domain_parsed {
-            // prioritize spoofed Google referer if available
-            if let Some(google_ref) = spoof_referrer_google(parsed_domain) {
-                return HeaderValue::from_str(&google_ref).ok();
+        if rng.random_bool(0.25) {
+            if let Some(parsed_domain) = domain_parsed {
+                // prioritize spoofed Google referer if available
+                if let Some(google_ref) = spoof_referrer_google(parsed_domain) {
+                    return HeaderValue::from_str(&google_ref).ok();
+                }
             }
         }
+
         if rng.random_bool(0.50) {
             HeaderValue::from_static("https://google.com/").into()
         } else {
@@ -256,9 +259,9 @@ pub enum HeaderDetailLevel {
     Mild,
     /// Include a moderate set of headers without the referrer header.
     MildNoRef,
-    #[default]
     /// Include the full, extensive set of headers.
     Extensive,
+    #[default]
     /// Include the full, extensive set of headers without the referrer header.
     ExtensiveNoRef,
     /// Return nothing.
@@ -270,7 +273,7 @@ pub fn emulate_headers(
     user_agent: &str,
     header_map: &std::option::Option<&HeaderMap>,
     hostname: &Option<&str>,
-    chrome: bool, // incase HeaderMap allows case handling.
+    chrome: bool, // incase HeaderMap allows case handling and ignoring the referer handling.
     viewport: &Option<crate::spoof_viewport::Viewport>,
     domain_parsed: &Option<Box<url::Url>>,
     detail_level: &Option<HeaderDetailLevel>,
@@ -469,6 +472,9 @@ pub fn emulate_headers(
             insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
 
             // 8. Referer (if spoofing enabled and missing)
+            // If this is coming from chrome we do not want to inject the ref for all resources.
+            // We want to set the referer with our page navigation or on interception remove the referer headers.
+            // For now it is better for chrome not to use the referer unless you can re-order the headers with a http proxy.
             if add_ref {
                 if chrome {
                     if let Some(ref_header) = maybe_insert_spoofed_referer_simple(&mut thread_rng) {
@@ -957,9 +963,6 @@ mod tests {
         // Default headers added
         assert_eq!(headers.get(USER_AGENT).unwrap(), user_agent);
         assert!(headers.contains_key(ACCEPT));
-
-        // Referer header populated by spoofing logic if missing
-        assert!(headers.contains_key(REFERER));
     }
 
     #[test]

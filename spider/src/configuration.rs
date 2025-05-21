@@ -274,6 +274,8 @@ pub struct Configuration {
     /// Setup network interception for request. This does nothing without the flag `chrome_intercept` enabled.
     #[cfg(feature = "chrome")]
     pub chrome_intercept: RequestInterceptConfiguration,
+    /// The referer to use.
+    pub referer: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]

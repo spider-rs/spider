@@ -2594,7 +2594,7 @@ impl Page {
                                     &configuration.viewport,
                                     &configuration.request_timeout,
                                     &configuration.track_events,
-                                    crate::configuration::get_referer(&configuration.headers),
+                                    &configuration.referer.clone(),
                                 )
                                 .await;
 
@@ -2944,7 +2944,7 @@ impl Page {
                                     &configuration.viewport,
                                     &configuration.request_timeout,
                                     &configuration.track_events,
-                                    get_referer(&configuration.headers),
+                                    &configuration.referer.clone(),
                                 )
                                 .await;
 
