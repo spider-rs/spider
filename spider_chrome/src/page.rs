@@ -7,8 +7,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
-    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams,
-    SetUserAgentOverrideParams,
+    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams, SetExtraHttpHeadersParams, SetUserAgentOverrideParams
 };
 use chromiumoxide_cdp::cdp::browser_protocol::page::*;
 use chromiumoxide_cdp::cdp::browser_protocol::performance::{GetMetricsParams, Metric};
@@ -458,6 +457,15 @@ impl Page {
             .send(TargetMessage::AllFrames(tx))
             .await?;
         Ok(rx.await?)
+    }
+
+    /// Allows overriding user agent with the given string.
+    pub async fn set_extra_headers(
+        &self,
+        params: impl Into<SetExtraHttpHeadersParams>,
+    ) -> Result<&Self> {
+        self.execute(params.into()).await?;
+        Ok(self)
     }
 
     /// Allows overriding user agent with the given string.
