@@ -521,7 +521,6 @@ pub(crate) async fn attempt_navigation(
 
     cdp_params.background = Some(browser_context_id.is_some()); // not supported headless-shell
     cdp_params.browser_context_id.clone_from(browser_context_id);
-    cdp_params.url = url.into();
     cdp_params.for_tab = Some(false);
 
     browser

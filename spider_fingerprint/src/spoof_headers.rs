@@ -1,6 +1,6 @@
 use http::header::{
     HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, CONNECTION, HOST, PRAGMA,
-    REFERER, TE, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
+    REFERER, UPGRADE_INSECURE_REQUESTS, USER_AGENT,
 };
 use http::{HeaderMap, HeaderName};
 use rand::{rng, Rng};
@@ -624,9 +624,18 @@ pub fn emulate_headers(
                 }
             }
 
+            insert_or_default!(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.5"));
+            insert_or_default!(
+                ACCEPT_ENCODING,
+                HeaderValue::from_static("gzip, deflate, br, zstd")
+            );
+            insert_or_default!(CONNECTION, HeaderValue::from_static("keep-alive"));
             insert_or_default!(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
             insert_or_default!(CACHE_CONTROL, HeaderValue::from_static("max-age=0"));
-            insert_or_default!(TE, HeaderValue::from_static("trailers"));
+            insert_or_default!("Sec-Fetch-Dest", HeaderValue::from_static("document"));
+            insert_or_default!("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
+            insert_or_default!("Sec-Fetch-Site", HeaderValue::from_static("none"));
+            insert_or_default!("Sec-Fetch-User", HeaderValue::from_static("?1"));
         }
         BrowserKind::Safari => {
             insert_or_default!(
