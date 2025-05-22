@@ -638,6 +638,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 
     let stealth_mode = config.stealth_mode;
     let stealth = stealth_mode.stealth();
+    let block_ads = config.chrome_intercept.block_ads;
 
     emulation_config.dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
     emulation_config.fingerprint = config.fingerprint;
@@ -668,21 +669,44 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     let stealth = async {
         match config.user_agent.as_deref() {
             Some(agent) if stealth => {
-                let _ = tokio::join!(
-                    chrome_page.add_script_to_evaluate_on_new_document(merged_script,),
-                    chrome_page.set_user_agent(agent.as_str())
-                );
+                if block_ads {
+                    let _ = tokio::join!(
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
+                        chrome_page.set_ad_blocking_enabled(true),
+                        chrome_page.set_user_agent(agent.as_str())
+                    );
+                } else {
+                    let _ = tokio::join!(
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
+                        chrome_page.set_user_agent(agent.as_str())
+                    );
+                }
             }
             Some(agent) => {
-                let _ = tokio::join!(
-                    chrome_page.set_user_agent(agent.as_str()),
-                    chrome_page.add_script_to_evaluate_on_new_document(merged_script)
-                );
+                if block_ads {
+                    let _ = tokio::join!(
+                        chrome_page.set_user_agent(agent.as_str()),
+                        chrome_page.set_ad_blocking_enabled(true),
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script)
+                    );
+                } else {
+                    let _ = tokio::join!(
+                        chrome_page.set_user_agent(agent.as_str()),
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script)
+                    );
+                }
             }
             None if stealth => {
-                let _ = chrome_page
-                    .add_script_to_evaluate_on_new_document(merged_script)
-                    .await;
+                if block_ads {
+                    let _ = tokio::join!(
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
+                        chrome_page.set_ad_blocking_enabled(true),
+                    );
+                } else {
+                    let _ = chrome_page
+                        .add_script_to_evaluate_on_new_document(merged_script)
+                        .await;
+                }
             }
             None => (),
         }

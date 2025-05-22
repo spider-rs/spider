@@ -28,7 +28,7 @@ impl EmulationManager {
 
     pub fn init_commands(&mut self, viewport: &Viewport) -> CommandChain {
         let mut chains = Vec::with_capacity(2);
-        let set_touch = SetTouchEmulationEnabledParams::new(true);
+        let set_touch = SetTouchEmulationEnabledParams::new(viewport.emulating_mobile);
         let orientation = if viewport.is_landscape {
             ScreenOrientation::new(ScreenOrientationType::LandscapePrimary, 90)
         } else {

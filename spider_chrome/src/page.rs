@@ -7,7 +7,8 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
-    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams, SetExtraHttpHeadersParams, SetUserAgentOverrideParams
+    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams,
+    SetExtraHttpHeadersParams, SetUserAgentOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::page::*;
 use chromiumoxide_cdp::cdp::browser_protocol::performance::{GetMetricsParams, Metric};
@@ -1309,6 +1310,37 @@ impl Page {
     /// Returns the HTML outer html of the page
     pub async fn outer_html_bytes(&self) -> Result<Vec<u8>> {
         Ok(self.outer_html().await?.into())
+    }
+
+    /// Enable Chrome's experimental ad filter on all sites.
+    pub async fn set_ad_blocking_enabled(&self, enabled: bool) -> Result<&Self> {
+        self.execute(SetAdBlockingEnabledParams::new(enabled))
+            .await?;
+        Ok(self)
+    }
+
+    /// Start to screencast a frame.
+    pub async fn start_screencast(
+        &self,
+        params: impl Into<StartScreencastParams>,
+    ) -> Result<&Self> {
+        self.execute(params.into()).await?;
+        Ok(self)
+    }
+
+    /// Acknowledges that a screencast frame has been received by the frontend.
+    pub async fn ack_screencast(
+        &self,
+        params: impl Into<ScreencastFrameAckParams>,
+    ) -> Result<&Self> {
+        self.execute(params.into()).await?;
+        Ok(self)
+    }
+
+    /// Stop screencast a frame.
+    pub async fn stop_screencast(&self, params: impl Into<StopScreencastParams>) -> Result<&Self> {
+        self.execute(params.into()).await?;
+        Ok(self)
     }
 
     /// Returns source for the script with given id.

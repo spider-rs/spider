@@ -695,6 +695,7 @@ impl RequestInterceptConfiguration {
             block_visuals: true,
             block_analytics: true,
             block_stylesheets: true,
+            block_ads: true,
             ..Default::default()
         }
     }
