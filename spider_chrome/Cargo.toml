@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.72"
+version = "2.37.73"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -37,7 +37,7 @@ tracing = "0.1"
 pin-project-lite = "0.2"
 dunce = "1"
 bytes = { version = "1", features = ["serde"], optional = true }
-reqwest = { version = "0.12" }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 lazy_static = "1"
 phf = { version = "0.11", features = ["macros"] }
 adblock = { version = "0.9", optional = true, default-features = false, features = [
@@ -79,7 +79,7 @@ phf_codegen = "0.11"
 convert_case = "0.8"
 
 [features]
-default = ["bytes", "simd"]
+default = ["bytes", "simd", "default-tls"]
 stream = ["tokio-tungstenite/stream"]
 fetcher = []
 bytes = ["dep:bytes"]
@@ -87,6 +87,8 @@ adblock = ["dep:adblock"]
 simd = ["dep:sonic-rs"]
 firewall = ["dep:spider_firewall"]
 chrome_tls_connection = ["tokio-tungstenite/native-tls"]
+default-tls = ["reqwest/default-tls"]
+rust-tls = ["reqwest/rustls-tls"]
 
 # Temporary features until cargo weak dependencies bug is fixed
 # See https://github.com/rust-lang/cargo/issues/10801
