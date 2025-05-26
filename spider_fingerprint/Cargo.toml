@@ -1,6 +1,6 @@
 [package]
 name = "spider_fingerprint"
-version = "2.37.80"
+version = "2.37.81"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Fingerprint library for Rust."
 repository = "https://github.com/spider-rs/spider"

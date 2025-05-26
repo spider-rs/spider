@@ -1,3 +1,0 @@
-https://static01.nyt.com/video-static/vhs3/vhs.min.js
-https://www.nytimes.com/vi-assets/static-assets/vendors~
-https://als-svc.nytimes.com/als

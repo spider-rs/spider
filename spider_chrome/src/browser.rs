@@ -17,7 +17,7 @@ use crate::cmd::{to_command_response, CommandMessage};
 use crate::conn::Connection;
 use crate::detection::{self, DetectionOptions};
 use crate::error::{BrowserStderr, CdpError, Result};
-use crate::handler::blockers::intercept_manager::NetworkInterceptManager;
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use crate::handler::browser::BrowserContext;
 use crate::handler::viewport::Viewport;
 use crate::handler::{Handler, HandlerConfig, HandlerMessage, REQUEST_TIMEOUT};

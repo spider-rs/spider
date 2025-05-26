@@ -1,16 +1,14 @@
-use crate::handler::blockers::intercept_manager::NetworkInterceptManager;
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use hashbrown::{HashMap, HashSet};
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::Error;
-
 use fnv::FnvHashMap;
 use futures::channel::mpsc::Receiver;
 use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::{Fuse, Stream, StreamExt};
 use futures::task::{Context, Poll};
-
 use crate::listeners::{EventListenerRequest, EventListeners};
 use chromiumoxide_cdp::cdp::browser_protocol::browser::*;
 use chromiumoxide_cdp::cdp::browser_protocol::target::*;

@@ -1,3 +1,0 @@
-https://www.bbc.com/userinfo
-https://www.bbc.co.uk/wc-data/container/consent-banner
-https://idcta.api.bbc.com/idcta/config

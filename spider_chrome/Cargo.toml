@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.80"
+version = "2.37.81"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -49,6 +49,7 @@ case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 hashbrown = { version = "0.15", default-features = true }
 aho-corasick = "1"
 sonic-rs = { version = "0.5", optional = true, features = ["utf8_lossy"] }
+spider_network_blocker = "0"
 spider_chromiumoxide_types = { path = "types", version = "0.7" }
 spider_chromiumoxide_cdp = { path = "cdp", version = "0.7" }
 spider_chromiumoxide_fetcher = { path = "fetcher", version = "0.7", default-features = false, optional = true }
@@ -72,11 +73,6 @@ proc-macro2 = "1"
 chrono = "0.4"
 tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
-
-[build-dependencies]
-phf = { version = "0.11", default-features = false }
-phf_codegen = "0.11"
-convert_case = "0.8"
 
 [features]
 default = ["bytes", "simd", "default-tls"]

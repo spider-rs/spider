@@ -1,3 +1,0 @@
-https://libs.outbrain.com/video/
-https://turnip.cdn.turner.com/top/player-ui/
-https://warnermediagroup-com.videoplayerhub.com/galleryloader.js

@@ -1,13 +1,8 @@
 use super::blockers::{
-    block_websites::block_xhr,
-    ignore_script_embedded, ignore_script_xhr, ignore_script_xhr_media,
-    intercept_manager::NetworkInterceptManager,
-    scripts::{
-        URL_IGNORE_SCRIPT_BASE_PATHS, URL_IGNORE_SCRIPT_STYLES_PATHS, URL_IGNORE_TRIE,
-        URL_IGNORE_TRIE_PATHS,
-    },
+    block_websites::block_xhr, ignore_script_embedded, ignore_script_xhr, ignore_script_xhr_media,
     xhr::IGNORE_XHR_ASSETS,
 };
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use crate::auth::Credentials;
 use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
@@ -34,6 +29,9 @@ use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
 use reqwest::header::PROXY_AUTHORIZATION;
+pub use spider_network_blocker::scripts::{
+    URL_IGNORE_SCRIPT_BASE_PATHS, URL_IGNORE_SCRIPT_STYLES_PATHS, URL_IGNORE_TRIE_PATHS,
+};
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -267,6 +265,7 @@ impl NetworkManager {
     pub fn set_extra_headers(&mut self, headers: std::collections::HashMap<String, String>) {
         self.extra_headers = headers;
         self.extra_headers.remove(PROXY_AUTHORIZATION.as_str());
+        self.extra_headers.remove("Proxy-Authorization");
         if let Ok(headers) = serde_json::to_value(&self.extra_headers) {
             self.push_cdp_request(SetExtraHttpHeadersParams::new(Headers::new(headers)));
         }
@@ -324,7 +323,8 @@ impl NetworkManager {
         block_analytics: bool,
         intercept_manager: NetworkInterceptManager,
     ) -> bool {
-        let mut ignore_script = block_analytics && URL_IGNORE_TRIE.contains_prefix(url);
+        let mut ignore_script = block_analytics
+            && spider_network_blocker::scripts::URL_IGNORE_TRIE.contains_prefix(url);
 
         if !ignore_script {
             if let Some(index) = url.find("//") {
@@ -818,7 +818,7 @@ impl NetworkManager {
                 rules.rule_types = RuleTypes::All;
 
                 filter_set.add_filters(
-                    &*crate::handler::blockers::adblock_patterns::ADBLOCK_PATTERNS,
+                    &*spider_network_blocker::adblock::ADBLOCK_PATTERNS,
                     rules,
                 );
 

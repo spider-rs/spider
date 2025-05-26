@@ -1,2 +1,0 @@
-https://static-assets.bleacherreport.net/js/vendors~bitmovin-player
-https://vid.bleacherreport.com/videos/
