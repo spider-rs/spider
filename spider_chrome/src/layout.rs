@@ -86,6 +86,15 @@ impl From<Point> for DispatchMouseEventParams {
     }
 }
 
+/// Represents the scroll behavior mode.
+#[derive(Default, Debug, Clone, Copy)]
+pub enum ScrollBehavior {
+    #[default]
+    Auto,
+    Instant,
+    Smooth,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct ElementQuad {
     pub top_left: Point,

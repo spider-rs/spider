@@ -555,8 +555,6 @@ impl WebAutomation {
     /// Run the web automation step.
     pub async fn run(&self, page: &chromiumoxide::Page) -> bool {
         use crate::utils::wait_for_selector;
-        use chromiumoxide::cdp::browser_protocol::dom::Rect;
-        use chromiumoxide::cdp::browser_protocol::dom::ScrollIntoViewIfNeededParams;
         use std::time::Duration;
 
         let mut valid = false;
@@ -600,16 +598,10 @@ impl WebAutomation {
                 }
             }
             WebAutomation::ScrollX(px) => {
-                let mut cmd = ScrollIntoViewIfNeededParams::builder().build();
-                let rect = Rect::new(*px, 0.0, 10.0, 10.0);
-                cmd.rect = Some(rect);
-                valid = page.execute(cmd).await.is_ok();
+                valid = page.scroll_by((*px as f32).into(), 0.0, Default::default()).await.is_ok()
             }
             WebAutomation::ScrollY(px) => {
-                let mut cmd = ScrollIntoViewIfNeededParams::builder().build();
-                let rect = Rect::new(0.0, *px, 10.0, 10.0);
-                cmd.rect = Some(rect);
-                valid = page.execute(cmd).await.is_ok();
+                valid = page.scroll_by(0.0, (*px as f32).into(), Default::default()).await.is_ok()
             }
             WebAutomation::Fill { selector, value } => {
                 if let Ok(ele) = page.find_element(selector).await {

@@ -35,7 +35,7 @@ use crate::handler::httpfuture::HttpFuture;
 use crate::handler::target::{GetExecutionContext, TargetMessage};
 use crate::handler::target_message_future::TargetMessageFuture;
 use crate::js::EvaluationResult;
-use crate::layout::{Delta, Point};
+use crate::layout::{Delta, Point, ScrollBehavior};
 use crate::page::ScreenshotParams;
 use crate::{keys, utils, ArcHttpRequest};
 
@@ -205,7 +205,31 @@ impl PageInner {
         Ok(self)
     }
 
-    /// Moves the mouse to this point (dispatches a mouseWheel event)
+    /// Scrolls the current page by the specified horizontal and vertical offsets.
+    /// This method helps when Chrome version may not support certain CDP dispatch events.
+    pub async fn scroll_by(
+        &self,
+        delta_x: f64,
+        delta_y: f64,
+        behavior: ScrollBehavior,
+    ) -> Result<&Self> {
+        let behavior_str = match behavior {
+            ScrollBehavior::Auto => "auto",
+            ScrollBehavior::Instant => "instant",
+            ScrollBehavior::Smooth => "smooth",
+        };
+
+        self.evaluate_expression(format!(
+            "window.scrollBy({{top: {}, left: {}, behavior: '{}'}});",
+            delta_y, delta_x, behavior_str
+        ))
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Moves the mouse to this point (dispatches a mouseWheel event).
+    /// If you get an error use page.scroll_by instead.
     pub async fn scroll(&self, point: Point, delta: Delta) -> Result<&Self> {
         let mut params: DispatchMouseEventParams =
             DispatchMouseEventParams::new(DispatchMouseEventType::MouseWheel, point.x, point.y);

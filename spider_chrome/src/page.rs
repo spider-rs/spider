@@ -36,7 +36,7 @@ use crate::handler::target::{GetName, GetParent, GetUrl, TargetMessage};
 use crate::handler::PageInner;
 use crate::javascript::extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML};
 use crate::js::{Evaluation, EvaluationResult};
-use crate::layout::{Delta, Point};
+use crate::layout::{Delta, Point, ScrollBehavior};
 use crate::listeners::{EventListenerRequest, EventStream};
 use crate::{utils, ArcHttpRequest};
 
@@ -645,6 +645,18 @@ impl Page {
     /// `Point.y` the vertical position of the mouse.
     pub async fn scroll(&self, point: Point, delta: Delta) -> Result<&Self> {
         self.inner.scroll(point, delta).await?;
+        Ok(self)
+    }
+
+    /// Scrolls the current page by the specified horizontal and vertical offsets.
+    /// This method helps when Chrome version may not support certain CDP dispatch events.
+    pub async fn scroll_by(
+        &self,
+        delta_x: f64,
+        delta_y: f64,
+        behavior: ScrollBehavior,
+    ) -> Result<&Self> {
+        self.inner.scroll_by(delta_x, delta_y, behavior).await?;
         Ok(self)
     }
 
