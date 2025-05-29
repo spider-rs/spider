@@ -8,16 +8,6 @@ use futures::channel::oneshot::Sender;
 use futures::stream::Stream;
 use futures::task::{Context, Poll};
 
-use chromiumoxide_cdp::cdp::browser_protocol::page::{FrameId, GetFrameTreeParams};
-use chromiumoxide_cdp::cdp::browser_protocol::{
-    browser::BrowserContextId,
-    log as cdplog, performance,
-    target::{AttachToTargetParams, SessionId, SetAutoAttachParams, TargetId, TargetInfo},
-};
-use chromiumoxide_cdp::cdp::events::CdpEvent;
-use chromiumoxide_cdp::cdp::CdpEventMessage;
-use chromiumoxide_types::{Command, Method, Request, Response};
-use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use crate::auth::Credentials;
 use crate::cdp::browser_protocol::target::CloseTargetParams;
 use crate::cmd::CommandChain;
@@ -36,9 +26,19 @@ use crate::handler::viewport::Viewport;
 use crate::handler::{PageInner, REQUEST_TIMEOUT};
 use crate::listeners::{EventListenerRequest, EventListeners};
 use crate::{page::Page, ArcHttpRequest};
+use chromiumoxide_cdp::cdp::browser_protocol::page::{FrameId, GetFrameTreeParams};
+use chromiumoxide_cdp::cdp::browser_protocol::{
+    browser::BrowserContextId,
+    log as cdplog, performance,
+    target::{AttachToTargetParams, SessionId, SetAutoAttachParams, TargetId, TargetInfo},
+};
+use chromiumoxide_cdp::cdp::events::CdpEvent;
 use chromiumoxide_cdp::cdp::js_protocol::runtime::{
     ExecutionContextId, RunIfWaitingForDebuggerParams,
 };
+use chromiumoxide_cdp::cdp::CdpEventMessage;
+use chromiumoxide_types::{Command, Method, Request, Response};
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use std::time::Duration;
 
 macro_rules! advance_state {

@@ -2,7 +2,6 @@ use super::blockers::{
     block_websites::block_xhr, ignore_script_embedded, ignore_script_xhr, ignore_script_xhr_media,
     xhr::IGNORE_XHR_ASSETS,
 };
-use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use crate::auth::Credentials;
 use crate::cmd::CommandChain;
 use crate::handler::http::HttpRequest;
@@ -29,6 +28,7 @@ use chromiumoxide_types::{Command, Method, MethodId};
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
 use reqwest::header::PROXY_AUTHORIZATION;
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 pub use spider_network_blocker::scripts::{
     URL_IGNORE_SCRIPT_BASE_PATHS, URL_IGNORE_SCRIPT_STYLES_PATHS, URL_IGNORE_TRIE_PATHS,
 };

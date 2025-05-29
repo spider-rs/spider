@@ -36,7 +36,7 @@ use crate::handler::target::{GetName, GetParent, GetUrl, TargetMessage};
 use crate::handler::PageInner;
 use crate::javascript::extract::{FULL_XML_SERIALIZER_JS, OUTER_HTML};
 use crate::js::{Evaluation, EvaluationResult};
-use crate::layout::Point;
+use crate::layout::{Delta, Point};
 use crate::listeners::{EventListenerRequest, EventStream};
 use crate::{utils, ArcHttpRequest};
 
@@ -643,8 +643,8 @@ impl Page {
     /// Dispatches a `mouseWheel` event and moves the mouse to the position of
     /// the `point` where `Point.x` is the horizontal position of the mouse and
     /// `Point.y` the vertical position of the mouse.
-    pub async fn scroll(&self, point: Point) -> Result<&Self> {
-        self.inner.scroll(point).await?;
+    pub async fn scroll(&self, point: Point, delta: Delta) -> Result<&Self> {
+        self.inner.scroll(point, delta).await?;
         Ok(self)
     }
 

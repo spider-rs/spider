@@ -56,6 +56,25 @@ impl std::ops::Div<f64> for Point {
     }
 }
 
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub struct Delta {
+    /// X delta in CSS pixels for mouse wheel event (default: 0).
+    pub delta_x: f64,
+    /// Y delta in CSS pixels for mouse wheel event (default: 0).
+    pub delta_y: f64,
+}
+
+impl Delta {
+    /// Create a new Delta instance
+    pub fn new(delta_x: f64, delta_y: f64) -> Self {
+        Self { delta_x, delta_y }
+    }
+
+    pub fn area(&self, other: &Self) -> f64 {
+        (self.delta_x * other.delta_y - other.delta_x * self.delta_y) / 2.
+    }
+}
+
 /// Converts a point into Left-Down-Single-Mouseclick
 impl From<Point> for DispatchMouseEventParams {
     fn from(el: Point) -> DispatchMouseEventParams {

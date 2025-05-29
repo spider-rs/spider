@@ -35,7 +35,7 @@ use crate::handler::httpfuture::HttpFuture;
 use crate::handler::target::{GetExecutionContext, TargetMessage};
 use crate::handler::target_message_future::TargetMessageFuture;
 use crate::js::EvaluationResult;
-use crate::layout::Point;
+use crate::layout::{Delta, Point};
 use crate::page::ScreenshotParams;
 use crate::{keys, utils, ArcHttpRequest};
 
@@ -206,13 +206,14 @@ impl PageInner {
     }
 
     /// Moves the mouse to this point (dispatches a mouseWheel event)
-    pub async fn scroll(&self, point: Point) -> Result<&Self> {
-        self.execute(DispatchMouseEventParams::new(
-            DispatchMouseEventType::MouseWheel,
-            point.x,
-            point.y,
-        ))
-        .await?;
+    pub async fn scroll(&self, point: Point, delta: Delta) -> Result<&Self> {
+        let mut params: DispatchMouseEventParams =
+            DispatchMouseEventParams::new(DispatchMouseEventType::MouseWheel, point.x, point.y);
+
+        params.delta_x = Some(delta.delta_x);
+        params.delta_y = Some(delta.delta_y);
+
+        self.execute(params).await?;
         Ok(self)
     }
 

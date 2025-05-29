@@ -17,7 +17,6 @@ use crate::cmd::{to_command_response, CommandMessage};
 use crate::conn::Connection;
 use crate::detection::{self, DetectionOptions};
 use crate::error::{BrowserStderr, CdpError, Result};
-use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 use crate::handler::browser::BrowserContext;
 use crate::handler::viewport::Viewport;
 use crate::handler::{Handler, HandlerConfig, HandlerMessage, REQUEST_TIMEOUT};
@@ -37,6 +36,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::target::{
 };
 use chromiumoxide_cdp::cdp::{CdpEventMessage, IntoEventKind};
 use chromiumoxide_types::*;
+use spider_network_blocker::intercept_manager::NetworkInterceptManager;
 
 /// Default `Browser::launch` timeout in MS
 pub const LAUNCH_TIMEOUT: u64 = 20_000;
