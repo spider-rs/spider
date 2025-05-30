@@ -15,7 +15,7 @@ include = ["src/**/*", "*.pdl", "LICENSE-*"]
 name = "chromiumoxide_cdp"
 
 [features]
-serde0 = []
+serde0 = ["spider_chromiumoxide_pdl/serde0"]
 
 [dev-dependencies]
 spider_chromiumoxide_pdl = { path = "../pdl", version = "0.7" }

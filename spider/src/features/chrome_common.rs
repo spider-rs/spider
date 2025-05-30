@@ -598,10 +598,16 @@ impl WebAutomation {
                 }
             }
             WebAutomation::ScrollX(px) => {
-                valid = page.scroll_by((*px as f32).into(), 0.0, Default::default()).await.is_ok()
+                valid = page
+                    .scroll_by((*px as f32).into(), 0.0, Default::default())
+                    .await
+                    .is_ok()
             }
             WebAutomation::ScrollY(px) => {
-                valid = page.scroll_by(0.0, (*px as f32).into(), Default::default()).await.is_ok()
+                valid = page
+                    .scroll_by(0.0, (*px as f32).into(), Default::default())
+                    .await
+                    .is_ok()
             }
             WebAutomation::Fill { selector, value } => {
                 if let Ok(ele) = page.find_element(selector).await {
