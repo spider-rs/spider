@@ -39,6 +39,44 @@ use crate::js::{Evaluation, EvaluationResult};
 use crate::layout::{Delta, Point, ScrollBehavior};
 use crate::listeners::{EventListenerRequest, EventStream};
 use crate::{utils, ArcHttpRequest};
+use aho_corasick::AhoCorasick;
+
+lazy_static::lazy_static! {
+    /// Determine the platform used.
+    static ref PLATFORM_MATCHER: AhoCorasick = {
+         AhoCorasick::builder()
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .ascii_case_insensitive(true)
+        .build([
+            "ipad",        // 0
+            "ipod",        // 1
+            "iphone",      // 2
+            "android",     // 3
+            "macintosh",   // 4
+            "mac os x",    // 5
+            "windows",     // 6
+            "linux",       // 7
+        ])
+        .expect("valid pattern")
+    };
+}
+
+/// Determine the platform used from a user-agent.
+pub fn platform_from_user_agent(user_agent: &str) -> &'static str {
+    match PLATFORM_MATCHER.find(user_agent) {
+        Some(mat) => match mat.pattern().as_usize() {
+            0 => "iPad",
+            1 => "iPod",
+            2 => "iPhone",
+            3 => "Linux armv8l",
+            4 | 5 => "MacIntel",
+            6 => "Win32",
+            7 => "Linux x86_64",
+            _ => "",
+        },
+        None => "",
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Page {
@@ -474,7 +512,17 @@ impl Page {
         &self,
         params: impl Into<SetUserAgentOverrideParams>,
     ) -> Result<&Self> {
-        self.execute(params.into()).await?;
+        let mut default_params = params.into();
+
+        if default_params.platform.is_none() {
+            let platform = platform_from_user_agent(&default_params.user_agent);
+
+            if !platform.is_empty() {
+                default_params.platform = Some(platform.into());
+            }
+        }
+
+        self.execute(default_params).await?;
         Ok(self)
     }
 
