@@ -2105,6 +2105,7 @@ impl Website {
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
+                self.configuration.max_page_bytes,
             )
             .await;
 
@@ -2143,6 +2144,7 @@ impl Website {
                             &self.configuration.request_timeout,
                             &self.configuration.track_events,
                             self.configuration.referer.clone(),
+                            self.configuration.max_page_bytes,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2166,6 +2168,7 @@ impl Website {
                         &self.configuration.request_timeout,
                         &self.configuration.track_events,
                         self.configuration.referer.clone(),
+                        self.configuration.max_page_bytes,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2309,6 +2312,7 @@ impl Website {
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
+                self.configuration.max_page_bytes,
             )
             .await;
 
@@ -2347,6 +2351,7 @@ impl Website {
                             &self.configuration.request_timeout,
                             &self.configuration.track_events,
                             self.configuration.referer.clone(),
+                            self.configuration.max_page_bytes,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2370,6 +2375,7 @@ impl Website {
                         &self.configuration.request_timeout,
                         &self.configuration.track_events,
                         self.configuration.referer.clone(),
+                        self.configuration.max_page_bytes,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2616,6 +2622,7 @@ impl Website {
                 &self.configuration.request_timeout,
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
+                self.configuration.max_page_bytes,
             )
             .await;
             let u = page.get_url();
@@ -3032,6 +3039,7 @@ impl Website {
                     &config.request_timeout,
                     &config.track_events,
                     config.referer.clone(),
+                    config.max_page_bytes,
                 )
                 .await;
 
@@ -3878,7 +3886,8 @@ impl Website {
                                                                 &shared.6.viewport,
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
-                                                                shared.6.referer.clone()
+                                                                shared.6.referer.clone(),
+                                                                shared.6.max_page_bytes
                                                             )
                                                             .await;
 
@@ -3904,7 +3913,8 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-                                                                            shared.6.referer.clone()
+                                                                            shared.6.referer.clone(),
+                                                                            shared.6.max_page_bytes
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -3926,7 +3936,8 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-                                                                            shared.6.referer.clone()
+                                                                            shared.6.referer.clone(),
+                                                                            shared.6.max_page_bytes
                                                                         )
                                                                         .await,
                                                                     );
@@ -4518,7 +4529,8 @@ impl Website {
                                                                 &shared.6.viewport,
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
-                                                                shared.6.referer.clone()
+                                                                shared.6.referer.clone(),
+                                                                shared.6.max_page_bytes
                                                             )
                                                             .await;
 
@@ -4544,7 +4556,8 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-                                                                            shared.6.referer.clone()
+                                                                            shared.6.referer.clone(),
+                                                                            shared.6.max_page_bytes
 
                                                                         ).await;
                                                                         page.clone_from(&p);
@@ -4567,7 +4580,8 @@ impl Website {
                                                                             &shared.6.viewport,
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
-                                                                            shared.6.referer.clone()
+                                                                            shared.6.referer.clone(),
+                                                                            shared.6.max_page_bytes
                                                                         )
                                                                         .await,
                                                                     );
@@ -5526,7 +5540,8 @@ impl Website {
                                         &self.configuration.viewport,
                                         &self.configuration.request_timeout,
                                         &self.configuration.track_events,
-                                        self.configuration.referer.clone()
+                                        self.configuration.referer.clone(),
+                                        self.configuration.max_page_bytes
                                     )
                                     .await;
 
@@ -5610,7 +5625,8 @@ impl Website {
                                                                     &shared.3.viewport,
                                                                     &shared.3.request_timeout,
                                                                     &shared.3.track_events,
-                                                                    shared.3.referer.clone()
+                                                                    shared.3.referer.clone(),
+                                                                    shared.3.max_page_bytes
                                                                 )
                                                                 .await;
 
@@ -5734,7 +5750,8 @@ impl Website {
                                                             &shared.3.viewport,
                                                             &shared.3.request_timeout,
                                                             &shared.3.track_events,
-                                                            shared.3.referer.clone()
+                                                            shared.3.referer.clone(),
+                                                            shared.3.max_page_bytes
                                                         )
                                                         .await;
 
@@ -6624,6 +6641,12 @@ impl Website {
     /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated. This may initially show the link in your links_visited or subscription calls but, the following links will not be crawled.
     pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
         self.configuration.with_normalize(normalize);
+        self
+    }
+
+    /// Set the max amount of bytes to collect per page. Only used for chrome atm.
+    pub fn with_max_page_bytes(&mut self, max_page_bytes: Option<f64>) -> &mut Self {
+        self.configuration.with_max_page_bytes(max_page_bytes);
         self
     }
 

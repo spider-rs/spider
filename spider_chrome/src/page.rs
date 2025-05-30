@@ -7,8 +7,8 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
-    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetCookiesParams,
-    SetExtraHttpHeadersParams, SetUserAgentOverrideParams,
+    Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetBlockedUrLsParams,
+    SetCookiesParams, SetExtraHttpHeadersParams, SetUserAgentOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::page::*;
 use chromiumoxide_cdp::cdp::browser_protocol::performance::{GetMetricsParams, Metric};
@@ -884,6 +884,27 @@ impl Page {
     // Disables the CSS agent
     pub async fn disable_css(&self) -> Result<&Self> {
         self.execute(browser_protocol::css::DisableParams::default())
+            .await?;
+        Ok(self)
+    }
+
+    /// Block urls from networking.
+    ///
+    /// Prevents further networking
+    ///
+    /// See https://chromedevtools.github.io/devtools-protocol/tot/Network#method-setBlockedURLs
+    pub async fn set_blocked_urls(&self, urls: Vec<String>) -> Result<&Self> {
+        self.execute(SetBlockedUrLsParams::new(urls)).await?;
+        Ok(self)
+    }
+
+    /// Block all urls from networking.
+    ///
+    /// Prevents further networking
+    ///
+    /// See https://chromedevtools.github.io/devtools-protocol/tot/Network#method-setBlockedURLs
+    pub async fn block_all_urls(&self) -> Result<&Self> {
+        self.execute(SetBlockedUrLsParams::new(vec!["*".into()]))
             .await?;
         Ok(self)
     }

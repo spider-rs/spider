@@ -276,6 +276,8 @@ pub struct Configuration {
     pub chrome_intercept: RequestInterceptConfiguration,
     /// The referer to use.
     pub referer: Option<String>,
+    /// Determine the max bytes per page.
+    pub max_page_bytes: Option<f64>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1293,6 +1295,12 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     pub fn with_screenshot(&mut self, screenshot_config: Option<ScreenShotConfig>) -> &mut Self {
         self.screenshot = screenshot_config;
+        self
+    }
+
+    /// Set the max amount of bytes to collect per page. Only used for chrome atm.
+    pub fn with_max_page_bytes(&mut self, max_page_bytes: Option<f64>) -> &mut Self {
+        self.max_page_bytes = max_page_bytes;
         self
     }
 
