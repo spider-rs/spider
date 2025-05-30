@@ -1410,6 +1410,7 @@ impl Page {
         request_timeout: &Option<Box<Duration>>,
         track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
+        max_page_bytes: Option<f64>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -1425,6 +1426,7 @@ impl Page {
             &request_timeout,
             track_events,
             referrer,
+            max_page_bytes,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -2595,6 +2597,7 @@ impl Page {
                                     &configuration.request_timeout,
                                     &configuration.track_events,
                                     configuration.referer.clone(),
+                                    configuration.max_page_bytes,
                                 )
                                 .await;
 
@@ -2945,6 +2948,7 @@ impl Page {
                                     &configuration.request_timeout,
                                     &configuration.track_events,
                                     configuration.referer.clone(),
+                                    configuration.max_page_bytes,
                                 )
                                 .await;
 

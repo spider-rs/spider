@@ -1316,6 +1316,7 @@ pub async fn fetch_page_html_chrome_base(
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
+    max_page_bytes: Option<f64>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -1401,6 +1402,12 @@ pub async fn fetch_page_html_chrome_base(
 
     let (tx, rx) = oneshot::channel::<bool>();
 
+    let mut page_clone = if max_page_bytes.is_some() {
+        Some(page.clone())
+    } else {
+        None
+    };
+
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
@@ -1408,6 +1415,9 @@ pub async fn fetch_page_html_chrome_base(
 
         let f1 = async {
             let mut total = 0.0;
+            let mut blocked_urls = false;
+
+            let total_max = max_page_bytes.unwrap_or_default();
 
             let mut response_map: Option<HashMap<String, f64>> = if track_responses {
                 Some(HashMap::new())
@@ -1427,6 +1437,14 @@ pub async fn fetch_page_html_chrome_base(
                                 .or_insert(event.encoded_data_length);
                         }
 
+                        if let Some(page) = &page_clone {
+                            if !blocked_urls && total > total_max {
+                                blocked_urls = true;
+                                let _ = page.block_all_urls().await;
+                                page_clone = None;
+                            }
+                        }
+
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
                                 if request_id == &event.request_id {
@@ -1441,12 +1459,18 @@ pub async fn fetch_page_html_chrome_base(
                 } else {
                     while let Some(event) = listener.next().await {
                         total += event.encoded_data_length;
-
                         if let Some(response_map) = response_map.as_mut() {
                             response_map
                                 .entry(event.request_id.inner().clone())
                                 .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
+                        }
+                        if let Some(page) = &page_clone {
+                            if !blocked_urls && total > total_max {
+                                blocked_urls = true;
+                                let _ = page.block_all_urls().await;
+                                page_clone = None;
+                            }
                         }
                     }
                 }
@@ -2419,6 +2443,7 @@ pub async fn handle_response_bytes(
                             break;
                         }
                     }
+
                     let limit = *MAX_SIZE_BYTES;
 
                     if limit > 0 && data.len() + text.len() > limit {
@@ -2799,6 +2824,7 @@ pub async fn fetch_page_html(
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
+    max_page_bytes: Option<f64>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -2821,6 +2847,7 @@ pub async fn fetch_page_html(
                 &request_timeout,
                 &track_events,
                 referrer,
+                max_page_bytes,
             )
             .await
             {
@@ -2965,6 +2992,7 @@ pub async fn fetch_page_html(
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
+    max_page_bytes: Option<f64>,
 ) -> PageResponse {
     match fetch_page_html_chrome_base(
         &target_url,
@@ -2982,6 +3010,7 @@ pub async fn fetch_page_html(
         request_timeout,
         track_events,
         referrer,
+        max_page_bytes,
     )
     .await
     {
@@ -3009,6 +3038,7 @@ pub async fn fetch_page_html_chrome(
     request_timeout: &Option<Box<std::time::Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
+    max_page_bytes: Option<f64>,
 ) -> PageResponse {
     match &page {
         page => {
@@ -3028,6 +3058,7 @@ pub async fn fetch_page_html_chrome(
                 request_timeout,
                 track_events,
                 referrer,
+                max_page_bytes,
             )
             .await
             {
