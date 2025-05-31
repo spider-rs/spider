@@ -3,7 +3,7 @@ use rand::prelude::IndexedRandom;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// View port handling for chrome.
 pub struct Viewport {
