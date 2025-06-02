@@ -87,6 +87,10 @@ pub use spider_fingerprint;
 /// re-export network blocker.
 pub use spider_network_blocker;
 
+#[cfg(feature = "firewall")]
+/// re-export firewall.
+pub use spider_firewall;
+
 pub use crate::browser::{Browser, BrowserConfig};
 pub use crate::conn::Connection;
 pub use crate::element::Element;

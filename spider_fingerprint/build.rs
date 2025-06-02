@@ -64,9 +64,13 @@ fn main() {
                 file.flush().unwrap();
             }
             // Atomically move to output and fallback only after a successful write
-            rename(&tmp_path, &generated_path).unwrap();
+            if let Err(e) = rename(&tmp_path, &generated_path) {
+                eprintln!("{:?}", e)
+            }
             // Only now overwrite fallback file
-            copy(&generated_path, fallback_path).unwrap();
+            if let Err(e) = copy(&generated_path, fallback_path) {
+                eprintln!("{:?}", e)
+            }
         }
         None => {
             // Download or parse failed: use fallback file
@@ -75,7 +79,9 @@ fn main() {
             );
             // Copy fallback to output
             if Path::new(fallback_path).exists() {
-                copy(fallback_path, &generated_path).unwrap();
+                if let Err(e) = copy(fallback_path, &generated_path) {
+                    eprintln!("{:?}", e)
+                }
             } else {
                 panic!("No fallback file found and failed to download new data!");
             }
