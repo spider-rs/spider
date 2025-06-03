@@ -1,6 +1,6 @@
 [package]
 name = "spider_chrome"
-version = "2.37.96"
+version = "2.37.97"
 rust-version = "1.70"
 authors = ["j-mendez <jeff@spider.cloud>"]
 edition = "2021"
@@ -66,6 +66,7 @@ winreg = "0.52"
 [dependencies.spider_firewall]
 version = "2"
 optional = true
+default-features = false
 
 [dev-dependencies]
 quote = "1"
@@ -81,7 +82,8 @@ fetcher = []
 bytes = ["dep:bytes"]
 adblock = ["dep:adblock"]
 simd = ["dep:sonic-rs"]
-firewall = ["dep:spider_firewall"]
+firewall = ["dep:spider_firewall", "spider_firewall/default"]
+firewall-rustls = ["dep:spider_firewall", "spider_firewall/rustls"]
 chrome_tls_connection = ["tokio-tungstenite/native-tls"]
 default-tls = ["reqwest/default-tls"]
 rust-tls = ["reqwest/rustls-tls"]

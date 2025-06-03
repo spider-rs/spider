@@ -419,9 +419,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.28.1"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14d76e2f5af19477d6254415acc95ba97c6cc6f3b1e3cb4676b7f0fab8194298"
+checksum = "78ac0334b0fef1ddaf141154a3ef6d55a95b5b1a52c720753554b0a1ca670e68"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -4944,9 +4944,9 @@ checksum = "a35e8a6bf28cd121053a66aa2e6a2e3eaffad4a60012179f0e864aa5ffeff215"
 
 [[package]]
 name = "reqwest"
-version = "0.12.18"
+version = "0.12.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e98ff6b0dbbe4d5a37318f433d4fc82babd21631f194d370409ceb2e40b2f0b5"
+checksum = "a2f8e5513d63f2e5b386eb5106dc67eaf3f84e95258e210489136b8b92ad6119"
 dependencies = [
  "async-compression",
  "base64 0.22.1",
@@ -5847,7 +5847,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5915,7 +5915,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6007,7 +6007,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "clap",
  "env_logger",
@@ -6033,7 +6033,7 @@ dependencies = [
 
 [[package]]
 name = "spider_fingerprint"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "case_insensitive_string",
  "http 1.3.1",
@@ -6050,9 +6050,9 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.33.21"
+version = "2.33.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73db83e550d690fbd65764df1b739bf779bc68740cf6f5f13abbd976213692c0"
+checksum = "4d8e4649e42302c821904c28ed54966439d0ee4d0ba53e826b636db8483ed3f8"
 dependencies = [
  "hashbrown 0.15.3",
  "phf 0.11.3",
@@ -6060,13 +6060,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "ua_generator",
 ]
 
 [[package]]
 name = "spider_network_blocker"
-version = "0.0.8"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6b84668cd1bedc0f976889e7807d740c6320ec2b3acad94ec9242249d131f67"
+checksum = "f317f4a0dee82ec1d6937d22d6231677edd464f0c0ed62d0a9b2dc93cb3f5a56"
 dependencies = [
  "convert_case 0.8.0",
  "hashbrown 0.15.3",
@@ -6098,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6121,7 +6122,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6138,7 +6139,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.96"
+version = "2.37.97"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -7168,9 +7169,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdb0c213ca27a9f57ab69ddb290fd80d970922355b83ae380b395d3986b8a2e"
+checksum = "5cc2d9e086a412a451384326f521c8123a99a466b329941a9403696bff9b0da2"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
