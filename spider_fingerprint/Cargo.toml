@@ -1,6 +1,6 @@
 [package]
 name = "spider_fingerprint"
-version = "2.37.99"
+version = "2.37.103"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Fingerprint library for Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -19,6 +19,7 @@ case_insensitive_string = { version = "0.2", features = ["compact"] }
 serde = { version = "1", features = ["derive"], optional = true }
 phf = { version = "0.11", features = ["macros"] }
 http = "1"
+aho-corasick = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -643,6 +643,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     emulation_config.dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
     emulation_config.fingerprint = config.fingerprint;
     emulation_config.tier = stealth_mode;
+    emulation_config.user_agent_data = Some(false);
 
     let viewport = if let Some(vp) = &config.viewport {
         let vp = spider_fingerprint::spoof_viewport::Viewport {

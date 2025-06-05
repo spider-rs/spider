@@ -1,10 +1,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use chromiumoxide_cdp::cdp::browser_protocol::dom::*;
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     MediaFeature, SetDeviceMetricsOverrideParams, SetEmulatedMediaParams,
     SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
+    UserAgentBrandVersion,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::input::{DispatchDragEventType, DragData};
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
@@ -14,6 +14,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::network::{
 use chromiumoxide_cdp::cdp::browser_protocol::page::*;
 use chromiumoxide_cdp::cdp::browser_protocol::performance::{GetMetricsParams, Metric};
 use chromiumoxide_cdp::cdp::browser_protocol::target::{SessionId, TargetId};
+use chromiumoxide_cdp::cdp::browser_protocol::{dom::*, emulation};
 use chromiumoxide_cdp::cdp::js_protocol;
 use chromiumoxide_cdp::cdp::js_protocol::debugger::GetScriptSourceParams;
 use chromiumoxide_cdp::cdp::js_protocol::runtime::{
@@ -513,13 +514,54 @@ impl Page {
         &self,
         params: impl Into<SetUserAgentOverrideParams>,
     ) -> Result<&Self> {
-        let mut default_params = params.into();
+        let mut default_params: SetUserAgentOverrideParams = params.into();
 
         if default_params.platform.is_none() {
             let platform = platform_from_user_agent(&default_params.user_agent);
-
             if !platform.is_empty() {
                 default_params.platform = Some(platform.into());
+            }
+        }
+
+        if default_params.user_agent_metadata.is_none() {
+            let ua_data = spider_fingerprint::spoof_user_agent::build_high_entropy_data(&Some(
+                &default_params.user_agent,
+            ));
+            let windows = ua_data.platform == "Windows";
+
+            let brands = ua_data
+                .full_version_list
+                .iter()
+                .map(|b| {
+                    let b = b.clone();
+                    UserAgentBrandVersion::new(b.brand, b.version)
+                })
+                .collect::<Vec<_>>();
+
+            let full_versions = ua_data
+                .full_version_list
+                .into_iter()
+                .map(|b| UserAgentBrandVersion::new(b.brand, b.version))
+                .collect::<Vec<_>>();
+
+            let user_agent_metadata_builder = emulation::UserAgentMetadata::builder()
+                .architecture(ua_data.architecture)
+                .bitness(ua_data.bitness)
+                .model(ua_data.model)
+                .platform_version(ua_data.platform_version)
+                .brands(brands)
+                .full_version_lists(full_versions)
+                .platform(ua_data.platform)
+                .mobile(ua_data.mobile);
+
+            let user_agent_metadata_builder = if windows {
+                user_agent_metadata_builder.wow64(ua_data.wow64_ness)
+            } else {
+                user_agent_metadata_builder
+            };
+
+            if let Ok(user_agent_metadata) = user_agent_metadata_builder.build() {
+                default_params.user_agent_metadata = Some(user_agent_metadata);
             }
         }
 

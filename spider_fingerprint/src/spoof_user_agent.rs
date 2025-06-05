@@ -1,4 +1,4 @@
-use crate::{BASE_CHROME_VERSION, CHROME_VERSIONS_BY_MAJOR};
+use crate::{mobile_model_from_user_agent, BASE_CHROME_VERSION, CHROME_VERSIONS_BY_MAJOR};
 use rand::prelude::IndexedRandom;
 use rand::{rng, Rng};
 
@@ -100,7 +100,7 @@ pub fn smart_spoof_chrome_full_version(ua_major: &str, // e.g. "136"
         .get("latest")
         .and_then(|arr| arr.first())
         .map(|s| *s)
-        .unwrap_or(&crate::LATEST_FULL_VERSION_FULL); // Fallback default (shouldn't hit if PHF is built)
+        .unwrap_or(&crate::LATEST_CHROME_FULL_VERSION_FULL); // Fallback default (shouldn't hit if PHF is built)
 
     // 75% chance: if ua_major is also the latest, just use the true latest version
     let ua_major = ua_major.split('.').next().unwrap_or(ua_major);
@@ -154,6 +154,10 @@ pub struct HighEntropyUaData {
     pub full_version_list: Vec<BrandEntry>,
     /// The ua full version.
     pub ua_full_version: String,
+    /// Is this user-agent part of the mobile list?
+    pub mobile: bool,
+    /// A boolean indicating if the user agent’s binary is running in 32-bit mode on 64-bit Windows.
+    pub wow64_ness: bool,
 }
 
 /// Build the entropy data.
@@ -163,7 +167,7 @@ pub fn build_high_entropy_data(user_agent: &Option<&str>) -> HighEntropyUaData {
     let full_version = user_agent
         .split_whitespace()
         .find_map(|s| s.strip_prefix("Chrome/"))
-        .unwrap_or(&crate::LATEST_FULL_VERSION_FULL);
+        .unwrap_or(&crate::LATEST_CHROME_FULL_VERSION_FULL);
 
     let mut older_brand = true;
 
@@ -285,14 +289,23 @@ pub fn build_high_entropy_data(user_agent: &Option<&str>) -> HighEntropyUaData {
         },
     ];
 
+    let mobile = mobile_model_from_user_agent(user_agent);
+    let mobile_device = mobile.is_some();
+
     HighEntropyUaData {
         architecture: architecture.to_string(),
         bitness: bitness.to_string(),
-        model,
+        model: if let Some(mobile_model) = mobile {
+            mobile_model.to_string()
+        } else {
+            model
+        },
         platform: platform.to_string(),
         platform_version,
         full_version_list,
         ua_full_version: smart_spoof_chrome_full_version(full_version),
+        mobile: mobile_device,
+        wow64_ness: false,
     }
 }
 

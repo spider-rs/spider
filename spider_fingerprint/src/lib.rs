@@ -28,6 +28,7 @@ use profiles::{
 use spoof_gpu::build_gpu_spoof_script_wgsl;
 
 use crate::configs::{AgentOs, Tier};
+use aho_corasick::AhoCorasick;
 pub use spoof_headers::emulate_headers;
 pub use spoof_refererer::spoof_referrer;
 
@@ -35,22 +36,56 @@ pub use http;
 pub use url;
 
 lazy_static::lazy_static! {
-    /// The latest Chrome version, configurable via the `CHROME_VERSION` env variable.
-    pub static ref BASE_CHROME_VERSION: u32 = std::env::var("CHROME_VERSION")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(136);
-
-    pub(crate) static ref LATEST_FULL_VERSION_FULL: &'static str = CHROME_VERSIONS_BY_MAJOR
+    // Get the latest chrome version as the base to use.
+    pub static ref LATEST_CHROME_FULL_VERSION_FULL: &'static str = CHROME_VERSIONS_BY_MAJOR
         .get("latest")
         .and_then(|arr| arr.first().copied())
-        .unwrap_or("136.0.7103.114");
-
+        .unwrap_or(&"137.0.7151.56");
+    /// The latest Chrome version major ex: 137.
+    pub static ref BASE_CHROME_VERSION: u32 = LATEST_CHROME_FULL_VERSION_FULL
+        .split('.')
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(137);
     /// The latest Chrome not a brand version, configurable via the `CHROME_NOT_A_BRAND_VERSION` env variable.
     pub static ref CHROME_NOT_A_BRAND_VERSION: String = std::env::var("CHROME_NOT_A_BRAND_VERSION")
         .ok()
         .and_then(|v| if v.is_empty() { None } else { Some(v) })
         .unwrap_or("99.0.0.0".into());
+
+    pub static ref MOBILE_PATTERNS: [&'static str; 38] = [
+        // Apple
+        "iphone", "ipad", "ipod",
+        // Android
+        "android",
+        // Generic mobile
+        "mobi", "mobile", "touch",
+        // Specific Android browsers/devices
+        "silk", "nexus", "pixel", "huawei", "honor", "xiaomi", "miui", "redmi",
+        "oneplus", "samsung", "galaxy", "lenovo", "oppo", "vivo", "realme",
+        // Mobile browsers
+        "opera mini", "opera mobi", "ucbrowser", "ucweb", "baidubrowser", "qqbrowser",
+        "dolfin", "crmo", "fennec", "iemobile", "webos", "blackberry", "bb10",
+        "playbook", "palm", "nokia"
+    ];
+
+    /// Common mobile indicators for user-agent detection.
+    pub static ref MOBILE_MATCHER: AhoCorasick = aho_corasick::AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .build(MOBILE_PATTERNS.as_ref())
+        .expect("failed to compile AhoCorasick patterns");
+}
+
+/// Returns `true` if the user-agent is likely a mobile browser.
+pub fn is_mobile_user_agent(user_agent: &str) -> bool {
+    MOBILE_MATCHER.find(user_agent).is_some()
+}
+
+/// Does the user-agent matches a mobile device indicator.
+pub fn mobile_model_from_user_agent(user_agent: &str) -> Option<&'static str> {
+    MOBILE_MATCHER
+        .find(&user_agent)
+        .map(|m| MOBILE_PATTERNS[m.pattern()])
 }
 
 /// Generate the initial stealth script to send in one command.
@@ -146,7 +181,7 @@ impl Fingerprint {
     }
 }
 /// Configuration options for browser fingerprinting and automation.
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EmulationConfiguration {
     /// Enables stealth mode to help avoid detection by anti-bot mechanisms.
@@ -159,6 +194,8 @@ pub struct EmulationConfiguration {
     pub agent_os: AgentOs,
     /// Is this firefox?
     pub firefox_agent: bool,
+    /// Add userAgentData. Usually can be disabled when set via CDP for accuracy.
+    pub user_agent_data: Option<bool>,
 }
 
 /// Get the OS being used.
@@ -234,7 +271,7 @@ pub fn emulate(
     let agent_os = config.agent_os;
     let firefox_agent = config.firefox_agent;
 
-    let spoof_script = if stealth && !firefox_agent {
+    let spoof_script = if stealth && !firefox_agent && config.user_agent_data.unwrap_or(true) {
         &crate::spoof_user_agent::spoof_user_agent_data_high_entropy_values(
             &crate::spoof_user_agent::build_high_entropy_data(&Some(user_agent)),
         )
