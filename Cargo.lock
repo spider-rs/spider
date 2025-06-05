@@ -170,9 +170,9 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
-version = "0.6.18"
+version = "0.6.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acc5369981196006228e28809f761875c0327210a891e941f4c683b3a99529b"
+checksum = "301af1932e46185686725e0fad2f8f2aa7da69dd70bf6ecc44d6b703844a3933"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -185,33 +185,33 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55cc3b69f167a1ef2e161439aa98aed94e6028e5f9a59be9a6ffb47aef1651f9"
+checksum = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd"
 
 [[package]]
 name = "anstyle-parse"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b2d16507662817a6a20a9ea92df6652ee4f94f914589377d69f3b21bc5798a9"
+checksum = "4e7644824f0aa2c7b9384579234ef10eb7efb6a0deb83f9630a49594dd9c15c2"
 dependencies = [
  "utf8parse",
 ]
 
 [[package]]
 name = "anstyle-query"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79947af37f4177cfead1110013d678905c37501914fba0efea834c3fe9a8d60c"
+checksum = "6c8bdeb6047d8983be085bab0ba1472e6dc604e7041dbf6fcd5e71523014fae9"
 dependencies = [
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "anstyle-wincon"
-version = "3.0.8"
+version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6680de5231bd6ee4c6191b8a1325daa282b415391ec9d3a37bd34f2060dc73fa"
+checksum = "403f75924867bb1033c59fbf0797484329750cfbe3c4325cd33127941fabc882"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
@@ -749,9 +749,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
-version = "1.7.3"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89e25b6adfb930f02d1981565a6e5d9c547ac15a96606256d3b59040e5cd4ca3"
+checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
 
 [[package]]
 name = "benches"
@@ -1186,9 +1186,9 @@ dependencies = [
 
 [[package]]
 name = "colorchoice"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
+checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "compact_str"
@@ -3012,9 +3012,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c293b6b3d21eca78250dc7dbebd6b9210ec5530e038cbfe0661b5c47ab06e8"
+checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3033,7 +3033,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.4.0",
+ "windows-registry",
 ]
 
 [[package]]
@@ -4565,9 +4565,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.114"
+version = "2.1.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1722a421a1f0ae8f40e4cd265bd559fed5f5f67c0bbd7b70a780a43519c8e19"
+checksum = "10a9da533ae9faae4b0fbef5afbe9acaf1802b18fafa002a421753e3273389df"
 dependencies = [
  "psl-types",
 ]
@@ -5159,7 +5159,7 @@ dependencies = [
  "typed-builder",
  "url",
  "webpki-root-certs 0.26.11",
- "windows-registry 0.5.2",
+ "windows-registry",
 ]
 
 [[package]]
@@ -5847,7 +5847,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5860,7 +5860,7 @@ dependencies = [
  "case_insensitive_string",
  "chrono",
  "const_format",
- "cookie 0.14.4",
+ "cookie 0.18.1",
  "cron 0.15.0",
  "fastrand 2.3.0",
  "flexbuffers",
@@ -5915,7 +5915,7 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -6007,7 +6007,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "clap",
  "env_logger",
@@ -6033,7 +6033,7 @@ dependencies = [
 
 [[package]]
 name = "spider_fingerprint"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "case_insensitive_string",
  "http 1.3.1",
@@ -6050,9 +6050,9 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.33.22"
+version = "2.33.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d8e4649e42302c821904c28ed54966439d0ee4d0ba53e826b636db8483ed3f8"
+checksum = "b70e0885e330e974acd732be7f23f95b1ee3beb9882fc96d93b58b976d651ba0"
 dependencies = [
  "hashbrown 0.15.3",
  "phf 0.11.3",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "aho-corasick",
  "fast_html2md",
@@ -6122,7 +6122,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "hashbrown 0.15.3",
  "indexmap 1.9.3",
@@ -6139,7 +6139,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.98"
+version = "2.37.99"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -7169,9 +7169,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc2d9e086a412a451384326f521c8123a99a466b329941a9403696bff9b0da2"
+checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -7889,7 +7889,7 @@ dependencies = [
  "windows-interface 0.59.1",
  "windows-link",
  "windows-result 0.3.4",
- "windows-strings 0.4.2",
+ "windows-strings",
 ]
 
 [[package]]
@@ -7965,24 +7965,13 @@ dependencies = [
 
 [[package]]
 name = "windows-registry"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4286ad90ddb45071efd1a66dfa43eb02dd0dfbae1545ad6cc3c51cf34d7e8ba3"
-dependencies = [
- "windows-result 0.3.4",
- "windows-strings 0.3.1",
- "windows-targets 0.53.0",
-]
-
-[[package]]
-name = "windows-registry"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3bab093bdd303a1240bb99b8aba8ea8a69ee19d34c9e2ef9594e708a4878820"
 dependencies = [
  "windows-link",
  "windows-result 0.3.4",
- "windows-strings 0.4.2",
+ "windows-strings",
 ]
 
 [[package]]
@@ -7999,15 +7988,6 @@ name = "windows-result"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56f42bd332cc6c8eac5af113fc0c1fd6a8fd2aa08a0119358686e5160d0586c6"
-dependencies = [
- "windows-link",
-]
-
-[[package]]
-name = "windows-strings"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87fa48cc5d406560701792be122a10132491cff9d0aeb23583cc2dcafc847319"
 dependencies = [
  "windows-link",
 ]

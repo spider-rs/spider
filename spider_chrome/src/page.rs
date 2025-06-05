@@ -6,6 +6,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     MediaFeature, SetDeviceMetricsOverrideParams, SetEmulatedMediaParams,
     SetGeolocationOverrideParams, SetLocaleOverrideParams, SetTimezoneOverrideParams,
 };
+use chromiumoxide_cdp::cdp::browser_protocol::input::{DispatchDragEventType, DragData};
 use chromiumoxide_cdp::cdp::browser_protocol::network::{
     Cookie, CookieParam, DeleteCookiesParams, GetCookiesParams, SetBlockedUrLsParams,
     SetCookiesParams, SetExtraHttpHeadersParams, SetUserAgentOverrideParams,
@@ -673,6 +674,101 @@ impl Page {
         Ok(self)
     }
 
+    /// Performs a double mouse click event at the point's location.
+    ///
+    /// This scrolls the point into view first, then executes a
+    /// `DispatchMouseEventParams` command of type `MouseLeft` with
+    /// `MousePressed` as single click and then releases the mouse with an
+    /// additional `DispatchMouseEventParams` of type `MouseLeft` with
+    /// `MouseReleased`
+    ///
+    /// Bear in mind that if `click()` triggers a navigation the new page is not
+    /// immediately loaded when `click()` resolves. To wait until navigation is
+    /// finished an additional `wait_for_navigation()` is required:
+    ///
+    /// # Example
+    ///
+    /// Trigger a navigation and wait until the triggered navigation is finished
+    ///
+    /// ```no_run
+    /// # use chromiumoxide::page::Page;
+    /// # use chromiumoxide::error::Result;
+    /// # use chromiumoxide::layout::Point;
+    /// # async fn demo(page: Page, point: Point) -> Result<()> {
+    ///     let html = page.click(point).await?.wait_for_navigation().await?.content();
+    ///     # Ok(())
+    /// # }
+    /// ```
+    /// ```
+    pub async fn double_click(&self, point: Point) -> Result<&Self> {
+        self.inner.double_click(point).await?;
+        Ok(self)
+    }
+
+    /// Performs a single mouse click event at the point's location with the modifier: Alt=1, Ctrl=2, Meta/Command=4, Shift=8\n(default: 0).
+    ///
+    /// This scrolls the point into view first, then executes a
+    /// `DispatchMouseEventParams` command of type `MouseLeft` with
+    /// `MousePressed` as single click and then releases the mouse with an
+    /// additional `DispatchMouseEventParams` of type `MouseLeft` with
+    /// `MouseReleased`
+    ///
+    /// Bear in mind that if `click()` triggers a navigation the new page is not
+    /// immediately loaded when `click()` resolves. To wait until navigation is
+    /// finished an additional `wait_for_navigation()` is required:
+    ///
+    /// # Example
+    ///
+    /// Trigger a navigation and wait until the triggered navigation is finished
+    ///
+    /// ```no_run
+    /// # use chromiumoxide::page::Page;
+    /// # use chromiumoxide::error::Result;
+    /// # use chromiumoxide::layout::Point;
+    /// # async fn demo(page: Page, point: Point) -> Result<()> {
+    ///     let html = page.double_click_with_modifier(point, 1).await?.wait_for_navigation().await?.content();
+    ///     # Ok(())
+    /// # }
+    /// ```
+    /// ```
+    pub async fn click_with_modifier(&self, point: Point, modifiers: i64) -> Result<&Self> {
+        self.inner.click_with_modifier(point, modifiers).await?;
+        Ok(self)
+    }
+
+    /// Performs a double mouse click event at the point's location with the modifier: Alt=1, Ctrl=2, Meta/Command=4, Shift=8\n(default: 0).
+    ///
+    /// This scrolls the point into view first, then executes a
+    /// `DispatchMouseEventParams` command of type `MouseLeft` with
+    /// `MousePressed` as single click and then releases the mouse with an
+    /// additional `DispatchMouseEventParams` of type `MouseLeft` with
+    /// `MouseReleased`
+    ///
+    /// Bear in mind that if `click()` triggers a navigation the new page is not
+    /// immediately loaded when `click()` resolves. To wait until navigation is
+    /// finished an additional `wait_for_navigation()` is required:
+    ///
+    /// # Example
+    ///
+    /// Trigger a navigation and wait until the triggered navigation is finished
+    ///
+    /// ```no_run
+    /// # use chromiumoxide::page::Page;
+    /// # use chromiumoxide::error::Result;
+    /// # use chromiumoxide::layout::Point;
+    /// # async fn demo(page: Page, point: Point) -> Result<()> {
+    ///     let html = page.double_click_with_modifier(point, 1).await?.wait_for_navigation().await?.content();
+    ///     # Ok(())
+    /// # }
+    /// ```
+    /// ```
+    pub async fn double_click_with_modifier(&self, point: Point, modifiers: i64) -> Result<&Self> {
+        self.inner
+            .double_click_with_modifier(point, modifiers)
+            .await?;
+        Ok(self)
+    }
+
     /// Dispatches a `mouseMoved` event and moves the mouse to the position of
     /// the `point` where `Point.x` is the horizontal position of the mouse and
     /// `Point.y` the vertical position of the mouse.
@@ -685,6 +781,23 @@ impl Page {
     /// keys.
     pub async fn press_key(&self, input: impl AsRef<str>) -> Result<&Self> {
         self.inner.press_key(input).await?;
+        Ok(self)
+    }
+
+    /// Dispatches a `DragEvent`, moving the element to the given `point`.
+    ///
+    /// `point.x` defines the horizontal target, and `point.y` the vertical mouse position.
+    /// Accepts `drag_type`, `drag_data`, and optional keyboard `modifiers`.
+    pub async fn drag(
+        &self,
+        drag_type: DispatchDragEventType,
+        point: Point,
+        drag_data: DragData,
+        modifiers: Option<i64>,
+    ) -> Result<&Self> {
+        self.inner
+            .drag(drag_type, point, drag_data, modifiers)
+            .await?;
         Ok(self)
     }
 

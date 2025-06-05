@@ -15,8 +15,8 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::{
     SetDeviceMetricsOverrideParams,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::input::{
-    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
-    MouseButton,
+    DispatchDragEventParams, DispatchDragEventType, DispatchKeyEventParams, DispatchKeyEventType,
+    DispatchMouseEventParams, DispatchMouseEventType, DragData, MouseButton,
 };
 use chromiumoxide_cdp::cdp::browser_protocol::page::{
     FrameId, GetLayoutMetricsParams, GetLayoutMetricsReturns, PrintToPdfParams, Viewport,
@@ -228,6 +228,28 @@ impl PageInner {
         Ok(self)
     }
 
+    /// Dispatches a `DragEvent`, moving the element to the given `point`.
+    ///
+    /// `point.x` defines the horizontal target, and `point.y` the vertical mouse position.
+    /// Accepts `drag_type`, `drag_data`, and optional keyboard `modifiers`.
+    pub async fn drag(
+        &self,
+        drag_type: DispatchDragEventType,
+        point: Point,
+        drag_data: DragData,
+        modifiers: Option<i64>,
+    ) -> Result<&Self> {
+        let mut params: DispatchDragEventParams =
+            DispatchDragEventParams::new(drag_type, point.x, point.y, drag_data);
+
+        if let Some(modifiers) = modifiers {
+            params.modifiers = Some(modifiers);
+        }
+
+        self.execute(params).await?;
+        Ok(self)
+    }
+
     /// Moves the mouse to this point (dispatches a mouseWheel event).
     /// If you get an error use page.scroll_by instead.
     pub async fn scroll(&self, point: Point, delta: Delta) -> Result<&Self> {
@@ -241,13 +263,19 @@ impl PageInner {
         Ok(self)
     }
 
-    /// Performs a mouse click event at the point's location
-    pub async fn click(&self, point: Point) -> Result<&Self> {
+    /// Performs a mouse click event at the point's location with the amount of clicks and modifier.
+    pub async fn click_with_count(
+        &self,
+        point: Point,
+        click_count: impl Into<i64>,
+        modifiers: impl Into<i64>,
+    ) -> Result<&Self> {
         let cmd = DispatchMouseEventParams::builder()
             .x(point.x)
             .y(point.y)
             .button(MouseButton::Left)
-            .click_count(1);
+            .click_count(click_count)
+            .modifiers(modifiers);
 
         self.move_mouse(point)
             .await?
@@ -266,6 +294,34 @@ impl PageInner {
         )
         .await?;
         Ok(self)
+    }
+
+    /// Performs a mouse click event at the point's location
+    pub async fn click(&self, point: Point) -> Result<&Self> {
+        self.click_with_count(point, 1, 0).await
+    }
+
+    /// Performs a mouse double click event at the point's location
+    pub async fn double_click(&self, point: Point) -> Result<&Self> {
+        self.click_with_count(point, 2, 0).await
+    }
+
+    /// Performs a mouse click event at the point's location and modifier: Alt=1, Ctrl=2, Meta/Command=4, Shift=8\n(default: 0).
+    pub async fn click_with_modifier(
+        &self,
+        point: Point,
+        modifiers: impl Into<i64>,
+    ) -> Result<&Self> {
+        self.click_with_count(point, 1, modifiers).await
+    }
+
+    /// Performs a mouse double click event at the point's location and modifier: Alt=1, Ctrl=2, Meta/Command=4, Shift=8\n(default: 0).
+    pub async fn double_click_with_modifier(
+        &self,
+        point: Point,
+        modifiers: impl Into<i64>,
+    ) -> Result<&Self> {
+        self.click_with_count(point, 2, modifiers).await
     }
 
     /// This simulates pressing keys on the page.
