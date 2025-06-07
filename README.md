@@ -11,15 +11,16 @@
 [API Docs](https://docs.rs/spider/latest/spider) |
 [Chat](https://discord.spider.cloud)
 
-The building blocks for data curation workloads.
+A web crawler and scraper, building blocks for data curation workloads.
 
 - Concurrent
 - Streaming
 - [Decentralization](./spider_worker/)
-- [CDP Automation](./spider_chrome/)
-- [Anti-Bot mitigation](./spider_fingerprint/)
-- [HTML transformations](./spider_transformations/README.md)
-- Adblocker and Firewall
+- [CDP Automation](https://github.com/spider-rs/spider_chrome)
+- [Anti-Bot mitigation](https://github.com/spider-rs/spider_fingerprint)
+- [HTML transformations](https://github.com/spider-rs/spider_transformations)
+- [Adblocker](https://github.com/spider-rs/spider_network_blocker)
+- [Firewall](https://github.com/spider-rs/spider_firewall)
 - Smart Mode
 - Proxy Support
 - Subscriptions

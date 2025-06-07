@@ -29,7 +29,9 @@ features = ["serde"]
 
 [dependencies.spider_utils]
 version = "2"
-path = "../spider_utils"
+
+[dependencies.spider_transformations]
+version = "2"
 
 [[example]]
 name = "example"
@@ -165,8 +167,7 @@ name = "real_world"
 path = "real_world.rs"
 required-features = [
     "spider/sync",
-    "spider/chrome",
-    "spider_utils/transformations",
+    "spider/chrome"
 ]
 
 [[example]]

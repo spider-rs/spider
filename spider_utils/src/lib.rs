@@ -16,9 +16,6 @@ pub struct DocumentSelectors<K> {
     pub xpath: HashMap<K, Vec<String>>,
 }
 
-#[cfg(feature = "transformations")]
-pub use spider_transformations;
-
 /// Extracted content from CSS query selectors.
 type CSSQueryMap = HashMap<String, Vec<String>>;
 

@@ -1,8 +1,8 @@
 [package]
 name = "spider"
-version = "2.37.105"
+version = "2.37.106"
 authors = ["j-mendez <jeff@spider.cloud>"]
-description = "The building blocks for data curation workloads."
+description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider", "scraper"]
@@ -97,7 +97,6 @@ rquest-util = { version = "2", optional = true, features = ["emulation-serde"] }
 
 [dependencies.spider_chrome]
 version = "2"
-path = "../spider_chrome"
 optional = true
 default-features = false
 features = ["bytes", "stream"]
@@ -108,7 +107,6 @@ optional = true
 
 [dependencies.spider_fingerprint]
 version = "2"
-path = "../spider_fingerprint"
 default-features = false
 features = ["serde"]
 

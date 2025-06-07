@@ -1,9 +1,9 @@
-//! `cargo run --example transform_markdown --features="spider/sync spider_utils/transformations"`
+//! `cargo run --example transform_markdown --features="spider/sync"`
 extern crate spider;
 
 use spider::tokio;
 use spider::website::Website;
-use spider_utils::spider_transformations::transformation::content::{
+use spider_transformations::transformation::content::{
     transform_content, ReturnFormat, TransformConfig,
 };
 use tokio::io::AsyncWriteExt;
