@@ -1,8 +1,8 @@
 [package]
 name = "spider"
-version = "2.37.103"
+version = "2.37.104"
 authors = ["j-mendez <jeff@spider.cloud>"]
-description = "A web crawler and scraper, building blocks for data curation workloads."
+description = "The building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
 readme = "README.md"
 keywords = ["crawler", "spider", "scraper"]

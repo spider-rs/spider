@@ -11,23 +11,23 @@
 [API Docs](https://docs.rs/spider/latest/spider) |
 [Chat](https://discord.spider.cloud)
 
-A web crawler and scraper, building blocks for data curation workloads.
+The building blocks for data curation workloads.
 
 - Concurrent
 - Streaming
-- Decentralization
-- Headless Chrome Rendering
-- HTTP Proxies
-- Cron Jobs
-- Subscriptions
+- [Decentralization](./spider_worker/)
+- [CDP Automation](./spider_chrome/)
+- [Anti-Bot mitigation](./spider_fingerprint/)
+- [HTML transformations](./spider_transformations/README.md)
+- Adblocker and Firewall
 - Smart Mode
-- Anti-Bot mitigation
+- Proxy Support
+- Subscriptions
 - Disk persistence
-- Privacy and Efficiency through Ad, Analytics, and Custom Tiered Network Blocking
 - Blacklisting, Whitelisting, and Budgeting Depth
 - Dynamic AI Prompt Scripting Headless with Step Caching
 - CSS/Xpath Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
-- HTML to markdown, text, and etc transformations with [spider_transformations](./spider_transformations/README.md)
+- Cron Jobs
 
 - [Changelog](CHANGELOG.md)
 

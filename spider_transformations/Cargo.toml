@@ -1,6 +1,6 @@
 [package]
 name = "spider_transformations"
-version = "2.37.103"
+version = "2.37.104"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Transformation utils to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider-transformations"
