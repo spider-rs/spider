@@ -277,22 +277,66 @@ impl PageInner {
             .click_count(click_count)
             .modifiers(modifiers);
 
-        self.move_mouse(point)
-            .await?
-            .execute(
-                cmd.clone()
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .build()
-                    .unwrap(),
-            )
-            .await?;
+        if let Ok(cmd) = cmd
+            .clone()
+            .r#type(DispatchMouseEventType::MousePressed)
+            .build()
+        {
+            self.move_mouse(point).await?.execute(cmd).await?;
+        }
 
-        self.execute(
-            cmd.r#type(DispatchMouseEventType::MouseReleased)
-                .build()
-                .unwrap(),
-        )
-        .await?;
+        if let Ok(cmd) = cmd.r#type(DispatchMouseEventType::MouseReleased).build() {
+            self.execute(cmd).await?;
+        }
+
+        Ok(self)
+    }
+
+    /// Performs a click-and-drag from one point to another with optional modifiers.
+    pub async fn click_and_drag(
+        &self,
+        from: Point,
+        to: Point,
+        modifiers: impl Into<i64>,
+    ) -> Result<&Self> {
+        let modifiers = modifiers.into();
+        let click_count = 1;
+
+        let cmd = DispatchMouseEventParams::builder()
+            .button(MouseButton::Left)
+            .click_count(click_count)
+            .modifiers(modifiers);
+
+        if let Ok(cmd) = cmd
+            .clone()
+            .x(from.x)
+            .y(from.y)
+            .r#type(DispatchMouseEventType::MousePressed)
+            .build()
+        {
+            self.move_mouse(from).await?.execute(cmd).await?;
+        }
+
+        // Note: we may want to add some slight movement in between for advanced anti-bot bypassing.
+        if let Ok(cmd) = cmd
+            .clone()
+            .x(to.x)
+            .y(to.y)
+            .r#type(DispatchMouseEventType::MouseMoved)
+            .build()
+        {
+            self.move_mouse(to).await?.execute(cmd).await?;
+        }
+
+        if let Ok(cmd) = cmd
+            .r#type(DispatchMouseEventType::MouseReleased)
+            .x(to.x)
+            .y(to.y)
+            .build()
+        {
+            self.execute(cmd).await?;
+        }
+
         Ok(self)
     }
 
@@ -366,10 +410,14 @@ impl PageInner {
             .windows_virtual_key_code(key_definition.key_code)
             .native_virtual_key_code(key_definition.key_code);
 
-        self.execute(cmd.clone().r#type(key_down_event_type).build().unwrap())
-            .await?;
-        self.execute(cmd.r#type(DispatchKeyEventType::KeyUp).build().unwrap())
-            .await?;
+        if let Ok(cmd) = cmd.clone().r#type(key_down_event_type).build() {
+            self.execute(cmd).await?;
+        }
+
+        if let Ok(cmd) = cmd.r#type(DispatchKeyEventType::KeyUp).build() {
+            self.execute(cmd).await?;
+        }
+
         Ok(self)
     }
 
@@ -392,6 +440,7 @@ impl PageInner {
                     .unwrap(),
             )
             .await?;
+
         Ok(resp.result)
     }
 

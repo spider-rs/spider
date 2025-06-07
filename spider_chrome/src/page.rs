@@ -778,6 +778,64 @@ impl Page {
         Ok(self)
     }
 
+    /// Performs a click-and-drag mouse event from a starting point to a destination.
+    ///
+    /// This scrolls both points into view and dispatches a sequence of `DispatchMouseEventParams`
+    /// commands in order: a `MousePressed` event at the start location, followed by a `MouseMoved`
+    /// event to the end location, and finally a `MouseReleased` event to complete the drag.
+    ///
+    /// This is useful for dragging UI elements, sliders, or simulating mouse gestures.
+    ///
+    /// # Example
+    ///
+    /// Perform a drag from point A to point B using the Shift modifier:
+    ///
+    /// ```no_run
+    /// # use chromiumoxide::page::Page;
+    /// # use chromiumoxide::error::Result;
+    /// # use chromiumoxide::layout::Point;
+    /// # async fn demo(page: Page, from: Point, to: Point) -> Result<()> {
+    ///     page.click_and_drag_with_modifier(from, to, 8).await?;
+    ///     Ok(())
+    /// # }
+    /// ```
+    pub async fn click_and_drag(&self, from: Point, to: Point) -> Result<&Self> {
+        self.inner.click_and_drag(from, to, 0).await?;
+        Ok(self)
+    }
+
+    /// Performs a click-and-drag mouse event from a starting point to a destination,
+    /// with optional keyboard modifiers: Alt = 1, Ctrl = 2, Meta/Command = 4, Shift = 8 (default: 0).
+    ///
+    /// This scrolls both points into view and dispatches a sequence of `DispatchMouseEventParams`
+    /// commands in order: a `MousePressed` event at the start location, followed by a `MouseMoved`
+    /// event to the end location, and finally a `MouseReleased` event to complete the drag.
+    ///
+    /// This is useful for dragging UI elements, sliders, or simulating mouse gestures.
+    ///
+    /// # Example
+    ///
+    /// Perform a drag from point A to point B using the Shift modifier:
+    ///
+    /// ```no_run
+    /// # use chromiumoxide::page::Page;
+    /// # use chromiumoxide::error::Result;
+    /// # use chromiumoxide::layout::Point;
+    /// # async fn demo(page: Page, from: Point, to: Point) -> Result<()> {
+    ///     page.click_and_drag_with_modifier(from, to, 8).await?;
+    ///     Ok(())
+    /// # }
+    /// ```
+    pub async fn click_and_drag_with_modifier(
+        &self,
+        from: Point,
+        to: Point,
+        modifiers: i64,
+    ) -> Result<&Self> {
+        self.inner.click_and_drag(from, to, modifiers).await?;
+        Ok(self)
+    }
+
     /// Performs a double mouse click event at the point's location with the modifier: Alt=1, Ctrl=2, Meta/Command=4, Shift=8\n(default: 0).
     ///
     /// This scrolls the point into view first, then executes a

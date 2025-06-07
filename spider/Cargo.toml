@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.104"
+version = "2.37.105"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
