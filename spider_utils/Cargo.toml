@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.37.106"
+version = "2.37.107"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Utilities to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider"
@@ -8,8 +8,8 @@ readme = "README.md"
 keywords = ["crawler", "spider"]
 categories = ["web-programming", "command-line-utilities"]
 license = "MIT"
-documentation = "https://docs.rs/spider"
-edition = "2018"
+documentation = "https://docs.rs/spider_utils"
+edition = "2021"
 
 [dependencies]
 indexmap = { version = "1", optional = true }
