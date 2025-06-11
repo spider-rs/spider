@@ -643,19 +643,10 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     emulation_config.dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
     emulation_config.fingerprint = config.fingerprint;
     emulation_config.tier = stealth_mode;
-    emulation_config.user_agent_data = Some(false);
+    emulation_config.user_agent_data = Some(true); // Enable this until experimental is removed from userAgentData page.setUserAgent.
 
     let viewport = if let Some(vp) = &config.viewport {
-        let vp = spider_fingerprint::spoof_viewport::Viewport {
-            width: vp.width,
-            height: vp.height,
-            device_scale_factor: vp.device_scale_factor,
-            emulating_mobile: vp.emulating_mobile,
-            is_landscape: vp.is_landscape,
-            has_touch: vp.has_touch,
-        };
-
-        Some(vp)
+        Some((*vp).into())
     } else {
         None
     };

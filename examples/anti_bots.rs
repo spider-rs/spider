@@ -1,4 +1,4 @@
-//! cargo run --example anti_bots --features="chrome chrome_intercept real_browser spider_utils/transformations"
+//! cargo run --example anti_bots --features="chrome chrome_intercept real_browser"
 
 use spider::configuration::{ChromeEventTracker, Fingerprint};
 use spider::features::chrome_common::{

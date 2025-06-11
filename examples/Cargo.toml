@@ -254,8 +254,3 @@ required-features = ["spider/sync"]
 name = "css_scrape"
 path = "css_scrape.rs"
 required-features = ["spider/sync"]
-
-[[example]]
-name = "transform_markdown"
-path = "transform_markdown.rs"
-required-features = ["spider/sync", "spider_utils/transformations"]

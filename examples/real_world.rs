@@ -1,4 +1,4 @@
-//! cargo run --example real_world --features="chrome chrome_intercept real_browser spider_utils/transformations"
+//! cargo run --example real_world --features="chrome chrome_intercept real_browser"
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
