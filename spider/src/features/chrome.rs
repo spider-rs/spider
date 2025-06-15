@@ -475,23 +475,54 @@ pub async fn launch_browser(
     }
 }
 
-/// configure the browser
+/// configure the browser.
 pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
-    let timezone_id = async {
+    let timezone = configuration.timezone_id.is_some();
+    let locale = configuration.locale.is_some();
+
+    if timezone && locale {
+        let timezone_id = async {
+            if let Some(timezone_id) = configuration.timezone_id.as_deref() {
+                if !timezone_id.is_empty() {
+                    let _ = new_page
+                    .emulate_timezone(
+                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                            timezone_id,
+                        ),
+                    )
+                    .await;
+                }
+            }
+        };
+
+        let locale = async {
+            if let Some(locale) = configuration.locale.as_deref() {
+                if !locale.is_empty() {
+                    let _ = new_page
+                        .emulate_locale(
+                            chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                                locale: Some(locale.into()),
+                            },
+                        )
+                        .await;
+                }
+            }
+        };
+
+        tokio::join!(timezone_id, locale);
+    } else if timezone {
         if let Some(timezone_id) = configuration.timezone_id.as_deref() {
             if !timezone_id.is_empty() {
                 let _ = new_page
-                .emulate_timezone(
-                    chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
-                        timezone_id,
-                    ),
-                )
-                .await;
+                    .emulate_timezone(
+                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                            timezone_id,
+                        ),
+                    )
+                    .await;
             }
         }
-    };
-
-    let locale = async {
+    } else if locale {
         if let Some(locale) = configuration.locale.as_deref() {
             if !locale.is_empty() {
                 let _ = new_page
@@ -503,9 +534,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
                     .await;
             }
         }
-    };
-
-    tokio::join!(timezone_id, locale);
+    }
 }
 
 /// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
@@ -651,11 +680,16 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         None
     };
 
-    let merged_script = spider_fingerprint::emulate(
+    let gpu_profile = spider_fingerprint::profiles::gpu::select_random_gpu_profile(
+        spider_fingerprint::get_agent_os(ua),
+    );
+
+    let merged_script = spider_fingerprint::emulate_with_profile(
         ua,
         &emulation_config,
         &viewport.as_ref(),
         &config.evaluate_on_new_document,
+        &gpu_profile,
     );
 
     let stealth = async {
@@ -665,12 +699,15 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     let _ = tokio::join!(
                         chrome_page.add_script_to_evaluate_on_new_document(merged_script),
                         chrome_page.set_ad_blocking_enabled(true),
-                        chrome_page.set_user_agent(agent.as_str())
+                        chrome_page.set_user_agent(agent.as_str()),
+                        chrome_page.emulate_hardware_concurrency(
+                            gpu_profile.hardware_concurrency.try_into().unwrap_or(8)
+                        ),
                     );
                 } else {
                     let _ = tokio::join!(
                         chrome_page.add_script_to_evaluate_on_new_document(merged_script),
-                        chrome_page.set_user_agent(agent.as_str())
+                        chrome_page.set_user_agent(agent.as_str()),
                     );
                 }
             }
@@ -679,7 +716,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     let _ = tokio::join!(
                         chrome_page.set_user_agent(agent.as_str()),
                         chrome_page.set_ad_blocking_enabled(true),
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script)
+                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
                     );
                 } else {
                     let _ = tokio::join!(
@@ -693,6 +730,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
                     let _ = tokio::join!(
                         chrome_page.add_script_to_evaluate_on_new_document(merged_script),
                         chrome_page.set_ad_blocking_enabled(true),
+                        chrome_page.emulate_hardware_concurrency(
+                            gpu_profile.hardware_concurrency.try_into().unwrap_or(8)
+                        ),
                     );
                 } else {
                     let _ = chrome_page
@@ -704,8 +744,18 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
+    let disable_log = async {
+        if config.disable_log {
+            let _ = chrome_page.disable_log().await;
+        }
+    };
+
     if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
-        tokio::join!(stealth, configure_browser(&chrome_page, &config))
+        tokio::join!(
+            stealth,
+            disable_log,
+            configure_browser(&chrome_page, &config)
+        )
     })
     .await
     {

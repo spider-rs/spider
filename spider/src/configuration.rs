@@ -278,6 +278,9 @@ pub struct Configuration {
     pub referer: Option<String>,
     /// Determine the max bytes per page.
     pub max_page_bytes: Option<f64>,
+    #[cfg(feature = "chrome")]
+    /// Disables log domain, prevents further log entries from being reported to the client. This does nothing without the flag `chrome` enabled.
+    pub disable_log: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
