@@ -6446,6 +6446,12 @@ impl Website {
         self
     }
 
+    /// Automatically setup geo-location configurations when using a proxy. This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_auto_geolocation(&mut self, enabled: bool) -> &mut Self {
+        self.configuration.with_auto_geolocation(enabled);
+        self
+    }
+
     #[cfg(feature = "chrome")]
     /// Set custom fingerprint ID for request. This does nothing without the `chrome` flag enabled.
     pub fn with_fingerprint_advanced(

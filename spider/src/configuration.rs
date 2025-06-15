@@ -281,6 +281,9 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Disables log domain, prevents further log entries from being reported to the client. This does nothing without the flag `chrome` enabled.
     pub disable_log: bool,
+    #[cfg(feature = "chrome")]
+    /// Automatic locale and timezone handling via third party. This does nothing without the flag `chrome` enabled.
+    pub auto_geolocation: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -471,6 +474,7 @@ impl Configuration {
             modify_headers: true,
             service_worker_enabled: true,
             fingerprint: Fingerprint::Basic,
+            auto_geolocation: false,
             ..Default::default()
         }
     }
@@ -959,6 +963,19 @@ impl Configuration {
     #[cfg(not(feature = "chrome"))]
     /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_service_worker_enabled(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    /// Automatically setup geo-location configurations when using a proxy. This method does nothing if the `chrome` feature is not enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_auto_geolocation(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    /// Automatically setup geo-location configurations when using a proxy. This method does nothing if the `chrome` feature is not enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_auto_geolocation(&mut self, enabled: bool) -> &mut Self {
+        self.auto_geolocation = enabled;
         self
     }
 

@@ -5,10 +5,13 @@ use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
 use chromiumoxide::cdp::browser_protocol::{
-    browser::BrowserContextId, network::CookieParam, target::CreateTargetParams,
+    browser::BrowserContextId, emulation::SetGeolocationOverrideParams, network::CookieParam,
+    target::CreateTargetParams,
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
+use chromiumoxide::serde::Deserialize;
+use chromiumoxide::serde_json;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
@@ -475,14 +478,136 @@ pub async fn launch_browser(
     }
 }
 
+/// Represents IP-based geolocation and network metadata.
+#[derive(Debug, Deserialize)]
+pub struct GeoInfo {
+    /// The public IP address detected.
+    pub ip: Option<String>,
+    /// The CIDR network range of the IP.
+    pub network: Option<String>,
+    /// IP version (e.g., "IPv4" or "IPv6").
+    pub version: Option<String>,
+    /// The city associated with the IP.
+    pub city: Option<String>,
+    /// The region (e.g., state or province).
+    pub region: Option<String>,
+    /// Short regional code (e.g., "CA").
+    pub region_code: Option<String>,
+    /// Two-letter country code (e.g., "US").
+    pub country: Option<String>,
+    /// Full country name.
+    pub country_name: Option<String>,
+    /// Same as `country`, often redundant.
+    pub country_code: Option<String>,
+    /// ISO 3166-1 alpha-3 country code (e.g., "USA").
+    pub country_code_iso3: Option<String>,
+    /// Capital of the country.
+    pub country_capital: Option<String>,
+    /// Top-level domain of the country (e.g., ".us").
+    pub country_tld: Option<String>,
+    /// Continent code (e.g., "NA").
+    pub continent_code: Option<String>,
+    /// Whether the country is in the European Union.
+    pub in_eu: Option<bool>,
+    /// Postal or ZIP code.
+    pub postal: Option<String>,
+    /// Approximate latitude of the IP location.
+    pub latitude: Option<f64>,
+    /// Approximate longitude of the IP location.
+    pub longitude: Option<f64>,
+    /// Timezone identifier (e.g., "America/New_York").
+    pub timezone: Option<String>,
+    /// UTC offset string (e.g., "-0400").
+    pub utc_offset: Option<String>,
+    /// Country calling code (e.g., "+1").
+    pub country_calling_code: Option<String>,
+    /// ISO 4217 currency code (e.g., "USD").
+    pub currency: Option<String>,
+    /// Currency name (e.g., "Dollar").
+    pub currency_name: Option<String>,
+    /// Comma-separated preferred language codes.
+    pub languages: Option<String>,
+    /// Country surface area in square kilometers.
+    pub country_area: Option<f64>,
+    /// Approximate country population.
+    pub country_population: Option<u64>,
+    /// ASN (Autonomous System Number) of the IP.
+    pub asn: Option<String>,
+    /// ISP or organization name.
+    pub org: Option<String>,
+}
+
+/// Auto-detect the geo-location.
+pub async fn detect_geo_info(new_page: &Page) -> Option<GeoInfo> {
+    use rand::prelude::IndexedRandom;
+    let apis = [
+        "https://ipapi.co/json",
+        "https://ipinfo.io/json",
+        "https://ipwho.is/",
+    ];
+
+    let url = apis.choose(&mut rand::rng())?;
+
+    new_page.goto(*url).await.ok()?;
+    new_page.wait_for_navigation().await.ok()?;
+
+    let html = new_page.content().await.ok()?;
+
+    let json_start = html.find("<pre>")? + "<pre>".len();
+    let json_end = html.find("</pre>")?;
+    let json = html.get(json_start..json_end)?.trim();
+
+    serde_json::from_str(json).ok()
+}
+
 /// configure the browser.
 pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
-    let timezone = configuration.timezone_id.is_some();
-    let locale = configuration.locale.is_some();
+    let mut timezone = configuration.timezone_id.is_some();
+    let mut locale = configuration.locale.is_some();
+
+    let mut timezone_value = configuration.timezone_id.clone();
+    let mut locale_value = configuration.locale.clone();
+
+    let mut emulate_geolocation = None;
+
+    // get the locale of the proxy.
+    if configuration.auto_geolocation && configuration.proxies.is_some() && !timezone && !locale {
+        if let Some(geo) = detect_geo_info(&new_page).await {
+            if let Some(languages) = geo.languages {
+                if let Some(locale_v) = languages.split(',').next() {
+                    if !locale_v.is_empty() {
+                        locale_value = Some(Box::new(locale_v.into()));
+                    }
+                }
+            }
+
+            if let Some(timezone_v) = geo.timezone {
+                if !timezone_v.is_empty() {
+                    timezone_value = Some(Box::new(timezone_v));
+                }
+            }
+
+            timezone = timezone_value.is_some();
+            locale = locale_value.is_some();
+
+            let mut geo_location_override = SetGeolocationOverrideParams::default();
+
+            geo_location_override.latitude = geo.latitude;
+            geo_location_override.longitude = geo.longitude;
+            geo_location_override.accuracy = Some(0.7);
+
+            emulate_geolocation = Some(geo_location_override);
+        }
+    }
 
     if timezone && locale {
+        let geo = async {
+            if let Some(geolocation) = emulate_geolocation {
+                let _ = new_page.emulate_geolocation(geolocation).await;
+            }
+        };
         let timezone_id = async {
-            if let Some(timezone_id) = configuration.timezone_id.as_deref() {
+            if let Some(timezone_id) = timezone_value.as_deref() {
                 if !timezone_id.is_empty() {
                     let _ = new_page
                     .emulate_timezone(
@@ -496,7 +621,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
         };
 
         let locale = async {
-            if let Some(locale) = configuration.locale.as_deref() {
+            if let Some(locale) = locale_value.as_deref() {
                 if !locale.is_empty() {
                     let _ = new_page
                         .emulate_locale(
@@ -509,9 +634,9 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
             }
         };
 
-        tokio::join!(timezone_id, locale);
+        tokio::join!(timezone_id, locale, geo);
     } else if timezone {
-        if let Some(timezone_id) = configuration.timezone_id.as_deref() {
+        if let Some(timezone_id) = timezone_value.as_deref() {
             if !timezone_id.is_empty() {
                 let _ = new_page
                     .emulate_timezone(
@@ -523,7 +648,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
             }
         }
     } else if locale {
-        if let Some(locale) = configuration.locale.as_deref() {
+        if let Some(locale) = locale_value.as_deref() {
             if !locale.is_empty() {
                 let _ = new_page
                     .emulate_locale(
