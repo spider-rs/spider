@@ -458,7 +458,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.116",
+ "spider 2.37.117",
 ]
 
 [[package]]
@@ -2369,7 +2369,7 @@ dependencies = [
  "http 1.3.1",
  "hyper 1.6.0",
  "hyper-util",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
@@ -3839,7 +3839,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.1.1",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "socket2 0.5.10",
  "thiserror 2.0.12",
  "tokio",
@@ -3859,7 +3859,7 @@ dependencies = [
  "rand 0.9.1",
  "ring",
  "rustc-hash 2.1.1",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.12",
@@ -4125,7 +4125,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "rustls-native-certs",
  "rustls-pki-types",
  "serde",
@@ -4395,9 +4395,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.27"
+version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "730944ca083c1c233a75c09f199e973ca499344a2b7ba9e755c457e86fb4a321"
+checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -4877,9 +4877,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.113"
+version = "2.37.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a78a46bb07c0792228538960efdf72c0e4ac1e58942ff7dca6c2a83a8da0688"
+checksum = "6c2f9aef48d7ef46a108c2fc42a080f7afa495485a14a310bf97095ff3ac2ee1"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4914,7 +4914,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.116"
+version = "2.37.117"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4982,9 +4982,9 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.117"
+version = "2.37.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3588e8e21417d13128b8d171a0564ce5a1f93071e269bccdda6ffa7dccfcda"
+checksum = "8e14c644d91069a7c960c8a10bb524384b55493e5c3f41a44d974a64cbcaed46"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5059,14 +5059,14 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.116"
+version = "2.37.117"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
  "quote",
  "serde_json",
- "spider 2.37.116",
+ "spider 2.37.117",
  "tikv-jemallocator",
 ]
 
@@ -5079,9 +5079,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.116",
+ "spider 2.37.117",
  "spider_transformations",
- "spider_utils 2.37.113",
+ "spider_utils 2.37.116",
 ]
 
 [[package]]
@@ -5169,7 +5169,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.37.113",
+ "spider 2.37.116",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5178,9 +5178,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.113"
+version = "2.37.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05bfaa0c2f01a5a7c82c4a799551c2050e4255ccc552d6908692601caefff1b7"
+checksum = "053de06f4076a84ba76fe47138c01688fc46f5d814eb0c6f5ed3668ddb40c633"
 dependencies = [
  "hashbrown 0.15.4",
  "lazy_static",
@@ -5193,7 +5193,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.116"
+version = "2.37.117"
 dependencies = [
  "hashbrown 0.15.4",
  "indexmap 1.9.3",
@@ -5209,11 +5209,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.116"
+version = "2.37.117"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.116",
+ "spider 2.37.117",
  "warp",
 ]
 
@@ -5273,7 +5273,7 @@ dependencies = [
  "native-tls",
  "once_cell",
  "percent-encoding",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "serde",
  "serde_json",
  "sha2",
@@ -5912,7 +5912,7 @@ version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "tokio",
 ]
 
@@ -6367,7 +6367,7 @@ dependencies = [
  "flate2",
  "log",
  "once_cell",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "rustls-pki-types",
  "serde",
  "serde_json",

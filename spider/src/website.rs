@@ -6175,6 +6175,12 @@ impl Website {
         self
     }
 
+    /// Bypass CSP protection detection. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_csp_bypass(&mut self, enabled: bool) -> &mut Self {
+        self.configuration.with_csp_bypass(enabled);
+        self
+    }
+
     /// Use sqlite to store data and track large crawls. This does nothing without the [disk] flag enabled.
     #[cfg(feature = "disk")]
     pub fn with_sqlite(&mut self, sqlite: bool) -> &mut Self {

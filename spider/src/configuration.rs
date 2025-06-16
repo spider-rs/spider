@@ -284,6 +284,9 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Automatic locale and timezone handling via third party. This does nothing without the flag `chrome` enabled.
     pub auto_geolocation: bool,
+    #[cfg(feature = "chrome")]
+    /// Enables bypassing CSP. This does nothing without the flag `chrome` enabled.
+    pub bypass_csp: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -632,6 +635,19 @@ impl Configuration {
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.subdomains = subdomains;
+        self
+    }
+
+    /// Bypass CSP protection detection. This does nothing without the feat flag `chrome` enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_csp_bypass(&mut self, enabled: bool) -> &mut Self {
+        self.bypass_csp = enabled;
+        self
+    }
+
+    /// Bypass CSP protection detection. This does nothing without the feat flag `chrome` enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_csp_bypass(&mut self, _enabled: bool) -> &mut Self {
         self
     }
 

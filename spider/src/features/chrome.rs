@@ -875,10 +875,17 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
+    let bypass_csp = async {
+        if config.bypass_csp {
+            let _ = chrome_page.set_bypass_csp(true).await;
+        }
+    };
+
     if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
         tokio::join!(
             stealth,
             disable_log,
+            bypass_csp,
             configure_browser(&chrome_page, &config)
         )
     })
