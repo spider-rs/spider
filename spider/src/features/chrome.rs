@@ -875,7 +875,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
-    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
         tokio::join!(
             stealth,
             disable_log,
@@ -884,7 +884,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
     })
     .await
     {
-        log::error!("failed to setup event handlers within 10 seconds.");
+        log::error!("failed to setup event handlers within 15 seconds.");
     }
 }
 

@@ -99,7 +99,22 @@ pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
     "application/x-shockwave-flash",
 };
 
+static VERIFY_PATTERNS: &[&[u8]] = &[
+    b"verifying you are human",
+    b"review the security of your connection",
+    b"please verify you are a human",
+    b"checking your browser before accessing",
+    b"prove you are human",
+    b"checking if the site connection is secure",
+];
+
 lazy_static! {
+    /// Bot verify.
+    static ref AC: AhoCorasick =  aho_corasick::AhoCorasickBuilder::new()
+        .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+        .build(VERIFY_PATTERNS)
+        .unwrap();
+
     /// Scan for error anti-bot pages.
     static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::new([
         "cf-error-code",
@@ -228,6 +243,11 @@ pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
     b == *APACHE_FORBIDDEN || b.starts_with(*OPEN_RESTY_FORBIDDEN)
 }
 
+/// Needs bot verification.
+pub fn contains_verification(text: &Vec<u8>) -> bool {
+    AC.is_match(text)
+}
+
 /// Is cloudflare turnstile page? This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 pub(crate) fn detect_cf_turnstyle(b: &Vec<u8>) -> bool {
@@ -251,13 +271,23 @@ async fn cf_handle(
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let layout_metrics = page.layout_metrics().await?;
         let mut wait_for = CF_WAIT_FOR.clone();
-
         page_wait(&page, &Some(wait_for.clone())).await;
 
+        let _ = page.emulate_viewport(
+            chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams::new(
+                744, 455, 1.0, false,
+            ),
+        )
+        .await;
+
         let _ = page
-            .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
+            .click(chromiumoxide::layout::Point::new(55.22, 277.0))
             .await;
+        // let _ = page
+        //     .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
+        //     .await;
 
         wait_for.page_navigations = true;
 
@@ -276,12 +306,43 @@ async fn cf_handle(
                     Ok(nc) => nc,
                     _ => next_content,
                 }
+            } else if contains_verification(&next_content) {
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_millis(3500),
+                ))
+                .into();
+                page_wait(&page, &Some(wait_for.clone())).await;
+
+                let next_content = match page.outer_html_bytes().await {
+                    Ok(nc) => nc,
+                    _ => next_content,
+                };
+
+                if !detect_cf_turnstyle(&next_content) {
+                    validated = true;
+                    page_wait(&page, &Some(wait_for)).await;
+                    match page.outer_html_bytes().await {
+                        Ok(nc) => nc,
+                        _ => next_content,
+                    }
+                } else {
+                    next_content
+                }
             } else {
                 next_content
             };
 
             *b = next_content;
         }
+
+        let _ = page.emulate_viewport(
+            chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams::new(
+                layout_metrics.css_layout_viewport.client_width, layout_metrics.css_layout_viewport.client_height, 1.0, false,
+            ),
+        )
+        .await;
+
+        Ok::<(), chromiumoxide::error::CdpError>(())
     })
     .await;
 
