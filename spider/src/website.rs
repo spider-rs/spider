@@ -4055,7 +4055,10 @@ impl Website {
     }
 
     /// Start to crawl website concurrently using chrome with the ability to send it across threads for subscriptions.
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    #[cfg_attr(
+        all(feature = "tracing", not(feature = "decentralized")),
+        tracing::instrument(skip_all)
+    )]
     async fn crawl_concurrent_raw_send(
         &self,
         client: &Client,

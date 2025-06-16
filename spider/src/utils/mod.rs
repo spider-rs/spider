@@ -2498,6 +2498,10 @@ pub async fn handle_response_bytes(
         while let Some(item) = stream.next().await {
             match item {
                 Ok(text) => {
+                    if !data.has_remaining_mut() {
+                        break;
+                    }
+
                     if only_html && first_bytes {
                         first_bytes = false;
                         if is_binary_file(&text) {
@@ -2580,6 +2584,10 @@ where
         while let Some(item) = stream.next().await {
             match item {
                 Ok(res_bytes) => {
+                    if !collected_bytes.has_remaining_mut() {
+                        break;
+                    }
+
                     if only_html && first_bytes {
                         first_bytes = false;
                         if is_binary_file(&res_bytes) {
@@ -2739,7 +2747,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(all(feature = "fs", not(feature = "chrome")))]
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
-    use crate::bytes::BufMut;
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -2767,6 +2774,10 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             while let Some(item) = stream.next().await {
                 match item {
                     Ok(text) => {
+                        if !data.has_remaining_mut() {
+                            break;
+                        }
+
                         let wrote_disk = file.is_some();
 
                         // perform operations entire in memory to build resource
@@ -2919,8 +2930,6 @@ pub async fn fetch_page_html(
                         &target_url,
                     );
 
-                    use crate::bytes::BufMut;
-
                     match client.get(target_url).send().await {
                         Ok(res) if valid_parsing_status(&res) => {
                             #[cfg(feature = "headers")]
@@ -2936,6 +2945,9 @@ pub async fn fetch_page_html(
                             while let Some(item) = stream.next().await {
                                 match item {
                                     Ok(text) => {
+                                        if !data.has_remaining_mut() {
+                                            break;
+                                        }
                                         let wrote_disk = file.is_some();
 
                                         // perform operations entire in memory to build resource
@@ -3131,8 +3143,6 @@ pub async fn fetch_page_html_chrome(
                         target_url
                     );
 
-                    use crate::bytes::BufMut;
-
                     match client.get(target_url).send().await {
                         Ok(res) if valid_parsing_status(&res) => {
                             #[cfg(feature = "headers")]
@@ -3147,6 +3157,9 @@ pub async fn fetch_page_html_chrome(
                             while let Some(item) = stream.next().await {
                                 match item {
                                     Ok(text) => {
+                                        if !data.has_remaining_mut() {
+                                            break;
+                                        }
                                         let limit = *MAX_SIZE_BYTES;
 
                                         if limit > 0 && data.len() + text.len() > limit {
