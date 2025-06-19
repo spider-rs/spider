@@ -2515,7 +2515,7 @@ pub async fn handle_response_bytes(
                         break;
                     }
 
-                    data.put(text)
+                    data.extend_from_slice(&text)
                 }
                 Err(e) => {
                     log::error!("{e} in {}", target_url);
@@ -2609,7 +2609,7 @@ where
                         }
                     }
 
-                    collected_bytes.put(res_bytes);
+                    collected_bytes.extend_from_slice(&res_bytes);
                 }
                 Err(e) => {
                     log::error!("{e} in {}", target_url);
@@ -2782,7 +2782,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 
                         // perform operations entire in memory to build resource
                         if !wrote_disk && data.capacity() < 8192 {
-                            data.put(text);
+                            data.extend_from_slice(&text);
                         } else {
                             if !wrote_disk {
                                 file_path = string_concat!(
@@ -2793,18 +2793,18 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                                     Ok(f) => {
                                         let file = file.insert(f);
 
-                                        data.put(text);
+                                        data.extend_from_slice(&text);
 
                                         if let Ok(_) = file.write_all(&data.as_ref()).await {
                                             data.clear();
                                         }
                                     }
-                                    _ => data.put(text),
+                                    _ => data.extend_from_slice(&text),
                                 };
                             } else {
                                 if let Some(f) = file.as_mut() {
                                     if let Err(_) = f.write_all(&text).await {
-                                        data.put(text)
+                                        data.extend_from_slice(&text)
                                     }
                                 }
                             }
@@ -2952,7 +2952,7 @@ pub async fn fetch_page_html(
 
                                         // perform operations entire in memory to build resource
                                         if !wrote_disk && data.capacity() < 8192 {
-                                            data.put(text);
+                                            data.extend_from_slice(&text);
                                         } else {
                                             if !wrote_disk {
                                                 file_path = string_concat!(
@@ -2967,7 +2967,7 @@ pub async fn fetch_page_html(
                                                     Ok(f) => {
                                                         let file = file.insert(f);
 
-                                                        data.put(text);
+                                                        data.extend_from_slice(&text);
 
                                                         if let Ok(_) =
                                                             file.write_all(&data.as_ref()).await
@@ -2975,12 +2975,12 @@ pub async fn fetch_page_html(
                                                             data.clear();
                                                         }
                                                     }
-                                                    _ => data.put(text),
+                                                    _ => data.extend_from_slice(&text),
                                                 };
                                             } else {
                                                 if let Some(f) = file.as_mut() {
                                                     if let Ok(_) = f.write_all(&text).await {
-                                                        data.put(text)
+                                                        data.extend_from_slice(&text)
                                                     }
                                                 }
                                             }
@@ -3165,7 +3165,8 @@ pub async fn fetch_page_html_chrome(
                                         if limit > 0 && data.len() + text.len() > limit {
                                             break;
                                         }
-                                        data.put(text)
+
+                                        data.extend_from_slice(&text)
                                     }
                                     Err(e) => {
                                         log::error!("{e} in {}", target_url);

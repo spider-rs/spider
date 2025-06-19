@@ -193,9 +193,9 @@ checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "async-compression"
-version = "0.4.24"
+version = "0.4.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d615619615a650c571269c00dca41db04b9210037fa76ed8239f70404ab56985"
+checksum = "40f6024f3f856663b45fd0c9b6f2024034a702f453549449e0d84a305900dad4"
 dependencies = [
  "brotli",
  "flate2",
@@ -332,9 +332,9 @@ dependencies = [
 
 [[package]]
 name = "autocfg"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
+checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "aws-lc-rs"
@@ -458,7 +458,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.118",
+ "spider 2.37.119",
 ]
 
 [[package]]
@@ -1450,12 +1450,12 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "errno"
-version = "0.3.12"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
+checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2778,9 +2778,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.173"
+version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8cfeafaffdbc32176b64fb251369d52ea9f0a8fbc6f8759edffef7b525d64bb"
+checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libloading"
@@ -3767,9 +3767,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.121"
+version = "2.1.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "015c19c09d18ceb580930bb9c9490e4c439a4a3d7e0e594f30627ca680c31fb0"
+checksum = "98426d83dcbac622be1c1146e8763ccb4a2fe9bca707dd7446a842e186fa91aa"
 dependencies = [
  "psl-types",
 ]
@@ -3870,9 +3870,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.12"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee4e529991f949c5e25755532370b8af5d114acae52326361d68d47af64aa842"
+checksum = "fcebb1209ee276352ef14ff8732e24cc2b02bbac986cd74a4c81bcb2f9881970"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -3893,9 +3893,9 @@ dependencies = [
 
 [[package]]
 name = "r-efi"
-version = "5.2.0"
+version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74765f6d916ee2faa39bc8e68e4f3ed8949b48cccdac59983d287a7cb71ce9c5"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rancor"
@@ -4877,9 +4877,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.116"
+version = "2.37.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c2f9aef48d7ef46a108c2fc42a080f7afa495485a14a310bf97095ff3ac2ee1"
+checksum = "58b3652be041683395ed96c7207676eb74556f948bd06f7d61430e5e03094de7"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4914,7 +4914,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.118"
+version = "2.37.119"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4982,9 +4982,9 @@ dependencies = [
 
 [[package]]
 name = "spider_chrome"
-version = "2.37.118"
+version = "2.37.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e14c644d91069a7c960c8a10bb524384b55493e5c3f41a44d974a64cbcaed46"
+checksum = "d4f20c459fd034b617591b391e0c754f036d481b88ac5649dff7fef39678192a"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -5059,14 +5059,14 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.118"
+version = "2.37.119"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
  "quote",
  "serde_json",
- "spider 2.37.118",
+ "spider 2.37.119",
  "tikv-jemallocator",
 ]
 
@@ -5079,9 +5079,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.118",
+ "spider 2.37.119",
  "spider_transformations",
- "spider_utils 2.37.116",
+ "spider_utils 2.37.118",
 ]
 
 [[package]]
@@ -5169,7 +5169,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.37.116",
+ "spider 2.37.118",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5178,9 +5178,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.116"
+version = "2.37.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053de06f4076a84ba76fe47138c01688fc46f5d814eb0c6f5ed3668ddb40c633"
+checksum = "97df6fa75e851a2107cc3691924c68ce15f7df2809867ca603f7bcff86758c71"
 dependencies = [
  "hashbrown 0.15.4",
  "lazy_static",
@@ -5193,7 +5193,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.118"
+version = "2.37.119"
 dependencies = [
  "hashbrown 0.15.4",
  "indexmap 1.9.3",
@@ -5209,11 +5209,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.118"
+version = "2.37.119"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.118",
+ "spider 2.37.119",
  "warp",
 ]
 
@@ -6155,9 +6155,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.29"
+version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b1ffbcf9c6f6b99d386e7444eb608ba646ae452a36b39737deb9663b610f662"
+checksum = "81383ab64e72a7a8b8e13130c49e3dab29def6d0c7d76a03087b3cf71c5c6903"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6920,6 +6920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-sys"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
+dependencies = [
+ "windows-targets 0.53.2",
+]
+
+[[package]]
 name = "windows-targets"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7230,18 +7239,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.25"
+version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1702d9583232ddb9174e01bb7c15a2ab8fb1bc6f227aa1233858c351a3ba0cb"
+checksum = "1039dd0d3c310cf05de012d8a39ff557cb0d23087fd44cad61df08fc31907a2f"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.25"
+version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28a6e20d751156648aa063f3800b706ee209a32c0b4d9f24be3d980b01be55ef"
+checksum = "9ecf5b4cc5364572d7f4c329661bcc82724222973f2cab6f050a4e5c22f75181"
 dependencies = [
  "proc-macro2",
  "quote",
