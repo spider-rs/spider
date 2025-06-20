@@ -30,11 +30,23 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Setup Local Web server
+        id: server
         run: |
-          git clone https://github.com/tailwindlabs/tailwindcss.com && cd tailwindcss.com
-          npm i --force && npm run build
-          npm run start & true
+          set +e
+          git clone https://github.com/tailwindlabs/tailwindcss.com || exit 0
+          cd tailwindcss.com || exit 0
+          npm i --force || exit 0
+          npm run build
+          if [ $? -eq 0 ]; then
+            echo "status=ok" >> $GITHUB_OUTPUT
+            npm run start &
+          else
+            echo "Server build failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
+          fi
       - name: Run Benchmark Compare OSS
+        if: steps.server.outputs.status == 'ok'
         run: cargo bench --bench crawl
       - name: Run Benchmark Compare OSS - Features[decentralized]
+        if: steps.server.outputs.status == 'ok'
         run: cargo bench --bench crawl --features decentralized

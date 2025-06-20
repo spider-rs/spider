@@ -10,26 +10,24 @@ pub mod header_utils;
 pub mod interner;
 /// A trie struct.
 pub mod trie;
-
 #[cfg(feature = "balance")]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
-use crate::page::{AntiBotTech, Metadata};
-use crate::{page::STREAMING_CHUNK_SIZE, RelativeSelectors};
+
+use crate::{page::{STREAMING_CHUNK_SIZE, AntiBotTech, Metadata}, RelativeSelectors};
 use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
-use bytes::BufMut;
 use case_insensitive_string::CaseInsensitiveString;
 #[cfg(feature = "chrome")]
 use hashbrown::HashMap;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
-use std::str::FromStr;
-use std::sync::Arc;
 use std::{
+    str::FromStr,
     future::Future,
     time::{Duration, Instant},
+    sync::Arc
 };
 use tokio::sync::Semaphore;
 use url::Url;
@@ -2498,10 +2496,6 @@ pub async fn handle_response_bytes(
         while let Some(item) = stream.next().await {
             match item {
                 Ok(text) => {
-                    if !data.has_remaining_mut() {
-                        break;
-                    }
-
                     if only_html && first_bytes {
                         first_bytes = false;
                         if is_binary_file(&text) {
@@ -2584,10 +2578,6 @@ where
         while let Some(item) = stream.next().await {
             match item {
                 Ok(res_bytes) => {
-                    if !collected_bytes.has_remaining_mut() {
-                        break;
-                    }
-
                     if only_html && first_bytes {
                         first_bytes = false;
                         if is_binary_file(&res_bytes) {
@@ -2774,10 +2764,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             while let Some(item) = stream.next().await {
                 match item {
                     Ok(text) => {
-                        if !data.has_remaining_mut() {
-                            break;
-                        }
-
                         let wrote_disk = file.is_some();
 
                         // perform operations entire in memory to build resource
@@ -2945,9 +2931,6 @@ pub async fn fetch_page_html(
                             while let Some(item) = stream.next().await {
                                 match item {
                                     Ok(text) => {
-                                        if !data.has_remaining_mut() {
-                                            break;
-                                        }
                                         let wrote_disk = file.is_some();
 
                                         // perform operations entire in memory to build resource
@@ -3157,9 +3140,6 @@ pub async fn fetch_page_html_chrome(
                             while let Some(item) = stream.next().await {
                                 match item {
                                     Ok(text) => {
-                                        if !data.has_remaining_mut() {
-                                            break;
-                                        }
                                         let limit = *MAX_SIZE_BYTES;
 
                                         if limit > 0 && data.len() + text.len() > limit {
