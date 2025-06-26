@@ -4,17 +4,20 @@ pub mod abs;
 pub mod connect;
 /// Generic CSS selectors.
 pub mod css_selectors;
+#[cfg(feature = "balance")]
+/// CPU and Memory detection to balance limitations.
+pub mod detect_system;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 /// String interner.
 pub mod interner;
 /// A trie struct.
 pub mod trie;
-#[cfg(feature = "balance")]
-/// CPU and Memory detection to balance limitations.
-pub mod detect_system;
 
-use crate::{page::{STREAMING_CHUNK_SIZE, AntiBotTech, Metadata}, RelativeSelectors};
+use crate::{
+    page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},
+    RelativeSelectors,
+};
 use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
@@ -24,10 +27,10 @@ use hashbrown::HashMap;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
 use std::{
-    str::FromStr,
     future::Future,
+    str::FromStr,
+    sync::Arc,
     time::{Duration, Instant},
-    sync::Arc
 };
 use tokio::sync::Semaphore;
 use url::Url;

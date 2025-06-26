@@ -28,8 +28,6 @@ cargo install spider_cli
 cargo install -F chrome spider_cli
 # with smart mode defaults to HTTP and Headless when needed
 cargo install -F smart spider_cli
-# with full resources not just web pages
-cargo install -F full_resources spider_cli
 ```
 
 ## Cli
@@ -63,6 +61,12 @@ Set a crawl budget and only allow 10 pages matching the /blog/ path and limit al
 
 ```sh
 spider --url https://choosealicense.com --budget "*,100,/blog/,10" crawl -o
+```
+
+Get all the resources for the page.
+
+```sh
+spider --url https://choosealicense.com --full-resources crawl -o
 ```
 
 ```sh

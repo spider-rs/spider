@@ -53,6 +53,7 @@ async fn main() {
         .with_subdomains(cli.subdomains)
         .with_chrome_intercept(RequestInterceptConfiguration::new(cli.block_images))
         .with_danger_accept_invalid_certs(cli.accept_invalid_certs)
+        .with_full_resources(cli.full_resources)
         .with_tld(cli.tld)
         .with_blacklist_url(
             cli.blacklist_url

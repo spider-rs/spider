@@ -51,4 +51,7 @@ pub struct Cli {
     /// Dangerously accept invalid certficates
     #[clap(long)]
     pub accept_invalid_certs: bool,
+    /// Gather all content that relates to the domain like css,jss, and etc.
+    #[clap(long)]
+    pub full_resources: bool,
 }
