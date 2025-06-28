@@ -21,6 +21,9 @@ pub struct Cli {
     /// Allow all tlds for domain.
     #[clap(short, long)]
     pub tld: bool,
+    #[clap(short, long)]
+    /// Return the headers of the page.  Requires the `headers` flag enabled.
+    pub return_headers: bool,
     /// Print page visited on standard output
     #[clap(short, long)]
     pub verbose: bool,

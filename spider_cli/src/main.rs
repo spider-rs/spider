@@ -17,15 +17,40 @@ pub mod options;
 use crate::spider::tokio::io::AsyncWriteExt;
 use clap::Parser;
 use options::{Cli, Commands};
-use serde_json::json;
+
+use serde_json::{json, Value};
+
+use spider::client::header::{HeaderMap, HeaderValue};
 use spider::features::chrome_common::RequestInterceptConfiguration;
 use spider::hashbrown::HashMap;
-use spider::string_concat::string_concat;
-use spider::string_concat::string_concat_impl;
+use spider::page::Page;
+use spider::string_concat::{string_concat, string_concat_impl};
 use spider::tokio;
+use spider::utils::header_utils::header_map_to_hash_map;
 use spider::utils::log;
 use spider::website::Website;
 use std::path::{Path, PathBuf};
+
+/// convert the headers to json
+fn headers_to_json(headers: &Option<HeaderMap<HeaderValue>>) -> Value {
+    if let Some(headers) = &headers {
+        serde_json::to_value(&header_map_to_hash_map(headers)).unwrap_or_default()
+    } else {
+        Value::Null
+    }
+}
+
+/// handle the headers
+#[cfg(feature = "headers")]
+fn handle_headers(res: &Page) -> Value {
+    headers_to_json(&res.headers)
+}
+
+/// handle the headers
+#[cfg(not(feature = "headers"))]
+fn handle_headers(_res: &Page) -> Value {
+    headers_to_json(&None)
+}
 
 #[tokio::main]
 async fn main() {
@@ -84,6 +109,8 @@ async fn main() {
         website.with_external_domains(Some(domains.into_iter()));
     }
 
+    let return_headers = cli.return_headers;
+
     match website
         .build()
     {
@@ -108,7 +135,15 @@ async fn main() {
 
                     if output_links {
                         while let Ok(res) = rx2.recv().await {
-                            let _ = stdout.write_all(string_concat!(res.get_url(), "\n").as_bytes()).await;
+                            if return_headers {
+                                let headers_json = handle_headers(&res);
+
+                                let _ = stdout
+                                    .write_all(format!("{} - {}\n", res.get_url(), headers_json).as_bytes())
+                                    .await;
+                            } else {
+                                let _ = stdout.write_all(string_concat!(res.get_url(), "\n").as_bytes()).await;
+                            }
                         }
                     }
                 }
@@ -198,6 +233,11 @@ async fn main() {
                             "links": match res.page_links {
                                 Some(ref s) => s.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
                                 _ => Default::default()
+                            },
+                            "headers": if return_headers {
+                               handle_headers(&res)
+                            } else {
+                                Default::default()
                             }
                         });
 

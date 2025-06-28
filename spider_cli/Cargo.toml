@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.37.121"
+version = "2.37.124"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -42,6 +42,7 @@ regex = ["spider/regex"]
 chrome_intercept = ["spider/chrome_intercept"]
 chrome = ["spider/chrome"]
 smart = ["spider/smart"]
+headers = ["spider/headers"]
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }
