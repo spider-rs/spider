@@ -1926,7 +1926,7 @@ impl Page {
                     }
                     Event::Text(e) => {
                         if is_link_tag {
-                            if let Ok(v) = e.unescape() {
+                            if let Ok(v) = e.decode() {
                                 push_link_verify(
                                     &base,
                                     &v,
