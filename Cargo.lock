@@ -458,7 +458,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.125",
+ "spider 2.37.126",
 ]
 
 [[package]]
@@ -4944,7 +4944,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.125"
+version = "2.37.126"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5089,14 +5089,14 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.125"
+version = "2.37.126"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
  "quote",
  "serde_json",
- "spider 2.37.125",
+ "spider 2.37.126",
  "tikv-jemallocator",
 ]
 
@@ -5109,7 +5109,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.125",
+ "spider 2.37.126",
  "spider_transformations",
  "spider_utils 2.37.121",
 ]
@@ -5223,7 +5223,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.125"
+version = "2.37.126"
 dependencies = [
  "hashbrown 0.15.4",
  "indexmap 1.9.3",
@@ -5239,11 +5239,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.125"
+version = "2.37.126"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.125",
+ "spider 2.37.126",
  "warp",
 ]
 
@@ -5775,16 +5775,15 @@ dependencies = [
 
 [[package]]
 name = "tiktoken-rs"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44075987ee2486402f0808505dd65692163d243a337fc54363d49afac41087f6"
+checksum = "25563eeba904d770acf527e8b370fe9a5547bacd20ff84a0b6c3bc41288e5625"
 dependencies = [
  "anyhow",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bstr",
  "fancy-regex",
  "lazy_static",
- "parking_lot",
  "regex",
  "rustc-hash 1.1.0",
 ]
