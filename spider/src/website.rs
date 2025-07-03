@@ -6052,12 +6052,11 @@ impl Website {
         use sitemap::reader::{SiteMapEntity, SiteMapReader};
         use sitemap::structs::Location;
 
-        
         if !b.is_empty() && b.starts_with(b"<?xml") {
             let mut stream = tokio_stream::iter(SiteMapReader::new(&*b));
-    
+
             let retry = self.configuration.retry;
-    
+
             while let Some(entity) = stream.next().await {
                 if !self.handle_process(handle, &mut interval, async {}).await {
                     break;
@@ -6066,37 +6065,39 @@ impl Website {
                     SiteMapEntity::Url(url_entry) => match url_entry.loc {
                         Location::Url(url) => {
                             let link: CaseInsensitiveString = url.as_str().into();
-    
+
                             let allowed = self.is_allowed(&link);
-    
+
                             if allowed.eq(&ProcessLinkStatus::Blocked) {
                                 continue;
                             }
-    
+
                             if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
                                 *exceeded_budget = true;
                                 break;
                             }
-    
+
                             self.insert_link(link.clone()).await;
-    
+
                             if crawl {
                                 let client = client.clone();
                                 let tx = tx.clone();
-    
+
                                 crate::utils::spawn_task("page_fetch", async move {
                                     let mut page = Page::new_page(&link.inner(), &client).await;
-    
+
                                     let mut retry_count = retry;
-    
+
                                     while page.should_retry && retry_count > 0 {
                                         if let Some(timeout) = page.get_timeout() {
                                             tokio::time::sleep(timeout).await;
                                         }
-                                        page.clone_from(&Page::new_page(link.inner(), &client).await);
+                                        page.clone_from(
+                                            &Page::new_page(link.inner(), &client).await,
+                                        );
                                         retry_count -= 1;
                                     }
-    
+
                                     if let Ok(permit) = tx.reserve().await {
                                         permit.send(page);
                                     }
@@ -6115,13 +6116,12 @@ impl Website {
                         log::info!("incorrect sitemap error: {:?}", err.msg())
                     }
                 };
-    
+
                 if *exceeded_budget {
                     break;
                 }
             }
         }
-        
     }
 
     /// get base link for crawl establishing.

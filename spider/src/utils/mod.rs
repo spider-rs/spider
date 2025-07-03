@@ -249,7 +249,7 @@ pub fn contains_verification(text: &Vec<u8>) -> bool {
     AC.is_match(text)
 }
 
-/// Is cloudflare turnstile page? This does nothing without the real_browser feature enabled.
+/// Is turnstile page? This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 pub(crate) fn detect_cf_turnstyle(b: &Vec<u8>) -> bool {
     let cf = CF_END.as_ref();
@@ -272,23 +272,11 @@ async fn cf_handle(
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
-        let layout_metrics = page.layout_metrics().await?;
         let mut wait_for = CF_WAIT_FOR.clone();
         page_wait(&page, &Some(wait_for.clone())).await;
 
-        let _ = page.emulate_viewport(
-            chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams::new(
-                744, 455, 1.0, false,
-            ),
-        )
-        .await;
-
-        let _ = page
-            .click(chromiumoxide::layout::Point::new(55.22, 277.0))
-            .await;
-        // let _ = page
-        //     .evaluate(r###"document.querySelectorAll("iframe").forEach(el=>el.click());"###)
-        //     .await;
+        page.click(page.find_element("iframe").await?.clickable_point().await?)
+            .await?;
 
         wait_for.page_navigations = true;
 
@@ -336,13 +324,6 @@ async fn cf_handle(
             *b = next_content;
         }
 
-        let _ = page.emulate_viewport(
-            chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams::new(
-                layout_metrics.css_layout_viewport.client_width, layout_metrics.css_layout_viewport.client_height, 1.0, false,
-            ),
-        )
-        .await;
-
         Ok::<(), chromiumoxide::error::CdpError>(())
     })
     .await;
@@ -353,7 +334,7 @@ async fn cf_handle(
     }
 }
 
-/// Handle cloudflare protected pages via chrome. This does nothing without the real_browser feature enabled.
+/// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
 async fn cf_handle(
     _b: &mut Vec<u8>,
