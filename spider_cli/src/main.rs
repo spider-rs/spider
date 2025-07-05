@@ -52,6 +52,19 @@ fn handle_headers(_res: &Page) -> Value {
     headers_to_json(&None)
 }
 
+/// handle the duration elaspsed to milliseconds.
+#[cfg(feature = "time")]
+fn handle_time(res: &Page, mut json: Value) -> Value {
+    json["duration_elasped_ms"] = json!(res.get_duration_elapsed().as_millis());
+    json
+}
+
+/// handle the duration elaspsed to milliseconds.
+#[cfg(not(feature = "time"))]
+fn handle_time(_res: &Page, mut _json: Value) -> Value {
+    _json
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -240,6 +253,8 @@ async fn main() {
                                 Default::default()
                             }
                         });
+
+                        let page_json = handle_time(&res, page_json);
 
                         match serde_json::to_string_pretty(&page_json) {
                             Ok(j) => {
