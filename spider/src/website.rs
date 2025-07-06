@@ -25,6 +25,7 @@ use async_job::{async_trait, Job, Runner};
 use hashbrown::{HashMap, HashSet};
 use reqwest::header::REFERER;
 use reqwest::StatusCode;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1334,7 +1335,7 @@ impl Website {
         }
     }
 
-    #[cfg(all(not(feature = "rquest"), not(feature = "decentralized")))]
+    #[cfg(all(not(feature = "wreq"), not(feature = "decentralized")))]
     /// Base client configuration.
     fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -1362,10 +1363,23 @@ impl Website {
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(20))
             .http1_title_case_headers()
-            // .set_host(missing_host)
+            .http1_allow_obsolete_multiline_headers_in_responses(true)
+            .http1_allow_spaces_after_header_name_in_responses(true)
             // .http1_preserve_header_order()
             // .http1_preserve_header_case()
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs);
+
+        let client = if let Some(network_interface) = &self.configuration.network_interface {
+            client.interface(&network_interface)
+        } else {
+            client
+        };
+
+        let client = if let Some(local_address) = &self.configuration.local_address {
+            client.local_address(*local_address)
+        } else {
+            client
+        };
 
         let client = if self.configuration.proxies.is_none() {
             client
@@ -1389,7 +1403,7 @@ impl Website {
         crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
 
-    #[cfg(all(feature = "rquest", not(feature = "decentralized")))]
+    #[cfg(all(feature = "wreq", not(feature = "decentralized")))]
     /// Base client configuration.
     fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -1411,6 +1425,12 @@ impl Website {
             .redirect(policy)
             .referer(self.configuration.referer.is_none())
             .connect_timeout(Duration::from_secs(10));
+
+        let client = if let Some(local_address) = &self.configuration.local_address {
+            client.local_address(*local_address)
+        } else {
+            client
+        };
 
         let client = if self.configuration.proxies.is_none() {
             client
@@ -6559,9 +6579,9 @@ impl Website {
         self
     }
 
-    /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
-    #[cfg(feature = "rquest")]
-    pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {
+    /// Set the request emuluation. This method does nothing if the `wreq` flag is not enabled.
+    #[cfg(feature = "wreq")]
+    pub fn with_emulation(&mut self, emulation: Option<wreq_util::Emulation>) -> &mut Self {
         self.configuration.with_emulation(emulation);
         self
     }
@@ -6649,6 +6669,18 @@ impl Website {
     ) -> &mut Self {
         self.configuration
             .with_automation_scripts(automation_scripts);
+        self
+    }
+
+    /// Bind the connections only on the network interface.
+    pub fn with_network_interface(&mut self, network_interface: Option<String>) -> &mut Self {
+        self.configuration.with_network_interface(network_interface);
+        self
+    }
+
+    /// Bind to a local IP Address.
+    pub fn with_local_address(&mut self, local_address: Option<IpAddr>) -> &mut Self {
+        self.configuration.with_local_address(local_address);
         self
     }
 

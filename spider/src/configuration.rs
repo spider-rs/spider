@@ -10,6 +10,7 @@ pub use crate::features::openai_common::GPTConfigs;
 use crate::utils::get_domain_from_url;
 use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
+use std::net::IpAddr;
 use std::time::Duration;
 
 #[cfg(feature = "chrome")]
@@ -176,9 +177,9 @@ pub struct Configuration {
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: Box<String>,
-    #[cfg(feature = "rquest")]
+    #[cfg(feature = "wreq")]
     /// The type of request emulation. This does nothing without the flag `sync` enabled.
-    pub emulation: Option<rquest_util::Emulation>,
+    pub emulation: Option<wreq_util::Emulation>,
     #[cfg(feature = "cron")]
     /// Cron string to perform crawls - use <https://crontab.guru/> to help generate a valid cron for needs.
     pub cron_str: String,
@@ -287,6 +288,10 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Enables bypassing CSP. This does nothing without the flag `chrome` enabled.
     pub bypass_csp: bool,
+    /// Bind the connections only on the network interface.
+    pub network_interface: Option<String>,
+    /// Bind to a local IP Address.
+    pub local_address: Option<IpAddr>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -651,6 +656,18 @@ impl Configuration {
         self
     }
 
+    /// Bind the connections only on the network interface.
+    pub fn with_network_interface(&mut self, network_interface: Option<String>) -> &mut Self {
+        self.network_interface = network_interface;
+        self
+    }
+
+    /// Bind to a local IP Address.
+    pub fn with_local_address(&mut self, local_address: Option<IpAddr>) -> &mut Self {
+        self.local_address = local_address;
+        self
+    }
+
     /// Include tld detection.
     pub fn with_tld(&mut self, tld: bool) -> &mut Self {
         self.tld = tld;
@@ -879,9 +896,9 @@ impl Configuration {
         self
     }
 
-    /// Set the request emuluation. This method does nothing if the `rquest` flag is not enabled.
-    #[cfg(feature = "rquest")]
-    pub fn with_emulation(&mut self, emulation: Option<rquest_util::Emulation>) -> &mut Self {
+    /// Set the request emuluation. This method does nothing if the `wreq` flag is not enabled.
+    #[cfg(feature = "wreq")]
+    pub fn with_emulation(&mut self, emulation: Option<wreq_util::Emulation>) -> &mut Self {
         self.emulation = emulation;
         self
     }

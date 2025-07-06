@@ -46,18 +46,18 @@ use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
 
-#[cfg(not(feature = "rquest"))]
+#[cfg(not(feature = "wreq"))]
 use reqwest::{Response, StatusCode};
-#[cfg(feature = "rquest")]
-use rquest::{Response, StatusCode};
+#[cfg(feature = "wreq")]
+use wreq::{Response, StatusCode};
 
 /// The request error.
-#[cfg(all(not(feature = "cache_request"), not(feature = "rquest")))]
+#[cfg(all(not(feature = "cache_request"), not(feature = "wreq")))]
 pub(crate) type RequestError = reqwest::Error;
 
-/// The request error (for `rquest`).
-#[cfg(all(not(feature = "cache_request"), feature = "rquest"))]
-pub(crate) type RequestError = rquest::Error;
+/// The request error (for `wreq`).
+#[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
+pub(crate) type RequestError = wreq::Error;
 
 /// The request error (for `reqwest_middleware` with caching).
 #[cfg(feature = "cache_request")]

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.129"
+version = "2.37.130"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -83,7 +83,7 @@ h2 = "0.4"
 tower = { version = "0.5", features = ["limit"] }
 pin-project-lite = "0.2"
 sonic-rs = { version = "0.5", optional = true }
-rquest = { version = "5", optional = true, features = [
+wreq = { version = "5", optional = true, features = [
     "json",
     "stream",
     "socks",
@@ -93,7 +93,7 @@ rquest = { version = "5", optional = true, features = [
     "deflate",
     "cookies",
 ] }
-rquest-util = { version = "2", optional = true, features = ["emulation-serde"] }
+wreq-util = { version = "2", optional = true, features = ["emulation-serde"] }
 
 [dependencies.spider_chrome]
 version = "2"
@@ -255,8 +255,8 @@ string_interner_bucket_backend = ["dep:string-interner"]
 page_error_status_details = []
 simd = ["dep:sonic-rs"]
 firewall = ["dep:spider_firewall", "spider_chrome/firewall"]
-rquest = ["dep:rquest", "dep:rquest-util"]
-rquest_hickory_dns = ["rquest/hickory-dns"]
+wreq = ["dep:wreq", "dep:wreq-util"]
+rquest_hickory_dns = ["wreq/hickory-dns"]
 
 # Allows full concurrency.
 cowboy = []
