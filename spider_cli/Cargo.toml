@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.37.128"
+version = "2.37.129"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -36,7 +36,7 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = []
+default = ["status_code"]
 jemalloc = ["tikv-jemallocator"]
 regex = ["spider/regex"]
 chrome_intercept = ["spider/chrome_intercept"]
@@ -44,6 +44,8 @@ chrome = ["spider/chrome"]
 smart = ["spider/smart"]
 headers = ["spider/headers"]
 time = ["spider/time"]
+status_code = []
+remote_addr = ["spider/remote_addr"]
 
 [target.'cfg(all(not(windows), not(target_os = "android"), not(target_env = "musl")))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional = true }

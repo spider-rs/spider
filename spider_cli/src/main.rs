@@ -65,6 +65,32 @@ fn handle_time(_res: &Page, mut _json: Value) -> Value {
     _json
 }
 
+/// handle the HTTP status code.
+#[cfg(feature = "status_code")]
+fn handle_status_code(res: &Page, mut json: Value) -> Value {
+    json["status_code"] = res.status_code.as_u16().into();
+    json
+}
+
+/// handle the HTTP status code.
+#[cfg(not(feature = "status_code"))]
+fn handle_status_code(_res: &Page, mut _json: Value) -> Value {
+    _json
+}
+
+/// handle the remote address.
+#[cfg(feature = "remote_addr")]
+fn handle_remote_address(res: &Page, mut json: Value) -> Value {
+    json["remote_address"] = json!(res.remote_addr);
+    json
+}
+
+/// handle the remote address.
+#[cfg(not(feature = "remote_addr"))]
+fn handle_remote_address(_res: &Page, mut _json: Value) -> Value {
+    _json
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -255,6 +281,8 @@ async fn main() {
                         });
 
                         let page_json = handle_time(&res, page_json);
+                        let page_json = handle_status_code(&res, page_json);
+                        let page_json = handle_remote_address(&res, page_json);
 
                         match serde_json::to_string_pretty(&page_json) {
                             Ok(j) => {
