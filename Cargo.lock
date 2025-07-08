@@ -458,7 +458,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.130",
+ "spider 2.37.132",
 ]
 
 [[package]]
@@ -2409,9 +2409,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
+checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4850,44 +4850,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.127"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0af7e95f62916535976aab74fdf890aa5bcfd00b5b8738c05aba6e1e423eec"
-dependencies = [
- "ahash",
- "aho-corasick",
- "auto_encoder",
- "bytes",
- "case_insensitive_string",
- "h2 0.4.11",
- "hashbrown 0.15.4",
- "lazy_static",
- "libc",
- "log",
- "lol_html",
- "num_cpus",
- "percent-encoding",
- "phf 0.11.3",
- "pin-project-lite",
- "quick-xml",
- "regex",
- "reqwest",
- "serde",
- "serde_regex",
- "smallvec",
- "spider_fingerprint",
- "string-interner",
- "string_concat",
- "strum",
- "tokio",
- "tokio-stream",
- "tower 0.5.2",
- "url",
-]
-
-[[package]]
-name = "spider"
-version = "2.37.130"
+version = "2.37.132"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4951,6 +4914,43 @@ dependencies = [
  "url",
  "wreq",
  "wreq-util",
+]
+
+[[package]]
+name = "spider"
+version = "2.37.132"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "605efcd144ddc592a26fed51eec2f8db2f65ac6a353e0e0fb7e4f82ed0aef66e"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "auto_encoder",
+ "bytes",
+ "case_insensitive_string",
+ "h2 0.4.11",
+ "hashbrown 0.15.4",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.11.3",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_regex",
+ "smallvec",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.2",
+ "url",
 ]
 
 [[package]]
@@ -5030,14 +5030,14 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.130"
+version = "2.37.132"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
  "quote",
  "serde_json",
- "spider 2.37.130",
+ "spider 2.37.132",
  "tikv-jemallocator",
 ]
 
@@ -5050,16 +5050,16 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.130",
+ "spider 2.37.132",
  "spider_transformations",
- "spider_utils 2.37.127",
+ "spider_utils 2.37.130",
 ]
 
 [[package]]
 name = "spider_fingerprint"
-version = "2.37.116"
+version = "2.37.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03b133a3d3e2ccfc3526179af6905e9d3565e63848fc809f1fe3b39555738aff"
+checksum = "82a4f234e6887a3c2c35984ff4c11da440095491dfedced72de26d4839f49207"
 dependencies = [
  "aho-corasick",
  "case_insensitive_string",
@@ -5140,7 +5140,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.37.127",
+ "spider 2.37.132 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5149,9 +5149,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.127"
+version = "2.37.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "438b91af47e4cd3079c27ea227ce1380a9e828e5430f732ea004a6ba92630763"
+checksum = "40e81f8105e5d8ecadd2bc30d16f9b9173f3dcce2e343a2d44fb29603df64c9d"
 dependencies = [
  "hashbrown 0.15.4",
  "lazy_static",
@@ -5164,7 +5164,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.130"
+version = "2.37.132"
 dependencies = [
  "hashbrown 0.15.4",
  "indexmap 1.9.3",
@@ -5180,11 +5180,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.130"
+version = "2.37.132"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.130",
+ "spider 2.37.132",
  "warp",
 ]
 
