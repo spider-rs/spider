@@ -22,13 +22,13 @@ pub type Client = wreq::Client;
 /// The asynchronous Client Builder.
 pub type ClientBuilder = wreq::ClientBuilder;
 #[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
-pub use wreq_util;
-#[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
 pub use wreq as request_client;
 #[cfg(all(feature = "cookies", not(feature = "cache_request"), feature = "wreq"))]
 pub use wreq::cookie;
 #[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
 pub use wreq::{header, redirect, Error, Proxy, Response, StatusCode};
+#[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
+pub use wreq_util;
 
 /// The asynchronous Client to make requests with HTTP Cache.
 #[cfg(feature = "cache_request")]
