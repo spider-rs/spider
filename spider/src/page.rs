@@ -860,7 +860,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         cookies: res.cookies,
         url: url.into(),
         #[cfg(feature = "time")]
-        duration: Some(Instant::now()),
+        duration: res.duration,
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         error_status: get_error_status(&mut should_retry, res.error_for_status),
