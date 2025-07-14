@@ -55,7 +55,7 @@ fn handle_headers(_res: &Page) -> Value {
 /// handle the duration elaspsed to milliseconds.
 #[cfg(feature = "time")]
 fn handle_time(res: &Page, mut json: Value) -> Value {
-    json["duration_elasped_ms"] = json!(res.get_duration_elapsed().as_millis());
+    json["duration_elapsed_ms"] = json!(res.get_duration_elapsed().as_millis());
     json
 }
 

@@ -15,7 +15,6 @@ use chromiumoxide::serde_json;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
-use reqwest::cookie::{CookieStore, Jar};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -25,8 +24,10 @@ lazy_static! {
     static ref LOOP_BACK_PROXY: bool = std::env::var("LOOP_BACK_PROXY").unwrap_or_default() == "true";
 }
 
-/// parse a cookie into a jar
+#[cfg(feature = "cookies")]
+/// Parse a cookie into a jar. This does nothing without the 'cookies' flag.
 pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieParam>, String> {
+    use reqwest::cookie::{CookieStore, Jar};
     let jar = Jar::default();
 
     jar.add_cookie_str(cookie_str, url);
@@ -77,6 +78,12 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
     } else {
         Err("No cookies found".to_string())
     }
+}
+
+/// Parse a cookie into a jar. This does nothing without the 'cookies' flag.
+#[cfg(not(feature = "cookies"))]
+pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieParam>, String> {
+    Ok(Default::default())
 }
 
 /// get chrome configuration
