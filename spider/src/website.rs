@@ -131,6 +131,40 @@ pub fn is_safe_javascript_challenge(page: &Page) -> bool {
     AC_JS_CHALLENGE.find(page).is_some()
 }
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "illumos",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "solaris",
+    target_os = "tvos",
+    target_os = "visionos",
+    target_os = "watchos",
+))]
+/// Bind connections only on the specified network interface.
+fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
+    client.interface(&network_interface)
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "illumos",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "solaris",
+    target_os = "tvos",
+    target_os = "visionos",
+    target_os = "watchos",
+)))]
+/// Bind connections only on the specified network interface.
+fn set_interface(client: ClientBuilder, _interface: &str) -> ClientBuilder {
+    client
+}
+
 lazy_static! {
     static ref AC_JS_CHALLENGE: aho_corasick::AhoCorasick =  aho_corasick::AhoCorasick::new(JS_SAFE_CHALLENGE_PATTERNS).expect("safe challenges");
     /// The default Semaphore limits.
@@ -1370,7 +1404,7 @@ impl Website {
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs);
 
         let client = if let Some(network_interface) = &self.configuration.network_interface {
-            client.interface(&network_interface)
+            set_interface(client, &network_interface)
         } else {
             client
         };
