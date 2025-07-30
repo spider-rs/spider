@@ -10,7 +10,6 @@ use chromiumoxide::cdp::browser_protocol::{
 };
 use chromiumoxide::error::CdpError;
 use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::serde::Deserialize;
 use chromiumoxide::serde_json;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
@@ -486,7 +485,8 @@ pub async fn launch_browser(
 }
 
 /// Represents IP-based geolocation and network metadata.
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GeoInfo {
     /// The public IP address detected.
     pub ip: Option<String>,
@@ -545,6 +545,7 @@ pub struct GeoInfo {
 }
 
 /// Auto-detect the geo-location.
+#[cfg(feature = "serde")]
 pub async fn detect_geo_info(new_page: &Page) -> Option<GeoInfo> {
     use rand::prelude::IndexedRandom;
     let apis = [
@@ -565,6 +566,12 @@ pub async fn detect_geo_info(new_page: &Page) -> Option<GeoInfo> {
     let json = html.get(json_start..json_end)?.trim();
 
     serde_json::from_str(json).ok()
+}
+
+#[cfg(not(feature = "serde"))]
+/// Auto-detect the geo-location.
+pub async fn detect_geo_info(new_page: &Page) -> Option<GeoInfo> {
+    None
 }
 
 /// configure the browser.
