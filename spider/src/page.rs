@@ -1106,6 +1106,12 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
+        let duration = if cfg!(feature = "time") {
+            Some(tokio::time::Instant::now())
+        } else {
+            None
+        };
+
         let mut page_response: PageResponse = match client.get(url).send().await {
             Ok(res)
                 if crate::utils::valid_parsing_status(&res)
@@ -1374,6 +1380,8 @@ impl Page {
                 page_response.metadata = metadata;
             }
         }
+
+        crate::utils::set_page_response_duration(&mut page_response, duration);
 
         build(url, page_response)
     }

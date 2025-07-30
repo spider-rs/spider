@@ -2182,7 +2182,7 @@ pub async fn fetch_page_html_chrome_base(
 
 #[cfg(feature = "time")]
 /// Set the duration of time took for the page.
-fn set_page_response_duration(
+pub(crate) fn set_page_response_duration(
     page_response: &mut PageResponse,
     duration: Option<tokio::time::Instant>,
 ) {
@@ -2191,7 +2191,7 @@ fn set_page_response_duration(
 
 #[cfg(not(feature = "time"))]
 /// Set the duration of time took for the page.
-fn set_page_response_duration(
+pub(crate) fn set_page_response_duration(
     _page_response: &mut PageResponse,
     _duration: Option<tokio::time::Instant>,
 ) {
@@ -2660,22 +2660,11 @@ async fn fetch_page_html_raw_base(
     } else {
         None
     };
-
-    match client.get(target_url).send().await {
-        Ok(res) if valid_parsing_status(&res) => {
-            let mut page_response = handle_response_bytes(res, target_url, only_html).await;
-            set_page_response_duration(&mut page_response, duration);
-            page_response
-        }
-        Ok(res) => {
-            let mut page_response = handle_response_bytes(res, target_url, only_html).await;
-            set_page_response_duration(&mut page_response, duration);
-            page_response
-        }
+    let mut page_response = match client.get(target_url).send().await {
+        Ok(res) => handle_response_bytes(res, target_url, only_html).await,
         Err(err) => {
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
-            set_page_response_duration(&mut page_response, duration);
 
             if let Some(status_code) = err.status() {
                 page_response.status_code = status_code;
@@ -2686,7 +2675,11 @@ async fn fetch_page_html_raw_base(
             page_response.error_for_status = Some(Err(err));
             page_response
         }
-    }
+    };
+
+    set_page_response_duration(&mut page_response, duration);
+
+    page_response
 }
 
 /// Perform a network request to a resource extracting all content streaming.
@@ -3139,7 +3132,13 @@ pub async fn fetch_page_html_chrome(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
 ) -> PageResponse {
-    match &page {
+    let duration = if cfg!(feature = "time") {
+        Some(tokio::time::Instant::now())
+    } else {
+        None
+    };
+
+    let mut page_response = match &page {
         page => {
             match fetch_page_html_chrome_base(
                 &target_url,
@@ -3238,7 +3237,11 @@ pub async fn fetch_page_html_chrome(
                 }
             }
         }
-    }
+    };
+
+    set_page_response_duration(&mut page_response, duration);
+
+    page_response
 }
 
 #[cfg(not(feature = "openai"))]
