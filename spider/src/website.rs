@@ -6380,11 +6380,11 @@ impl Website {
     }
 
     /// Add whitelist urls to allow.
-    pub fn with_whitelist_url<T>(&mut self, blacklist_url: Option<Vec<T>>) -> &mut Self
+    pub fn with_whitelist_url<T>(&mut self, whitelist_url: Option<Vec<T>>) -> &mut Self
     where
         Vec<CompactString>: From<Vec<T>>,
     {
-        self.configuration.with_whitelist_url(blacklist_url);
+        self.configuration.with_whitelist_url(whitelist_url);
         self
     }
 
