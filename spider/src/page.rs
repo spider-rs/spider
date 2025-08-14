@@ -212,9 +212,24 @@ pub struct AIResults {
     pub js_output: String,
     /// The content output returned from the GPT response that is not a browser script, example: extracted data from the markup.
     pub content_output: Vec<String>,
-    /// The base64 image of the page.
+    /// The image of the page.
     pub screenshot_output: Option<Vec<u8>>,
-    /// The error of the occured if any.
+    /// The error that occured if any.
+    pub error: Option<String>,
+}
+
+/// The automation results..
+#[cfg(feature = "chrome")]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AutomationResults {
+    /// The prompt used for the GPT.
+    pub input: String,
+    /// The content output returned from observing the changes.
+    pub content_output: serde_json::Value,
+    /// The base64 image of the page.
+    pub screenshot_output: Option<String>,
+    /// The error that occured if any.
     pub error: Option<String>,
 }
 
@@ -228,9 +243,11 @@ pub struct Metadata {
     pub description: Option<CompactString>,
     /// The Open Graph image URL (`og:image`).
     pub image: Option<CompactString>,
-    // /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
-    // #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    // pub og: Option<Box<OpenGraph>>,
+    #[cfg(feature = "chrome")]
+    /// The web automation metadata:
+    pub automation: Option<Vec<AutomationResults>>, // /// Optional Open Graph metadata (`<meta property="og:*">`) extracted from the page.
+                                                    // #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+                                                    // pub og: Option<Box<OpenGraph>>,
 }
 
 impl Metadata {
@@ -1010,6 +1027,22 @@ pub(crate) fn get_charset_from_content_type(
     None
 }
 
+#[cfg(feature = "chrome")]
+/// Set the metadata found on the page.
+
+pub(crate) fn set_metadata(mdata: &Option<Box<Metadata>>, metadata: &mut Metadata) {
+    if let Some(mdata) = &mdata {
+        if mdata.automation.is_some() {
+            metadata.automation = mdata.automation.clone();
+        }
+    }
+}
+
+/// Set the metadata found on the page.
+
+#[cfg(not(feature = "chrome"))]
+pub(crate) fn set_metadata(_mdata: &Option<Box<Metadata>>, _metadata: &mut Metadata) {}
+
 /// Check if urls are the same without the trailing slashes.
 fn exact_url_match(url: &str, target_url: &str) -> bool {
     let end_target_slash = target_url.ends_with('/');
@@ -1363,8 +1396,10 @@ impl Page {
             }
         };
 
-        let valid_meta =
-            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+        let valid_meta = meta_title.is_some()
+            || meta_description.is_some()
+            || meta_og_image.is_some()
+            || metadata.is_some();
 
         if valid_meta {
             let mut metadata_inner = Metadata::default();
@@ -1372,7 +1407,9 @@ impl Page {
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
 
-            if metadata_inner.exist() {
+            if metadata_inner.exist() && metadata.is_some() {
+                set_metadata(&metadata, &mut metadata_inner);
+
                 metadata.replace(Box::new(metadata_inner));
             }
 
@@ -2288,14 +2325,20 @@ impl Page {
             );
         }
 
-        let valid_meta =
-            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+        let valid_meta = meta_title.is_some()
+            || meta_description.is_some()
+            || meta_og_image.is_some()
+            || self.get_metadata().is_some();
 
         if valid_meta {
             let mut metadata_inner = Metadata::default();
             metadata_inner.title = meta_title;
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
+
+            if metadata_inner.exist() && self.get_metadata().is_some() {
+                set_metadata(self.get_metadata(), &mut metadata_inner);
+            }
 
             if metadata_inner.exist() {
                 metadata.replace(Box::new(metadata_inner));

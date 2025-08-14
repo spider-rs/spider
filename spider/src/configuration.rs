@@ -63,6 +63,8 @@ pub struct ChromeEventTracker {
     pub responses: bool,
     /// Track the requests.
     pub requests: bool,
+    /// Track the changes between web automation.
+    pub automation: bool,
 }
 
 #[cfg(feature = "chrome")]
@@ -72,6 +74,7 @@ impl ChromeEventTracker {
         ChromeEventTracker {
             requests,
             responses,
+            automation: true,
         }
     }
 }

@@ -27,11 +27,14 @@ async fn main() {
             },
         ]),
     );
+    let mut tracker = spider::configuration::ChromeEventTracker::new(true, true);
+    tracker.automation = true;
 
     let mut website: Website = Website::new("https://rsseau.fr/en/blog")
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_limit(1)
+        .with_event_tracker(Some(tracker))
         .with_automation_scripts(Some(automation_scripts))
         .build()
         .unwrap();
@@ -40,7 +43,7 @@ async fn main() {
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {
-            println!("{:?}", page.get_url());
+            println!("{:?} - {:?}", page.get_url(), page.get_metadata());
         }
     });
 

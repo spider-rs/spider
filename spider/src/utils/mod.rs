@@ -1407,6 +1407,7 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
+    let mut metadata: Option<Vec<crate::page::AutomationResults>> = None;
 
     // the base networking timeout to prevent any hard hangs.
     let mut base_timeout = match request_timeout {
@@ -1427,9 +1428,9 @@ pub async fn fetch_page_html_chrome_base(
         (None, None)
     };
 
-    let (track_requests, track_responses) = match track_events {
-        Some(tracker) => (tracker.requests, tracker.responses),
-        _ => (false, false),
+    let (track_requests, track_responses, track_automation) = match track_events {
+        Some(tracker) => (tracker.requests, tracker.responses, tracker.automation),
+        _ => (false, false, false),
     };
 
     let (event_loading_listener, cancel_listener, received_listener, event_sent_listener) = tokio::join!(
@@ -1821,18 +1822,37 @@ pub async fn fetch_page_html_chrome_base(
                 };
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
-                    tokio::join!(
-                        crate::features::chrome_common::eval_execution_scripts(
-                            &page,
-                            &target_url,
-                            &execution_scripts
-                        ),
-                        crate::features::chrome_common::eval_automation_scripts(
-                            &page,
-                            &target_url,
-                            &automation_scripts
-                        )
-                    );
+                    let mut _metadata = Vec::new();
+
+                    if track_automation {
+                        tokio::join!(
+                            crate::features::chrome_common::eval_execution_scripts(
+                                &page,
+                                &target_url,
+                                &execution_scripts
+                            ),
+                            crate::features::chrome_common::eval_automation_scripts_tracking(
+                                &page,
+                                &target_url,
+                                &automation_scripts,
+                                &mut _metadata
+                            )
+                        );
+                        metadata = Some(_metadata);
+                    } else {
+                        tokio::join!(
+                            crate::features::chrome_common::eval_execution_scripts(
+                                &page,
+                                &target_url,
+                                &execution_scripts
+                            ),
+                            crate::features::chrome_common::eval_automation_scripts(
+                                &page,
+                                &target_url,
+                                &automation_scripts
+                            )
+                        );
+                    }
                 })
                 .await
                 {
@@ -1945,6 +1965,12 @@ pub async fn fetch_page_html_chrome_base(
                     perform_screenshot(source, page, screenshot, &mut page_response),
                 )
                 .await;
+            }
+
+            if metadata.is_some() {
+                let mut default_metadata = Metadata::default();
+                default_metadata.automation = metadata;
+                page_response.metadata = Some(Box::new(default_metadata));
             }
 
             page_response
@@ -2175,6 +2201,7 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     page_response.anti_bot_tech = anti_bot_tech;
+
     set_page_response_duration(&mut page_response, duration);
 
     Ok(page_response)
@@ -2342,8 +2369,8 @@ pub async fn perform_screenshot(
             }
 
             match page.execute(cdp_params).await {
-                Ok(b) => match STANDARD.decode(&b.data) {
-                    Ok(b) => {
+                Ok(b) => {
+                    if let Ok(b) = STANDARD.decode(&b.data) {
                         if ss.save {
                             let output_path = create_output_path(
                                 &ss.output_dir.clone().unwrap_or_else(|| "./storage/".into()),
@@ -2357,8 +2384,7 @@ pub async fn perform_screenshot(
                             page_response.screenshot_bytes = Some(b);
                         }
                     }
-                    _ => (),
-                },
+                }
                 Err(e) => {
                     log::error!("failed to take screenshot: {:?} - {:?}", e, target_url)
                 }
