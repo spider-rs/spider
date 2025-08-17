@@ -1076,7 +1076,7 @@ pub(crate) fn metadata_handlers<'h>(
     lol_html::send::ElementContentHandlers<'h>,
 )> {
     vec![
-        lol_html::text!("title", |el| {
+        lol_html::text!("head title", |el| {
             let t = el.as_str();
             if !t.is_empty() {
                 *meta_title = Some(t.into());
