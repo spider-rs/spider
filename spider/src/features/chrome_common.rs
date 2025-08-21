@@ -622,7 +622,6 @@ pub(crate) fn generate_wait_for_dom_js_code_with_selector_base(
 
 #[cfg(feature = "chrome")]
 const CLICKABLE_SELECTOR: &str = concat!(
-    "a[href],",
     "button:not([disabled]),",
     "input[type='button']:not([disabled]),",
     "input[type='submit']:not([disabled]),",
@@ -634,11 +633,10 @@ const CLICKABLE_SELECTOR: &str = concat!(
     "select:not([disabled]),",
     "textarea:not([disabled]),",
     "[role='button']:not([aria-disabled='true']),",
-    "[role='link']:not([aria-disabled='true']),",
     "[onclick],",
     "[contenteditable=''],[contenteditable='true'],",
     // focusables as a last resort
-    "[tabindex]:not([tabindex^='-'])"
+    "[tabindex]:not([tabindex^='-'],a[href])"
 );
 
 impl WebAutomation {
