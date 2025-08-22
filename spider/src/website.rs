@@ -4087,7 +4087,6 @@ impl Website {
                                     }
                                 }
 
-                                self.subscription_guard().await;
                                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
                                 if links.is_empty() && set.is_empty() {
@@ -4095,6 +4094,7 @@ impl Website {
                                 }
                             }
 
+                            self.subscription_guard().await;
                             b.dispose();
                         }
                     }
@@ -4734,7 +4734,6 @@ impl Website {
                                     }
                                 }
 
-                                website.subscription_guard().await;
                                 website
                                     .dequeue(&mut q, &mut links, &mut exceeded_budget)
                                     .await;
@@ -4744,6 +4743,7 @@ impl Website {
                                 }
                             }
 
+                            website.subscription_guard().await;
                             b.dispose();
                             website
                         }
