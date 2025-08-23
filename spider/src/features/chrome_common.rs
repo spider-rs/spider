@@ -464,7 +464,7 @@ impl From<AuthChallengeResponse>
 }
 
 /// Represents various web automation actions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum WebAutomation {
     /// Runs custom JavaScript code.
@@ -473,6 +473,13 @@ pub enum WebAutomation {
     Click(String),
     /// Clicks on all elements.
     ClickAll(String),
+    /// Clicks at the position x and y coordinates.
+    ClickPoint {
+        /// The horizontal (X) coordinate.
+        x: f64,
+        /// The vertical (Y) coordinate.
+        y: f64,
+    },
     /// Clicks on all elements.
     ClickAllClickable(),
     /// Waits for a fixed duration in milliseconds.
@@ -532,6 +539,7 @@ impl WebAutomation {
             Click(_) => "Click",
             ClickAll(_) => "ClickAll",
             ClickAllClickable() => "ClickAllClickable",
+            ClickPoint { .. } => "ClickPoint",
             Wait(_) => "Wait",
             WaitForNavigation => "WaitForNavigation",
             WaitForDom { .. } => "WaitForDom",
@@ -557,6 +565,9 @@ impl WebAutomation {
             ClickAllClickable() => "ClickAllClickable".into(),
             Wait(ms) => format!("Wait {}ms", ms),
             WaitForNavigation => "WaitForNavigation".into(),
+            ClickPoint { x, y } => {
+                format!("ClickPoint x:{} y:{}", x, y)
+            }
             WaitForDom { selector, timeout } => selector
                 .as_ref()
                 .map(|s| format!("WaitForDom {} ({}ms)", s, timeout))
@@ -678,6 +689,12 @@ impl WebAutomation {
                         valid = ele.click().await.is_ok();
                     }
                 }
+            }
+            WebAutomation::ClickPoint { x, y } => {
+                valid = page
+                    .click(chromiumoxide::layout::Point { x: *x, y: *y })
+                    .await
+                    .is_ok();
             }
             WebAutomation::WaitForDom { selector, timeout } => {
                 valid = page
