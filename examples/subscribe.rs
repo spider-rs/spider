@@ -22,6 +22,7 @@ async fn main() {
     });
 
     let start = std::time::Instant::now();
+
     website.crawl().await;
     website.unsubscribe();
     let duration = start.elapsed();

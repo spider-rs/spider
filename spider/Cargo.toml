@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.153"
+version = "2.37.155"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -154,7 +154,8 @@ __basic = [
     "encoding",
     "string_interner_buffer_backend",
     "balance",
-    "real_browser"
+    "real_browser",
+    "disk_native_tls"
 ]
 basic_tls = [
     "reqwest_native_tls_native_roots",

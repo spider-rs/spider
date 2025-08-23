@@ -80,63 +80,85 @@ impl DatabaseHandler {
         self.seeded
     }
 
-    /// Get or initialize the database pool
-    pub async fn get_db_pool(&self) -> &SqlitePool {
-        self.pool
-            .get_or_init(|| async {
-                let db_path = get_db_path(&self.crawl_id);
-                let direct = db_path.starts_with("sqlite://");
+    /// Set the seeded state
+    pub fn set_seeded(&mut self, seeded: bool) {
+        self.seeded = seeded;
+    }
 
-                // not a shared sqlite db.
-                if direct {
-                    create_file_and_directory(&db_path[9..]).await;
-                } else {
-                    create_file_and_directory(&db_path).await;
-                }
+    /// Set the persist state
+    pub fn set_persisted(&mut self, persist: bool) {
+        self.persist = persist;
+    }
 
-                let db_url = if direct {
-                    db_path
-                } else {
-                    format!("sqlite://{}", db_path)
-                };
+    /// Generate a sqlite pool.
+    pub async fn generate_pool(&self) -> SqlitePool {
+        let db_path = get_db_path(&self.crawl_id);
+        let direct = db_path.starts_with("sqlite://");
 
-                let pool =
-                    SqlitePool::connect_lazy(&db_url).expect("Failed to connect to the database");
+        // not a shared sqlite db.
+        if direct {
+            create_file_and_directory(&db_path[9..]).await;
+        } else {
+            create_file_and_directory(&db_path).await;
+        }
 
-                let create_resources_table = sqlx::query(
-                    r#"CREATE TABLE IF NOT EXISTS resources (
+        let db_url = if direct {
+            db_path
+        } else {
+            format!("sqlite://{}", db_path)
+        };
+
+        let pool = SqlitePool::connect_lazy(&db_url).expect("Failed to connect to the database");
+
+        let create_resources_table = sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS resources (
                             id INTEGER PRIMARY KEY,
                             url TEXT NOT NULL COLLATE NOCASE
                         );
                         CREATE INDEX IF NOT EXISTS idx_url ON resources (url COLLATE NOCASE);"#,
-                )
-                .execute(&pool);
+        )
+        .execute(&pool);
 
-                let create_signatures_table = sqlx::query(
-                    r#"CREATE TABLE IF NOT EXISTS signatures (
+        let create_signatures_table = sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS signatures (
                             id INTEGER PRIMARY KEY,
                             url INTEGER NOT NULL
                         );
                         CREATE INDEX IF NOT EXISTS idx_url ON signatures (url);"#,
-                )
-                .execute(&pool);
+        )
+        .execute(&pool);
 
-                // Run the queries concurrently
-                let (resources_result, signatures_result) =
-                    tokio::join!(create_resources_table, create_signatures_table);
+        // Run the queries concurrently
+        let (resources_result, signatures_result) =
+            tokio::join!(create_resources_table, create_signatures_table);
 
-                // Handle possible errors
-                if let Err(e) = resources_result {
-                    log::warn!("SQLite error creating resources table: {:?}", e);
-                }
+        // Handle possible errors
+        if let Err(e) = resources_result {
+            log::warn!("SQLite error creating resources table: {:?}", e);
+        }
 
-                if let Err(e) = signatures_result {
-                    log::warn!("SQLite error creating signatures table: {:?}", e);
-                }
+        if let Err(e) = signatures_result {
+            log::warn!("SQLite error creating signatures table: {:?}", e);
+        }
 
-                pool
-            })
-            .await
+        pool
+    }
+
+    /// Get or initialize the database pool
+    pub async fn initlaize_pool(&self) {
+        if !self.pool_inited() {
+            let _ = self.pool.set(self.generate_pool().await);
+        }
+    }
+
+    /// Set the pool directly.
+    pub async fn set_pool(&self, pool: SqlitePool) {
+        let _ = self.pool.set(pool);
+    }
+
+    /// Get or initialize the database pool
+    pub async fn get_db_pool(&self) -> &SqlitePool {
+        self.pool.get_or_init(|| self.generate_pool()).await
     }
 
     /// Check if a URL exists (ignore case)
@@ -364,7 +386,11 @@ async fn create_file_and_directory(file_path: &str) {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
 
-    let _ = tokio::fs::File::create(path).await;
+    if let Ok(exist) = tokio::fs::try_exists(path).await {
+        if !exist {
+            let _ = tokio::fs::File::create(path).await;
+        }
+    }
 }
 
 #[cfg(test)]

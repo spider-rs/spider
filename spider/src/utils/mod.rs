@@ -22,6 +22,8 @@ use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
 use case_insensitive_string::CaseInsensitiveString;
+use hashbrown::HashSet;
+
 #[cfg(feature = "chrome")]
 use hashbrown::HashMap;
 use lol_html::{send::HtmlRewriter, OutputSink};
@@ -4422,6 +4424,26 @@ impl OutputSink for HtmlOutputSink {
     }
 }
 
+/// Consumes `set` and returns (left, right), where `left` are items matching `pred`.
+pub fn split_hashset_round_robin<T>(mut set: HashSet<T>, parts: usize) -> Vec<HashSet<T>>
+where
+    T: Eq + std::hash::Hash,
+{
+    if parts <= 1 {
+        return vec![set];
+    }
+    let len = set.len();
+    let mut buckets: Vec<HashSet<T>> = (0..parts)
+        .map(|_| HashSet::with_capacity(len / parts + 1))
+        .collect();
+
+    let mut i = 0usize;
+    for v in set.drain() {
+        buckets[i % parts].insert(v);
+        i += 1;
+    }
+    buckets
+}
 /// Emit a log info event.
 #[cfg(feature = "tracing")]
 pub fn emit_log(link: &str) {

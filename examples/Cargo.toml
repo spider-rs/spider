@@ -143,6 +143,11 @@ path = "chrome_remote.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
+name = "concurrent_profiles"
+path = "concurrent_profiles.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/disk"]
+
+[[example]]
 name = "anti_bots"
 path = "anti_bots.rs"
 required-features = ["spider/sync", "spider/chrome"]

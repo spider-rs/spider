@@ -233,6 +233,8 @@ pub struct Configuration {
     pub concurrency_limit: Option<usize>,
     /// Normalize the html de-deplucating the content.
     pub normalize: bool,
+    /// Share the state of the crawl requires the 'disk' feature flag.
+    pub shared: bool,
     /// Modify the headers to act like a real-browser
     pub modify_headers: bool,
     /// Cache the page following HTTP caching rules.
@@ -1299,6 +1301,19 @@ impl Configuration {
     /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated. This may initially show the link in your links_visited or subscription calls but, the following links will not be crawled.
     pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
         self.normalize = normalize;
+        self
+    }
+
+    #[cfg(not(feature = "disk"))]
+    /// Store all the links found on the disk to share the state. This does nothing without the `disk` flag enabled.
+    pub fn with_shared_state(&mut self, _shared: bool) -> &mut Self {
+        self
+    }
+
+    /// Store all the links found on the disk to share the state. This does nothing without the `disk` flag enabled.
+    #[cfg(feature = "disk")]
+    pub fn with_shared_state(&mut self, shared: bool) -> &mut Self {
+        self.shared = shared;
         self
     }
 

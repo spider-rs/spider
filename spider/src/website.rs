@@ -379,6 +379,8 @@ pub struct Website {
     send_configured: bool,
     /// The website requires javascript to load. This will be sent as a hint when http request.
     website_meta_info: WebsiteMetaInfo,
+    /// Skip the initial link?
+    skip_initial: bool,
 }
 
 impl Website {
@@ -421,10 +423,24 @@ impl Website {
         Website::_new(url, check_firewall)
     }
 
+    /// Setup a shared database.
+    #[cfg(feature = "disk")]
+    pub fn setup_database_handler(&self) -> Box<DatabaseHandler> {
+        Box::new(DatabaseHandler::new(&Some(self.target_id())))
+    }
+
+    #[cfg(feature = "disk")]
+    /// Setup the sqlist usage.
+    pub fn setup_shared_db(&mut self, db: Box<DatabaseHandler>) {
+        self.sqlite = Some(db)
+    }
+
     #[cfg(feature = "disk")]
     /// Setup the sqlist usage.
     pub fn setup_sqlite(&mut self) {
-        self.sqlite = Some(Box::new(DatabaseHandler::new(&Some(self.target_id()))))
+        if self.sqlite.is_none() {
+            self.sqlite = Some(self.setup_database_handler())
+        }
     }
 
     /// Set the url of the website to re-use configuration and data.
@@ -471,13 +487,29 @@ impl Website {
     /// Setup SQLite. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub fn setup_disk(&mut self) {
-        if self.enable_sqlite {
-            if self.sqlite.is_none() {
-                let db_handler = Box::new(DatabaseHandler::new(&Some(self.target_id())));
-
-                self.sqlite = Some(db_handler);
+        if self.enable_sqlite && self.sqlite.is_none() {
+            self.setup_sqlite();
+        }
+        // run full on sqlite.
+        if self.configuration.shared {
+            if let Some(sqlite) = self.sqlite.as_mut() {
+                sqlite.seeded = true;
+                // sqlite.persist = true;
             }
         }
+    }
+
+    #[cfg(feature = "disk")]
+    /// Set the sqlite disk persistance.
+    pub fn set_disk_persistance(&mut self, persist: bool) -> &mut Self {
+        if self.enable_sqlite {
+            if !self.sqlite.is_none() {
+                if let Some(sqlite) = self.sqlite.as_mut() {
+                    sqlite.persist = persist;
+                }
+            }
+        }
+        self
     }
 
     /// Setup SQLite. This does nothing with `disk` flag enabled.
@@ -508,8 +540,11 @@ impl Website {
                     true
                 } else {
                     let db_pool = sqlite.get_db_pool().await;
+                    let allowed = sqlite.url_exists(db_pool, url_to_check).await;
 
-                    !sqlite.url_exists(db_pool, url_to_check).await
+                    // println!("ALLOWED: {:?} - {:?}", !allowed, url_to_check);
+
+                    !allowed
                 }
             }
             _ => true,
@@ -552,7 +587,7 @@ impl Website {
 
     /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn clear_disk(&self) {
+    pub async fn clear_disk(&self) {
         if let Some(sqlite) = &self.sqlite {
             if sqlite.pool_inited() {
                 let _ = DatabaseHandler::clear_table(sqlite.get_db_pool().await).await;
@@ -562,7 +597,19 @@ impl Website {
 
     /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn clear_disk(&self) {}
+    pub async fn clear_disk(&self) {}
+
+    /// Check if the disk is enabled. This does nothing with `disk` flag enabled.
+    #[cfg(not(feature = "disk"))]
+    pub(crate) fn shared_disk_enabled(&self) -> bool {
+        self.configuration.shared && self.sqlite.is_some()
+    }
+
+    /// Check if the disk is enabled. This does nothing with `disk` flag enabled.
+    #[cfg(feature = "disk")]
+    pub(crate) fn shared_disk_enabled(&self) -> bool {
+        self.configuration.shared && self.sqlite.is_some()
+    }
 
     /// Insert a new URL to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
@@ -590,14 +637,19 @@ impl Website {
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
         if seed_check {
+            let mut seeded = false;
             if let Some(sqlite) = &self.sqlite {
                 if !sqlite.ready() {
                     let _ = self.seed().await;
+                    seeded = true;
                 }
+            }
+            if let Some(sqlite) = self.sqlite.as_mut() {
+                sqlite.set_seeded(seeded);
             }
         }
 
-        if mem_load == 2 || beyond_memory_limits {
+        if mem_load == 2 || beyond_memory_limits || self.shared_disk_enabled() {
             self.insert_url_disk(&new_url).await
         } else if mem_load == 1 {
             if self.links_visited.len() <= 100 {
@@ -624,14 +676,19 @@ impl Website {
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
         if seed_check {
+            let mut seeded = false;
             if let Some(sqlite) = &self.sqlite {
                 if !sqlite.ready() {
                     let _ = self.seed().await;
+                    seeded = true;
                 }
+            }
+            if let Some(sqlite) = self.sqlite.as_mut() {
+                sqlite.set_seeded(seeded);
             }
         }
 
-        if mem_load == 2 || beyond_memory_limits {
+        if mem_load == 2 || beyond_memory_limits || self.shared_disk_enabled() {
             self.insert_signature_disk(new_signature).await
         } else if mem_load == 1 {
             if self.signatures.len() <= 100 {
@@ -1103,7 +1160,7 @@ impl Website {
         self.clear_disk().await;
     }
 
-    /// Clear all pages and links stored.
+    /// Clear all pages and links stored in memory.
     pub fn clear(&mut self) {
         self.links_visited.clear();
         self.signatures.clear();
@@ -1915,6 +1972,8 @@ impl Website {
         let setup = self.setup_base();
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
+        } else {
+            self.skip_initial = !self.extra_links.is_empty();
         }
         self.configure_robots_parser(&setup.0).await;
         setup
@@ -1956,6 +2015,11 @@ impl Website {
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
+
+        if self.skip_initial {
+            return Default::default();
+        }
+
         if self
             .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -2080,7 +2144,9 @@ impl Website {
             .await;
 
             if self.configuration.return_page_links {
-                page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                page.page_links = links_pages
+                    .filter(|pages: &HashSet<CaseInsensitiveString>| !pages.is_empty())
+                    .map(Box::new);
             }
 
             links.extend(links_ssg);
@@ -2136,6 +2202,10 @@ impl Website {
         _: bool,
         chrome_page: &chromiumoxide::Page,
     ) -> HashSet<CaseInsensitiveString> {
+        if self.skip_initial {
+            return Default::default();
+        }
+
         if self
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -2648,6 +2718,9 @@ impl Website {
         _: bool,
         page: &chromiumoxide::Page,
     ) -> HashSet<CaseInsensitiveString> {
+        if self.skip_initial {
+            return Default::default();
+        }
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let expanded = self.get_expanded_links(&self.url.inner().as_str());
         self.configuration.configure_allowlist();
@@ -2719,6 +2792,9 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
+        if self.skip_initial {
+            return Default::default();
+        }
         use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.url.inner();
@@ -2898,6 +2974,11 @@ impl Website {
         browser: &crate::features::chrome::OnceBrowser,
     ) -> HashSet<CaseInsensitiveString> {
         use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
+
+        if self.skip_initial {
+            return Default::default();
+        }
+
         let links: HashSet<CaseInsensitiveString> = if self
             .is_allowed_default(&self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
@@ -3604,6 +3685,9 @@ impl Website {
                                 set.shutdown().await;
                                 semaphore.add_permits(permits);
                             }).await {
+                                while let Some(links) = stream.next().await {
+                                    self.extra_links.insert(links);
+                                }
                                 break 'outer;
                             }
                             let allowed = self.is_allowed(&link);
@@ -3754,7 +3838,14 @@ impl Website {
                     if links.is_empty() && set.is_empty() || exceeded_budget {
                         // await for all tasks to complete.
                         if exceeded_budget {
-                            while set.join_next().await.is_some() {}
+                            while let Some(links) = stream.next().await {
+                                self.extra_links.insert(links);
+                            }
+                            while let Some(links) = set.join_next().await {
+                                if let Ok(links) = links {
+                                    self.extra_links.extend(links.0);
+                                }
+                            }
                         }
                         break 'outer;
                     }
@@ -3766,6 +3857,11 @@ impl Website {
                 if links.is_empty() && set.is_empty() {
                     break;
                 }
+            }
+
+            // store the extra links.
+            if !links.is_empty() {
+                self.extra_links.extend(links);
             }
         }
     }
@@ -4096,6 +4192,10 @@ impl Website {
 
                             self.subscription_guard().await;
                             b.dispose();
+                            // store the extra links.
+                            if !links.is_empty() {
+                                self.extra_links.extend(links);
+                            }
                         }
                     }
                     Err(err) => {
@@ -4745,6 +4845,7 @@ impl Website {
 
                             website.subscription_guard().await;
                             b.dispose();
+
                             website
                         }
                     }
@@ -4942,6 +5043,10 @@ impl Website {
             if links.is_empty() || exceeded_budget {
                 break;
             }
+        }
+
+        if !links.is_empty() {
+            self.extra_links.extend(links);
         }
     }
 
@@ -5203,6 +5308,10 @@ impl Website {
                 if links.is_empty() && set.is_empty() {
                     break;
                 }
+            }
+
+            if !links.is_empty() {
+                self.extra_links.extend(links);
             }
         }
     }
@@ -6243,14 +6352,14 @@ impl Website {
         self
     }
 
-    /// Use sqlite to store data and track large crawls. This does nothing without the [disk] flag enabled.
+    /// Use sqlite to store data and track large crawls. This does nothing without the `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub fn with_sqlite(&mut self, sqlite: bool) -> &mut Self {
         if sqlite {
             self.enable_sqlite = true;
         } else {
             self.enable_sqlite = false;
-            self.sqlite = None
+            self.sqlite = None;
         };
         self
     }
@@ -6730,6 +6839,11 @@ impl Website {
         self
     }
 
+    /// Store all the links found on the disk to share the state. This does nothing without the `disk` flag enabled.
+    pub fn with_shared_state(&mut self, shared: bool) -> &mut Self {
+        self.configuration.with_shared_state(shared);
+        self
+    }
     /// Set the max amount of bytes to collect per page. Only used for chrome atm.
     pub fn with_max_page_bytes(&mut self, max_page_bytes: Option<f64>) -> &mut Self {
         self.configuration.with_max_page_bytes(max_page_bytes);
