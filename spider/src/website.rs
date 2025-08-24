@@ -542,8 +542,6 @@ impl Website {
                     let db_pool = sqlite.get_db_pool().await;
                     let allowed = sqlite.url_exists(db_pool, url_to_check).await;
 
-                    // println!("ALLOWED: {:?} - {:?}", !allowed, url_to_check);
-
                     !allowed
                 }
             }
@@ -1151,6 +1149,11 @@ impl Website {
         extra_links: HashSet<CaseInsensitiveString>,
     ) -> &HashSet<CaseInsensitiveString> {
         self.extra_links.extend(extra_links);
+        &self.extra_links
+    }
+
+    /// Get the extra links.
+    pub fn get_extra_links(&self) -> &HashSet<CaseInsensitiveString> {
         &self.extra_links
     }
 
