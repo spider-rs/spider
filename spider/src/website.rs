@@ -369,11 +369,11 @@ pub struct Website {
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
-    #[cfg(feature = "disk")]
     /// The disk handler to use.
-    sqlite: Option<Box<DatabaseHandler>>,
     #[cfg(feature = "disk")]
+    sqlite: Option<Box<DatabaseHandler>>,
     /// Configure sqlite on start
+    #[cfg(feature = "disk")]
     enable_sqlite: bool,
     /// Was the setup already configured for sync sendable thread use?
     send_configured: bool,
@@ -600,7 +600,7 @@ impl Website {
     /// Check if the disk is enabled. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     pub(crate) fn shared_disk_enabled(&self) -> bool {
-        self.configuration.shared && self.sqlite.is_some()
+        false
     }
 
     /// Check if the disk is enabled. This does nothing with `disk` flag enabled.

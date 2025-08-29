@@ -515,6 +515,13 @@ pub enum WebAutomation {
         ///  The value to fill the input element with.
         value: String,
     },
+    /// Type with the keyboard.
+    Type {
+        ///  The value to fill the input element with.
+        value: String,
+        /// The mofidier to use for the key.
+        modifier: Option<i64>
+    },
     /// Scrolls the page until the end.
     InfiniteScroll(u32),
     /// Perform a screenshot on the page - fullscreen and omit background for params.
@@ -549,6 +556,7 @@ impl WebAutomation {
             ScrollX(_) => "ScrollX",
             ScrollY(_) => "ScrollY",
             Fill { .. } => "Fill",
+            Type { .. } => "Type",
             InfiniteScroll(_) => "InfiniteScroll",
             Screenshot { .. } => "Screenshot",
             ValidateChain => "ValidateChain",
@@ -580,6 +588,7 @@ impl WebAutomation {
             ScrollX(dx) => format!("ScrollX {}", dx),
             ScrollY(dy) => format!("ScrollY {}", dy),
             Fill { selector, .. } => format!("Fill {}", selector),
+            Type { value, modifier  } => format!("Type {} modifier={:?}", value, modifier),
             InfiniteScroll(n) => format!("InfiniteScroll {}", n),
             Screenshot {
                 full_page,
@@ -735,6 +744,12 @@ impl WebAutomation {
                         valid = el.type_str(value).await.is_ok();
                     }
                 }
+            }
+            WebAutomation::Type { value, modifier } => {
+                valid = page
+                    .type_str_with_modifier(value, *modifier)
+                    .await
+                    .is_ok()
             }
             WebAutomation::InfiniteScroll(duration) => {
                 valid = page.evaluate(set_dynamic_scroll(*duration)).await.is_ok();
