@@ -878,9 +878,26 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         url: url.into(),
         #[cfg(feature = "time")]
         duration: res.duration,
-        final_redirect_destination: res.final_url,
         status_code: res.status_code,
-        error_status: get_error_status(&mut should_retry, res.error_for_status),
+        error_status: {
+            let error_status = get_error_status(&mut should_retry, res.error_for_status);
+
+            if should_retry {
+                if let Some(final_url) = &res.final_url {
+                    if final_url == "chrome-error://chromewebdata/" {
+                        should_retry = false;
+                    }
+                }
+                if let Some(message) = &error_status {
+                    if message.starts_with("error sending request for url ") {
+                        should_retry = false;
+                    }
+                }
+            }
+
+            error_status
+        },
+        final_redirect_destination: res.final_url,
         #[cfg(feature = "chrome")]
         chrome_page: None,
         #[cfg(feature = "chrome")]
