@@ -1456,7 +1456,12 @@ pub async fn fetch_page_html_chrome_base(
     );
 
     let (tx, rx) = oneshot::channel::<bool>();
-    let (tx11, rx11) = oneshot::channel::<bool>();
+
+    let mut page_clone = if max_page_bytes.is_some() {
+        Some(page.clone())
+    } else {
+        None
+    };
 
     // Listen for network events. todo: capture the last values endtime to track period.
     let bytes_collected_handle = tokio::spawn(async move {
@@ -1466,7 +1471,7 @@ pub async fn fetch_page_html_chrome_base(
         let f1 = async {
             let mut total = 0.0;
             let mut blocked_urls = false;
-            let should_block = max_page_bytes.is_some();
+
             let total_max = max_page_bytes.unwrap_or_default();
 
             let mut response_map: Option<HashMap<String, f64>> = if track_responses {
@@ -1487,6 +1492,14 @@ pub async fn fetch_page_html_chrome_base(
                                 .or_insert(event.encoded_data_length);
                         }
 
+                        if let Some(page) = &page_clone {
+                            if !blocked_urls && total > total_max {
+                                blocked_urls = true;
+                                let _ = page.block_all_urls().await;
+                                page_clone = None;
+                            }
+                        }
+
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
                                 if request_id == &event.request_id {
@@ -1497,15 +1510,6 @@ pub async fn fetch_page_html_chrome_base(
                                 }
                             }
                         }
-
-                        if should_block && total > total_max {
-                            blocked_urls = true;
-                            break;
-                        }
-                    }
-
-                    if blocked_urls {
-                        let _ = tx11.send(true);
                     }
                 } else {
                     while let Some(event) = listener.next().await {
@@ -1516,14 +1520,13 @@ pub async fn fetch_page_html_chrome_base(
                                 .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
                         }
-                        if should_block && !blocked_urls && total > total_max {
-                            blocked_urls = true;
-                            break;
+                        if let Some(page) = &page_clone {
+                            if !blocked_urls && total > total_max {
+                                blocked_urls = true;
+                                let _ = page.block_all_urls().await;
+                                page_clone = None;
+                            }
                         }
-                    }
-
-                    if blocked_urls {
-                        let _ = tx11.send(true);
                     }
                 }
             }
@@ -1730,14 +1733,6 @@ pub async fn fetch_page_html_chrome_base(
         v = tokio::time::timeout(base_timeout + Duration::from_millis(50), page_navigate) => {
             if v.is_err() {
                 request_cancelled = true;
-            }
-        }
-        v = rx11 => {
-            if let Ok(v) = v {
-                if v {
-                    request_cancelled = v;
-                    let _ = page.block_all_urls().await;
-                }
             }
         }
         v = rx => {

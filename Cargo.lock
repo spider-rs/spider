@@ -449,7 +449,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.161",
+ "spider 2.37.165",
 ]
 
 [[package]]
@@ -712,6 +712,42 @@ dependencies = [
  "cfg-if",
  "encoding_rs",
  "memchr",
+]
+
+[[package]]
+name = "chromey"
+version = "2.37.129"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e62446c96b6ff89c3fe2fb27fb6c675826895900e25cf84898dded698e6f3ba8"
+dependencies = [
+ "adblock",
+ "aho-corasick",
+ "base64 0.22.1",
+ "case_insensitive_string",
+ "dunce",
+ "fnv",
+ "futures",
+ "futures-timer",
+ "hashbrown 0.15.5",
+ "lazy_static",
+ "phf 0.11.3",
+ "pin-project-lite",
+ "rand 0.9.2",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sonic-rs",
+ "spider_chromiumoxide_cdp",
+ "spider_chromiumoxide_types",
+ "spider_fingerprint",
+ "spider_firewall",
+ "spider_network_blocker",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-tungstenite 0.27.0",
+ "tracing",
+ "url",
+ "winreg 0.52.0",
 ]
 
 [[package]]
@@ -4817,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.161"
+version = "2.37.165"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4828,6 +4864,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "case_insensitive_string",
+ "chromey",
  "chrono",
  "const_format",
  "cookie",
@@ -4862,7 +4899,6 @@ dependencies = [
  "sitemap",
  "smallvec",
  "sonic-rs",
- "spider_chrome",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -4881,42 +4917,6 @@ dependencies = [
  "url",
  "wreq",
  "wreq-util",
-]
-
-[[package]]
-name = "spider_chrome"
-version = "2.37.126"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b409964c48269acdc69a5f72b544f24d78f173f8c1afcd4455ef1d805ebf10a9"
-dependencies = [
- "adblock",
- "aho-corasick",
- "base64 0.22.1",
- "case_insensitive_string",
- "dunce",
- "fnv",
- "futures",
- "futures-timer",
- "hashbrown 0.15.5",
- "lazy_static",
- "phf 0.11.3",
- "pin-project-lite",
- "rand 0.9.2",
- "reqwest",
- "serde",
- "serde_json",
- "sonic-rs",
- "spider_chromiumoxide_cdp",
- "spider_chromiumoxide_types",
- "spider_fingerprint",
- "spider_firewall",
- "spider_network_blocker",
- "thiserror 1.0.69",
- "tokio",
- "tokio-tungstenite 0.27.0",
- "tracing",
- "url",
- "winreg 0.52.0",
 ]
 
 [[package]]
@@ -4960,14 +4960,14 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.161"
+version = "2.37.165"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
  "quote",
  "serde_json",
- "spider 2.37.161",
+ "spider 2.37.165",
  "tikv-jemallocator",
 ]
 
@@ -4980,7 +4980,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.161",
+ "spider 2.37.165",
  "spider_transformations",
  "spider_utils 2.37.158",
 ]
@@ -5094,7 +5094,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.161"
+version = "2.37.165"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5110,11 +5110,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.161"
+version = "2.37.165"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.161",
+ "spider 2.37.165",
  "warp",
 ]
 
