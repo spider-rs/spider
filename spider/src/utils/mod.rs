@@ -1735,7 +1735,6 @@ pub async fn fetch_page_html_chrome_base(
         v = rx11 => {
             if let Ok(v) = v {
                 if v {
-                    request_cancelled = v;
                     let _ = page.block_all_urls().await;
                 }
             }
