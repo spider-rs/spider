@@ -16,7 +16,7 @@ A web crawler and scraper, building blocks for data curation workloads.
 - Concurrent
 - Streaming
 - [Decentralization](./spider_worker/)
-- [CDP Automation](https://github.com/spider-rs/spider_chrome)
+- [CDP Automation](https://github.com/spider-rs/chromey)
 - [Anti-Bot mitigation](https://github.com/spider-rs/spider_fingerprint)
 - [HTML transformations](https://github.com/spider-rs/spider_transformations)
 - [Adblocker](https://github.com/spider-rs/spider_network_blocker)

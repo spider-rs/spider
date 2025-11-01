@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.161"
+version = "2.37.167"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -95,7 +95,7 @@ wreq = { version = "5", optional = true, features = [
 ] }
 wreq-util = { version = "2", optional = true, features = ["emulation-serde"] }
 
-[dependencies.spider_chrome]
+[dependencies.chromey]
 version = "2"
 optional = true
 default-features = false
@@ -168,7 +168,7 @@ basic = [
 disk = ["dep:sqlx"]
 disk_native_tls = ["disk", "sqlx/runtime-tokio-native-tls"]
 disk_aws = ["disk", "sqlx/tls-rustls-aws-lc-rs"]
-adblock = ["chrome", "spider_chrome/adblock"]
+adblock = ["chrome", "chromey/adblock"]
 balance = ["dep:sysinfo"]
 regex = []
 glob = ["dep:itertools"]
@@ -212,7 +212,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:spider_chrome", "dep:base64", "serde", "dep:fastrand"]
+chrome = ["dep:chromey", "dep:base64", "serde", "dep:fastrand"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]
@@ -220,8 +220,8 @@ chrome_screenshot = ["chrome"]
 chrome_store_page = ["chrome", "serde"]
 chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
-chrome_simd = ["chrome", "spider_chrome/simd", "simd"]
-chrome_tls_connection = ["chrome", "spider_chrome/chrome_tls_connection"]
+chrome_simd = ["chrome", "chromey/simd", "simd"]
+chrome_tls_connection = ["chrome", "chromey/chrome_tls_connection"]
 cookies = ["reqwest/cookies", "dep:cookie"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "dep:rand", "chrome_intercept"]
@@ -256,7 +256,7 @@ string_interner_string_backend = ["dep:string-interner"]
 string_interner_bucket_backend = ["dep:string-interner"]
 page_error_status_details = []
 simd = ["dep:sonic-rs"]
-firewall = ["dep:spider_firewall", "spider_chrome/firewall"]
+firewall = ["dep:spider_firewall", "chromey/firewall"]
 wreq = ["dep:wreq", "dep:wreq-util"]
 rquest_hickory_dns = ["wreq/hickory-dns"]
 
