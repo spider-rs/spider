@@ -1173,6 +1173,8 @@ impl Page {
                     None
                 };
 
+                let base_input_url = tokio::sync::OnceCell::new();
+
                 let (encoding, adjust_charset_on_meta_tag) =
                     match get_charset_from_content_type(res.headers()) {
                         Some(h) => (h, false),
@@ -1224,6 +1226,11 @@ impl Page {
                             } else {
                                 base.as_deref()
                             };
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
+                            };
 
                             push_link(
                                 &base,
@@ -1255,6 +1262,11 @@ impl Page {
                                 } else {
                                     base.as_deref()
                                 };
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
                                 push_link(
                                     &base,
                                     &href,
@@ -1274,8 +1286,17 @@ impl Page {
                 };
 
                 let mut element_content_handlers =
-                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 3);
+                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
 
+                element_content_handlers.push(lol_html::element!("base", |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+
+                    Ok(())
+                }));
                 element_content_handlers.push(base_links_settings);
 
                 element_content_handlers.extend(metadata_handlers(
@@ -1344,9 +1365,9 @@ impl Page {
 
                 if r_settings.ssg_build {
                     if let Some(ssg_map) = ssg_map {
-                        if let Some(ref cell) = cell {
+                        if let Some(cell) = &cell {
                             if let Some(source) = cell.get() {
-                                if let Some(ref url_base) = base {
+                                if let Some(url_base) = &base {
                                     let build_ssg_path = convert_abs_path(url_base, source);
                                     let build_page =
                                         Page::new_page(build_ssg_path.as_str(), client).await;
@@ -1371,6 +1392,11 @@ impl Page {
                                                     original_page.as_ref()
                                                 } else {
                                                     base.as_deref()
+                                                };
+                                                let base = if base_input_url.initialized() {
+                                                    base_input_url.get()
+                                                } else {
+                                                    base
                                                 };
                                                 push_link(
                                                     &base,
@@ -2060,6 +2086,8 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
                     .await;
             } else {
+                let base_input_url = tokio::sync::OnceCell::new();
+
                 let parent_host = &selectors.1[0];
                 // the host schemes
                 let parent_host_scheme = &selectors.1[1];
@@ -2079,6 +2107,16 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
+                element_content_handlers.push(lol_html::element!("base", |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+
+                    Ok(())
+                }));
+
                 element_content_handlers.push(lol_html::element!(
                     if xml_file {
                         BASE_CSS_SELECTORS_WITH_XML
@@ -2091,6 +2129,11 @@ impl Page {
                                 original_page
                             } else {
                                 base.as_deref()
+                            };
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
                             };
 
                             push_link(
@@ -2202,6 +2245,7 @@ impl Page {
                     .await;
             } else {
                 let cell = tokio::sync::OnceCell::new();
+                let base_input_url = tokio::sync::OnceCell::new();
 
                 // the original url
                 let parent_host = &selectors.1[0];
@@ -2223,6 +2267,16 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
+                element_content_handlers.push(lol_html::element!("base", |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+
+                    Ok(())
+                }));
+
                 element_content_handlers.push(lol_html::element!(
                     if xml_file {
                         BASE_CSS_SELECTORS_WITH_XML
@@ -2235,6 +2289,11 @@ impl Page {
                                 original_page
                             } else {
                                 base.as_deref()
+                            };
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
                             };
 
                             push_link(
@@ -2312,6 +2371,11 @@ impl Page {
                                         original_page
                                     } else {
                                         base.as_deref()
+                                    };
+                                    let base = if base_input_url.initialized() {
+                                        base_input_url.get()
+                                    } else {
+                                        base
                                     };
 
                                     push_link(
@@ -2469,6 +2533,7 @@ impl Page {
                     .await;
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
+                let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -2493,6 +2558,16 @@ impl Page {
 
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+
+                element_content_handlers.push(element!("base", |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+
+                    Ok(())
+                }));
 
                 element_content_handlers.push(element!("script", |element| {
                     if !static_app {
@@ -2538,6 +2613,12 @@ impl Page {
                                 original_page.as_ref()
                             } else {
                                 base.as_deref()
+                            };
+
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
                             };
 
                             push_link(
@@ -2720,6 +2801,12 @@ impl Page {
 
                     match rx.await {
                         Ok(v) => {
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get().cloned().map(Box::new)
+                            } else {
+                                base1.as_deref().cloned().map(Box::new)
+                            };
+
                             let extended_map = self
                                 .links_stream_base::<A>(
                                     selectors,
@@ -2727,7 +2814,7 @@ impl Page {
                                         Some(h) => auto_encode_bytes(&h),
                                         _ => Default::default(),
                                     },
-                                    &base1.as_deref().cloned().map(Box::new),
+                                    &base,
                                 )
                                 .await;
 
@@ -2822,6 +2909,7 @@ impl Page {
                     .await;
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
+                let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
                 let parent_frags = &selectors.1; // todo: allow mix match tpt
@@ -2844,6 +2932,15 @@ impl Page {
                 let mut static_app = false;
 
                 let mut element_content_handlers = vec![
+                    element!("base", |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
+                        }
+
+                        Ok(())
+                    }),
                     element!("script", |element| {
                         if !static_app {
                             if let Some(src) = element.get_attribute("src") {
@@ -2886,6 +2983,12 @@ impl Page {
                                 original_page.as_ref()
                             } else {
                                 base.as_deref()
+                            };
+
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
                             };
 
                             push_link(
@@ -3164,6 +3267,7 @@ impl Page {
                 let parent_host_scheme = &selectors.1[1];
                 let base_input_domain = &selectors.2; // the domain after redirects
                 let sub_matcher = &selectors.0;
+                let base_input_url = tokio::sync::OnceCell::new();
 
                 let base = base.as_deref();
 
@@ -3188,6 +3292,11 @@ impl Page {
                             } else {
                                 base.as_deref()
                             };
+                            let base = if base_input_url.initialized() {
+                                base_input_url.get()
+                            } else {
+                                base
+                            };
 
                             push_link(
                                 &base,
@@ -3207,6 +3316,16 @@ impl Page {
 
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+
+                element_content_handlers.push(lol_html::element!("base", |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+
+                    Ok(())
+                }));
 
                 element_content_handlers.push(base_links_settings);
 

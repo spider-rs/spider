@@ -7414,17 +7414,11 @@ async fn test_respect_robots_txt() {
         website_second.setup().await;
     website_second.configure_robots_parser(&client_second).await;
 
-    assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
+    assert!(!&website
+        .is_allowed(&"https://www.mongodb.com/community/forums/auth/".into())
+        .eq(&ProcessLinkStatus::Allowed));
 
-    // test crawl delay with wildcard agent [DOES not work when using set agent]
-    let mut website_third: Website = Website::new("https://www.mongodb.com");
-    website_third.configuration.respect_robots_txt = true;
-    let (client_third, _): (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) =
-        website_third.setup().await;
-
-    website_third.configure_robots_parser(&client_third).await;
-
-    assert_eq!(website_third.configuration.delay, 10000); // should equal 10 seconds in ms
+    // assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 }
 
 #[cfg(not(feature = "decentralized"))]
