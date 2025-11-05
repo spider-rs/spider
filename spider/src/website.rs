@@ -6996,7 +6996,7 @@ impl Website {
     #[cfg(not(feature = "sync"))]
     pub fn queue(
         &mut self,
-        capacity: usize,
+        _capacity: usize,
     ) -> Option<Arc<(broadcast::Sender<Page>, broadcast::Receiver<Page>)>> {
         None
     }

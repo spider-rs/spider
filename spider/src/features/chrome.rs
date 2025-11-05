@@ -85,6 +85,32 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
     Ok(Default::default())
 }
 
+/// Handle the browser cookie configurations.
+#[cfg(not(feature = "cookies"))]
+pub async fn set_cookies(
+    config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
+    browser: &Browser,
+) {
+}
+
+/// Handle the browser cookie configurations.
+#[cfg(feature = "cookies")]
+pub async fn set_cookies(
+    config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
+    browser: &Browser,
+) {
+    if !config.cookie_str.is_empty() {
+        if let Some(parsed) = url_parsed {
+            let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
+            if let Ok(co) = cookies {
+                let _ = browser.set_cookies(co).await;
+            };
+        };
+    }
+}
+
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
@@ -453,15 +479,7 @@ pub async fn launch_browser(
             if let Ok(c) = browser.create_browser_context(create_content).await {
                 let _ = browser.send_new_context(c.clone()).await;
                 let _ = context_id.insert(c);
-                if !config.cookie_str.is_empty() {
-                    if let Some(parsed) = url_parsed {
-                        let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
-                        if let Ok(co) = cookies {
-                            let _ = browser.set_cookies(co).await;
-                        };
-                    };
-                }
-
+                set_cookies(&config, &url_parsed, &browser).await;
                 if let Some(id) = &browser.browser_context.id {
                     let cmd = SetDownloadBehaviorParamsBuilder::default();
 

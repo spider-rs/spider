@@ -433,7 +433,7 @@ impl<'de> serde::Deserialize<'de> for AllowListSet {
 }
 
 /// Get the user agent from the top agent list randomly.
-#[cfg(any(feature = "ua_generator"))]
+#[cfg(feature = "ua_generator")]
 pub fn get_ua(chrome: bool) -> &'static str {
     if chrome {
         ua_generator::ua::spoof_chrome_ua()
@@ -443,7 +443,7 @@ pub fn get_ua(chrome: bool) -> &'static str {
 }
 
 /// Get the user agent via cargo package + version.
-#[cfg(not(any(feature = "ua_generator")))]
+#[cfg(not(feature = "ua_generator"))]
 pub fn get_ua(_chrome: bool) -> &'static str {
     use std::env;
 

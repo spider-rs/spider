@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.168"
+version = "2.37.169"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -212,7 +212,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:chromey", "dep:base64", "serde", "dep:fastrand"]
+chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]
@@ -224,7 +224,7 @@ chrome_simd = ["chrome", "chromey/simd", "simd"]
 chrome_tls_connection = ["chrome", "chromey/chrome_tls_connection"]
 cookies = ["reqwest/cookies", "dep:cookie"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
-smart = ["chrome", "dep:rand", "chrome_intercept"]
+smart = ["chrome", "chrome_intercept"]
 encoding = []
 headers = ["dep:httpdate"]
 remote_addr = []

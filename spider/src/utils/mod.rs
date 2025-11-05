@@ -2479,7 +2479,7 @@ pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
 
 #[cfg(not(feature = "cookies"))]
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
-pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
+pub fn get_cookies(_res: &Response) -> Option<crate::client::header::HeaderMap> {
     None
 }
 
