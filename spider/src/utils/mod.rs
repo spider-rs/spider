@@ -1240,7 +1240,7 @@ async fn navigate(
 }
 
 #[cfg(all(feature = "real_browser", feature = "chrome"))]
-/// generate random mouse movement.
+/// Generate random mouse movement. This does nothing without the 'real_browser' flag enabled.
 async fn perform_smart_mouse_movement(
     page: &chromiumoxide::Page,
     viewport: &Option<crate::configuration::Viewport>,
@@ -1273,6 +1273,7 @@ async fn perform_smart_mouse_movement(
 }
 
 #[cfg(all(not(feature = "real_browser"), feature = "chrome"))]
+/// Generate random mouse movement. This does nothing without the 'real_browser' flag enabled.
 async fn perform_smart_mouse_movement(
     _page: &chromiumoxide::Page,
     _viewport: &Option<crate::configuration::Viewport>,
@@ -1336,6 +1337,7 @@ const HALF_MAX_PAGE_TIMEOUT: tokio::time::Duration =
     tokio::time::Duration::from_millis(FIVE_MINUTES as u64 / 2);
 
 #[cfg(all(feature = "chrome", feature = "headers"))]
+/// Store the page headers. This does nothing without the 'headers' flag enabled.
 fn store_headers(page_response: &PageResponse, chrome_http_req_res: &mut ChromeHTTPReqRes) {
     if let Some(response_headers) = &page_response.headers {
         chrome_http_req_res.response_headers =
@@ -1344,7 +1346,21 @@ fn store_headers(page_response: &PageResponse, chrome_http_req_res: &mut ChromeH
 }
 
 #[cfg(all(feature = "chrome", not(feature = "headers")))]
+/// Store the page headers. This does nothing without the 'headers' flag enabled.
 fn store_headers(_page_response: &PageResponse, _chrome_http_req_res: &mut ChromeHTTPReqRes) {}
+
+#[inline]
+/// f64 to u64 floor.
+#[cfg(feature = "chrome")]
+fn f64_to_u64_floor(x: f64) -> u64 {
+    if !x.is_finite() || x <= 0.0 {
+        0
+    } else if x >= u64::MAX as f64 {
+        u64::MAX
+    } else {
+        x as u64
+    }
+}
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
@@ -1464,22 +1480,33 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     // Listen for network events. todo: capture the last values endtime to track period.
+    // TODO: optionall check if spawn required.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
             if asset { Some(OnceCell::new()) } else { None };
 
+        let should_block = max_page_bytes.is_some();
+        let total_max = max_page_bytes.unwrap_or_default();
+
         let f1 = async {
             let mut total = 0.0;
             let mut blocked_urls = false;
-
-            let should_block = max_page_bytes.is_some();
-            let total_max = max_page_bytes.unwrap_or_default();
 
             let mut response_map: Option<HashMap<String, f64>> = if track_responses {
                 Some(HashMap::new())
             } else {
                 None
             };
+
+            if should_block && total_max > 0.0 {
+                if let Some(page_clone) = &page_clone {
+                    let max_bytes = f64_to_u64_floor(total_max);
+                    // todo: roll custom blocking upfront to prevent duplicate spawn.
+                    let _ = page_clone
+                        .start_wire_bytes_budget_background(max_bytes, None, None)
+                        .await;
+                }
+            }
 
             if let Ok(mut listener) = event_loading_listener {
                 if asset {
@@ -1496,7 +1523,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(page) = &page_clone {
                             if should_block && !blocked_urls && total > total_max {
                                 blocked_urls = true;
-                                let _ = page.stop_loading().await;
+                                let _ = page.force_stop_all().await;
                                 page_clone = None;
                             }
                         }
@@ -1524,7 +1551,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(page) = &page_clone {
                             if should_block && !blocked_urls && total > total_max {
                                 blocked_urls = true;
-                                let _ = page.stop_loading().await;
+                                let _ = page.force_stop_all().await;
                                 page_clone = None;
                             }
                         }

@@ -6485,7 +6485,7 @@ impl Website {
         self
     }
 
-    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the [control] flag enabled.
+    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the 'control' flag enabled.
     pub fn with_no_control_thread(&mut self, no_control_thread: bool) -> &mut Self {
         self.configuration.with_no_control_thread(no_control_thread);
         self

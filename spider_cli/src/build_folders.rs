@@ -6,9 +6,8 @@ use unicode_normalization::UnicodeNormalization;
 /// Windows reserved device names (case-insensitive, no extension)
 fn is_windows_reserved_name(name: &str) -> bool {
     const RESERVED: &[&str] = &[
-        "CON","PRN","AUX","NUL",
-        "COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9",
-        "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     let upper = name.split('.').next().unwrap_or("").to_ascii_uppercase();
     RESERVED.contains(&upper.as_str())
@@ -43,8 +42,10 @@ fn sanitize_component(raw: &str) -> Option<String> {
     // Remove/replace forbidden characters.
     let mut out = String::with_capacity(normalized.len());
     for ch in normalized.chars() {
-        let bad = matches!(ch, '\0' | '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
-            || ch.is_control();
+        let bad = matches!(
+            ch,
+            '\0' | '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*'
+        ) || ch.is_control();
         out.push(if bad { '_' } else { ch });
     }
 

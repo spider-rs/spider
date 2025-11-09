@@ -425,7 +425,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.171",
+ "spider 2.37.174",
 ]
 
 [[package]]
@@ -692,9 +692,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.37.138"
+version = "2.37.141"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "174fc7824697c9de5f2305fbd2a86beda03afbd149228d54894dca538e3be2b0"
+checksum = "68dff10af800628fab0047d6b9c7c523edeb691a7f925e8ae42221e700ae3d74"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -4751,9 +4751,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.169"
+version = "2.37.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e346c6bd4453191b09fcfca4ec219091834282136683100c82841265ea9ef16"
+checksum = "aef9d05b5a0aeff42b8cb6d571570010fa214ac977825da13bd902d9c860ae24"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.171"
+version = "2.37.174"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4896,7 +4896,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.171"
+version = "2.37.174"
 dependencies = [
  "clap",
  "env_logger",
@@ -4904,7 +4904,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.37.171",
+ "spider 2.37.174",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -4919,9 +4919,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.171",
+ "spider 2.37.174",
  "spider_transformations",
- "spider_utils 2.37.169",
+ "spider_utils 2.37.172",
 ]
 
 [[package]]
@@ -5009,7 +5009,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.37.169",
+ "spider 2.37.172",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5018,9 +5018,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.169"
+version = "2.37.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6158e851cefce3e3d33e2ddc2801d7cedfda1fa27b74cdebbe505ba813bcf1ce"
+checksum = "cc277f5516266784b79bd0b1a39679ba05619da5e12390a68de2d98a5c0d13bb"
 dependencies = [
  "hashbrown 0.15.5",
  "lazy_static",
@@ -5033,7 +5033,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.171"
+version = "2.37.174"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5049,11 +5049,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.171"
+version = "2.37.174"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.171",
+ "spider 2.37.174",
  "warp",
 ]
 

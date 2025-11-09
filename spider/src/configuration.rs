@@ -1023,13 +1023,13 @@ impl Configuration {
         self
     }
 
-    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the [control] flag enabled.
+    /// Skip setting up a control thread for pause, start, and shutdown programmatic handling. This does nothing without the 'control' flag enabled.
     pub fn with_no_control_thread(&mut self, no_control_thread: bool) -> &mut Self {
         self.no_control_thread = no_control_thread;
         self
     }
 
-    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the [chrome] feature is not enabled.
+    /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the 'chrome' feature is not enabled.
     pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
         self.viewport = match viewport {
             Some(vp) => Some(vp.into()),
