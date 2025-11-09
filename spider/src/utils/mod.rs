@@ -1496,7 +1496,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(page) = &page_clone {
                             if should_block && !blocked_urls && total > total_max {
                                 blocked_urls = true;
-                                let _ = page.block_all_urls().await;
+                                let _ = page.stop_loading().await;
                                 page_clone = None;
                             }
                         }
@@ -1524,7 +1524,7 @@ pub async fn fetch_page_html_chrome_base(
                         if let Some(page) = &page_clone {
                             if should_block && !blocked_urls && total > total_max {
                                 blocked_urls = true;
-                                let _ = page.block_all_urls().await;
+                                let _ = page.stop_loading().await;
                                 page_clone = None;
                             }
                         }
