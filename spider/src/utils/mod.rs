@@ -1385,7 +1385,7 @@ pub async fn fetch_page_html_chrome_base(
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
-            EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived,
+            EventDataReceived, EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived,
             GetResponseBodyParams, RequestId, ResourceType,
         },
         error::CdpError,
@@ -1446,12 +1446,20 @@ pub async fn fetch_page_html_chrome_base(
         (None, None)
     };
 
+    let should_block = max_page_bytes.is_some();
+
     let (track_requests, track_responses, track_automation) = match track_events {
         Some(tracker) => (tracker.requests, tracker.responses, tracker.automation),
         _ => (false, false, false),
     };
 
-    let (event_loading_listener, cancel_listener, received_listener, event_sent_listener) = tokio::join!(
+    let (
+        event_loading_listener,
+        cancel_listener,
+        received_listener,
+        event_sent_listener,
+        event_data_received,
+    ) = tokio::join!(
         page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
         ),
         page.event_listener::<EventLoadingFailed>(),
@@ -1469,44 +1477,37 @@ pub async fn fetch_page_html_chrome_base(
                 Err(CdpError::NotFound)
             }
         },
+        async {
+            if should_block {
+                page.event_listener::<EventDataReceived>().await
+            } else {
+                Err(CdpError::NotFound)
+            }
+        }
     );
 
     let (tx, rx) = oneshot::channel::<bool>();
 
-    let mut page_clone = if max_page_bytes.is_some() {
+    let page_clone = if should_block {
         Some(page.clone())
     } else {
         None
     };
 
     // Listen for network events. todo: capture the last values endtime to track period.
-    // TODO: optionall check if spawn required.
+    // TODO: optional check if spawn required.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
             if asset { Some(OnceCell::new()) } else { None };
 
-        let should_block = max_page_bytes.is_some();
-        let total_max = max_page_bytes.unwrap_or_default();
-
         let f1 = async {
             let mut total = 0.0;
-            let mut blocked_urls = false;
 
             let mut response_map: Option<HashMap<String, f64>> = if track_responses {
                 Some(HashMap::new())
             } else {
                 None
             };
-
-            if should_block && total_max > 0.0 {
-                if let Some(page_clone) = &page_clone {
-                    let max_bytes = f64_to_u64_floor(total_max);
-                    // todo: roll custom blocking upfront to prevent duplicate spawn.
-                    let _ = page_clone
-                        .start_wire_bytes_budget_background(max_bytes, None, None)
-                        .await;
-                }
-            }
 
             if let Ok(mut listener) = event_loading_listener {
                 if asset {
@@ -1518,14 +1519,6 @@ pub async fn fetch_page_html_chrome_base(
                                 .entry(event.request_id.inner().clone())
                                 .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
-                        }
-
-                        if let Some(page) = &page_clone {
-                            if should_block && !blocked_urls && total > total_max {
-                                blocked_urls = true;
-                                let _ = page.force_stop_all().await;
-                                page_clone = None;
-                            }
                         }
 
                         if let Some(once) = &finished_media {
@@ -1547,13 +1540,6 @@ pub async fn fetch_page_html_chrome_base(
                                 .entry(event.request_id.inner().clone())
                                 .and_modify(|e| *e += event.encoded_data_length)
                                 .or_insert(event.encoded_data_length);
-                        }
-                        if let Some(page) = &page_clone {
-                            if should_block && !blocked_urls && total > total_max {
-                                blocked_urls = true;
-                                let _ = page.force_stop_all().await;
-                                page_clone = None;
-                            }
                         }
                     }
                 }
@@ -1667,7 +1653,25 @@ pub async fn fetch_page_html_chrome_base(
             request_map
         };
 
-        let (t1, _, res_map, req_map) = tokio::join!(f1, f2, f3, f4);
+        let f5 = async {
+            if let Some(page_clone) = &page_clone {
+                if let Ok(mut listener) = event_data_received {
+                    let mut total_bytes: u64 = 0;
+                    let total_max = f64_to_u64_floor(max_page_bytes.unwrap_or_default());
+
+                    while let Some(event) = listener.next().await {
+                        let encoded = event.encoded_data_length.max(0) as u64;
+                        total_bytes = total_bytes.saturating_add(encoded);
+                        if total_bytes > total_max {
+                            let _ = page_clone.force_stop_all().await;
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        let (t1, _, res_map, req_map, __) = tokio::join!(f1, f2, f3, f4, f5);
 
         (t1.0, t1.1, res_map, req_map)
     });

@@ -285,7 +285,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         },
         intercept_manager: config.chrome_intercept.intercept_manager,
         only_html: config.only_html && !config.full_resources,
-        ..HandlerConfig::default()
+        max_bytes_allowed: config.max_bytes_allowed..HandlerConfig::default(),
     }
 }
 

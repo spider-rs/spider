@@ -284,6 +284,8 @@ pub struct Configuration {
     pub referer: Option<String>,
     /// Determine the max bytes per page.
     pub max_page_bytes: Option<f64>,
+    /// Determine the max bytes per browser context.
+    pub max_bytes_allowed: Option<u64>,
     #[cfg(feature = "chrome")]
     /// Disables log domain, prevents further log entries from being reported to the client. This does nothing without the flag `chrome` enabled.
     pub disable_log: bool,
@@ -1369,9 +1371,15 @@ impl Configuration {
         self
     }
 
-    /// Set the max amount of bytes to collect per page. Only used for chrome atm.
+    /// Set the max amount of bytes to collect per page. This method does nothing if the `chrome` is not enabled.
     pub fn with_max_page_bytes(&mut self, max_page_bytes: Option<f64>) -> &mut Self {
         self.max_page_bytes = max_page_bytes;
+        self
+    }
+
+    /// Set the max amount of bytes to collected for the browser context. This method does nothing if the `chrome` is not enabled.
+    pub fn with_max_bytes_allowed(&mut self, max_bytes_allowed: Option<u64>) -> &mut Self {
+        self.max_bytes_allowed = max_bytes_allowed;
         self
     }
 

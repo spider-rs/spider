@@ -6847,9 +6847,16 @@ impl Website {
         self.configuration.with_shared_state(shared);
         self
     }
+
     /// Set the max amount of bytes to collect per page. Only used for chrome atm.
     pub fn with_max_page_bytes(&mut self, max_page_bytes: Option<f64>) -> &mut Self {
         self.configuration.with_max_page_bytes(max_page_bytes);
+        self
+    }
+
+    /// Set the max amount of bytes to collected for the browser context. Only used for chrome atm.
+    pub fn with_max_bytes_allowed(&mut self, max_bytes_allowed: Option<u64>) -> &mut Self {
+        self.configuration.with_max_bytes_allowed(max_bytes_allowed);
         self
     }
 
