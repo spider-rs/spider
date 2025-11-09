@@ -425,7 +425,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.37.170",
+ "spider 2.37.171",
 ]
 
 [[package]]
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.37.170"
+version = "2.37.171"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4896,15 +4896,18 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.37.170"
+version = "2.37.171"
 dependencies = [
  "clap",
  "env_logger",
  "failure_derive",
+ "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.37.170",
+ "spider 2.37.171",
  "tikv-jemallocator",
+ "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -4916,7 +4919,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.37.170",
+ "spider 2.37.171",
  "spider_transformations",
  "spider_utils 2.37.169",
 ]
@@ -5030,7 +5033,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.37.170"
+version = "2.37.171"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5046,11 +5049,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.37.170"
+version = "2.37.171"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.37.170",
+ "spider 2.37.171",
  "warp",
 ]
 

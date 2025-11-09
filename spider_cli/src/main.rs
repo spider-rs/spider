@@ -12,11 +12,12 @@ extern crate env_logger;
 extern crate serde_json;
 extern crate spider;
 
+pub mod build_folders;
 pub mod options;
 
-use crate::spider::tokio::io::AsyncWriteExt;
 use clap::Parser;
 use options::{Cli, Commands};
+use tokio::io::AsyncWriteExt;
 
 use serde_json::{json, Value};
 
@@ -30,6 +31,8 @@ use spider::utils::header_utils::header_map_to_hash_map;
 use spider::utils::log;
 use spider::website::Website;
 use std::path::{Path, PathBuf};
+
+use crate::build_folders::build_local_path;
 
 /// convert the headers to json
 fn headers_to_json(headers: &Option<HeaderMap<HeaderValue>>) -> Value {
@@ -203,47 +206,44 @@ async fn main() {
                         website.crawl().await;
                     });
 
-                    while let Ok(res) = rx2.recv().await {
-                        if let Some(parsed_url) = res.get_url_parsed_ref() {
+                    while let Ok(mut res) = rx2.recv().await {
+                        if let Some(parsed_url) = res.get_url_parsed() {
                             log("Storing", parsed_url);
-                                let url_path = parsed_url.path();
+                            let mut url_path = parsed_url.path().to_string();
 
-                                let split_paths: Vec<&str> = url_path.split('/').collect();
-                                let it = split_paths.iter();
-                                let last_item = split_paths.last().unwrap_or(&"");
-                                let mut download_path = download_path.clone();
+                            if url_path.is_empty() {
+                                url_path = "/".into();
+                            }
 
-                                for p in it {
-                                    if p != last_item {
-                                        download_path.push(p);
+                            let final_path = build_local_path(&download_path, &url_path);
 
-                                        if !Path::new(&download_path).exists() {
-                                            let _ = tokio::fs::create_dir_all(&download_path).await;
-                                        }
-                                    } else {
-                                        match tokio::fs::OpenOptions::new()
-                                        .write(true)
-                                        .create(true)
-                                        .truncate(true)
-                                        .open(&download_path.join(if p.contains('.') {
-                                            p.to_string()
-                                        } else {
-                                            string_concat!(
-                                                if p.is_empty() { "index" } else { p },
-                                                ".html"
-                                            )
-                                        })).await {
-                                            Ok(mut file) => {
-                                                if let Some(b) = res.get_bytes() {
-                                                    let _ = file.write_all(b).await;
-                                                }
-                                            }
-                                            _ => {
-                                                eprintln!("Unable to open file.")
-                                            }
-                                        }
+                            if let Some(parent) = final_path.parent() {
+                                if !parent.exists() {
+                                    if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                                        eprintln!("Failed to create dirs {:?}: {e}", parent);
+                                        continue;
                                     }
                                 }
+                            }
+
+                            if let Some(bytes) = res.get_bytes() {
+                                match tokio::fs::OpenOptions::new()
+                                    .write(true)
+                                    .create(true)
+                                    .truncate(true)
+                                    .open(&final_path)
+                                    .await
+                                {
+                                    Ok(mut file) => {
+                                        if let Err(e) = file.write_all(bytes).await {
+                                            eprintln!("Failed to write {:?}: {e}", final_path);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Unable to open file {:?}: {e}", final_path);
+                                    }
+                                }
+                            }
                         }
                     }
                 }

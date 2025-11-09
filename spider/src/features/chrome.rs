@@ -87,20 +87,12 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
 
 /// Handle the browser cookie configurations.
 #[cfg(not(feature = "cookies"))]
-pub async fn set_cookies(
-    config: &Configuration,
-    url_parsed: &Option<Box<Url>>,
-    browser: &Browser,
-) {
+pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, browser: &Browser) {
 }
 
 /// Handle the browser cookie configurations.
 #[cfg(feature = "cookies")]
-pub async fn set_cookies(
-    config: &Configuration,
-    url_parsed: &Option<Box<Url>>,
-    browser: &Browser,
-) {
+pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, browser: &Browser) {
     if !config.cookie_str.is_empty() {
         if let Some(parsed) = url_parsed {
             let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
