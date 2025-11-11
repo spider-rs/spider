@@ -29,7 +29,7 @@ use spider::string_concat::{string_concat, string_concat_impl};
 use spider::tokio;
 use spider::utils::header_utils::header_map_to_hash_map;
 use spider::utils::log;
-use spider::website::Website;
+use spider::website::{CrawlStatus, Website};
 use std::path::{Path, PathBuf};
 
 use crate::build_folders::build_local_path;
@@ -94,6 +94,24 @@ fn handle_remote_address(_res: &Page, mut _json: Value) -> Value {
     _json
 }
 
+/// Log the website status.
+fn log_website_status(website: &Website) {
+    use CrawlStatus::*;
+
+    let msg = match website.get_status() {
+        FirewallBlocked => "blocked by firewall",
+        Blocked => "blocked by the network, firewall, or rate limit",
+        ServerError => "server error",
+        Empty => "returned no content",
+        RateLimited => "rate limited",
+        Invalid => "invalid url",
+        _ => return,
+    };
+
+    let url = website.get_url();
+    eprintln!("{url:?} - {msg}.");
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -135,7 +153,7 @@ async fn main() {
                 .collect::<HashMap<&str, u32>>()
         }));
 
-    if let Some(ref agent) = cli.agent {
+    if let Some(agent) = &cli.agent {
         website.with_user_agent(Some(agent));
     }
     if let Some(delay) = cli.delay {
@@ -147,6 +165,13 @@ async fn main() {
     if let Some(depth) = cli.depth {
         website.with_depth(depth);
     }
+
+    if let Some(proxy_url) = cli.proxy_url {
+        if !proxy_url.is_empty() {
+            website.with_proxies(Some(vec![proxy_url.into()]));
+        }
+    }
+
     if let Some(domains) = cli.external_domains {
         website.with_external_domains(Some(domains.into_iter()));
     }
@@ -173,6 +198,7 @@ async fn main() {
 
                     tokio::spawn(async move {
                         website.crawl().await;
+                        log_website_status(&website);
                     });
 
                     if output_links {
@@ -204,6 +230,7 @@ async fn main() {
 
                     tokio::spawn(async move {
                         website.crawl().await;
+                        log_website_status(&website);
                     });
 
                     while let Ok(mut res) = rx2.recv().await {
@@ -259,6 +286,7 @@ async fn main() {
 
                     tokio::spawn(async move {
                         website.crawl().await;
+                        log_website_status(&website);
                     });
 
                     while let Ok(res) = rx2.recv().await {

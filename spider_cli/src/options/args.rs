@@ -57,4 +57,7 @@ pub struct Cli {
     /// Gather all content that relates to the domain like css,jss, and etc.
     #[clap(long)]
     pub full_resources: bool,
+    /// The proxy url to use.
+    #[clap(short, long)]
+    pub proxy_url: Option<String>,
 }
