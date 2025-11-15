@@ -40,53 +40,8 @@ use url::Url;
 #[cfg(feature = "cache_request")]
 use http_cache_reqwest::{Cache, CacheMode, HttpCache, HttpCacheOptions};
 
-// Use CACacheManager when cache_request and cache are set
-#[cfg(all(
-    feature = "cache_request",
-    feature = "cache",
-    not(feature = "cache_mem")
-))]
-use http_cache_reqwest::CACacheManager;
-#[cfg(all(
-    feature = "cache_request",
-    feature = "cache",
-    not(feature = "cache_mem")
-))]
-type CacheManager = CACacheManager;
-
-// Use MokaManager when cache_request and cache_mem are set
-#[cfg(all(
-    feature = "cache_request",
-    feature = "cache_mem",
-    not(feature = "cache")
-))]
-use http_cache_reqwest::MokaManager;
-#[cfg(all(
-    feature = "cache_request",
-    feature = "cache_mem",
-    not(feature = "cache")
-))]
-type CacheManager = MokaManager;
-
-// Default to CACacheManager if only cache_request is set, without cache or cache_mem
-#[cfg(all(
-    feature = "cache_request",
-    not(feature = "cache"),
-    not(feature = "cache_mem")
-))]
-use http_cache_reqwest::CACacheManager as DefaultCacheManager;
-#[cfg(all(
-    feature = "cache_request",
-    not(feature = "cache"),
-    not(feature = "cache_mem")
-))]
-type CacheManager = DefaultCacheManager;
-
 #[cfg(feature = "cache_request")]
-lazy_static! {
-    /// Cache manager for request.
-    pub static ref CACACHE_MANAGER: CacheManager = CacheManager::default();
-}
+pub use http_global_cache::CACACHE_MANAGER;
 
 /// The max backoff duration in seconds.
 const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
@@ -1614,6 +1569,7 @@ impl Website {
     /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
     fn configure_http_client_builder(&self) -> reqwest_middleware::ClientBuilder {
+        use crate::utils::create_cache_key;
         let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
@@ -1678,10 +1634,23 @@ impl Website {
             reqwest_middleware::ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
 
         if self.configuration.cache {
+            let mut cache_options = HttpCacheOptions::default();
+
+            cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+                let mut auth_token = None;
+                if let Some(auth) = req.headers.get("authorization") {
+                    if let Ok(token) = auth.to_str() {
+                        if !token.is_empty() {
+                            auth_token = Some(token);
+                        }
+                    }
+                }
+                create_cache_key(req, Some(req.method.as_str()), auth_token)
+            }));
             client.with(Cache(HttpCache {
                 mode: CacheMode::Default,
                 manager: CACACHE_MANAGER.clone(),
-                options: HttpCacheOptions::default(),
+                options: cache_options,
             }))
         } else {
             client
@@ -1807,8 +1776,8 @@ impl Website {
     /// Configure http client for decentralization.
     #[cfg(all(feature = "decentralized", feature = "cache_request"))]
     pub fn configure_http_client(&mut self) -> Client {
-        use reqwest::header::HeaderMap;
-        use reqwest::header::HeaderValue;
+        use crate::utils::create_cache_key;
+        use reqwest::header::{HeaderMap, HeaderValue};
         use reqwest_middleware::ClientBuilder;
 
         let mut headers = HeaderMap::new();
@@ -1860,6 +1829,20 @@ impl Website {
             }
         }
 
+        let mut cache_options = HttpCacheOptions::default();
+
+        cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+            let mut auth_token = None;
+            if let Some(auth) = req.headers.get("authorization") {
+                if let Ok(token) = auth.to_str() {
+                    if !token.is_empty() {
+                        auth_token = Some(token);
+                    }
+                }
+            }
+            create_cache_key(req, Some(req.method.as_str()), auth_token)
+        }));
+
         let client = ClientBuilder::new(unsafe {
             match &self.configuration.request_timeout {
                 Some(t) => client.timeout(**t),
@@ -1872,7 +1855,7 @@ impl Website {
         .with(Cache(HttpCache {
             mode: CacheMode::Default,
             manager: CACACHE_MANAGER.clone(),
-            options: HttpCacheOptions::default(),
+            options: cache_options,
         }));
 
         client.build()
@@ -2233,6 +2216,7 @@ impl Website {
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
+                self.configuration.get_cache_options(),
             )
             .await;
 
@@ -2272,6 +2256,7 @@ impl Website {
                             &self.configuration.track_events,
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
+                            self.configuration.get_cache_options(),
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2296,6 +2281,7 @@ impl Website {
                         &self.configuration.track_events,
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
+                        self.configuration.get_cache_options(),
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2440,6 +2426,7 @@ impl Website {
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
+                self.configuration.get_cache_options(),
             )
             .await;
 
@@ -2479,6 +2466,7 @@ impl Website {
                             &self.configuration.track_events,
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
+                            self.configuration.get_cache_options(),
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2503,6 +2491,7 @@ impl Website {
                         &self.configuration.track_events,
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
+                        self.configuration.get_cache_options(),
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2753,6 +2742,7 @@ impl Website {
                 &self.configuration.track_events,
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
+                self.configuration.get_cache_options(),
             )
             .await;
             let u = page.get_url();
@@ -3178,6 +3168,7 @@ impl Website {
                     &config.track_events,
                     config.referer.clone(),
                     config.max_page_bytes,
+                    config.get_cache_options(),
                 )
                 .await;
 
@@ -4040,7 +4031,9 @@ impl Website {
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
                                                                 shared.6.referer.clone(),
-                                                                shared.6.max_page_bytes
+                                                                shared.6.max_page_bytes,
+                                                                                                                                shared.6.get_cache_options()
+
                                                             )
                                                             .await;
 
@@ -4067,7 +4060,9 @@ impl Website {
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes
+                                                                            shared.6.max_page_bytes,
+                                                                                                                                                                                                            shared.6.get_cache_options()
+
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -4090,7 +4085,9 @@ impl Website {
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes
+                                                                            shared.6.max_page_bytes,
+                                                                                                                                                                                                            shared.6.get_cache_options()
+
                                                                         )
                                                                         .await,
                                                                     );
@@ -4690,7 +4687,9 @@ impl Website {
                                                                 &shared.6.request_timeout,
                                                                 &shared.6.track_events,
                                                                 shared.6.referer.clone(),
-                                                                shared.6.max_page_bytes
+                                                                shared.6.max_page_bytes,
+                                                                                                                                                                                                shared.6.get_cache_options()
+
                                                             )
                                                             .await;
 
@@ -4717,7 +4716,9 @@ impl Website {
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes
+                                                                            shared.6.max_page_bytes,
+                                                                                                                                                                                                            shared.6.get_cache_options()
+
 
                                                                         ).await;
                                                                         page.clone_from(&p);
@@ -4741,7 +4742,9 @@ impl Website {
                                                                             &shared.6.request_timeout,
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes
+                                                                            shared.6.max_page_bytes,
+                                                                                                                                                                                                            shared.6.get_cache_options()
+
                                                                         )
                                                                         .await,
                                                                     );
@@ -5710,7 +5713,9 @@ impl Website {
                                         &self.configuration.request_timeout,
                                         &self.configuration.track_events,
                                         self.configuration.referer.clone(),
-                                        self.configuration.max_page_bytes
+                                        self.configuration.max_page_bytes,
+                                                                                            self.configuration.get_cache_options(),
+
                                     )
                                     .await;
 
@@ -5795,7 +5800,9 @@ impl Website {
                                                                     &shared.3.request_timeout,
                                                                     &shared.3.track_events,
                                                                     shared.3.referer.clone(),
-                                                                    shared.3.max_page_bytes
+                                                                    shared.3.max_page_bytes,
+                                                                                                                                                               shared.3.get_cache_options(),
+
                                                                 )
                                                                 .await;
 
@@ -5920,7 +5927,9 @@ impl Website {
                                                             &shared.3.request_timeout,
                                                             &shared.3.track_events,
                                                             shared.3.referer.clone(),
-                                                            shared.3.max_page_bytes
+                                                            shared.3.max_page_bytes,
+                                                                                                                                                                                                                           shared.3.get_cache_options(),
+
                                                         )
                                                         .await;
 

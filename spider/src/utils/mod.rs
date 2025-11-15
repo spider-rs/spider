@@ -22,10 +22,10 @@ use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
 use case_insensitive_string::CaseInsensitiveString;
-use hashbrown::HashSet;
-
 #[cfg(feature = "chrome")]
 use hashbrown::HashMap;
+use hashbrown::HashSet;
+
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
 use std::{
@@ -1281,7 +1281,11 @@ async fn perform_smart_mouse_movement(
 }
 
 /// Cache the chrome response
-#[cfg(all(feature = "chrome", feature = "cache_chrome_hybrid"))]
+#[cfg(all(
+    feature = "chrome",
+    feature = "cache_chrome_hybrid",
+    feature = "cache_chrome_hybrid_mem"
+))]
 pub async fn cache_chrome_response(
     target_url: &str,
     page_response: &PageResponse,
@@ -1305,10 +1309,72 @@ pub async fn cache_chrome_response(
             },
             headers: chrome_http_req_res.response_headers,
         };
+        let auth_opt = match cache_options {
+            Some(CacheOptions::Yes) => None,
+            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::No) | None => None,
+        };
+        let cache_key = create_cache_key_raw(
+            target_url,
+            Some(&chrome_http_req_res.method),
+            auth_opt.as_deref(),
+        );
+
         put_hybrid_cache(
-            &string_concat!("GET", ":", target_url),
+            &cache_key,
             http_response,
-            &"GET",
+            &chrome_http_req_res.method,
+            chrome_http_req_res.request_headers,
+        )
+        .await;
+    }
+}
+
+/// Cache the chrome response
+#[cfg(all(
+    feature = "chrome",
+    feature = "cache_chrome_hybrid",
+    not(feature = "cache_chrome_hybrid_mem")
+))]
+pub async fn cache_chrome_response(
+    target_url: &str,
+    page_response: &PageResponse,
+    chrome_http_req_res: ChromeHTTPReqRes,
+    cache_options: &Option<CacheOptions>,
+) {
+    if let Ok(u) = url::Url::parse(target_url) {
+        let http_response = HttpResponse {
+            url: u,
+            body: match page_response.content.as_ref() {
+                Some(b) => b.to_vec(),
+                _ => Default::default(),
+            },
+            status: chrome_http_req_res.status_code.into(),
+            version: match chrome_http_req_res.protocol.as_str() {
+                "http/0.9" => HttpVersion::Http09,
+                "http/1" | "http/1.0" => HttpVersion::Http10,
+                "http/1.1" => HttpVersion::Http11,
+                "http/2.0" | "http/2" => HttpVersion::H2,
+                "http/3.0" | "http/3" => HttpVersion::H3,
+                _ => HttpVersion::Http11,
+            },
+            headers: chrome_http_req_res.response_headers,
+        };
+
+        let auth_opt = match cache_options {
+            Some(CacheOptions::Yes) => None,
+            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::No) | None => None,
+        };
+        let cache_key = create_cache_key_raw(
+            target_url,
+            Some(&chrome_http_req_res.method),
+            auth_opt.as_deref().map(|x| x.as_str()),
+        );
+        put_hybrid_cache(
+            &cache_key,
+            http_response,
+            &chrome_http_req_res.method,
             chrome_http_req_res.request_headers,
         )
         .await;
@@ -1321,6 +1387,7 @@ pub async fn cache_chrome_response(
     _target_url: &str,
     _page_response: &PageResponse,
     _chrome_http_req_res: ChromeHTTPReqRes,
+    _cache_options: &Option<CacheOptions>,
 ) {
 }
 
@@ -1362,6 +1429,81 @@ fn f64_to_u64_floor(x: f64) -> u64 {
     }
 }
 
+#[cfg(all(
+    feature = "chrome",
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
+))]
+/// Cache a chrome response from CDP body.
+async fn cache_chrome_response_from_cdp_body(
+    target_url: &str,
+    body: &[u8],
+    chrome_http_req_res: &ChromeHTTPReqRes,
+    cache_options: &Option<CacheOptions>,
+) {
+    use crate::utils::create_cache_key_raw;
+
+    if let Ok(u) = url::Url::parse(target_url) {
+        let http_response = HttpResponse {
+            url: u,
+            body: body.to_vec(),
+            status: chrome_http_req_res.status_code.into(),
+            version: match chrome_http_req_res.protocol.as_str() {
+                "http/0.9" => HttpVersion::Http09,
+                "http/1" | "http/1.0" => HttpVersion::Http10,
+                "http/1.1" => HttpVersion::Http11,
+                "http/2.0" | "http/2" => HttpVersion::H2,
+                "http/3.0" | "http/3" => HttpVersion::H3,
+                _ => HttpVersion::Http11,
+            },
+            headers: chrome_http_req_res.response_headers.clone(),
+        };
+
+        let auth_opt = match cache_options {
+            Some(CacheOptions::Yes) => None,
+            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::No) | None => None,
+        };
+        let cache_key = create_cache_key_raw(
+            target_url,
+            Some(&chrome_http_req_res.method),
+            auth_opt.as_deref().map(|x| x.as_str()),
+        );
+
+        put_hybrid_cache(
+            &cache_key,
+            http_response,
+            &chrome_http_req_res.method,
+            chrome_http_req_res.request_headers.clone(),
+        )
+        .await;
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg(feature = "chrome")]
+/// Map of the response.
+struct ResponseMap {
+    /// The url of the request
+    url: String,
+    /// The network request was skipped.
+    skipped: bool,
+    /// The bytes transferred
+    bytes_transferred: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg(feature = "chrome")]
+struct ResponseBase {
+    /// The map of the response.
+    response_map: Option<hashbrown::HashMap<String, ResponseMap>>,
+    /// The headers of request.
+    headers: Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+    /// The status code.
+    status_code: Option<i64>,
+    /// Is the main document cached?
+    main_doc_from_cache: bool,
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -1377,10 +1519,11 @@ pub async fn fetch_page_html_chrome_base(
     execution_scripts: &Option<ExecutionScripts>,
     automation_scripts: &Option<AutomationScripts>,
     viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<Box<std::time::Duration>>,
+    request_timeout: &Option<Box<Duration>>,
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -1390,33 +1533,10 @@ pub async fn fetch_page_html_chrome_base(
         },
         error::CdpError,
     };
-    use hashbrown::HashMap;
-    use std::time::Duration;
     use tokio::{
         sync::{oneshot, OnceCell},
         time::Instant,
     };
-
-    #[derive(Debug, Clone, Default)]
-    /// Map of the response.
-    struct ResponseMap {
-        /// The url of the request
-        url: String,
-        /// The network request was skipped.
-        skipped: bool,
-        /// The bytes transferred
-        bytes_transferred: f64,
-    }
-
-    #[derive(Debug, Clone, Default)]
-    struct ResponseBase {
-        /// The map of the response.
-        response_map: Option<HashMap<String, ResponseMap>>,
-        /// The headers of request.
-        headers: Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
-        /// The status code.
-        status_code: Option<i64>,
-    }
 
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -1486,7 +1606,23 @@ pub async fn fetch_page_html_chrome_base(
         }
     );
 
+    let cache_request = !cache_options.is_none();
+    let cache_request = if cache_request {
+        match cache_options {
+            Some(CacheOptions::No) => false,
+            _ => true,
+        }
+    } else {
+        cache_request
+    };
+
     let (tx, rx) = oneshot::channel::<bool>();
+    let (main_tx, main_rx) = if cache_request {
+        let c = oneshot::channel::<RequestId>();
+        (Some(c.0), Some(c.1))
+    } else {
+        (None, None)
+    };
 
     let page_clone = if should_block {
         Some(page.clone())
@@ -1510,17 +1646,17 @@ pub async fn fetch_page_html_chrome_base(
             };
 
             if let Ok(mut listener) = event_loading_listener {
-                if asset {
-                    while let Some(event) = listener.next().await {
-                        total += event.encoded_data_length;
+                while let Some(event) = listener.next().await {
+                    total += event.encoded_data_length;
 
-                        if let Some(response_map) = response_map.as_mut() {
-                            response_map
-                                .entry(event.request_id.inner().clone())
-                                .and_modify(|e| *e += event.encoded_data_length)
-                                .or_insert(event.encoded_data_length);
-                        }
+                    if let Some(response_map) = response_map.as_mut() {
+                        response_map
+                            .entry(event.request_id.inner().clone())
+                            .and_modify(|e| *e += event.encoded_data_length)
+                            .or_insert(event.encoded_data_length);
+                    }
 
+                    if asset {
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
                                 if request_id == &event.request_id {
@@ -1530,16 +1666,6 @@ pub async fn fetch_page_html_chrome_base(
                                     }
                                 }
                             }
-                        }
-                    }
-                } else {
-                    while let Some(event) = listener.next().await {
-                        total += event.encoded_data_length;
-                        if let Some(response_map) = response_map.as_mut() {
-                            response_map
-                                .entry(event.request_id.inner().clone())
-                                .and_modify(|e| *e += event.encoded_data_length)
-                                .or_insert(event.encoded_data_length);
                         }
                     }
                 }
@@ -1577,6 +1703,8 @@ pub async fn fetch_page_html_chrome_base(
 
             let mut status_code = None;
             let mut headers = None;
+            let mut main_doc_request_id: Option<RequestId> = None;
+            let mut main_doc_from_cache = false;
 
             if asset || response_map.is_some() {
                 if let Ok(mut listener) = received_listener {
@@ -1585,7 +1713,8 @@ pub async fn fetch_page_html_chrome_base(
                     let mut intial_request = false;
 
                     while let Some(event) = listener.next().await {
-                        if !intial_request && event.r#type == ResourceType::Document {
+                        let document = event.r#type == ResourceType::Document;
+                        if !intial_request && document {
                             let redirect =
                                 event.response.status >= 300 && event.response.status <= 399;
 
@@ -1593,11 +1722,18 @@ pub async fn fetch_page_html_chrome_base(
                                 intial_request = true;
                                 status_code = Some(event.response.status);
                                 headers = Some(event.response.headers.clone());
+                                main_doc_request_id = Some(event.request_id.clone());
+                                // DevTools cache flags
+                                let from_disk = event.response.from_disk_cache.unwrap_or(false);
+                                let from_prefetch =
+                                    event.response.from_prefetch_cache.unwrap_or(false);
+                                let from_sw = event.response.from_service_worker.unwrap_or(false);
+                                main_doc_from_cache = from_disk || from_prefetch || from_sw;
                             }
                         }
                         // check if media asset needs to be downloaded.
-                        if asset {
-                            if !initial_asset && event.r#type == ResourceType::Document {
+                        else if asset {
+                            if !initial_asset && document {
                                 allow_download =
                                     DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
                             }
@@ -1625,10 +1761,17 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
+            if let Some(request_id) = &main_doc_request_id {
+                if let Some(tx) = main_tx {
+                    let _ = tx.send(request_id.clone());
+                }
+            }
+
             ResponseBase {
                 response_map,
                 status_code,
                 headers,
+                main_doc_from_cache,
             }
         };
 
@@ -1704,18 +1847,17 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     }
                 }
-            } else {
-                if let Err(e) = navigate(page, source, &mut chrome_http_req_res, referrer).await {
-                    log::info!(
-                        "Navigation Error({:?}) - {:?}",
-                        e,
-                        &url_target.unwrap_or(source)
-                    );
-                    if let chromiumoxide::error::CdpError::Timeout = e {
-                        block_bytes = true;
-                    }
-                    return Err(e);
-                };
+            } else if let Err(e) = navigate(page, source, &mut chrome_http_req_res, referrer).await
+            {
+                log::info!(
+                    "Navigation Error({:?}) - {:?}",
+                    e,
+                    &url_target.unwrap_or(source)
+                );
+                if let chromiumoxide::error::CdpError::Timeout = e {
+                    block_bytes = true;
+                }
+                return Err(e);
             }
         }
 
@@ -2095,10 +2237,10 @@ pub async fn fetch_page_html_chrome_base(
                         page_response.status_code = chrome_http_req_res1.status_code;
                         page_response.waf_check = chrome_http_req_res1.waf_check;
 
-                        if !page_set {
+                        if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(&source, &page_response, chrome_http_req_res1),
+                                cache_chrome_response(&source, &page_response, chrome_http_req_res1, &cache_options),
                             )
                             .await;
                         }
@@ -2132,6 +2274,47 @@ pub async fn fetch_page_html_chrome_base(
     //         links.extend(page.extract_links_raw(&base, &results).await);
     //     }
     // }
+
+    let mut modified_cache = false;
+
+    if cache_request {
+        if let Some(mut main_rx) = main_rx {
+            if let Ok(doc_req_id) = &main_rx.try_recv() {
+                let cache_url = match &page_response.final_url {
+                    Some(final_url) if !final_url.is_empty() => final_url.as_str(),
+                    _ => target_url,
+                };
+
+                match page
+                    .execute(GetResponseBodyParams::new(doc_req_id.clone()))
+                    .await
+                {
+                    Ok(body_result) => {
+                        let raw_body: Vec<u8> = if body_result.base64_encoded {
+                            chromiumoxide::utils::base64::decode(&body_result.body)
+                                .unwrap_or_default()
+                        } else {
+                            body_result.body.clone().into_bytes()
+                        };
+                        let _ = tokio::time::timeout(
+                            base_timeout,
+                            cache_chrome_response_from_cdp_body(
+                                cache_url,
+                                &raw_body,
+                                &chrome_http_req_res,
+                                &cache_options,
+                            ),
+                        )
+                        .await;
+                        modified_cache = true;
+                    }
+                    Err(e) => {
+                        log::error!("{:?}", e)
+                    }
+                }
+            }
+        }
+    }
 
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
@@ -2218,10 +2401,15 @@ pub async fn fetch_page_html_chrome_base(
                     }
                 }
 
-                if !page_set {
+                if cache_request && !page_set && !rs.main_doc_from_cache && !modified_cache {
                     let _ = tokio::time::timeout(
                         base_timeout,
-                        cache_chrome_response(&source, &page_response, chrome_http_req_res),
+                        cache_chrome_response(
+                            &source,
+                            &page_response,
+                            chrome_http_req_res,
+                            &cache_options,
+                        ),
                     )
                     .await;
                 }
@@ -2970,6 +3158,7 @@ pub async fn fetch_page_html(
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -2980,18 +3169,25 @@ pub async fn fetch_page_html(
         None
     };
 
+    let cached_html = get_cached_url(&target_url, cache_options).await;
+    let cached = !cached_html.is_none();
+
     let mut page_response = match &page {
         page => {
             match fetch_page_html_chrome_base(
-                &target_url,
+                if let Some(cached) = &cached_html {
+                    &cached
+                } else {
+                    &target_url
+                },
                 &page,
-                false,
+                cached,
                 true,
                 wait_for,
                 screenshot,
                 page_set,
                 openai_config,
-                None,
+                if cached { Some(target_url) } else { None },
                 execution_scripts,
                 automation_scripts,
                 &viewport,
@@ -3128,6 +3324,146 @@ pub async fn fetch_page_html(
     page_response
 }
 
+#[cfg(any(feature = "cache", feature = "cache_mem"))]
+/// Create the cache key from string.
+pub fn create_cache_key_raw(
+    uri: &str,
+    override_method: Option<&str>,
+    auth: Option<&str>,
+) -> String {
+    if let Some(authentication) = auth {
+        format!(
+            "{}:{}:{}",
+            override_method.unwrap_or_else(|| "GET".into()),
+            uri,
+            authentication
+        )
+    } else {
+        format!(
+            "{}:{}",
+            override_method.unwrap_or_else(|| "GET".into()),
+            uri
+        )
+    }
+}
+
+#[cfg(any(feature = "cache", feature = "cache_mem"))]
+/// Create the cache key.
+pub fn create_cache_key(
+    parts: &http::request::Parts,
+    override_method: Option<&str>,
+    auth: Option<&str>,
+) -> String {
+    create_cache_key_raw(
+        &parts.uri.to_string(),
+        Some(override_method.unwrap_or_else(|| parts.method.as_str())),
+        auth,
+    )
+}
+
+#[derive(Default, Debug, Clone)]
+/// Cache options to use for the request.
+pub enum CacheOptions {
+    /// Use cache without authentication.
+    Yes,
+    /// Use cache with authentication.
+    Authorized(String),
+    #[default]
+    /// Do not use the memory cache.
+    No,
+}
+
+#[cfg(any(feature = "cache", feature = "cache_mem"))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn get_cached_url_base(
+    target_url: &str,
+    cache_options: Option<CacheOptions>,
+) -> Option<String> {
+    use crate::http_cache_reqwest::CacheManager;
+
+    let auth_opt = match cache_options {
+        Some(CacheOptions::Yes) => None,
+        Some(CacheOptions::Authorized(token)) => Some(token),
+        Some(CacheOptions::No) | None => {
+            return None;
+        }
+    };
+
+    let cache_url = create_cache_key_raw(target_url, None, auth_opt.as_deref());
+
+    let result = tokio::time::timeout(Duration::from_millis(60), async {
+        crate::website::CACACHE_MANAGER.get(&cache_url).await
+    })
+    .await;
+
+    if let Ok(cache_result) = result {
+        if let Ok(Some(http_response)) = cache_result {
+            let body = http_response.0.body;
+            if !auto_encoder::is_binary_file(&body) {
+                let accept_lang = http_response
+                    .0
+                    .headers
+                    .get("accept-language")
+                    .and_then(|h| if h.is_empty() { None } else { Some(h) })
+                    .map_or("", |v| v);
+
+                if accept_lang.is_empty() {
+                    return Some(auto_encoder::encode_bytes_from_language(
+                        &body,
+                        &accept_lang,
+                    ));
+                } else {
+                    return Some(auto_encoder::auto_encode_bytes(&body));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(any(feature = "cache", feature = "cache_mem"))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn get_cached_url(
+    target_url: &str,
+    cache_options: Option<&CacheOptions>,
+) -> Option<String> {
+    if let Some(body) = get_cached_url_base(target_url, cache_options.cloned()).await {
+        return Some(body);
+    }
+
+    let alt_url: Option<String> = if target_url.ends_with('/') {
+        let trimmed = target_url.trim_end_matches('/');
+        if trimmed.is_empty() || trimmed == target_url {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    } else {
+        let mut s = String::with_capacity(target_url.len() + 1);
+        s.push_str(target_url);
+        s.push('/');
+        Some(s)
+    };
+
+    if let Some(alt) = alt_url {
+        if let Some(body) = get_cached_url_base(&alt, cache_options.cloned()).await {
+            return Some(body);
+        }
+    }
+
+    None
+}
+
+#[cfg(all(not(feature = "cache"), not(feature = "cache_mem")))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn get_cached_url(
+    _target_url: &str,
+    _cache_options: Option<&CacheOptions>,
+) -> Option<String> {
+    None
+}
+
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html(
@@ -3145,17 +3481,25 @@ pub async fn fetch_page_html(
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
 ) -> PageResponse {
+    let cached_html = get_cached_url(&target_url, cache_options.as_ref()).await;
+    let cached = !cached_html.is_none();
+
     match fetch_page_html_chrome_base(
-        &target_url,
+        if let Some(cached) = &cached_html {
+            &cached
+        } else {
+            &target_url
+        },
         &page,
-        false,
+        cached,
         true,
         wait_for,
         screenshot,
         page_set,
         openai_config,
-        None,
+        if cached { Some(target_url) } else { None },
         execution_scripts,
         automation_scripts,
         viewport,
@@ -3163,6 +3507,7 @@ pub async fn fetch_page_html(
         track_events,
         referrer,
         max_page_bytes,
+        cache_options,
     )
     .await
     {
@@ -3191,6 +3536,7 @@ pub async fn fetch_page_html_chrome(
     track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -3198,18 +3544,25 @@ pub async fn fetch_page_html_chrome(
         None
     };
 
+    let cached_html = get_cached_url(&target_url, cache_options.as_ref()).await;
+    let cached = !cached_html.is_none();
+
     let mut page_response = match &page {
         page => {
             match fetch_page_html_chrome_base(
-                &target_url,
+                if let Some(cached) = &cached_html {
+                    &cached
+                } else {
+                    &target_url
+                },
                 &page,
-                false,
+                cached,
                 true,
                 wait_for,
                 screenshot,
                 page_set,
                 openai_config,
-                None,
+                if cached { Some(target_url) } else { None },
                 execution_scripts,
                 automation_scripts,
                 viewport,
@@ -3217,6 +3570,7 @@ pub async fn fetch_page_html_chrome(
                 track_events,
                 referrer,
                 max_page_bytes,
+                cache_options,
             )
             .await
             {

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.180"
+version = "2.37.187"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -55,6 +55,7 @@ moka = { version = "0.12", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
 http-cache-semantics = { version = "2", optional = true }
 http-cache = { version = "0.20", optional = true, default-features = false }
+http-global-cache = { version = "0.1.0", optional = true, default-features = false, features = ["cache_request"] }
 http = { version = "1", optional = true }
 phf = "0.11"
 auto_encoder = { version = "0.1" }
@@ -192,12 +193,11 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-cache_request = ["dep:reqwest-middleware", "dep:http-cache-reqwest"]
-cache = ["cache_request", "http-cache-reqwest/manager-cacache"]
-cache_mem = ["cache_request", "http-cache-reqwest/manager-moka"]
+cache_request = ["dep:http-global-cache","dep:reqwest-middleware", "dep:http-cache-reqwest"]
+cache = ["cache_request", "http-global-cache/cache"]
+cache_mem = ["cache_request", "http-global-cache/cache_mem"]
 cache_openai = ["dep:moka"]
 cache_chrome_hybrid = [
-    "cache_request",
     "cache",
     "chrome",
     "dep:http-cache-semantics",
@@ -205,7 +205,6 @@ cache_chrome_hybrid = [
     "dep:http",
 ]
 cache_chrome_hybrid_mem = [
-    "cache_request",
     "cache_mem",
     "chrome",
     "dep:http-cache-semantics",

@@ -1,21 +1,33 @@
 //! cargo run --example cache_chrome_hybrid --features="spider/sync spider/chrome spider/cache_chrome_hybrid"
 extern crate spider;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-
 use crate::spider::http_cache_reqwest::CacheManager;
 use crate::spider::tokio::io::AsyncWriteExt;
 use spider::string_concat::{string_concat, string_concat_impl};
 use spider::tokio;
 use spider::website::Website;
+use spider::{
+    configuration::ChromeEventTracker, features::chrome_common::RequestInterceptConfiguration,
+};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 static GLOBAL_URL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr/en")
+    let mut interception = RequestInterceptConfiguration::new(true);
+    let mut tracker = ChromeEventTracker::default();
+
+    interception.block_javascript = true;
+
+    tracker.responses = true;
+    tracker.requests = true;
+
+    let mut website: Website = Website::new("https://spider.cloud")
         .with_caching(true)
+        .with_chrome_intercept(interception)
+        .with_event_tracker(Some(tracker))
         .build()
         .unwrap();
     let mut rx2 = website.subscribe(500).unwrap();

@@ -8,6 +8,9 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::utils::get_domain_from_url;
+#[cfg(any(feature = "cache_request", feature = "chrome"))]
+use crate::utils::CacheOptions;
+
 use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::net::IpAddr;
@@ -1394,6 +1397,42 @@ impl Configuration {
         self.modify_headers = modify_headers;
         self
     }
+
+    /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
+    #[cfg(any(feature = "cache_request", feature = "chrome"))]
+    pub(crate) fn get_cache_options(&self) -> Option<CacheOptions> {
+        if !self.cache {
+            return None;
+        }
+
+        let auth_token = self
+            .headers
+            .as_ref()
+            .and_then(|headers| {
+                headers
+                    .0
+                    .get("authorization")
+                    .or_else(|| headers.0.get("Authorization"))
+            })
+            .map(|s| s.to_owned());
+
+        match auth_token {
+            Some(token) if !token.is_empty() => {
+                if let Ok(token_str) = token.to_str() {
+                    Some(CacheOptions::Authorized(token_str.into()))
+                } else {
+                    Some(CacheOptions::Yes)
+                }
+            }
+            _ => Some(CacheOptions::Yes),
+        }
+    }
+
+    // /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
+    // #[cfg(not(any(feature = "cache_request", feature = "chrome")))]
+    // pub(crate) fn get_cache_options(&self) -> Option<CacheOptions> {
+    //     None
+    // }
 
     /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Self {
