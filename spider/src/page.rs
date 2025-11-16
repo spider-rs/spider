@@ -2751,6 +2751,7 @@ impl Page {
                                     &configuration.track_events,
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
+                                    configuration.get_cache_options()
                                 )
                                 .await;
 
@@ -3124,6 +3125,7 @@ impl Page {
                                     &configuration.track_events,
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
+                                    configuration.get_cache_options()
                                 )
                                 .await;
 
