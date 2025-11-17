@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.37.188"
+version = "2.37.190"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -193,7 +193,7 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-cache_request = ["dep:http-global-cache","dep:reqwest-middleware", "dep:http-cache-reqwest"]
+cache_request = ["dep:http-global-cache","dep:reqwest-middleware", "dep:http-cache-reqwest", "dep:http"]
 cache = ["cache_request", "http-global-cache/cache"]
 cache_mem = ["cache_request", "http-global-cache/cache_mem"]
 cache_openai = ["dep:moka"]

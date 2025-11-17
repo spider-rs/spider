@@ -1479,6 +1479,19 @@ async fn cache_chrome_response_from_cdp_body(
     }
 }
 
+#[cfg(all(
+    feature = "chrome",
+    not(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))
+))]
+/// Cache a chrome response from CDP body.
+async fn cache_chrome_response_from_cdp_body(
+    _target_url: &str,
+    _body: &[u8],
+    _chrome_http_req_res: &ChromeHTTPReqRes,
+    _cache_options: &Option<CacheOptions>,
+) {
+}
+
 #[derive(Debug, Clone, Default)]
 #[cfg(feature = "chrome")]
 /// Map of the response.
