@@ -267,9 +267,11 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_javascript: config.chrome_intercept.block_javascript,
         ignore_analytics: config.chrome_intercept.block_analytics,
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
-        extra_headers: match config.headers {
-            Some(ref headers) => {
+        extra_headers: match &config.headers {
+            Some(headers) => {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
+                hm.remove("user-agent");
+                hm.remove("referrer-policy");
 
                 if cfg!(feature = "real_browser") {
                     crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
