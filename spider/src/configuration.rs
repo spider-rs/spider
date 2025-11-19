@@ -302,6 +302,10 @@ pub struct Configuration {
     pub network_interface: Option<String>,
     /// Bind to a local IP Address.
     pub local_address: Option<IpAddr>,
+    /// The default http connect timeout
+    pub default_http_connect_timeout: Option<Duration>,
+    /// The default http read timeout
+    pub default_http_read_timeout: Option<Duration>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1025,6 +1029,24 @@ impl Configuration {
     /// Set the retry limit for request. Set the value to 0 for no retries. The default is 0.
     pub fn with_retry(&mut self, retry: u8) -> &mut Self {
         self.retry = retry;
+        self
+    }
+
+    /// The default http connect timeout.
+    pub fn with_default_http_connect_timeout(
+        &mut self,
+        default_http_connect_timeout: Option<Duration>,
+    ) -> &mut Self {
+        self.default_http_connect_timeout = default_http_connect_timeout;
+        self
+    }
+
+    /// The default http read timeout.
+    pub fn with_default_http_read_timeout(
+        &mut self,
+        default_http_read_timeout: Option<Duration>,
+    ) -> &mut Self {
+        self.default_http_read_timeout = default_http_read_timeout;
         self
     }
 

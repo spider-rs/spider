@@ -4,7 +4,7 @@ pub mod abs;
 pub mod connect;
 /// Generic CSS selectors.
 pub mod css_selectors;
-#[cfg(feature = "balance")]
+#[cfg(any(feature = "balance", feature = "disk"))]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
 /// Utils to modify the HTTP header.
@@ -4733,7 +4733,7 @@ const REBALANCE_TIME: std::time::Duration = std::time::Duration::from_millis(100
 #[cfg(feature = "balance")]
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
     let cpu_load = if detect {
-        crate::utils::detect_system::get_global_cpu_state().await
+        detect_system::get_global_cpu_state().await
     } else {
         0
     };

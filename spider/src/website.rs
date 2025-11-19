@@ -86,17 +86,20 @@ pub fn is_safe_javascript_challenge(page: &Page) -> bool {
     AC_JS_CHALLENGE.find(page).is_some()
 }
 
-#[cfg(any(
-    target_os = "android",
-    target_os = "fuchsia",
-    target_os = "illumos",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "solaris",
-    target_os = "tvos",
-    target_os = "visionos",
-    target_os = "watchos",
+#[cfg(all(
+    any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "illumos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "solaris",
+        target_os = "tvos",
+        target_os = "visionos",
+        target_os = "watchos",
+    ),
+    not(feature = "wreq")
 ))]
 /// Bind connections only on the specified network interface.
 fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
@@ -104,6 +107,7 @@ fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilde
 }
 
 #[cfg(not(any(
+    feature = "wreq",
     target_os = "android",
     target_os = "fuchsia",
     target_os = "illumos",
@@ -1404,13 +1408,27 @@ impl Website {
             _ => true,
         };
 
+        let timeout_mult = if self.configuration.proxies.is_some() {
+            2
+        } else {
+            1
+        };
+
         let client = reqwest::Client::builder()
             .redirect(policy)
             .http09_responses()
             .http1_ignore_invalid_headers_in_responses(true)
             .referer(self.configuration.referer.is_none())
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(20))
+            .connect_timeout(
+                self.configuration
+                    .default_http_connect_timeout
+                    .unwrap_or(Duration::from_secs(24 * timeout_mult)),
+            )
+            .read_timeout(
+                self.configuration
+                    .default_http_read_timeout
+                    .unwrap_or(Duration::from_secs(42 * timeout_mult)),
+            )
             .http1_title_case_headers()
             .http1_allow_obsolete_multiline_headers_in_responses(true)
             .http1_allow_spaces_after_header_name_in_responses(true)
@@ -1470,10 +1488,25 @@ impl Website {
             _ => true,
         };
 
+        let timeout_mult = if self.configuration.proxies.is_some() {
+            2
+        } else {
+            1
+        };
+
         let client = Client::builder()
             .redirect(policy)
             .referer(self.configuration.referer.is_none())
-            .connect_timeout(Duration::from_secs(10));
+            .connect_timeout(
+                self.configuration
+                    .default_http_connect_timeout
+                    .unwrap_or(Duration::from_secs(24 * timeout_mult)),
+            )
+            .read_timeout(
+                self.configuration
+                    .default_http_read_timeout
+                    .unwrap_or(Duration::from_secs(42 * timeout_mult)),
+            );
 
         let client = if let Some(local_address) = &self.configuration.local_address {
             client.local_address(*local_address)
@@ -6697,6 +6730,28 @@ impl Website {
         wait_for_delay: Option<crate::configuration::WaitForDelay>,
     ) -> &mut Self {
         self.configuration.with_wait_for_delay(wait_for_delay);
+        self
+    }
+
+    /// The default http connect timeout.
+    pub fn with_default_http_connect_timeout(
+        &mut self,
+        default_http_connect_timeout: Option<Duration>,
+    ) -> &mut Self {
+        self.configuration
+            .with_default_http_connect_timeout(default_http_connect_timeout);
+
+        self
+    }
+
+    /// The default http read timeout.
+    pub fn with_default_http_read_timeout(
+        &mut self,
+        default_http_read_timeout: Option<Duration>,
+    ) -> &mut Self {
+        self.configuration
+            .with_default_http_read_timeout(default_http_read_timeout);
+
         self
     }
 
