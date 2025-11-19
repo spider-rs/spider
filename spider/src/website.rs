@@ -25,6 +25,7 @@ use async_job::{async_trait, Job, Runner};
 use hashbrown::{HashMap, HashSet};
 use reqwest::header::REFERER;
 use reqwest::StatusCode;
+use std::fmt;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicI8, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -271,6 +272,13 @@ pub enum WebsiteMetaInfo {
     None,
 }
 
+/// On link find callback rewrite a url if it meets a condition.
+pub type OnLinkFindCallback = Arc<
+    dyn Fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)
+        + Send
+        + Sync,
+>;
+
 /// Represents a website to crawl and gather all links or page content.
 /// ```rust
 /// use spider::website::Website;
@@ -282,14 +290,12 @@ pub enum WebsiteMetaInfo {
 ///     // do something
 /// }
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Website {
     /// Configuration properties for website.
     pub configuration: Box<Configuration>,
     /// The callback when a link is found.
-    pub on_link_find_callback: Option<
-        fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-    >,
+    pub on_link_find_callback: Option<OnLinkFindCallback>,
     /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
     pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
@@ -340,6 +346,55 @@ pub struct Website {
     website_meta_info: WebsiteMetaInfo,
     /// Skip the initial link?
     skip_initial: bool,
+}
+
+impl fmt::Debug for Website {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let domain_str = self.domain_parsed.as_ref().map(|u| u.as_str().to_owned());
+        let pages_len = self.pages.as_ref().map(|p| p.len()).unwrap_or(0);
+
+        let mut ds = f.debug_struct("Website");
+
+        ds.field("url", &self.url.as_ref())
+            .field("crawl_id", &self.crawl_id)
+            .field("domain_parsed", &domain_str)
+            // callbacks – just show presence, avoids Fn: Debug bound
+            .field(
+                "on_link_find_callback",
+                &self.on_link_find_callback.is_some(),
+            )
+            .field(
+                "on_should_crawl_callback",
+                &self.on_should_crawl_callback.is_some(),
+            )
+            // state + counters
+            .field("status", &self.status)
+            .field("shutdown", &self.shutdown)
+            .field("extra_links_len", &self.extra_links.len())
+            .field("signatures_len", &self.signatures.len())
+            .field("pages_len", &pages_len)
+            // channels / sqlite / client: just booleans
+            .field("channel_present", &self.channel.is_some())
+            .field("channel_queue_present", &self.channel_queue.is_some())
+            .field("client_present", &self.client.is_some())
+            // initial page info
+            .field("initial_status_code", &self.initial_status_code)
+            .field("initial_anti_bot_tech", &self.initial_anti_bot_tech)
+            .field("initial_page_waf_check", &self.initial_page_waf_check)
+            .field("initial_page_should_retry", &self.initial_page_should_retry)
+            // misc flags/meta
+            .field("send_configured", &self.send_configured)
+            .field("website_meta_info", &self.website_meta_info)
+            .field("skip_initial", &self.skip_initial);
+
+        #[cfg(feature = "disk")]
+        {
+            ds.field("sqlite_present", &self.sqlite.is_some())
+            .field("enable_sqlite", &self.enable_sqlite);
+        }
+
+        ds.finish()
+    }
 }
 
 impl Website {
@@ -2153,14 +2208,12 @@ impl Website {
                 self.insert_signature(signature).await;
             }
 
-            self.insert_link(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.url.clone(), None);
-                    c.0
-                }
+            let url = match &self.on_link_find_callback {
+                Some(cb) => cb(*self.url.clone(), None).0,
                 _ => *self.url.clone(),
-            })
-            .await;
+            };
+
+            self.insert_link(url).await;
 
             if self.configuration.return_page_links {
                 page.page_links = links_pages
@@ -2367,15 +2420,12 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.url.clone(), None);
-
-                    c.0
-                }
+            let url = match &self.on_link_find_callback {
+                Some(cb) => cb(*self.url.clone(), None).0,
                 _ => *self.url.clone(),
-            })
-            .await;
+            };
+
+            self.insert_link(url).await;
 
             // setup link tracking.
             if self.configuration.return_page_links && page.page_links.is_none() {
@@ -2632,12 +2682,8 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.url.to_owned(), None);
-
-                    c.0
-                }
+            self.insert_link(match &self.on_link_find_callback {
+                Some(cb) => cb(*self.url.to_owned(), None).0,
                 _ => *self.url.to_owned(),
             })
             .await;
@@ -2709,7 +2755,7 @@ impl Website {
             let u = page.get_url();
             let u = if u.is_empty() { link } else { u.into() };
 
-            let link_result = match self.on_link_find_callback {
+            let link_result = match &self.on_link_find_callback {
                 Some(cb) => cb(u, None),
                 _ => (u, None),
             };
@@ -2778,10 +2824,11 @@ impl Website {
                 self.configuration.get_cache_options(),
             )
             .await;
+
             let u = page.get_url();
             let u = if u.is_empty() { link } else { u.into() };
 
-            let link_result = match self.on_link_find_callback {
+            let link_result = match &self.on_link_find_callback {
                 Some(cb) => cb(u, None),
                 _ => (u, None),
             };
@@ -2935,13 +2982,12 @@ impl Website {
                     self.insert_signature(signature).await;
                 }
 
-                self.insert_link(match self.on_link_find_callback {
-                    Some(cb) => {
-                        let c = cb(*self.url.clone(), None);
-                        c.0
-                    }
-                    _ => *self.url.clone(),
-                })
+                self.insert_link(
+                    self.on_link_find_callback
+                        .as_ref()
+                        .map(|cb| cb(*self.url.clone(), None).0)
+                        .unwrap_or_else(|| self.url.clone()),
+                )
                 .await;
 
                 if self.configuration.return_page_links {
@@ -3082,14 +3128,12 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(match self.on_link_find_callback {
-                Some(cb) => {
-                    let c = cb(*self.url.clone(), None);
-
-                    c.0
-                }
-                _ => *self.url.clone(),
-            })
+            self.insert_link(
+                self.on_link_find_callback
+                    .as_ref()
+                    .map(|cb| cb(*self.url.clone(), None).0)
+                    .unwrap_or_else(|| *self.url.clone()),
+            )
             .await;
 
             let links = if !page_links.is_empty() {
@@ -3638,7 +3682,6 @@ impl Website {
         if self.single_page() {
             self._crawl_establish(client, &mut selector, false).await;
         } else {
-            let on_link_find_callback = self.on_link_find_callback;
             let on_should_crawl_callback = self.on_should_crawl_callback;
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
@@ -3671,6 +3714,7 @@ impl Website {
                     self.configuration.normalize,
                 ),
                 self.domain_parsed.clone(),
+                self.on_link_find_callback.clone(),
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
@@ -3734,9 +3778,8 @@ impl Website {
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
-
                                 spawn_set("page_fetch", &mut set, async move {
-                                    let link_result = match on_link_find_callback {
+                                    let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
@@ -3954,10 +3997,10 @@ impl Website {
                                 self.url.inner().to_string(),
                                 b.browser.2.clone(),
                                 self.domain_parsed.clone(),
+                                self.on_link_find_callback.clone(),
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_link_find_callback = self.on_link_find_callback;
                             let on_should_crawl_callback = self.on_should_crawl_callback;
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
@@ -4027,7 +4070,6 @@ impl Website {
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
-
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
@@ -4043,7 +4085,7 @@ impl Website {
                                                             );
 
                                                             let link_result =
-                                                                match on_link_find_callback {
+                                                                match  &shared.10 {
                                                                     Some(cb) => cb(link, None),
                                                                     _ => (link, None),
                                                                 };
@@ -4283,7 +4325,6 @@ impl Website {
             website._crawl_establish(client, &mut selector, false).await;
             website
         } else {
-            let on_link_find_callback = self.on_link_find_callback;
             let on_should_crawl_callback = self.on_should_crawl_callback;
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
@@ -4314,6 +4355,7 @@ impl Website {
                     self.configuration.normalize,
                 ),
                 self.domain_parsed.clone(),
+                self.on_link_find_callback.clone(),
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
@@ -4378,7 +4420,7 @@ impl Website {
                                 let shared = shared.clone();
 
                                 spawn_set("page_fetch", &mut set, async move {
-                                    let link_result = match on_link_find_callback {
+                                    let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
@@ -4608,10 +4650,10 @@ impl Website {
                                 self.url.inner().to_string(),
                                 b.browser.2.clone(),
                                 self.domain_parsed.clone(),
+                                self.on_link_find_callback.clone(),
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_link_find_callback = self.on_link_find_callback;
                             let on_should_crawl_callback = self.on_should_crawl_callback;
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
@@ -4699,7 +4741,7 @@ impl Website {
                                                             );
 
                                                             let link_result =
-                                                                match on_link_find_callback {
+                                                                match &shared.10 {
                                                                     Some(cb) => cb(link, None),
                                                                     _ => (link, None),
                                                                 };
@@ -4985,7 +5027,7 @@ impl Website {
         let domain = self.url.inner().as_str();
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
-        let on_link_find_callback = self.on_link_find_callback;
+        let on_link_find_callback = self.on_link_find_callback.clone();
         // http worker verify
         let http_worker = std::env::var("SPIDER_WORKER")
             .unwrap_or_else(|_| "http:".to_string())
@@ -5039,9 +5081,10 @@ impl Website {
 
                         if let Ok(permit) = SEM.acquire().await {
                             let client = client.clone();
+                            let on_link_find_callback = on_link_find_callback.clone();
 
                             spawn_set("page_fetch", &mut set, async move {
-                                let link_results = match on_link_find_callback {
+                                let link_results = match &on_link_find_callback.clone() {
                                     Some(cb) => cb(link, None),
                                     _ => (link, None),
                                 };
@@ -5114,7 +5157,6 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> = self.drain_extra_links().collect();
 
             let (mut interval, throttle) = self.setup_crawl();
-            let on_link_find_callback = self.on_link_find_callback;
             let on_should_crawl_callback = self.on_should_crawl_callback;
             let return_page_links = self.configuration.return_page_links;
 
@@ -5136,6 +5178,7 @@ impl Website {
                 self.configuration.clone(),
                 self.domain_parsed.clone(),
                 browser,
+                self.on_link_find_callback.clone(),
             ));
 
             let add_external = self.configuration.external_domains_caseless.len() > 0;
@@ -5203,7 +5246,7 @@ impl Website {
                                 let shared = shared.clone();
 
                                 spawn_set("page_fetch", &mut set, async move {
-                                    let link_result = match on_link_find_callback {
+                                    let link_result = match &shared.7 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
@@ -6593,15 +6636,24 @@ impl Website {
     /// Perform a callback to run on each link find.
     pub fn with_on_link_find_callback(
         &mut self,
-        on_link_find_callback: Option<
-            fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>),
-        >,
+        on_link_find_callback: Option<OnLinkFindCallback>,
     ) -> &mut Self {
         match on_link_find_callback {
             Some(callback) => self.on_link_find_callback = Some(callback),
             _ => self.on_link_find_callback = None,
         };
         self
+    }
+
+    /// Perform a callback to run on each link find shorthand.
+    pub fn set_on_link_find<F>(&mut self, f: F)
+    where
+        F: Fn(CaseInsensitiveString, Option<String>) -> (CaseInsensitiveString, Option<String>)
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.on_link_find_callback = Some(Arc::new(f));
     }
 
     /// Use a callback to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
