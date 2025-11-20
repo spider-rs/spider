@@ -34,13 +34,10 @@ async fn crawl_website(url: &str) -> Result<()> {
             Some(Duration::from_millis(100)),
             "body".into(),
         )))
-        .with_headers(Some(HeaderMap::from_iter([
-            (
-                REFERER,
-                HeaderValue::from_static(spider::spider_fingerprint::spoof_referrer()),
-            ),
-            (REFERRER_POLICY, HeaderValue::from_static("strict-origin")),
-        ])))
+        .with_headers(Some(HeaderMap::from_iter([(
+            REFERER,
+            HeaderValue::from_static(spider::spider_fingerprint::spoof_referrer()),
+        )])))
         .with_block_assets(true)
         // .with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(10000)))))
         .with_stealth(true)

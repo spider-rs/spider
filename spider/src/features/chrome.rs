@@ -271,7 +271,6 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
             Some(headers) => {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
                 hm.remove("user-agent");
-                hm.remove("referrer-policy");
 
                 if cfg!(feature = "real_browser") {
                     crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
@@ -373,6 +372,9 @@ pub async fn setup_browser_configuration(
                     Some(ref headers) => {
                         let mut hm =
                             crate::utils::header_utils::header_map_to_hash_map(headers.inner());
+
+                        hm.remove("user-agent");
+
                         crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
 
                         if hm.is_empty() {
