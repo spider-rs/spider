@@ -390,7 +390,7 @@ impl fmt::Debug for Website {
         #[cfg(feature = "disk")]
         {
             ds.field("sqlite_present", &self.sqlite.is_some())
-            .field("enable_sqlite", &self.enable_sqlite);
+                .field("enable_sqlite", &self.enable_sqlite);
         }
 
         ds.finish()

@@ -1426,7 +1426,6 @@ impl Configuration {
         if !self.cache {
             return None;
         }
-
         let auth_token = self
             .headers
             .as_ref()

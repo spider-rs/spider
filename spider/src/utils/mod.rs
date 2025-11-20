@@ -3410,23 +3410,24 @@ pub async fn get_cached_url_base(
     .await;
 
     if let Ok(cache_result) = result {
-        if let Ok(Some(http_response)) = cache_result {
-            let body = http_response.0.body;
-            if !auto_encoder::is_binary_file(&body) {
-                let accept_lang = http_response
-                    .0
-                    .headers
-                    .get("accept-language")
-                    .and_then(|h| if h.is_empty() { None } else { Some(h) })
-                    .map_or("", |v| v);
+        if let Ok(Some((http_response, cache_policy))) = cache_result {
+            if !cache_policy.is_stale(std::time::SystemTime::now()) {
+                let body = http_response.body;
+                if !auto_encoder::is_binary_file(&body) {
+                    let accept_lang = http_response
+                        .headers
+                        .get("accept-language")
+                        .and_then(|h| if h.is_empty() { None } else { Some(h) })
+                        .map_or("", |v| v);
 
-                if accept_lang.is_empty() {
-                    return Some(auto_encoder::encode_bytes_from_language(
-                        &body,
-                        &accept_lang,
-                    ));
-                } else {
-                    return Some(auto_encoder::auto_encode_bytes(&body));
+                    if !accept_lang.is_empty() {
+                        return Some(auto_encoder::encode_bytes_from_language(
+                            &body,
+                            &accept_lang,
+                        ));
+                    } else {
+                        return Some(auto_encoder::auto_encode_bytes(&body));
+                    }
                 }
             }
         }
