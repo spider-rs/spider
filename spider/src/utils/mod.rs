@@ -1842,7 +1842,7 @@ pub async fn fetch_page_html_chrome_base(
                     let html = rewrite_base_tag(&source, &url_target).await;
 
                     if let Err(e) = page
-                        .execute(
+                        .send_command(
                             chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
                                 frame_id: frame.unwrap_or_default(),
                                 html,
@@ -2332,7 +2332,7 @@ pub async fn fetch_page_html_chrome_base(
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = tokio::time::timeout(
             base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
-            page.execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
+            page.send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
         )
         .await;
 
@@ -2592,7 +2592,7 @@ pub async fn perform_screenshot(
             }
 
             if omit_background {
-                let _ = page.execute(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams {
+                let _ = page.send_command(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams {
                     color: Some(chromiumoxide::cdp::browser_protocol::dom::Rgba {
                         r: 0,
                         g: 0,
@@ -2626,7 +2626,7 @@ pub async fn perform_screenshot(
             };
 
             if omit_background {
-                let _ = page.execute(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams { color: None })
+                let _ = page.send_command(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams { color: None })
                         .await;
             }
         }

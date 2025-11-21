@@ -1734,7 +1734,7 @@ impl Page {
     pub async fn close_page(&mut self) {
         if let Some(page) = self.chrome_page.as_mut() {
             let _ = page
-                .execute(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+                .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
                 .await;
         }
     }

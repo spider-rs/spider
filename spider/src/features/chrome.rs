@@ -778,7 +778,7 @@ pub async fn setup_auth_challenge_response(
                         .auth_challenge_response(acr)
                         .build() {
                             Ok(c) => {
-                                if let Err(e) = intercept_page.execute(c).await
+                                if let Err(e) = intercept_page.send_command(c).await
                                 {
                                     log("Failed to fullfill auth challege request: ", e.to_string());
                                 }

@@ -2,8 +2,8 @@
 
 extern crate spider;
 use crate::spider::tokio::io::AsyncWriteExt;
+use spider::client::header::REFERER;
 use spider::client::header::{HeaderMap, HeaderValue};
-use spider::client::header::{REFERER, REFERRER_POLICY};
 use spider::configuration::WaitForSelector;
 use spider::tokio;
 use spider::website::Website;
