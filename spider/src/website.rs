@@ -6748,8 +6748,28 @@ impl Website {
         self
     }
 
-    /// Wait for idle network request. This method does nothing if the `chrome` feature is not enabled.
+    /// Wait for network request to be idle within a time frame period (500ms no network connections). This does nothing without the `chrome` flag enabled.
     pub fn with_wait_for_idle_network(
+        &mut self,
+        wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
+    ) -> &mut Self {
+        self.configuration
+            .with_wait_for_idle_network(wait_for_idle_network);
+        self
+    }
+
+    /// Wait for network request with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_idle_network0(
+        &mut self,
+        wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
+    ) -> &mut Self {
+        self.configuration
+            .with_wait_for_idle_network(wait_for_idle_network);
+        self
+    }
+
+    /// Wait for network to be almost idle with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_almost_idle_network0(
         &mut self,
         wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
     ) -> &mut Self {

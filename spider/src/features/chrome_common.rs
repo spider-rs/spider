@@ -23,7 +23,7 @@ impl NetworkInterceptManager {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-/// Wait for network request with optional timeout. This does nothing without the `chrome` flag enabled.
+/// Wait for network request. This does nothing without the `chrome` flag enabled.
 pub struct WaitForIdleNetwork {
     /// The max time to wait for the network. It is recommended to set this to a value around 30s. Set the value to None to remove the timeout.
     pub timeout: Option<core::time::Duration>,
@@ -74,8 +74,12 @@ impl WaitForDelay {
 pub struct WaitFor {
     /// The max time to wait for the selector.
     pub selector: Option<WaitForSelector>,
-    /// Wait for idle network 500ms.
+    /// Wait for network request to be idle within a time frame period (500ms no network connections). This does nothing without the `chrome` flag enabled.
     pub idle_network: Option<WaitForIdleNetwork>,
+    /// Wait for network request with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub idle_network0: Option<WaitForIdleNetwork>,
+    /// Wait for network to be almost idle with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub almost_idle_network0: Option<WaitForIdleNetwork>,
     /// Wait for delay. Should only be used for testing.
     pub delay: Option<WaitForDelay>,
     /// Wait for dom element to stop updating.
@@ -102,6 +106,8 @@ impl WaitFor {
             } else {
                 None
             },
+            idle_network0: None,
+            almost_idle_network0: None,
             selector: if selector.is_some() {
                 Some(WaitForSelector::new(timeout, selector.unwrap_or_default()))
             } else {

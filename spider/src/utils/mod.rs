@@ -552,7 +552,7 @@ pub async fn page_wait(
     wait_for: &Option<crate::configuration::WaitFor>,
 ) {
     if let Some(wait_for) = wait_for {
-        if let Some(ref wait) = wait_for.idle_network {
+        if let Some(wait) = &wait_for.idle_network {
             wait_for_event::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
                 page,
                 wait.timeout,
@@ -560,15 +560,35 @@ pub async fn page_wait(
             .await;
         }
 
-        if let Some(ref wait) = wait_for.selector {
+        if let Some(wait) = &wait_for.almost_idle_network0 {
+            let fut = page.wait_for_network_almost_idle();
+
+            if let Some(timeout) = wait.timeout {
+                let _ = tokio::time::timeout(timeout, fut).await;
+            } else {
+                let _ = fut.await;
+            }
+        }
+
+        if let Some(wait) = &wait_for.idle_network0 {
+            let fut = page.wait_for_network_idle();
+
+            if let Some(timeout) = wait.timeout {
+                let _ = tokio::time::timeout(timeout, fut).await;
+            } else {
+                let _ = fut.await;
+            }
+        }
+
+        if let Some(wait) = &wait_for.selector {
             wait_for_selector(page, wait.timeout, &wait.selector).await;
         }
 
-        if let Some(ref wait) = wait_for.dom {
+        if let Some(wait) = &wait_for.dom {
             wait_for_dom(page, wait.timeout, &wait.selector).await;
         }
 
-        if let Some(ref wait) = wait_for.delay {
+        if let Some(wait) = &wait_for.delay {
             if let Some(timeout) = wait.timeout {
                 tokio::time::sleep(timeout).await
             }

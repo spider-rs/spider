@@ -1093,7 +1093,7 @@ impl Configuration {
     }
 
     #[cfg(feature = "chrome")]
-    /// Wait for idle network request. This method does nothing if the [chrome] feature is not enabled.
+    /// Wait for network request to be idle within a time frame period (500ms no network connections). This does nothing without the `chrome` flag enabled.
     pub fn with_wait_for_idle_network(
         &mut self,
         wait_for_idle_network: Option<WaitForIdleNetwork>,
@@ -1106,6 +1106,58 @@ impl Configuration {
                 self.wait_for = Some(wait_for);
             }
         }
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Wait for network request with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_idle_network0(
+        &mut self,
+        wait_for_idle_network0: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.idle_network0 = wait_for_idle_network0,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.idle_network0 = wait_for_idle_network0;
+                self.wait_for = Some(wait_for);
+            }
+        }
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Wait for network to be almost idle with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_almost_idle_network0(
+        &mut self,
+        wait_for_almost_idle_network0: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
+        match self.wait_for.as_mut() {
+            Some(wait_for) => wait_for.almost_idle_network0 = wait_for_almost_idle_network0,
+            _ => {
+                let mut wait_for = WaitFor::default();
+                wait_for.almost_idle_network0 = wait_for_almost_idle_network0;
+                self.wait_for = Some(wait_for);
+            }
+        }
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for network to be almost idle with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_almost_idle_network0(
+        &mut self,
+        _wait_for_almost_idle_network0: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Wait for network request with a max timeout. This does nothing without the `chrome` flag enabled.
+    pub fn with_wait_for_idle_network0(
+        &mut self,
+        _wait_for_idle_network0: Option<WaitForIdleNetwork>,
+    ) -> &mut Self {
         self
     }
 

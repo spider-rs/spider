@@ -27,8 +27,8 @@ async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
         .with_limit(5)
         .with_chrome_intercept(interception)
-        .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
-            500,
+        .with_wait_for_idle_network0(Some(WaitForIdleNetwork::new(Some(Duration::from_millis(
+            3000,
         )))))
         .with_wait_for_idle_dom(Some(WaitForSelector::new(
             Some(Duration::from_millis(100)),
