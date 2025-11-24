@@ -239,11 +239,20 @@ error was encountered while trying to use an ErrorDocument to handle the request
 <body>
 <center><h1>403 Forbidden</h1></center>
 <hr><center>openresty</center>"#;
+
+
+  /// Empty HTML.
+  pub static ref EMPTY_HTML: &'static [u8; 39] = b"<html><head></head><body></body></html>";
+}
+
+/// Detect if openresty hard 403 is forbidden and should not retry.
+pub fn detect_open_resty_forbidden(b: &[u8]) -> bool {
+    b.starts_with(*OPEN_RESTY_FORBIDDEN)
 }
 
 /// Detect if a page is forbidden and should not retry.
 pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
-    b == *APACHE_FORBIDDEN || b.starts_with(*OPEN_RESTY_FORBIDDEN)
+    b == *APACHE_FORBIDDEN || detect_open_resty_forbidden(b)
 }
 
 /// Needs bot verification.

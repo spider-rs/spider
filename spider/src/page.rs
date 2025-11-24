@@ -1,4 +1,3 @@
-use crate::compact_str::CompactString;
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
@@ -11,6 +10,7 @@ use crate::utils::{
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
+use crate::{compact_str::CompactString, utils::EMPTY_HTML};
 use auto_encoder::auto_encode_bytes;
 use hashbrown::HashSet;
 use lol_html::AsciiCompatibleEncoding;
@@ -1743,9 +1743,9 @@ impl Page {
     /// Close the chrome page used. Useful when storing the page for subscription usage. The feature flag `chrome_store_page` is required.
     pub async fn close_page(&mut self) {}
 
-    /// Page request fulfilled.
+    /// Page request is empty. On chrome an empty page has bare html markup.
     pub fn is_empty(&self) -> bool {
-        self.html.is_none()
+        self.html.is_none() || self.get_html_bytes_u8() == *EMPTY_HTML
     }
 
     /// Url getter for page.

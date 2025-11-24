@@ -2080,6 +2080,34 @@ impl Website {
         expanded
     }
 
+    /// Set the initial crawl status by page output.
+    pub(crate) fn set_crawl_initial_status(
+        &mut self,
+        page: &crate::page::Page,
+        links: &HashSet<CaseInsensitiveString>,
+    ) {
+        use crate::utils::{detect_open_resty_forbidden, APACHE_FORBIDDEN};
+
+        if page.status_code == reqwest::StatusCode::FORBIDDEN
+            && (links.is_empty() || page.is_empty())
+        {
+            if is_safe_javascript_challenge(&page) {
+                self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
+            } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
+                self.website_meta_info = WebsiteMetaInfo::Apache403;
+            } else if detect_open_resty_forbidden(page.get_html_bytes_u8()) {
+                self.website_meta_info = WebsiteMetaInfo::OpenResty403;
+            }
+            self.status = CrawlStatus::Blocked;
+        } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            self.status = CrawlStatus::RateLimited;
+        } else if page.status_code.is_server_error() {
+            self.status = CrawlStatus::ServerError;
+        } else if page.is_empty() {
+            self.status = CrawlStatus::Empty;
+        }
+    }
+
     /// Expand links for crawl.
     #[cfg(not(feature = "glob"))]
     async fn _crawl_establish(
@@ -2088,8 +2116,6 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
-
         if self.skip_initial {
             return Default::default();
         }
@@ -2228,22 +2254,7 @@ impl Website {
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN {
-                if is_safe_javascript_challenge(&page) {
-                    self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
-                } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
-                    self.website_meta_info = WebsiteMetaInfo::Apache403;
-                } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
-                    self.website_meta_info = WebsiteMetaInfo::OpenResty403;
-                }
-                self.status = CrawlStatus::Blocked;
-            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                self.status = CrawlStatus::RateLimited;
-            } else if page.status_code.is_server_error() {
-                self.status = CrawlStatus::ServerError;
-            } else if page.is_empty() {
-                self.status = CrawlStatus::Empty;
-            }
+            self.set_crawl_initial_status(&page, &links);
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
@@ -2374,7 +2385,7 @@ impl Website {
                 }
 
                 // check the page again for final.
-                if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                if let Some(final_redirect_destination) = &page.final_redirect_destination {
                     if final_redirect_destination == "chrome-error://chromewebdata/"
                         && page.status_code.is_success()
                         && page.is_empty()
@@ -2397,7 +2408,7 @@ impl Website {
                 }
             }
 
-            if let Some(ref domain) = page.final_redirect_destination {
+            if let Some(domain) = &page.final_redirect_destination {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let prior_domain = self.domain_parsed.take();
                 self.domain_parsed = parse_absolute_url(&domain);
@@ -2450,15 +2461,7 @@ impl Website {
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN {
-                self.status = CrawlStatus::Blocked;
-            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                self.status = CrawlStatus::RateLimited;
-            } else if page.status_code.is_server_error() {
-                self.status = CrawlStatus::ServerError;
-            } else if page.is_empty() {
-                self.status = CrawlStatus::Empty;
-            }
+            self.set_crawl_initial_status(&page, &links);
 
             if let Some(cb) = self.on_should_crawl_callback {
                 if !cb(&page) {
@@ -2515,7 +2518,7 @@ impl Website {
 
             let mut retry_count = self.configuration.retry;
 
-            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+            if let Some(final_redirect_destination) = &page.final_redirect_destination {
                 if final_redirect_destination == "chrome-error://chromewebdata/"
                     && page.status_code.is_success()
                     && page.is_empty()
@@ -2581,7 +2584,7 @@ impl Website {
                 }
 
                 // check the page again for final.
-                if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+                if let Some(final_redirect_destination) = &page.final_redirect_destination {
                     if final_redirect_destination == "chrome-error://chromewebdata/"
                         && page.status_code.is_success()
                         && page.is_empty()
@@ -2693,22 +2696,14 @@ impl Website {
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN {
-                self.status = CrawlStatus::Blocked;
-            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                self.status = CrawlStatus::RateLimited;
-            } else if page.status_code.is_server_error() {
-                self.status = CrawlStatus::ServerError;
-            } else if page.is_empty() {
-                self.status = CrawlStatus::Empty;
-            }
-
             // todo: pass full links to the worker to return.
             if self.configuration.return_page_links {
                 page.page_links = Some(page.links.clone().into());
             }
 
             let links = HashSet::from(page.links.clone());
+
+            self.set_crawl_initial_status(&page, &links);
 
             channel_send_page(&self.channel, page, &self.channel_guard);
 
@@ -2868,7 +2863,6 @@ impl Website {
         if self.skip_initial {
             return Default::default();
         }
-        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.url.inner();
         let expanded = self.get_expanded_links(&domain_name.as_str());
@@ -3001,22 +2995,7 @@ impl Website {
                 self.initial_page_should_retry = page.should_retry;
                 self.initial_page_waf_check = page.waf_check;
 
-                if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
-                    if is_safe_javascript_challenge(&page) {
-                        self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
-                    } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
-                        self.website_meta_info = WebsiteMetaInfo::Apache403;
-                    } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
-                        self.website_meta_info = WebsiteMetaInfo::OpenResty403;
-                    }
-                    self.status = CrawlStatus::Blocked;
-                } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    self.status = CrawlStatus::RateLimited;
-                } else if page.status_code.is_server_error() {
-                    self.status = CrawlStatus::ServerError;
-                } else if page.is_empty() {
-                    self.status = CrawlStatus::Empty;
-                }
+                self.set_crawl_initial_status(&page, &links);
 
                 if let Some(cb) = self.on_should_crawl_callback {
                     if !cb(&page) {
@@ -3045,8 +3024,6 @@ impl Website {
         mut base: &mut RelativeSelectors,
         browser: &crate::features::chrome::OnceBrowser,
     ) -> HashSet<CaseInsensitiveString> {
-        use crate::utils::{APACHE_FORBIDDEN, OPEN_RESTY_FORBIDDEN};
-
         if self.skip_initial {
             return Default::default();
         }
@@ -3149,22 +3126,7 @@ impl Website {
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
 
-            if page.status_code == reqwest::StatusCode::FORBIDDEN {
-                if is_safe_javascript_challenge(&page) {
-                    self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
-                } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
-                    self.website_meta_info = WebsiteMetaInfo::Apache403;
-                } else if page.get_html_bytes_u8().starts_with(*OPEN_RESTY_FORBIDDEN) {
-                    self.website_meta_info = WebsiteMetaInfo::OpenResty403;
-                }
-                self.status = CrawlStatus::Blocked;
-            } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                self.status = CrawlStatus::RateLimited;
-            } else if page.status_code.is_server_error() {
-                self.status = CrawlStatus::ServerError;
-            } else if page.is_empty() {
-                self.status = CrawlStatus::Empty;
-            }
+            self.set_crawl_initial_status(&page, &links);
 
             if self.configuration.return_page_links {
                 page.page_links = if links.is_empty() {
@@ -4107,7 +4069,7 @@ impl Website {
                                                                 &shared.6.track_events,
                                                                 shared.6.referer.clone(),
                                                                 shared.6.max_page_bytes,
-                                                                                                                                shared.6.get_cache_options()
+                                                                shared.6.get_cache_options()
 
                                                             )
                                                             .await;
