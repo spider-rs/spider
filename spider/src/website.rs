@@ -12,7 +12,9 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 #[cfg(feature = "disk")]
 use crate::features::disk::DatabaseHandler;
 use crate::packages::robotparser::parser::RobotFileParser;
-use crate::page::{AntiBotTech, Page, PageLinkBuildSettings};
+use crate::page::{
+    AntiBotTech, Page, PageLinkBuildSettings, CHROME_UNKNOWN_STATUS_ERROR, UNKNOWN_STATUS_ERROR,
+};
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
 use crate::utils::{
@@ -219,6 +221,8 @@ pub enum CrawlStatus {
     FirewallBlocked,
     /// The crawl failed from a server error.
     ServerError,
+    /// The crawl failed from a connection error with proxy or dns.
+    ConnectError,
     /// The crawl was rate limited.
     RateLimited,
     /// The initial request ran without returning html.
@@ -2088,9 +2092,7 @@ impl Website {
     ) {
         use crate::utils::{detect_open_resty_forbidden, APACHE_FORBIDDEN};
 
-        if page.status_code == reqwest::StatusCode::FORBIDDEN
-            && (links.is_empty() || page.is_empty())
-        {
+        if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
             if is_safe_javascript_challenge(&page) {
                 self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
             } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
@@ -2104,7 +2106,13 @@ impl Website {
         } else if page.status_code.is_server_error() {
             self.status = CrawlStatus::ServerError;
         } else if page.is_empty() {
-            self.status = CrawlStatus::Empty;
+            if page.status_code == *UNKNOWN_STATUS_ERROR
+                || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR
+            {
+                self.status = CrawlStatus::ConnectError;
+            } else {
+                self.status = CrawlStatus::Empty;
+            }
         }
     }
 
@@ -2319,7 +2327,7 @@ impl Website {
 
             let mut retry_count = self.configuration.retry;
 
-            if let Some(ref final_redirect_destination) = page.final_redirect_destination {
+            if let Some(final_redirect_destination) = &page.final_redirect_destination {
                 if final_redirect_destination == "chrome-error://chromewebdata/"
                     && page.status_code.is_success()
                     && page.is_empty()
