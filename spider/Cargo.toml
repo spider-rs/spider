@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.38.12"
+version = "2.38.16"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -221,6 +221,7 @@ chrome_intercept = ["chrome"]
 chrome_headless_new = ["chrome"]
 chrome_simd = ["chrome", "chromey/simd", "simd"]
 chrome_tls_connection = ["chrome", "chromey/chrome_tls_connection"]
+chrome_serde_stacker = ["chromey/serde_stacker"]
 cookies = ["reqwest/cookies", "dep:cookie"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "chrome_intercept"]
