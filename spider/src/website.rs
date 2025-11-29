@@ -2322,6 +2322,7 @@ impl Website {
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
+                &self.configuration.cache_policy,
             )
             .await;
 
@@ -2362,6 +2363,7 @@ impl Website {
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
+                            &self.configuration.cache_policy,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2387,6 +2389,7 @@ impl Website {
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
+                        &self.configuration.cache_policy,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2521,6 +2524,7 @@ impl Website {
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
+                &self.configuration.cache_policy,
             )
             .await;
 
@@ -2561,6 +2565,7 @@ impl Website {
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
+                            &self.configuration.cache_policy,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -2586,6 +2591,7 @@ impl Website {
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
+                        &self.configuration.cache_policy,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -2825,6 +2831,7 @@ impl Website {
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
+                &self.configuration.cache_policy,
             )
             .await;
 
@@ -3216,6 +3223,7 @@ impl Website {
                     config.referer.clone(),
                     config.max_page_bytes,
                     config.get_cache_options(),
+                    &config.cache_policy,
                 )
                 .await;
 
@@ -4077,8 +4085,8 @@ impl Website {
                                                                 &shared.6.track_events,
                                                                 shared.6.referer.clone(),
                                                                 shared.6.max_page_bytes,
-                                                                shared.6.get_cache_options()
-
+                                                                shared.6.get_cache_options(),
+                                                                &shared.6.cache_policy,
                                                             )
                                                             .await;
 
@@ -4106,8 +4114,8 @@ impl Website {
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
-                                                                                                                                                                                                            shared.6.get_cache_options()
-
+                                                                            shared.6.get_cache_options(),
+                                                                            &shared.6.cache_policy
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -4131,8 +4139,8 @@ impl Website {
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
-                                                                                                                                                                                                            shared.6.get_cache_options()
-
+                                                                            shared.6.get_cache_options(),
+                                                                            &shared.6.cache_policy
                                                                         )
                                                                         .await,
                                                                     );
@@ -4733,8 +4741,8 @@ impl Website {
                                                                 &shared.6.track_events,
                                                                 shared.6.referer.clone(),
                                                                 shared.6.max_page_bytes,
-                                                                                                                                                                                                shared.6.get_cache_options()
-
+                                                                shared.6.get_cache_options(),
+                                                                &shared.6.cache_policy
                                                             )
                                                             .await;
 
@@ -4762,9 +4770,8 @@ impl Website {
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
-                                                                                                                                                                                                            shared.6.get_cache_options()
-
-
+                                                                            shared.6.get_cache_options(),
+                                                                            &shared.6.cache_policy
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -4788,8 +4795,8 @@ impl Website {
                                                                             &shared.6.track_events,
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
-                                                                                                                                                                                                            shared.6.get_cache_options()
-
+                                                                            shared.6.get_cache_options(),
+                                                                            &shared.6.cache_policy
                                                                         )
                                                                         .await,
                                                                     );
@@ -5760,8 +5767,8 @@ impl Website {
                                         &self.configuration.track_events,
                                         self.configuration.referer.clone(),
                                         self.configuration.max_page_bytes,
-                                                                                            self.configuration.get_cache_options(),
-
+                                        self.configuration.get_cache_options(),
+                                        &self.configuration.cache_policy
                                     )
                                     .await;
 
@@ -5847,8 +5854,8 @@ impl Website {
                                                                     &shared.3.track_events,
                                                                     shared.3.referer.clone(),
                                                                     shared.3.max_page_bytes,
-                                                                                                                                                               shared.3.get_cache_options(),
-
+                                                                    shared.3.get_cache_options(),
+                                                                    &shared.3.cache_policy
                                                                 )
                                                                 .await;
 
@@ -5974,8 +5981,8 @@ impl Website {
                                                             &shared.3.track_events,
                                                             shared.3.referer.clone(),
                                                             shared.3.max_page_bytes,
-                                                                                                                                                                                                                           shared.3.get_cache_options(),
-
+                                                            shared.3.get_cache_options(),
+                                                            &shared.3.cache_policy
                                                         )
                                                         .await;
 
@@ -6669,6 +6676,16 @@ impl Website {
         stealth_mode: spider_fingerprint::configs::Tier,
     ) -> &mut Self {
         self.configuration.with_stealth_advanced(stealth_mode);
+        self
+    }
+
+    /// Set the cache policy.
+    pub fn with_cache_policy(
+        &mut self,
+        cache_policy: Option<crate::utils::BasicCachePolicy>,
+    ) -> &mut Self {
+        self.configuration.with_cache_policy(cache_policy);
+
         self
     }
 

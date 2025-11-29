@@ -25,6 +25,7 @@ A web crawler and scraper, building blocks for data curation workloads.
 - Proxy Support
 - Subscriptions
 - Disk persistence
+- Caching memory, disk, or remote hybrid between HTTP and chrome
 - Blacklisting, Whitelisting, and Budgeting Depth
 - Dynamic AI Prompt Scripting Headless with Step Caching
 - CSS/Xpath Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)

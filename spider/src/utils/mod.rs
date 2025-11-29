@@ -22,6 +22,7 @@ use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
 use auto_encoder::is_binary_file;
 use case_insensitive_string::CaseInsensitiveString;
+
 #[cfg(feature = "chrome")]
 use hashbrown::HashMap;
 use hashbrown::HashSet;
@@ -931,6 +932,140 @@ pub async fn perform_chrome_http_request(
     })
 }
 
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Perform a http future with chrome cached.
+pub async fn perform_chrome_http_request_cache(
+    page: &chromiumoxide::Page,
+    source: &str,
+    referrer: Option<String>,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+    let mut waf_check = false;
+    let mut status_code = StatusCode::OK;
+    let mut method = String::from("GET");
+    let mut response_headers: std::collections::HashMap<String, String> =
+        std::collections::HashMap::default();
+    let mut request_headers = std::collections::HashMap::default();
+    let mut protocol = String::from("http/1.1");
+    let mut anti_bot_tech = AntiBotTech::default();
+
+    let frame_id = page.mainframe().await?;
+
+    let cmd = chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+        url: source.to_string(),
+        transition_type: Some(chromiumoxide::cdp::browser_protocol::page::TransitionType::Other),
+        frame_id,
+        referrer,
+        referrer_policy: None,
+    };
+
+    let auth_opt = cache_auth_token(cache_options);
+    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+    let cache_strategy = None;
+    let remote = None;
+
+    let page_base = page.http_future_with_cache_intercept_enabled(
+        cmd,
+        auth_opt,
+        cache_policy,
+        cache_strategy,
+        remote,
+    );
+
+    match page_base.await {
+        Ok(http_request) => {
+            if let Some(http_method) = http_request.method.as_deref() {
+                method = http_method.into();
+            }
+
+            request_headers.clone_from(&http_request.headers);
+
+            if let Some(ref response) = http_request.response {
+                if let Some(ref p) = response.protocol {
+                    protocol.clone_from(p);
+                }
+
+                if let Some(res_headers) = response.headers.inner().as_object() {
+                    for (k, v) in res_headers {
+                        response_headers.insert(k.to_string(), v.to_string());
+                    }
+                }
+
+                let mut firewall = false;
+
+                if !response.url.starts_with(source) {
+                    match &response.security_details {
+                        Some(security_details) => {
+                            anti_bot_tech = detect_anti_bot_tech_response(
+                                &response.url,
+                                &HeaderSource::Map(&response_headers),
+                                &Default::default(),
+                                Some(&security_details.subject_name),
+                            );
+                            firewall = true;
+                        }
+                        _ => {
+                            anti_bot_tech = detect_anti_bot_tech_response(
+                                &response.url,
+                                &HeaderSource::Map(&response_headers),
+                                &Default::default(),
+                                None,
+                            );
+                            if anti_bot_tech == AntiBotTech::Cloudflare {
+                                if let Some(xframe_options) =
+                                    response_headers.get("x-frame-options")
+                                {
+                                    if xframe_options == r#"\"DENY\""# {
+                                        firewall = true;
+                                    }
+                                } else if let Some(encoding) =
+                                    response_headers.get("Accept-Encoding")
+                                {
+                                    if encoding == r#"cf-ray"# {
+                                        firewall = true;
+                                    }
+                                }
+                            } else {
+                                firewall = true;
+                            }
+                        }
+                    };
+
+                    waf_check = firewall && !matches!(anti_bot_tech, AntiBotTech::None);
+
+                    if !waf_check {
+                        waf_check = match response.protocol {
+                            Some(ref protocol) => protocol == "blob",
+                            _ => false,
+                        }
+                    }
+                }
+
+                status_code = StatusCode::from_u16(response.status as u16)
+                    .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+            } else {
+                if let Some(failure_text) = &http_request.failure_text {
+                    if failure_text == "net::ERR_FAILED" {
+                        waf_check = true;
+                    }
+                }
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    Ok(ChromeHTTPReqRes {
+        waf_check,
+        status_code,
+        method,
+        response_headers,
+        request_headers,
+        protocol,
+        anti_bot_tech,
+    })
+}
+
 /// Use OpenAI to extend the crawl. This does nothing without 'openai' feature flag.
 #[cfg(all(feature = "chrome", not(feature = "openai")))]
 pub async fn run_openai_request(
@@ -1268,6 +1403,21 @@ async fn navigate(
     Ok(())
 }
 
+/// Get the initial page headers of the page with navigation from the remote cache.
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+async fn navigate_cache(
+    page: &chromiumoxide::Page,
+    url: &str,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    *chrome_http_req_res =
+        perform_chrome_http_request_cache(page, url, referrer, cache_options, cache_policy).await?;
+    Ok(())
+}
+
 #[cfg(all(feature = "real_browser", feature = "chrome"))]
 /// Generate random mouse movement. This does nothing without the 'real_browser' flag enabled.
 async fn perform_smart_mouse_movement(
@@ -1547,6 +1697,300 @@ struct ResponseBase {
 }
 
 #[cfg(feature = "chrome")]
+#[inline]
+/// The log target.
+fn log_target<'a>(source: &'a str, url_target: Option<&'a str>) -> &'a str {
+    url_target.unwrap_or(source)
+}
+
+#[cfg(feature = "chrome")]
+#[inline]
+/// Is this a timeout error?
+fn is_timeout(e: &chromiumoxide::error::CdpError) -> bool {
+    matches!(e, chromiumoxide::error::CdpError::Timeout)
+}
+
+#[cfg(feature = "chrome")]
+/// Set the document if requested.
+async fn set_document_content_if_requested(
+    page: &chromiumoxide::Page,
+    source: &str,
+    url_target: Option<&str>,
+    block_bytes: &mut bool,
+) {
+    let Ok(frame_opt) = page.mainframe().await else {
+        return;
+    };
+
+    let html = rewrite_base_tag(&source, &url_target).await;
+
+    if let Err(e) = page
+        .send_command(
+            chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                frame_id: frame_opt.unwrap_or_default(),
+                html,
+            },
+        )
+        .await
+    {
+        log::info!(
+            "Set Content Error({:?}) - {:?}",
+            e,
+            log_target(source, url_target)
+        );
+        if is_timeout(&e) {
+            *block_bytes = true;
+        }
+    }
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Set the document if requested cached.
+async fn set_document_content_if_requested_cached(
+    page: &chromiumoxide::Page,
+    source: &str,
+    url_target: Option<&str>,
+    block_bytes: &mut bool,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) {
+    let Ok(frame_opt) = page.mainframe().await else {
+        return;
+    };
+
+    let auth_opt = cache_auth_token(cache_options);
+    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+    let cache_strategy = None;
+    let remote = Some("true");
+    let target_url = url_target.unwrap_or_default();
+    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(&target_url, auth_opt);
+
+    let _ = page
+        .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
+        .await;
+
+    let cache_future = async {
+        let html = rewrite_base_tag(&source, &url_target).await;
+
+        if let Err(e) = page
+            .send_command(
+                chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                    frame_id: frame_opt.unwrap_or_default(),
+                    html,
+                },
+            )
+            .await
+        {
+            log::info!(
+                "Set Content Error({:?}) - {:?}",
+                e,
+                log_target(source, url_target)
+            );
+            if is_timeout(&e) {
+                *block_bytes = true;
+            }
+        }
+    };
+
+    let (_, __, _cache_future) = tokio::join!(
+        page.spawn_cache_listener(
+            &cache_site,
+            auth_opt.map(|f| f.into()),
+            cache_strategy.clone(),
+            remote.map(|f| f.into())
+        ),
+        page.seed_cache(&target_url, auth_opt, remote),
+        cache_future
+    );
+
+    let _ = page.clear_local_cache(&cache_site);
+}
+
+#[cfg(feature = "chrome")]
+async fn navigate_if_requested(
+    page: &chromiumoxide::Page,
+    source: &str,
+    url_target: Option<&str>,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
+    block_bytes: &mut bool,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    if let Err(e) = navigate(page, source, chrome_http_req_res, referrer).await {
+        log::info!(
+            "Navigation Error({:?}) - {:?}",
+            e,
+            log_target(source, url_target)
+        );
+        if is_timeout(&e) {
+            *block_bytes = true;
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Navigate with the cache options.
+async fn navigate_if_requested_cache(
+    page: &chromiumoxide::Page,
+    source: &str,
+    url_target: Option<&str>,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
+    block_bytes: &mut bool,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    if let Err(e) = navigate_cache(
+        page,
+        source,
+        chrome_http_req_res,
+        referrer,
+        cache_options,
+        cache_policy,
+    )
+    .await
+    {
+        log::info!(
+            "Navigation Error({:?}) - {:?}",
+            e,
+            log_target(source, url_target)
+        );
+        if is_timeout(&e) {
+            *block_bytes = true;
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Is cache enabled?
+fn cache_enabled(cache_options: &Option<CacheOptions>) -> bool {
+    matches!(
+        cache_options,
+        Some(CacheOptions::Yes | CacheOptions::Authorized(_))
+    )
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// The chrome cache policy
+fn chrome_cache_policy(
+    cache_policy: &Option<BasicCachePolicy>,
+) -> chromiumoxide::cache::BasicCachePolicy {
+    cache_policy
+        .as_ref()
+        .map(|p| p.from_basic())
+        .unwrap_or(chromiumoxide::cache::BasicCachePolicy::Normal)
+}
+
+#[cfg(all(feature = "chrome", not(feature = "chrome_remote_cache")))]
+/// Core logic: either set document content or navigate.
+///
+/// Semantics preserved:
+/// - If `page_set == true`: no-op.
+/// - If `content == true`: tries SetDocumentContent; logs errors; sets `block_bytes` on timeout; does NOT return Err.
+/// - Else: performs navigation; returns Err on failure; sets `block_bytes` on timeout.
+pub async fn run_navigate_or_content_set_core(
+    page: &chromiumoxide::Page,
+    page_set: bool,
+    content: bool,
+    source: &str,
+    url_target: Option<&str>,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
+    block_bytes: &mut bool,
+    _cache_options: &Option<CacheOptions>,
+    _cache_policy: &Option<BasicCachePolicy>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    if page_set {
+        return Ok(());
+    }
+
+    if content {
+        set_document_content_if_requested(page, source, url_target, block_bytes).await;
+        return Ok(());
+    }
+
+    navigate_if_requested(
+        page,
+        source,
+        url_target,
+        chrome_http_req_res,
+        referrer,
+        block_bytes,
+    )
+    .await
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Core logic: either set document content or navigate.
+///
+/// Semantics preserved:
+/// - If `page_set == true`: no-op.
+/// - If `content == true`: tries SetDocumentContent; logs errors; sets `block_bytes` on timeout; does NOT return Err.
+/// - Else: performs navigation; returns Err on failure; sets `block_bytes` on timeout.
+pub async fn run_navigate_or_content_set_core(
+    page: &chromiumoxide::Page,
+    page_set: bool,
+    content: bool,
+    source: &str,
+    url_target: Option<&str>,
+    chrome_http_req_res: &mut ChromeHTTPReqRes,
+    referrer: Option<String>,
+    block_bytes: &mut bool,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    if page_set {
+        return Ok(());
+    }
+
+    let cache = cache_enabled(cache_options);
+
+    if content {
+        if cache {
+            set_document_content_if_requested_cached(
+                page,
+                source,
+                url_target,
+                block_bytes,
+                cache_options,
+                cache_policy,
+            )
+            .await;
+        } else {
+            set_document_content_if_requested(page, source, url_target, block_bytes).await;
+        }
+        return Ok(());
+    }
+
+    if cache {
+        navigate_if_requested_cache(
+            page,
+            source,
+            url_target,
+            chrome_http_req_res,
+            referrer,
+            block_bytes,
+            cache_options,
+            cache_policy,
+        )
+        .await
+    } else {
+        navigate_if_requested(
+            page,
+            source,
+            url_target,
+            chrome_http_req_res,
+            referrer,
+            block_bytes,
+        )
+        .await
+    }
+}
+
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
     source: &str,
@@ -1566,6 +2010,7 @@ pub async fn fetch_page_html_chrome_base(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -1864,46 +2309,19 @@ pub async fn fetch_page_html_chrome_base(
     let mut block_bytes = false;
 
     let page_navigation = async {
-        if !page_set {
-            // used for smart mode re-rendering direct assigning html
-            if content {
-                if let Ok(frame) = page.mainframe().await {
-                    let html = rewrite_base_tag(&source, &url_target).await;
-
-                    if let Err(e) = page
-                        .send_command(
-                            chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                                frame_id: frame.unwrap_or_default(),
-                                html,
-                            },
-                        )
-                        .await
-                    {
-                        log::info!(
-                            "Set Content Error({:?}) - {:?}",
-                            e,
-                            &url_target.unwrap_or(source)
-                        );
-                        if let chromiumoxide::error::CdpError::Timeout = e {
-                            block_bytes = true;
-                        }
-                    }
-                }
-            } else if let Err(e) = navigate(page, source, &mut chrome_http_req_res, referrer).await
-            {
-                log::info!(
-                    "Navigation Error({:?}) - {:?}",
-                    e,
-                    &url_target.unwrap_or(source)
-                );
-                if let chromiumoxide::error::CdpError::Timeout = e {
-                    block_bytes = true;
-                }
-                return Err(e);
-            }
-        }
-
-        Ok(())
+        run_navigate_or_content_set_core(
+            page,
+            page_set,
+            content,
+            source,
+            url_target,
+            &mut chrome_http_req_res,
+            referrer,
+            &mut block_bytes,
+            &cache_options,
+            &cache_policy,
+        )
+        .await
     };
 
     let start_time = Instant::now();
@@ -3201,6 +3619,7 @@ pub async fn fetch_page_html(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -3211,7 +3630,7 @@ pub async fn fetch_page_html(
         None
     };
 
-    let cached_html = get_cached_url(&target_url, cache_options).await;
+    let cached_html = get_cached_url(&target_url, cache_options, cache_policy).await;
     let cached = !cached_html.is_none();
 
     let mut page_response = match &page {
@@ -3237,6 +3656,7 @@ pub async fn fetch_page_html(
                 &track_events,
                 referrer,
                 max_page_bytes,
+                cache_policy,
             )
             .await
             {
@@ -3403,7 +3823,8 @@ pub fn create_cache_key(
     )
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Cache options to use for the request.
 pub enum CacheOptions {
     /// Use cache without authentication.
@@ -3415,11 +3836,46 @@ pub enum CacheOptions {
     No,
 }
 
+#[inline]
+/// Cache auth token.
+pub fn cache_auth_token(cache_options: &std::option::Option<CacheOptions>) -> Option<&str> {
+    cache_options.as_ref().and_then(|opt| match opt {
+        CacheOptions::Authorized(token) => Some(token.as_str()),
+        _ => None,
+    })
+}
+
+/// Basic cache policy.
+#[derive(Debug, Default, Clone, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BasicCachePolicy {
+    /// Allow stale caches – responses may be used even if they *should* be revalidated.
+    AllowStale,
+    /// Use this `SystemTime` as the reference "now" for staleness checks.
+    Period(std::time::SystemTime),
+    #[default]
+    /// Use the default system time.
+    Normal,
+}
+
+#[cfg(feature = "chrome_remote_cache")]
+impl BasicCachePolicy {
+    /// Convert the cache policy to chrome.
+    pub fn from_basic(&self) -> chromiumoxide::cache::BasicCachePolicy {
+        match &self {
+            BasicCachePolicy::AllowStale => chromiumoxide::cache::BasicCachePolicy::AllowStale,
+            BasicCachePolicy::Normal => chromiumoxide::cache::BasicCachePolicy::Normal,
+            BasicCachePolicy::Period(p) => chromiumoxide::cache::BasicCachePolicy::Period(*p),
+        }
+    }
+}
+
 #[cfg(any(feature = "cache", feature = "cache_mem"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn get_cached_url_base(
     target_url: &str,
     cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> Option<String> {
     use crate::http_cache_reqwest::CacheManager;
 
@@ -3470,8 +3926,10 @@ pub async fn get_cached_url_base(
 pub async fn get_cached_url(
     target_url: &str,
     cache_options: Option<&CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> Option<String> {
-    if let Some(body) = get_cached_url_base(target_url, cache_options.cloned()).await {
+    if let Some(body) = get_cached_url_base(target_url, cache_options.cloned(), cache_policy).await
+    {
         return Some(body);
     }
 
@@ -3490,7 +3948,7 @@ pub async fn get_cached_url(
     };
 
     if let Some(alt) = alt_url {
-        if let Some(body) = get_cached_url_base(&alt, cache_options.cloned()).await {
+        if let Some(body) = get_cached_url_base(&alt, cache_options.cloned(), cache_policy).await {
             return Some(body);
         }
     }
@@ -3503,6 +3961,7 @@ pub async fn get_cached_url(
 pub async fn get_cached_url(
     _target_url: &str,
     _cache_options: Option<&CacheOptions>,
+    _cache_policy: &Option<BasicCachePolicy>,
 ) -> Option<String> {
     None
 }
@@ -3525,8 +3984,9 @@ pub async fn fetch_page_html(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> PageResponse {
-    let cached_html = get_cached_url(&target_url, cache_options.as_ref()).await;
+    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
     let cached = !cached_html.is_none();
 
     match fetch_page_html_chrome_base(
@@ -3551,6 +4011,7 @@ pub async fn fetch_page_html(
         referrer,
         max_page_bytes,
         cache_options,
+        cache_policy,
     )
     .await
     {
@@ -3580,6 +4041,7 @@ pub async fn fetch_page_html_chrome(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -3587,7 +4049,7 @@ pub async fn fetch_page_html_chrome(
         None
     };
 
-    let cached_html = get_cached_url(&target_url, cache_options.as_ref()).await;
+    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
     let cached = !cached_html.is_none();
 
     let mut page_response = match &page {
@@ -3614,6 +4076,7 @@ pub async fn fetch_page_html_chrome(
                 referrer,
                 max_page_bytes,
                 cache_options,
+                cache_policy,
             )
             .await
             {

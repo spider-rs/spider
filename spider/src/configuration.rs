@@ -8,9 +8,7 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::openai_common::GPTConfigs;
 use crate::utils::get_domain_from_url;
-#[cfg(any(feature = "cache_request", feature = "chrome"))]
-use crate::utils::CacheOptions;
-
+use crate::utils::BasicCachePolicy;
 use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::net::IpAddr;
@@ -241,7 +239,11 @@ pub struct Configuration {
     /// Modify the headers to act like a real-browser
     pub modify_headers: bool,
     /// Cache the page following HTTP caching rules.
-    #[cfg(any(feature = "cache_request", feature = "chrome"))]
+    #[cfg(any(
+        feature = "cache_request",
+        feature = "chrome",
+        feature = "chrome_remote_cache"
+    ))]
     pub cache: bool,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
@@ -295,6 +297,8 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Automatic locale and timezone handling via third party. This does nothing without the flag `chrome` enabled.
     pub auto_geolocation: bool,
+    /// The cache policy to use.
+    pub cache_policy: Option<BasicCachePolicy>,
     #[cfg(feature = "chrome")]
     /// Enables bypassing CSP. This does nothing without the flag `chrome` enabled.
     pub bypass_csp: bool,
@@ -1472,9 +1476,20 @@ impl Configuration {
         self
     }
 
+    /// Set the cache policy.
+    pub fn with_cache_policy(&mut self, cache_policy: Option<BasicCachePolicy>) -> &mut Self {
+        self.cache_policy = cache_policy;
+        self
+    }
+
     /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
-    #[cfg(any(feature = "cache_request", feature = "chrome"))]
-    pub(crate) fn get_cache_options(&self) -> Option<CacheOptions> {
+    #[cfg(any(
+        feature = "cache_request",
+        feature = "chrome",
+        feature = "chrome_remote_cache"
+    ))]
+    pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
+        use crate::utils::CacheOptions;
         if !self.cache {
             return None;
         }
@@ -1501,11 +1516,14 @@ impl Configuration {
         }
     }
 
-    // /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
-    // #[cfg(not(any(feature = "cache_request", feature = "chrome")))]
-    // pub(crate) fn get_cache_options(&self) -> Option<CacheOptions> {
-    //     None
-    // }
+    /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
+    #[cfg(all(
+        not(any(feature = "cache_request", feature = "chrome_remote_cache")),
+        feature = "chrome"
+    ))]
+    pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
+        None
+    }
 
     /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Self {

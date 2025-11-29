@@ -1,12 +1,12 @@
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
-#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-use crate::utils::CacheOptions;
 use crate::utils::{
     css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
     get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
 };
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+use crate::utils::{BasicCachePolicy, CacheOptions};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -1502,6 +1502,7 @@ impl Page {
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
         cache_options: Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
     ) -> Self {
         let page_resource = crate::utils::fetch_page_html(
             &url,
@@ -1519,6 +1520,7 @@ impl Page {
             referrer,
             max_page_bytes,
             cache_options,
+            cache_policy,
         )
         .await;
         let mut p = build(url, page_resource);
@@ -2752,6 +2754,7 @@ impl Page {
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
                                     configuration.get_cache_options(),
+                                    &configuration.cache_policy,
                                 )
                                 .await;
 
@@ -3126,6 +3129,7 @@ impl Page {
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
                                     configuration.get_cache_options(),
+                                    &configuration.cache_policy,
                                 )
                                 .await;
 

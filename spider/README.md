@@ -124,6 +124,7 @@ spider = { version = "2", features = ["regex", "ua_generator"] }
 1. `chrome_cpu`: Disable gpu usage for chrome browser.
 1. `chrome_stealth`: Enables stealth mode to make it harder to be detected as a bot.
 1. `chrome_intercept`: Allows intercepting network request to speed up processing.
+1. `chrome_remote_cache`: Use a remote cache for chrome and HTTP (hybrid) - view the [chromey remote caching](https://github.com/spider-rs/chromey?tab=readme-ov-file#remote-caching) to learn more.
 1. `adblock`: Enables the ability to block ads when using chrome and chrome_intercept.
 1. `cookies`: Enables cookies storing and setting to use for request.
 1. `real_browser`: Enables the ability to bypass protected pages.
