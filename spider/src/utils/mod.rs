@@ -3630,7 +3630,7 @@ pub async fn fetch_page_html(
         None
     };
 
-    let cached_html = get_cached_url(&target_url, cache_options, cache_policy).await;
+    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
     let cached = !cached_html.is_none();
 
     let mut page_response = match &page {
@@ -3656,6 +3656,7 @@ pub async fn fetch_page_html(
                 &track_events,
                 referrer,
                 max_page_bytes,
+                cache_options,
                 cache_policy,
             )
             .await
@@ -3875,16 +3876,24 @@ impl BasicCachePolicy {
 pub async fn get_cached_url_base(
     target_url: &str,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
+    cache_policy: &Option<BasicCachePolicy>, // optional override/behavior
 ) -> Option<String> {
     use crate::http_cache_reqwest::CacheManager;
 
     let auth_opt = match cache_options {
         Some(CacheOptions::Yes) => None,
         Some(CacheOptions::Authorized(token)) => Some(token),
-        Some(CacheOptions::No) | None => {
-            return None;
-        }
+        Some(CacheOptions::No) | None => return None,
+    };
+
+    // Override behavior:
+    // - AllowStale: accept even stale entries
+    // - Period(t): use t as "now" for staleness checks
+    // - Normal/None: use SystemTime::now()
+    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
+    let now = match cache_policy {
+        Some(BasicCachePolicy::Period(t)) => *t,
+        _ => std::time::SystemTime::now(),
     };
 
     let cache_url = create_cache_key_raw(target_url, None, auth_opt.as_deref());
@@ -3895,8 +3904,8 @@ pub async fn get_cached_url_base(
     .await;
 
     if let Ok(cache_result) = result {
-        if let Ok(Some((http_response, cache_policy))) = cache_result {
-            if !cache_policy.is_stale(std::time::SystemTime::now()) {
+        if let Ok(Some((http_response, stored_policy))) = cache_result {
+            if allow_stale || !stored_policy.is_stale(now) {
                 let body = http_response.body;
                 if !auto_encoder::is_binary_file(&body) {
                     let accept_lang = http_response
@@ -3905,14 +3914,11 @@ pub async fn get_cached_url_base(
                         .and_then(|h| if h.is_empty() { None } else { Some(h) })
                         .map_or("", |v| v);
 
-                    if !accept_lang.is_empty() {
-                        return Some(auto_encoder::encode_bytes_from_language(
-                            &body,
-                            &accept_lang,
-                        ));
+                    return Some(if !accept_lang.is_empty() {
+                        auto_encoder::encode_bytes_from_language(&body, accept_lang)
                     } else {
-                        return Some(auto_encoder::auto_encode_bytes(&body));
-                    }
+                        auto_encoder::auto_encode_bytes(&body)
+                    });
                 }
             }
         }
