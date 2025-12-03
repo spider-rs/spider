@@ -2527,7 +2527,8 @@ pub async fn fetch_page_html_chrome_base(
 
             let forbidden = waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
 
-            if cfg!(feature = "real_browser") {
+            #[cfg(feature = "real_browser")]
+            {
                 // we can skip this check after a set bytes
                 if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE
                     && anti_bot_tech == AntiBotTech::Cloudflare
@@ -2548,10 +2549,11 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     }
                 }
-            };
+            }
 
             let ok = !res.is_empty();
 
+            #[cfg(feature = "real_browser")]
             if validate_cf && ok {
                 if !detect_cf_turnstyle(&res) && status_code == StatusCode::FORBIDDEN {
                     status_code = StatusCode::OK;
@@ -2848,6 +2850,7 @@ pub async fn fetch_page_html_chrome_base(
                     }
                 }
 
+                #[cfg(feature = "real_browser")]
                 if let Some(content) = &page_response.content {
                     // validate if the turnstile page is still open.
                     if anti_bot_tech == AntiBotTech::Cloudflare
