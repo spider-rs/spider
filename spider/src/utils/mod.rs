@@ -2070,13 +2070,7 @@ pub async fn fetch_page_html_chrome_base(
         page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
         ),
         page.event_listener::<EventLoadingFailed>(),
-        async {
-            if asset || track_responses {
-                page.event_listener::<EventResponseReceived>().await
-            } else {
-                Err(CdpError::NotFound)
-            }
-        },
+        page.event_listener::<EventResponseReceived>(),
         async {
             if track_requests {
                 page.event_listener::<EventRequestWillBeSent>().await
@@ -2191,57 +2185,60 @@ pub async fn fetch_page_html_chrome_base(
             let mut main_doc_request_id: Option<RequestId> = None;
             let mut main_doc_from_cache = false;
 
-            if asset || response_map.is_some() {
-                if let Ok(mut listener) = received_listener {
-                    let mut initial_asset = false;
-                    let mut allow_download = false;
-                    let mut intial_request = false;
+            let persist_event = asset || track_responses;
 
-                    while let Some(event) = listener.next().await {
-                        let document = event.r#type == ResourceType::Document;
-                        if !intial_request && document {
-                            let redirect =
-                                event.response.status >= 300 && event.response.status <= 399;
+            if let Ok(mut listener) = received_listener {
+                let mut initial_asset = false;
+                let mut allow_download = false;
+                let mut intial_request = false;
 
-                            if !redirect {
-                                intial_request = true;
-                                status_code = Some(event.response.status);
-                                headers = Some(event.response.headers.clone());
-                                main_doc_request_id = Some(event.request_id.clone());
-                                // DevTools cache flags
-                                let from_disk = event.response.from_disk_cache.unwrap_or(false);
-                                let from_prefetch =
-                                    event.response.from_prefetch_cache.unwrap_or(false);
-                                let from_sw = event.response.from_service_worker.unwrap_or(false);
-                                main_doc_from_cache = from_disk || from_prefetch || from_sw;
+                while let Some(event) = listener.next().await {
+                    let document = event.r#type == ResourceType::Document;
+
+                    if !intial_request && document {
+                        // todo: capture the redirect code.
+                        let redirect = event.response.status >= 300 && event.response.status <= 399;
+
+                        if !redirect {
+                            intial_request = true;
+                            status_code = Some(event.response.status);
+                            headers = Some(event.response.headers.clone());
+                            main_doc_request_id = Some(event.request_id.clone());
+                            // DevTools cache flags
+                            let from_disk = event.response.from_disk_cache.unwrap_or(false);
+                            let from_prefetch = event.response.from_prefetch_cache.unwrap_or(false);
+                            let from_sw = event.response.from_service_worker.unwrap_or(false);
+                            main_doc_from_cache = from_disk || from_prefetch || from_sw;
+                            if !persist_event {
+                                break;
                             }
                         }
-                        // check if media asset needs to be downloaded.
-                        else if asset {
-                            if !initial_asset && document {
-                                allow_download =
-                                    DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
-                            }
-                            if event.r#type == ResourceType::Media && allow_download {
-                                if let Some(once) = &finished_media {
-                                    let _ = once.set(event.request_id.clone());
-                                }
-                            }
-                            initial_asset = true;
+                    }
+                    // check if media asset needs to be downloaded ( this will trigger after the inital document )
+                    else if asset {
+                        if !initial_asset && document {
+                            allow_download =
+                                DOWNLOADABLE_MEDIA_TYPES.contains(&event.response.mime_type);
                         }
+                        if event.r#type == ResourceType::Media && allow_download {
+                            if let Some(once) = &finished_media {
+                                let _ = once.set(event.request_id.clone());
+                            }
+                        }
+                        initial_asset = true;
+                    }
 
-                        if let Some(response_map) = response_map.as_mut() {
-                            response_map.insert(
-                                event.request_id.inner().clone(),
-                                ResponseMap {
-                                    url: event.response.url.clone(),
-                                    bytes_transferred: event.response.encoded_data_length,
-                                    skipped: *MASK_BYTES_INTERCEPTION
-                                        && event.response.connection_id == 0.0
-                                        && event.response.encoded_data_length <= 17.0,
-                                },
-                            );
-                        }
+                    if let Some(response_map) = response_map.as_mut() {
+                        response_map.insert(
+                            event.request_id.inner().clone(),
+                            ResponseMap {
+                                url: event.response.url.clone(),
+                                bytes_transferred: event.response.encoded_data_length,
+                                skipped: *MASK_BYTES_INTERCEPTION
+                                    && event.response.connection_id == 0.0
+                                    && event.response.encoded_data_length <= 17.0,
+                            },
+                        );
                     }
                 }
             }
@@ -2821,7 +2818,8 @@ pub async fn fetch_page_html_chrome_base(
 
                 page_response.response_map = Some(_response_map);
 
-                if let Some(status) = rs.status_code
+                if let Some(status) = rs
+                    .status_code
                     .and_then(|s| s.try_into().ok())
                     .and_then(|u: u16| StatusCode::from_u16(u).ok())
                 {
