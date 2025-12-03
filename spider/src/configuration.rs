@@ -1483,11 +1483,7 @@ impl Configuration {
     }
 
     /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
-    #[cfg(any(
-        feature = "cache_request",
-        feature = "chrome",
-        feature = "chrome_remote_cache"
-    ))]
+    #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
     pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
         use crate::utils::CacheOptions;
         if !self.cache {
@@ -1518,8 +1514,8 @@ impl Configuration {
 
     /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
     #[cfg(all(
-        not(any(feature = "cache_request", feature = "chrome_remote_cache")),
-        feature = "chrome"
+        feature = "chrome",
+        not(any(feature = "cache_request", feature = "chrome_remote_cache"))
     ))]
     pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
         None

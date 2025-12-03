@@ -1571,7 +1571,7 @@ pub async fn cache_chrome_response(
 }
 
 /// 5 mins in ms
-pub(crate) const FIVE_MINUTES: u32 = 300000;
+pub(crate) const FIVE_MINUTES: u32 = 300_000;
 
 /// Max page timeout for events.
 #[cfg(feature = "chrome")]
@@ -2135,14 +2135,12 @@ pub async fn fetch_page_html_chrome_base(
             if let Ok(mut listener) = event_loading_listener {
                 while let Some(event) = listener.next().await {
                     total += event.encoded_data_length;
-
                     if let Some(response_map) = response_map.as_mut() {
                         response_map
                             .entry(event.request_id.inner().clone())
                             .and_modify(|e| *e += event.encoded_data_length)
                             .or_insert(event.encoded_data_length);
                     }
-
                     if asset {
                         if let Some(once) = &finished_media {
                             if let Some(request_id) = once.get() {
@@ -2410,6 +2408,7 @@ pub async fn fetch_page_html_chrome_base(
             || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
             || chrome_http_req_res.status_code == 404
             || chrome_http_req_res.status_code == 403
+            || chrome_http_req_res.status_code == 524
             || chrome_http_req_res.status_code.is_redirection()
             || chrome_http_req_res.status_code.is_success());
 
@@ -2822,12 +2821,11 @@ pub async fn fetch_page_html_chrome_base(
 
                 page_response.response_map = Some(_response_map);
 
-                if let Some(status) = rs.status_code {
-                    if let Ok(scode) = status.try_into() {
-                        if let Ok(status) = StatusCode::from_u16(scode) {
-                            page_response.status_code = status;
-                        }
-                    }
+                if let Some(status) = rs.status_code
+                    .and_then(|s| s.try_into().ok())
+                    .and_then(|u: u16| StatusCode::from_u16(u).ok())
+                {
+                    page_response.status_code = status;
                 }
 
                 set_page_response_headers_raw(&mut rs.headers, &mut page_response);
