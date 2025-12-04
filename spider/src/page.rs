@@ -69,7 +69,7 @@ lazy_static! {
         StatusCode::from_u16(400).expect("valid status code");
     /// Request malformed or unreachable
     pub(crate) static ref UNREACHABLE_REQUEST_ERROR: StatusCode =
-        StatusCode::from_u16(524).expect("valid status code");
+        StatusCode::from_u16(503).expect("valid status code");
 }
 
 /// Get the HTTP status code of errors.
@@ -91,7 +91,10 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
                 io::ErrorKind::ConnectionRefused => return *CONNECTION_REFUSED_ERROR,
                 io::ErrorKind::ConnectionAborted => return *CONNECTION_ABORTED_ERROR,
                 io::ErrorKind::ConnectionReset => return *CONNECTION_RESET_ERROR,
-                io::ErrorKind::NotFound => return *DNS_RESOLVE_ERROR,
+                io::ErrorKind::NotFound => return *UNREACHABLE_REQUEST_ERROR,
+                io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => {
+                    return *UNREACHABLE_REQUEST_ERROR
+                }
                 io::ErrorKind::TimedOut => return *CONNECTION_TIMEOUT_ERROR,
                 _ => (),
             }
@@ -104,7 +107,7 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
     }
 
     if err.is_request() {
-        return *UNREACHABLE_REQUEST_ERROR;
+        return StatusCode::BAD_REQUEST;
     }
 
     *UNKNOWN_STATUS_ERROR
