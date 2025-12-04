@@ -213,6 +213,21 @@ lazy_static! {
 }
 
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
+/// CF prefix scan bytes.
+const CF_PREFIX_SCAN_BYTES: usize = 120;
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
+/// CF slice prefix.
+fn cf_prefix_slice(b: &[u8]) -> &[u8] {
+    if b.len() > CF_PREFIX_SCAN_BYTES {
+        &b[..CF_PREFIX_SCAN_BYTES]
+    } else {
+        b
+    }
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
 lazy_static! {
     static ref CF_END: &'static [u8; 62] =
         b"target=\"_blank\">Cloudflare</a></div></div></div></body></html>";
@@ -220,7 +235,34 @@ lazy_static! {
         b"Performance &amp; security by Cloudflare</div></div></div></body></html>";
     static ref CF_HEAD: &'static [u8; 34] = b"<html><head>\n    <style global=\"\">";
     static ref CF_MOCK_FRAME: &'static [u8; 137] = b"<iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>";
-    static ref CF_JUST_A_MOMENT:&'static [u8; 81] = b"<!DOCTYPE html><html lang=\"en-US\" dir=\"ltr\"><head><title>Just a moment...</title>";
+    static ref CF_JUST_A_MOMENT: &'static [u8] =
+        b"<!DOCTYPE html><html lang=\"en-US\" dir=\"ltr\"><head><title>Just a moment...</title>";
+
+    // Fast prefix-only matcher (scan only the first ~120 bytes).
+    static ref CF_JUST_A_MOMENT_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .build([
+            b"<title>Just a moment...</title>".as_slice(),
+            b"Just a moment...".as_slice(),
+        ])
+        .expect("valid CF just-a-moment patterns");
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline]
+/// Is turnstile page? This does nothing without the 'real_browser' feature enabled.
+pub(crate) fn detect_cf_turnstyle(b: &[u8]) -> bool {
+    if b.ends_with(CF_END.as_ref()) || b.ends_with(CF_END2.as_ref()) {
+        return true;
+    }
+
+    if b.starts_with(CF_HEAD.as_ref()) && b.ends_with(CF_MOCK_FRAME.as_ref()) {
+        return true;
+    }
+
+    let pfx = cf_prefix_slice(b);
+
+    pfx.starts_with(CF_JUST_A_MOMENT.as_ref()) || CF_JUST_A_MOMENT_AC.is_match(pfx)
 }
 
 lazy_static! {
@@ -261,20 +303,6 @@ pub fn contains_verification(text: &Vec<u8>) -> bool {
     AC.is_match(text)
 }
 
-/// Is turnstile page? This does nothing without the real_browser feature enabled.
-#[cfg(all(feature = "chrome", feature = "real_browser"))]
-pub(crate) fn detect_cf_turnstyle(b: &Vec<u8>) -> bool {
-    let cf = CF_END.as_ref();
-    let cf2 = CF_END2.as_ref();
-    let cn = CF_HEAD.as_ref();
-    let cnf = CF_MOCK_FRAME.as_ref();
-
-    b.ends_with(cf)
-        || b.ends_with(cf2)
-        || b.starts_with(cn) && b.ends_with(cnf)
-        || b.starts_with(CF_JUST_A_MOMENT.as_ref())
-}
-
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn cf_handle(
@@ -287,8 +315,35 @@ async fn cf_handle(
         let mut wait_for = CF_WAIT_FOR.clone();
         page_wait(&page, &Some(wait_for.clone())).await;
 
-        page.click(page.find_element("iframe").await?.clickable_point().await?)
-            .await?;
+        let mut clicks = 0usize;
+
+        if let Ok(els) = page.find_elements(r#"
+        iframe,
+        input,
+        #tgnx8,
+        .cf-turnstile,
+        div[id*="turnstile"],
+        iframe[src*="challenges.cloudflare.com"],
+        iframe[src*="turnstile"],
+        iframe[title*="widget"],
+        .cb-lb input[type="checkbox"],
+        [class*="turnstile"]"#).await {
+            for el in els {
+                let did_click = match el.clickable_point().await {
+                    Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
+                    Err(_) => el.click().await.is_ok(),
+                };
+                if did_click {
+                    clicks += 1;
+                }
+            }
+        }
+
+        if clicks == 0 {
+            let _ = page
+                .evaluate(r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#)
+                .await;
+        }
 
         wait_for.page_navigations = true;
 
@@ -846,8 +901,8 @@ pub async fn perform_chrome_http_request(
 
                 request_headers.clone_from(&http_request.headers);
 
-                if let Some(ref response) = http_request.response {
-                    if let Some(ref p) = response.protocol {
+                if let Some(response) = &http_request.response {
+                    if let Some(p) = &response.protocol {
                         protocol.clone_from(p);
                     }
 
@@ -858,6 +913,8 @@ pub async fn perform_chrome_http_request(
                     }
 
                     let mut firewall = false;
+
+                    waf_check = detect_antibot_from_url(&response.url).is_some();
 
                     if !response.url.starts_with(source) {
                         match &response.security_details {
@@ -897,11 +954,12 @@ pub async fn perform_chrome_http_request(
                             }
                         };
 
-                        waf_check = firewall && !matches!(anti_bot_tech, AntiBotTech::None);
+                        waf_check =
+                            waf_check || firewall && !matches!(anti_bot_tech, AntiBotTech::None);
 
                         if !waf_check {
-                            waf_check = match response.protocol {
-                                Some(ref protocol) => protocol == "blob",
+                            waf_check = match &response.protocol {
+                                Some(protocol) => protocol == "blob",
                                 _ => false,
                             }
                         }
