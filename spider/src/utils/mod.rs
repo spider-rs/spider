@@ -312,6 +312,13 @@ async fn cf_handle(
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        // force upgrade https check.
+        if let Some(target_url) = page.url().await? {
+            if target_url.starts_with("http://") {
+                let _ = page.goto(target_url.replacen("http://", "https://", 1)).await;
+            }
+        }
+
         let mut wait_for = CF_WAIT_FOR.clone();
         page_wait(&page, &Some(wait_for.clone())).await;
 
@@ -1039,8 +1046,8 @@ pub async fn perform_chrome_http_request_cache(
 
             request_headers.clone_from(&http_request.headers);
 
-            if let Some(ref response) = http_request.response {
-                if let Some(ref p) = response.protocol {
+            if let Some(response) = &http_request.response {
+                if let Some(p) = &response.protocol {
                     protocol.clone_from(p);
                 }
 
@@ -1051,6 +1058,8 @@ pub async fn perform_chrome_http_request_cache(
                 }
 
                 let mut firewall = false;
+
+                waf_check = detect_antibot_from_url(&response.url).is_some();
 
                 if !response.url.starts_with(source) {
                     match &response.security_details {
@@ -1090,11 +1099,12 @@ pub async fn perform_chrome_http_request_cache(
                         }
                     };
 
-                    waf_check = firewall && !matches!(anti_bot_tech, AntiBotTech::None);
+                    waf_check =
+                        waf_check || firewall && !matches!(anti_bot_tech, AntiBotTech::None);
 
                     if !waf_check {
-                        waf_check = match response.protocol {
-                            Some(ref protocol) => protocol == "blob",
+                        waf_check = match &response.protocol {
+                            Some(protocol) => protocol == "blob",
                             _ => false,
                         }
                     }
