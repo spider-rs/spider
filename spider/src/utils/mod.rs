@@ -633,22 +633,20 @@ pub async fn page_wait(
         }
 
         if let Some(wait) = &wait_for.almost_idle_network0 {
-            let fut = page.wait_for_network_almost_idle();
-
             if let Some(timeout) = wait.timeout {
-                let _ = tokio::time::timeout(timeout, fut).await;
+                let _ = page
+                    .wait_for_network_almost_idle_with_timeout(timeout)
+                    .await;
             } else {
-                let _ = fut.await;
+                let _ = page.wait_for_network_almost_idle().await;
             }
         }
 
         if let Some(wait) = &wait_for.idle_network0 {
-            let fut = page.wait_for_network_idle();
-
             if let Some(timeout) = wait.timeout {
-                let _ = tokio::time::timeout(timeout, fut).await;
+                let _ = page.wait_for_network_idle_with_timeout(timeout).await;
             } else {
-                let _ = fut.await;
+                let _ = page.wait_for_network_idle().await;
             }
         }
 

@@ -6751,7 +6751,7 @@ impl Website {
         wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
     ) -> &mut Self {
         self.configuration
-            .with_wait_for_idle_network(wait_for_idle_network);
+            .with_wait_for_idle_network0(wait_for_idle_network);
         self
     }
 
@@ -6761,7 +6761,7 @@ impl Website {
         wait_for_idle_network: Option<crate::configuration::WaitForIdleNetwork>,
     ) -> &mut Self {
         self.configuration
-            .with_wait_for_idle_network(wait_for_idle_network);
+            .with_wait_for_almost_idle_network0(wait_for_idle_network);
         self
     }
 
