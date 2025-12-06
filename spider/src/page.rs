@@ -115,7 +115,7 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 lazy_static! {
-
+    /// General no script patterns.
     static ref NO_SCRIPT_JS_REQUIRED: aho_corasick::AhoCorasick = {
         let patterns = &[
             // JS-required / SPA shell markers
@@ -124,6 +124,7 @@ lazy_static! {
         aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
+    /// Methods that cause the dom to mutate.
     static ref DOM_SCRIPT_WATCH_METHODS: aho_corasick::AhoCorasick = {
         let patterns = &[
             ".createElementNS", ".removeChild", ".insertBefore", ".createElement",

@@ -308,14 +308,26 @@ pub fn contains_verification(text: &Vec<u8>) -> bool {
 async fn cf_handle(
     b: &mut Vec<u8>,
     page: &chromiumoxide::Page,
+    target_url: &str,
 ) -> Result<bool, chromiumoxide::error::CdpError> {
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
         // force upgrade https check.
-        if let Some(target_url) = page.url().await? {
-            if target_url.starts_with("http://") {
-                let _ = page.goto(target_url.replacen("http://", "https://", 1)).await;
+        if let Some(page_url) = page.url().await? {
+            if page_url == "about:blank" {
+                let target_url = if target_url.starts_with("http://") {
+                    let mut s = String::with_capacity(target_url.len() + 1);
+                    s.push_str("https://");
+                    s.push_str(&target_url["http://".len()..]);
+                    s
+                } else {
+                    target_url.to_string()
+                };
+                let _ = page.goto(target_url).await?.wait_for_navigation().await?;
+            }
+            else if page_url.starts_with("http://") {
+                let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?.wait_for_navigation().await?;
             }
         }
 
@@ -413,6 +425,7 @@ async fn cf_handle(
 async fn cf_handle(
     _b: &mut Vec<u8>,
     _page: &chromiumoxide::Page,
+    _target_url: &str,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     Ok(())
 }
@@ -866,6 +879,18 @@ pub struct ChromeHTTPReqRes {
     pub protocol: String,
     /// The anti-bot tech used.
     pub anti_bot_tech: crate::page::AntiBotTech,
+}
+
+#[cfg(feature = "chrome")]
+impl ChromeHTTPReqRes {
+    /// Is this an empty default
+    pub fn is_empty(&self) -> bool {
+        self.method.is_empty()
+            && self.protocol.is_empty()
+            && self.anti_bot_tech == crate::page::AntiBotTech::None
+            && self.request_headers.is_empty()
+            && self.response_headers.is_empty()
+    }
 }
 
 #[cfg(feature = "chrome")]
@@ -1974,6 +1999,10 @@ pub async fn run_navigate_or_content_set_core(
     }
 
     if content {
+        // check cf for the antibot
+        if detect_cf_turnstyle(source.as_bytes()) {
+            chrome_http_req_res.anti_bot_tech = AntiBotTech::Cloudflare;
+        }
         set_document_content_if_requested(page, source, url_target, block_bytes).await;
         return Ok(());
     }
@@ -2015,6 +2044,11 @@ pub async fn run_navigate_or_content_set_core(
     let cache = cache_enabled(cache_options);
 
     if content {
+        // check cf for the antibot
+        if detect_cf_turnstyle(source.as_bytes()) {
+            chrome_http_req_res.anti_bot_tech = AntiBotTech::Cloudflare;
+        }
+
         if cache {
             set_document_content_if_requested_cached(
                 page,
@@ -2466,12 +2500,9 @@ pub async fn fetch_page_html_chrome_base(
     let run_events = !base_timeout.is_zero()
         && !block_bytes
         && !request_cancelled
+        && !chrome_http_req_res.is_empty()
         && (!chrome_http_req_res.status_code.is_server_error()
             && !chrome_http_req_res.status_code.is_client_error()
-            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
-            || chrome_http_req_res.status_code == 404
-            || chrome_http_req_res.status_code == 403
-            || chrome_http_req_res.status_code == 524
             || chrome_http_req_res.status_code.is_redirection()
             || chrome_http_req_res.status_code.is_success());
 
@@ -2564,19 +2595,12 @@ pub async fn fetch_page_html_chrome_base(
             };
 
             let page_fn = async {
-                if xml_target {
-                    match page.content_bytes_xml().await {
-                        Ok(page_bytes) => {
-                            if page_bytes.is_empty() {
-                                page.outer_html_bytes().await
-                            } else {
-                                Ok(page_bytes)
-                            }
-                        }
-                        _ => page.outer_html_bytes().await,
-                    }
-                } else {
-                    page.outer_html_bytes().await
+                if !xml_target {
+                    return page.outer_html_bytes().await;
+                }
+                match page.content_bytes_xml().await {
+                    Ok(b) if !b.is_empty() => Ok(b),
+                    _ => page.outer_html_bytes().await,
                 }
             };
 
@@ -2599,7 +2623,7 @@ pub async fn fetch_page_html_chrome_base(
                     // detect the turnstile page.
                     if detect_cf_turnstyle(&res) {
                         if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(success) = cf_handle(&mut res, &page).await {
+                            if let Ok(success) = cf_handle(&mut res, &page, &target_url).await {
                                 if success {
                                     status_code = StatusCode::OK;
                                 }
@@ -4668,125 +4692,114 @@ pub fn clean_html_base(html: &str) -> String {
 #[cfg(feature = "chrome")]
 pub async fn rewrite_base_tag(html: &str, base_url: &Option<&str>) -> String {
     use lol_html::{element, html_content::ContentType};
-    use std::sync::OnceLock;
+    use std::sync::{
+        atomic::{AtomicBool, AtomicU8, Ordering},
+        Arc,
+    };
 
     if html.is_empty() {
-        return Default::default();
+        return String::new();
     }
 
-    let base_tag_inserted = OnceLock::new();
-    let already_present = OnceLock::new();
+    let base_href = match *base_url {
+        Some(s) if !s.is_empty() => s,
+        _ => return html.to_string(),
+    };
 
-    let base_url_len = base_url.map(|s| s.len());
+    const UNSET: u8 = 0;
+    const INSERTED: u8 = 1;
+    const PRESENT: u8 = 2;
 
-    let rewriter_settings: lol_html::Settings<'_, '_, lol_html::send::SendHandlerTypes> =
+    let state = Arc::new(AtomicU8::new(UNSET));
+    let saw_head = Arc::new(AtomicBool::new(false));
+
+    let base_tag = format!(r#"<base href="{}">"#, base_href);
+    let head_with_base = format!(r#"<head>{}</head>"#, base_tag);
+
+    let mut buffer = Vec::with_capacity(html.len() + base_href.len() + 64);
+
+    let state_for_base = state.clone();
+    let state_for_head = state.clone();
+    let state_for_body = state.clone();
+    let saw_head_for_head = saw_head.clone();
+    let saw_head_for_body = saw_head.clone();
+
+    let settings: lol_html::Settings<'_, '_, lol_html::send::SendHandlerTypes> =
         lol_html::send::Settings {
             element_content_handlers: vec![
-                // Handler for <base> to mark if it is present with href
-                element!("base", {
-                    |el| {
-                        // check base tags that do not exist yet.
-                        if base_tag_inserted.get().is_none() {
-                            // Check if a <base> with href already exists
-                            if let Some(attr) = el.get_attribute("href") {
-                                let valid_http =
-                                    attr.starts_with("http://") || attr.starts_with("https://");
+                element!("base", move |el| {
+                    if state_for_base.load(Ordering::Relaxed) == PRESENT {
+                        el.remove();
+                        return Ok(());
+                    }
 
-                                // we can validate if the domain is the same if not to remove it.
-                                if valid_http {
-                                    let _ = base_tag_inserted.set(true);
-                                    let _ = already_present.set(true);
-                                } else {
-                                    el.remove();
-                                }
-                            } else {
-                                el.remove();
+                    match el.get_attribute("href") {
+                        Some(href)
+                            if href.starts_with("http://") || href.starts_with("https://") =>
+                        {
+                            state_for_base.store(PRESENT, Ordering::Relaxed);
+                        }
+                        _ => el.remove(),
+                    }
+
+                    Ok(())
+                }),
+                element!("head", move |el: &mut lol_html::send::Element| {
+                    saw_head_for_head.store(true, Ordering::Relaxed);
+
+                    if let Some(handlers) = el.end_tag_handlers() {
+                        let state = state_for_head.clone();
+                        let base_tag = base_tag.clone();
+
+                        handlers.push(Box::new(move |end| {
+                            if state
+                                .compare_exchange(
+                                    UNSET,
+                                    INSERTED,
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                )
+                                .is_ok()
+                            {
+                                end.before(&base_tag, ContentType::Html);
                             }
-                        }
-
-                        Ok(())
+                            Ok(())
+                        }));
                     }
+
+                    Ok(())
                 }),
-                // Handler for <head> to insert <base> tag if not present
-                element!("head", {
-                    |el: &mut lol_html::send::Element| {
-                        if let Some(handlers) = el.end_tag_handlers() {
-                            let base_tag_inserted = base_tag_inserted.clone();
-                            let base_url =
-                                format!(r#"<base href="{}">"#, base_url.unwrap_or_default());
-
-                            handlers.push(Box::new(move |end| {
-                                if base_tag_inserted.get().is_none() {
-                                    let _ = base_tag_inserted.set(true);
-                                    end.before(&base_url, ContentType::Html);
-                                }
-                                Ok(())
-                            }))
+                element!("body", move |el: &mut lol_html::send::Element| {
+                    if !saw_head_for_body.load(Ordering::Relaxed) {
+                        if state_for_body
+                            .compare_exchange(UNSET, INSERTED, Ordering::Relaxed, Ordering::Relaxed)
+                            .is_ok()
+                        {
+                            el.before(&head_with_base, ContentType::Html);
                         }
-                        Ok(())
                     }
-                }),
-                // Handler for html if <head> not present to insert <head><base></head> tag if not present
-                element!("html", {
-                    |el: &mut lol_html::send::Element| {
-                        if let Some(handlers) = el.end_tag_handlers() {
-                            let base_tag_inserted = base_tag_inserted.clone();
-                            let base_url = format!(
-                                r#"<head><base href="{}"></head>"#,
-                                base_url.unwrap_or_default()
-                            );
-
-                            handlers.push(Box::new(move |end| {
-                                if base_tag_inserted.get().is_none() {
-                                    let _ = base_tag_inserted.set(true);
-                                    end.before(&base_url, ContentType::Html);
-                                }
-                                Ok(())
-                            }))
-                        }
-                        Ok(())
-                    }
+                    Ok(())
                 }),
             ],
             ..lol_html::send::Settings::new_for_handler_types()
         };
 
-    let mut buffer = Vec::with_capacity(
-        html.len()
-            + match base_url_len {
-                Some(l) => l + 29,
-                _ => 0,
-            },
-    );
-
-    let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |c: &[u8]| {
+    let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |c: &[u8]| {
         buffer.extend_from_slice(c);
     });
 
-    let mut stream = tokio_stream::iter(html.as_bytes().chunks(*STREAMING_CHUNK_SIZE));
-
-    let mut wrote_error = false;
-
-    while let Some(chunk) = stream.next().await {
-        // early exist
-        if already_present.get().is_some() {
-            break;
+    for chunk in html.as_bytes().chunks(*STREAMING_CHUNK_SIZE) {
+        if state.load(Ordering::Relaxed) == PRESENT {
+            return html.to_string();
         }
         if rewriter.write(chunk).is_err() {
-            wrote_error = true;
-            break;
+            return html.to_string();
         }
     }
 
-    if !wrote_error {
-        let _ = rewriter.end();
-    }
+    let _ = rewriter.end();
 
-    if already_present.get().is_some() {
-        html.to_string()
-    } else {
-        auto_encoder::auto_encode_bytes(&buffer)
-    }
+    auto_encoder::auto_encode_bytes(&buffer)
 }
 
 /// Clean the HTML to slim fit GPT models. This removes base64 images from the prompt.
