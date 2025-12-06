@@ -124,7 +124,7 @@ lazy_static! {
             // DOM mutation hot paths
             ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
             ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
-            ".style.setProperty", ".setProperty", "new DOMParser",
+            ".setProperty", "new DOMParser",
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
@@ -132,7 +132,7 @@ lazy_static! {
             // JS-required / SPA shell markers
             "enable javascript", "requires javascript", "turn on javascript",
         ];
-        aho_corasick::AhoCorasick::new(patterns).expect("vali ddom script  patterns")
+        aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
     /// Attributes for JS requirements.
@@ -2525,7 +2525,6 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::html_content::TextType;
         use lol_html::{doc_comments, element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -2659,38 +2658,37 @@ impl Page {
                     }
                 ));
 
-                element_content_handlers.push(element!(
-                    "*:not(script):not(a):not(body):not(head):not(html)",
-                    |el| {
-                        if el.tag_name() == "body" {
-                            let mut swapped = false;
-
-                            if let Some(id) = el.get_attribute("id") {
-                                if id == "__next" {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                    swapped = true;
-                                }
-                            }
-                            if !swapped {
-                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                    if el.has_attribute(attr) {
-                                        rerender.swap(true, Ordering::Relaxed);
-                                    }
-                                }
-                            }
-                        }
-                        el.remove();
-                        Ok(())
-                    }
-                ));
-
                 element_content_handlers.push(text!("script,noscript", |el| {
-                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
-                    {
+                    let s = el.as_str();
+                    if !s.is_empty() {
                         if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
                             rerender.swap(true, Ordering::Relaxed);
                         }
                     }
+                    Ok(())
+                }));
+
+                element_content_handlers.push(element!("*:not(a):not(head):not(html)", |el| {
+                    if el.tag_name() == "body" {
+                        let mut swapped = false;
+
+                        if let Some(id) = el.get_attribute("id") {
+                            if id == "__next" {
+                                rerender.swap(true, Ordering::Relaxed);
+                                swapped = true;
+                            }
+                        }
+                        if !swapped {
+                            for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                if el.has_attribute(attr) {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
+                    } else {
+                        el.remove();
+                    }
+
                     Ok(())
                 }));
 
@@ -2920,7 +2918,6 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::html_content::TextType;
         use lol_html::{doc_comments, element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -3046,7 +3043,17 @@ impl Page {
 
                         Ok(())
                     }),
-                    element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                    text!("script,noscript", |el| {
+                        let s = el.as_str();
+                        if !s.is_empty() {
+                            if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
+                                rerender.swap(true, Ordering::Relaxed);
+                            }
+                        }
+
+                        Ok(())
+                    }),
+                    element!("*:not(a):not(head):not(html)", |el| {
                         if el.tag_name() == "body" {
                             let mut swapped = false;
 
@@ -3063,21 +3070,12 @@ impl Page {
                                     }
                                 }
                             }
+                        } else {
+                            el.remove();
                         }
-                        el.remove();
                         Ok(())
                     }),
                 ];
-
-                element_content_handlers.push(text!("script,noscript", |el| {
-                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
-                    {
-                        if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
-                            rerender.swap(true, Ordering::Relaxed);
-                        }
-                    }
-                    Ok(())
-                }));
 
                 element_content_handlers.extend(&metadata_handlers(
                     &mut meta_title,
