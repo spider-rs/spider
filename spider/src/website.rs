@@ -7368,8 +7368,8 @@ impl std::fmt::Display for Website {
 
 impl std::error::Error for Website {}
 
-#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn crawl() {
     let url = "https://choosealicense.com";
     let mut website: Website = Website::new(url);
@@ -7449,8 +7449,8 @@ async fn crawl_cron_own() {
     let _ = tokio::join!(runner.stop(), join_handle);
 }
 
-#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn scrape() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.scrape().await;
@@ -7551,8 +7551,8 @@ async fn test_respect_robots_txt() {
     // assert_eq!(website_second.configuration.delay, 60000); // should equal one minute in ms
 }
 
-#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn test_crawl_subdomains() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.subdomains = true;
@@ -7622,8 +7622,8 @@ async fn test_crawl_glob() {
     );
 }
 
-#[cfg(not(feature = "decentralized"))]
 #[tokio::test]
+#[cfg(not(feature = "decentralized"))]
 async fn test_crawl_tld() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.tld = true;

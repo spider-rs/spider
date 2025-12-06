@@ -2786,6 +2786,10 @@ pub async fn fetch_page_html_chrome_base(
 
     if content.is_some() {
         page_response.content = content.map(|f| f.into());
+    } else if let Ok(res) = tokio::time::timeout(base_timeout, page.outer_html_bytes()).await {
+        if let Ok(content) = res {
+            page_response.content = Some(content.into());
+        }
     }
 
     if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
@@ -5353,39 +5357,39 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Se
     semaphore
 }
 
-#[derive(Debug)]
-/// Html output sink for the rewriter.
-#[cfg(feature = "smart")]
-pub(crate) struct HtmlOutputSink {
-    /// The bytes collected.
-    pub(crate) data: Vec<u8>,
-    /// The sender to send once finished.
-    pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
-}
+// #[derive(Debug)]
+// /// Html output sink for the rewriter.
+// #[cfg(feature = "smart")]
+// pub(crate) struct HtmlOutputSink {
+//     /// The bytes collected.
+//     pub(crate) data: Vec<u8>,
+//     /// The sender to send once finished.
+//     pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
+// }
 
-#[cfg(feature = "smart")]
-impl HtmlOutputSink {
-    /// A new output sink.
-    pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
-        HtmlOutputSink {
-            data: Vec::new(),
-            sender: Some(sender),
-        }
-    }
-}
+// #[cfg(feature = "smart")]
+// impl HtmlOutputSink {
+//     /// A new output sink.
+//     pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
+//         HtmlOutputSink {
+//             data: Vec::new(),
+//             sender: Some(sender),
+//         }
+//     }
+// }
 
-#[cfg(feature = "smart")]
-impl OutputSink for HtmlOutputSink {
-    fn handle_chunk(&mut self, chunk: &[u8]) {
-        self.data.extend_from_slice(chunk);
-        if chunk.len() == 0 {
-            if let Some(sender) = self.sender.take() {
-                let data_to_send = std::mem::take(&mut self.data);
-                let _ = sender.send(data_to_send);
-            }
-        }
-    }
-}
+// #[cfg(feature = "smart")]
+// impl OutputSink for HtmlOutputSink {
+//     fn handle_chunk(&mut self, chunk: &[u8]) {
+//         self.data.extend_from_slice(chunk);
+//         if chunk.len() == 0 {
+//             if let Some(sender) = self.sender.take() {
+//                 let data_to_send = std::mem::take(&mut self.data);
+//                 let _ = sender.send(data_to_send);
+//             }
+//         }
+//     }
+// }
 
 /// Consumes `set` and returns (left, right), where `left` are items matching `pred`.
 pub fn split_hashset_round_robin<T>(mut set: HashSet<T>, parts: usize) -> Vec<HashSet<T>>

@@ -115,23 +115,31 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 lazy_static! {
-    static ref DOM_WATCH_METHODS: aho_corasick::AhoCorasick = {
-        let patterns = &[
-            ".createElementNS",
-            ".removeChild",
-            ".insertBefore",
-            ".createElement",
-            ".setAttribute",
-            ".createTextNode",
-            ".replaceChildren",
-            ".prepend",
-            ".append",
-            ".appendChild",
-            ".write",
-        ];
 
-        aho_corasick::AhoCorasick::new(patterns).unwrap()
+    static ref DOM_SCRIPT_WATCH_METHODS: aho_corasick::AhoCorasick = {
+        let patterns = &[
+            ".createElementNS", ".removeChild", ".insertBefore", ".createElement",
+            ".setAttribute", ".createTextNode", ".replaceChildren", ".prepend",
+            ".append", ".appendChild", ".write", "window.location.href",
+            // DOM mutation hot paths
+            ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
+            ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
+            ".style.setProperty", ".setProperty", "new DOMParser",
+            // SPA routing
+            "history.pushState", "history.replaceState",
+            "location.assign", "location.replace",
+            "window.location=", "document.location=",
+            // JS-required / SPA shell markers
+            "enable javascript", "requires javascript", "turn on javascript",
+        ];
+        aho_corasick::AhoCorasick::new(patterns).expect("vali ddom script  patterns")
     };
+
+    /// Attributes for JS requirements.
+    static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
+            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
+            "ng-version", "data-v-app",
+    ];
 }
 
 lazy_static! {
@@ -2517,7 +2525,8 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::{doc_comments, element};
+        use lol_html::html_content::TextType;
+        use lol_html::{doc_comments, element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2653,10 +2662,37 @@ impl Page {
                 element_content_handlers.push(element!(
                     "*:not(script):not(a):not(body):not(head):not(html)",
                     |el| {
+                        if el.tag_name() == "body" {
+                            let mut swapped = false;
+
+                            if let Some(id) = el.get_attribute("id") {
+                                if id == "__next" {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                    swapped = true;
+                                }
+                            }
+                            if !swapped {
+                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                    if el.has_attribute(attr) {
+                                        rerender.swap(true, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        }
                         el.remove();
                         Ok(())
                     }
                 ));
+
+                element_content_handlers.push(text!("script,noscript", |el| {
+                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
+                    {
+                        if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
+                            rerender.swap(true, Ordering::Relaxed);
+                        }
+                    }
+                    Ok(())
+                }));
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
@@ -2668,11 +2704,8 @@ impl Page {
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let (dtx, rdx) = tokio::sync::oneshot::channel();
-                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
-
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -2691,15 +2724,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
-
-                let mut rerender = rerender.load(Ordering::Relaxed);
-
-                if !rerender {
-                    if let Some(_) = DOM_WATCH_METHODS.find(&rewrited_bytes) {
-                        rerender = true;
-                    }
-                }
+                let rerender = rerender.load(Ordering::Relaxed);
 
                 if rerender {
                     if let Some(browser_controller) = browser
@@ -2818,18 +2843,18 @@ impl Page {
                                 base1.as_deref().cloned().map(Box::new)
                             };
 
+                            let resource = match &v.content {
+                                Some(h) => auto_encode_bytes(&h),
+                                _ => Default::default(),
+                            };
+
                             let extended_map = self
-                                .links_stream_base::<A>(
-                                    selectors,
-                                    &match v.content {
-                                        Some(h) => auto_encode_bytes(&h),
-                                        _ => Default::default(),
-                                    },
-                                    &base,
-                                )
+                                .links_stream_base::<A>(selectors, &resource, &base)
                                 .await;
 
                             bytes_transferred = v.bytes_transferred;
+
+                            *self = build(&self.url, v);
 
                             map.extend(extended_map)
                         }
@@ -2895,7 +2920,8 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::{doc_comments, element};
+        use lol_html::html_content::TextType;
+        use lol_html::{doc_comments, element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -3021,10 +3047,37 @@ impl Page {
                         Ok(())
                     }),
                     element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                        if el.tag_name() == "body" {
+                            let mut swapped = false;
+
+                            if let Some(id) = el.get_attribute("id") {
+                                if id == "__next" {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                    swapped = true;
+                                }
+                            }
+                            if !swapped {
+                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                    if el.has_attribute(attr) {
+                                        rerender.swap(true, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        }
                         el.remove();
                         Ok(())
                     }),
                 ];
+
+                element_content_handlers.push(text!("script,noscript", |el| {
+                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
+                    {
+                        if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
+                            rerender.swap(true, Ordering::Relaxed);
+                        }
+                    }
+                    Ok(())
+                }));
 
                 element_content_handlers.extend(&metadata_handlers(
                     &mut meta_title,
@@ -3042,11 +3095,8 @@ impl Page {
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let (dtx, rdx) = tokio::sync::oneshot::channel();
-                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
-
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -3065,15 +3115,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
-
-                let mut rerender = rerender.load(Ordering::Relaxed);
-
-                if !rerender {
-                    if let Some(_) = DOM_WATCH_METHODS.find(&rewrited_bytes) {
-                        rerender = true;
-                    }
-                }
+                let rerender = rerender.load(Ordering::Relaxed);
 
                 if rerender {
                     if let Some(browser_controller) = browser
@@ -3086,7 +3128,6 @@ impl Page {
                         let browser_id = browser_controller.browser.2.clone();
                         let configuration = configuration.clone();
                         // we should re-use the html content instead with events.
-                        let target_url = self.url.clone();
                         // let context_id = context_id.clone();
                         let parent_host = parent_host.clone();
 
@@ -3186,19 +3227,24 @@ impl Page {
                     }
 
                     match rx.await {
-                        Ok(v) => {
+                        Ok(mut v) => {
+                            let resource = match &v.content {
+                                Some(h) => auto_encode_bytes(&h),
+                                _ => Default::default(),
+                            };
+
                             let extended_map = self
                                 .links_stream_base::<A>(
                                     selectors,
-                                    &match v.content {
-                                        Some(h) => auto_encode_bytes(&h),
-                                        _ => Default::default(),
-                                    },
+                                    &resource,
                                     &base.as_deref().cloned().map(Box::new),
                                 )
                                 .await;
 
                             bytes_transferred = v.bytes_transferred;
+
+                            *self = build(&self.url, v);
+
                             map.extend(extended_map)
                         }
                         Err(e) => {
@@ -3553,12 +3599,12 @@ async fn test_headers() {
     );
 }
 
+#[tokio::test]
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "chrome"),
     not(feature = "cache_request")
 ))]
-#[tokio::test]
 async fn parse_links() {
     let client = Client::builder()
         .user_agent(TEST_AGENT_NAME)
@@ -3581,12 +3627,12 @@ async fn parse_links() {
     );
 }
 
+#[tokio::test]
 #[cfg(all(
     not(feature = "decentralized"),
     not(feature = "chrome"),
     not(feature = "cache_request")
 ))]
-#[tokio::test]
 async fn test_status_code() {
     let client = Client::builder()
         .user_agent(TEST_AGENT_NAME)
