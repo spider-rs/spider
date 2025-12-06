@@ -327,7 +327,7 @@ async fn cf_handle(
                 let _ = page.goto(target_url).await?.wait_for_navigation().await?;
             }
             else if page_url.starts_with("http://") {
-                let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?.wait_for_navigation().await?;
+                let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?;
             }
         }
 
@@ -2503,6 +2503,10 @@ pub async fn fetch_page_html_chrome_base(
         && !chrome_http_req_res.is_empty()
         && (!chrome_http_req_res.status_code.is_server_error()
             && !chrome_http_req_res.status_code.is_client_error()
+            || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
+            || chrome_http_req_res.status_code == 404
+            || chrome_http_req_res.status_code == 403
+            || chrome_http_req_res.status_code == 524
             || chrome_http_req_res.status_code.is_redirection()
             || chrome_http_req_res.status_code.is_success());
 
@@ -2808,13 +2812,20 @@ pub async fn fetch_page_html_chrome_base(
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
 
-    if content.is_some() {
-        page_response.content = content.map(|f| f.into());
-    } else if let Ok(res) = tokio::time::timeout(base_timeout, page.outer_html_bytes()).await {
-        if let Ok(content) = res {
-            page_response.content = Some(content.into());
+    page_response.content = match content {
+        Some(c) => Some(c.into()),
+        None => {
+            if page_response.content.is_none() {
+                tokio::time::timeout(base_timeout, page.outer_html_bytes())
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .map(Into::into)
+            } else {
+                page_response.content
+            }
         }
-    }
+    };
 
     if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
         page_response.status_code = StatusCode::OK;
@@ -5370,39 +5381,39 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Se
     semaphore
 }
 
-// #[derive(Debug)]
-// /// Html output sink for the rewriter.
-// #[cfg(feature = "smart")]
-// pub(crate) struct HtmlOutputSink {
-//     /// The bytes collected.
-//     pub(crate) data: Vec<u8>,
-//     /// The sender to send once finished.
-//     pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
-// }
+#[derive(Debug)]
+/// Html output sink for the rewriter.
+#[cfg(feature = "smart")]
+pub(crate) struct HtmlOutputSink {
+    /// The bytes collected.
+    pub(crate) data: Vec<u8>,
+    /// The sender to send once finished.
+    pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
+}
 
-// #[cfg(feature = "smart")]
-// impl HtmlOutputSink {
-//     /// A new output sink.
-//     pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
-//         HtmlOutputSink {
-//             data: Vec::new(),
-//             sender: Some(sender),
-//         }
-//     }
-// }
+#[cfg(feature = "smart")]
+impl HtmlOutputSink {
+    /// A new output sink.
+    pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
+        HtmlOutputSink {
+            data: Vec::new(),
+            sender: Some(sender),
+        }
+    }
+}
 
-// #[cfg(feature = "smart")]
-// impl OutputSink for HtmlOutputSink {
-//     fn handle_chunk(&mut self, chunk: &[u8]) {
-//         self.data.extend_from_slice(chunk);
-//         if chunk.len() == 0 {
-//             if let Some(sender) = self.sender.take() {
-//                 let data_to_send = std::mem::take(&mut self.data);
-//                 let _ = sender.send(data_to_send);
-//             }
-//         }
-//     }
-// }
+#[cfg(feature = "smart")]
+impl OutputSink for HtmlOutputSink {
+    fn handle_chunk(&mut self, chunk: &[u8]) {
+        self.data.extend_from_slice(chunk);
+        if chunk.len() == 0 {
+            if let Some(sender) = self.sender.take() {
+                let data_to_send = std::mem::take(&mut self.data);
+                let _ = sender.send(data_to_send);
+            }
+        }
+    }
+}
 
 /// Consumes `set` and returns (left, right), where `left` are items matching `pred`.
 pub fn split_hashset_round_robin<T>(mut set: HashSet<T>, parts: usize) -> Vec<HashSet<T>>

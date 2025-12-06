@@ -137,16 +137,19 @@ lazy_static! {
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
-            "window.location=", "document.location=",
+            "window.location", "document.location",
+            // spa
+            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
+            "ng-version", "data-v-app",
         ];
         aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
-    /// Attributes for JS requirements.
-    static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
-            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
-            "ng-version", "data-v-app",
-    ];
+    // /// Attributes for JS requirements.
+    // static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
+    //         "__NEXT_DATA__", "__NUXT__", "data-reactroot",
+    //         "ng-version", "data-v-app",
+    // ];
 }
 
 lazy_static! {
@@ -2532,7 +2535,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::{element, text};
+        use lol_html::{doc_comments, element};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2594,7 +2597,7 @@ impl Page {
                 }));
 
                 element_content_handlers.push(element!("script", |element| {
-                    if !static_app && !rerender.load(Ordering::Relaxed) {
+                    if !static_app {
                         if let Some(src) = element.get_attribute("src") {
                             if src.starts_with("/") {
                                 if src.starts_with("/_next/static/chunks/pages/")
@@ -2615,6 +2618,7 @@ impl Page {
                                                 .is_match(&p)
                                             {
                                                 rerender.swap(true, Ordering::Relaxed);
+                                                break;
                                             }
                                         }
                                     }
@@ -2659,58 +2663,35 @@ impl Page {
                             );
                         }
 
+                        el.remove();
+
                         Ok(())
                     }
                 ));
 
-                element_content_handlers.push(text!("noscript", |el| {
-                    if !rerender.load(Ordering::Relaxed) {
-                        if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                            rerender.swap(true, Ordering::Relaxed);
-                        }
+                element_content_handlers.push(element!(
+                    "*:not(script):not(a):not(body):not(head):not(html)",
+                    |el| {
+                        el.remove();
+                        Ok(())
                     }
-                    Ok(())
-                }));
-
-                element_content_handlers.push(text!("script", |el| {
-                    let s = el.as_str();
-                    if !s.is_empty() {
-                        if !rerender.load(Ordering::Relaxed) {
-                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                rerender.swap(true, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                    Ok(())
-                }));
-
-                element_content_handlers.push(element!("body", |el| {
-                    if !rerender.load(Ordering::Relaxed) {
-                        let mut swapped = false;
-                        if el.get_attribute("id").as_deref() == Some("__next") {
-                            rerender.swap(true, Ordering::Relaxed);
-                            swapped = true;
-                        }
-
-                        if !swapped {
-                            for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                if el.has_attribute(attr) {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                    }
-                    Ok(())
-                }));
+                ));
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
+                    document_content_handlers: vec![doc_comments!(|c| {
+                        c.remove();
+                        Ok(())
+                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
+                let (dtx, rdx) = tokio::sync::oneshot::channel();
+                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
+
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -2729,7 +2710,17 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed) {
+                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
+
+                let mut rerender = rerender.load(Ordering::Relaxed);
+
+                if !rerender {
+                    if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&rewrited_bytes) {
+                        rerender = true;
+                    }
+                }
+
+                if rerender {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
@@ -2923,7 +2914,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::{element, text};
+        use lol_html::{doc_comments, element};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2981,7 +2972,7 @@ impl Page {
                         Ok(())
                     }),
                     element!("script", |element| {
-                        if !static_app && !rerender.load(Ordering::Relaxed) {
+                        if !static_app {
                             if let Some(src) = element.get_attribute("src") {
                                 if src.starts_with("/") {
                                     if src.starts_with("/_next/static/chunks/pages/")
@@ -3002,6 +2993,7 @@ impl Page {
                                                     .is_match(&p)
                                                 {
                                                     rerender.swap(true, Ordering::Relaxed);
+                                                    break;
                                                 }
                                             }
                                         }
@@ -3044,43 +3036,12 @@ impl Page {
                             );
                         }
 
-                        Ok(())
-                    }),
-                    text!("noscript", |el| {
-                        if !rerender.load(Ordering::Relaxed) {
-                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                                rerender.swap(true, Ordering::Relaxed);
-                            }
-                        }
-                        Ok(())
-                    }),
-                    text!("script", |el| {
-                        let s = el.as_str();
-                        if !s.is_empty() {
-                            if !rerender.load(Ordering::Relaxed) {
-                                if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                }
-                            }
-                        }
-                        Ok(())
-                    }),
-                    element!("body", |el| {
-                        if !rerender.load(Ordering::Relaxed) {
-                            let mut swapped = false;
+                        el.remove();
 
-                            if el.get_attribute("id").as_deref() == Some("__next") {
-                                rerender.swap(true, Ordering::Relaxed);
-                                swapped = true;
-                            }
-                            if !swapped {
-                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                    if el.has_attribute(attr) {
-                                        rerender.swap(true, Ordering::Relaxed);
-                                    }
-                                }
-                            }
-                        }
+                        Ok(())
+                    }),
+                    element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
+                        el.remove();
                         Ok(())
                     }),
                 ];
@@ -3093,12 +3054,19 @@ impl Page {
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
+                    document_content_handlers: vec![doc_comments!(|c| {
+                        c.remove();
+                        Ok(())
+                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
+                let (dtx, rdx) = tokio::sync::oneshot::channel();
+                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
+
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -3117,7 +3085,17 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed) {
+                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
+
+                let mut rerender = rerender.load(Ordering::Relaxed);
+
+                if !rerender {
+                    if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&rewrited_bytes) {
+                        rerender = true;
+                    }
+                }
+
+                if rerender {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
