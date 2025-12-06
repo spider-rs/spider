@@ -116,6 +116,14 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 lazy_static! {
 
+    static ref NO_SCRIPT_JS_REQUIRED: aho_corasick::AhoCorasick = {
+        let patterns = &[
+            // JS-required / SPA shell markers
+            "enable javascript", "requires javascript", "turn on javascript",
+        ];
+        aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
+    };
+
     static ref DOM_SCRIPT_WATCH_METHODS: aho_corasick::AhoCorasick = {
         let patterns = &[
             ".createElementNS", ".removeChild", ".insertBefore", ".createElement",
@@ -124,15 +132,13 @@ lazy_static! {
             // DOM mutation hot paths
             ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
             ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
-            ".style.setProperty", ".setProperty", "new DOMParser",
+            ".setProperty", "new DOMParser",
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
             "window.location=", "document.location=",
-            // JS-required / SPA shell markers
-            "enable javascript", "requires javascript", "turn on javascript",
         ];
-        aho_corasick::AhoCorasick::new(patterns).expect("vali ddom script  patterns")
+        aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
     /// Attributes for JS requirements.
@@ -2525,8 +2531,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::html_content::TextType;
-        use lol_html::{doc_comments, element, text};
+        use lol_html::{element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2588,7 +2593,7 @@ impl Page {
                 }));
 
                 element_content_handlers.push(element!("script", |element| {
-                    if !static_app {
+                    if !static_app && !rerender.load(Ordering::Relaxed) {
                         if let Some(src) = element.get_attribute("src") {
                             if src.starts_with("/") {
                                 if src.starts_with("/_next/static/chunks/pages/")
@@ -2653,42 +2658,45 @@ impl Page {
                             );
                         }
 
-                        el.remove();
-
                         Ok(())
                     }
                 ));
 
-                element_content_handlers.push(element!(
-                    "*:not(script):not(a):not(body):not(head):not(html)",
-                    |el| {
-                        if el.tag_name() == "body" {
-                            let mut swapped = false;
+                element_content_handlers.push(text!("noscript", |el| {
+                    if !rerender.load(Ordering::Relaxed) {
+                        if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                            rerender.swap(true, Ordering::Relaxed);
+                        }
+                    }
+                    Ok(())
+                }));
 
-                            if let Some(id) = el.get_attribute("id") {
-                                if id == "__next" {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                    swapped = true;
-                                }
-                            }
-                            if !swapped {
-                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                    if el.has_attribute(attr) {
-                                        rerender.swap(true, Ordering::Relaxed);
-                                    }
-                                }
+                element_content_handlers.push(text!("script", |el| {
+                    let s = el.as_str();
+                    if !s.is_empty() {
+                        if !rerender.load(Ordering::Relaxed) {
+                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                rerender.swap(true, Ordering::Relaxed);
                             }
                         }
-                        el.remove();
-                        Ok(())
                     }
-                ));
+                    Ok(())
+                }));
 
-                element_content_handlers.push(text!("script,noscript", |el| {
-                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
-                    {
-                        if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
+                element_content_handlers.push(element!("body", |el| {
+                    if !rerender.load(Ordering::Relaxed) {
+                        let mut swapped = false;
+                        if el.get_attribute("id").as_deref() == Some("__next") {
                             rerender.swap(true, Ordering::Relaxed);
+                            swapped = true;
+                        }
+
+                        if !swapped {
+                            for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                if el.has_attribute(attr) {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                }
+                            }
                         }
                     }
                     Ok(())
@@ -2696,10 +2704,6 @@ impl Page {
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
-                    document_content_handlers: vec![doc_comments!(|c| {
-                        c.remove();
-                        Ok(())
-                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
@@ -2724,9 +2728,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rerender = rerender.load(Ordering::Relaxed);
-
-                if rerender {
+                if rerender.load(Ordering::Relaxed) {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
@@ -2920,8 +2922,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::html_content::TextType;
-        use lol_html::{doc_comments, element, text};
+        use lol_html::{element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2979,7 +2980,7 @@ impl Page {
                         Ok(())
                     }),
                     element!("script", |element| {
-                        if !static_app {
+                        if !static_app && !rerender.load(Ordering::Relaxed) {
                             if let Some(src) = element.get_attribute("src") {
                                 if src.starts_with("/") {
                                     if src.starts_with("/_next/static/chunks/pages/")
@@ -3042,19 +3043,34 @@ impl Page {
                             );
                         }
 
-                        el.remove();
-
                         Ok(())
                     }),
-                    element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
-                        if el.tag_name() == "body" {
+                    text!("noscript", |el| {
+                        if !rerender.load(Ordering::Relaxed) {
+                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                                rerender.swap(true, Ordering::Relaxed);
+                            }
+                        }
+                        Ok(())
+                    }),
+                    text!("script", |el| {
+                        let s = el.as_str();
+                        if !s.is_empty() {
+                            if !rerender.load(Ordering::Relaxed) {
+                                if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
+                        Ok(())
+                    }),
+                    element!("body", |el| {
+                        if !rerender.load(Ordering::Relaxed) {
                             let mut swapped = false;
 
-                            if let Some(id) = el.get_attribute("id") {
-                                if id == "__next" {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                    swapped = true;
-                                }
+                            if el.get_attribute("id").as_deref() == Some("__next") {
+                                rerender.swap(true, Ordering::Relaxed);
+                                swapped = true;
                             }
                             if !swapped {
                                 for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
@@ -3064,20 +3080,9 @@ impl Page {
                                 }
                             }
                         }
-                        el.remove();
                         Ok(())
                     }),
                 ];
-
-                element_content_handlers.push(text!("script,noscript", |el| {
-                    if el.text_type() == TextType::ScriptData || el.text_type() == TextType::RawText
-                    {
-                        if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&el.as_str()) {
-                            rerender.swap(true, Ordering::Relaxed);
-                        }
-                    }
-                    Ok(())
-                }));
 
                 element_content_handlers.extend(&metadata_handlers(
                     &mut meta_title,
@@ -3087,10 +3092,6 @@ impl Page {
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
-                    document_content_handlers: vec![doc_comments!(|c| {
-                        c.remove();
-                        Ok(())
-                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
@@ -3115,9 +3116,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rerender = rerender.load(Ordering::Relaxed);
-
-                if rerender {
+                if rerender.load(Ordering::Relaxed) {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
