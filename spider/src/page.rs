@@ -138,18 +138,15 @@ lazy_static! {
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
             "window.location", "document.location",
-            // spa
-            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
-            "ng-version", "data-v-app",
         ];
         aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
-    // /// Attributes for JS requirements.
-    // static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
-    //         "__NEXT_DATA__", "__NUXT__", "data-reactroot",
-    //         "ng-version", "data-v-app",
-    // ];
+    /// Attributes for JS requirements.
+    static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
+            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
+            "ng-version", "data-v-app",
+    ];
 }
 
 lazy_static! {
@@ -479,6 +476,48 @@ pub struct Page {
     pub anti_bot_tech: AntiBotTech,
     /// Page metadata.
     pub metadata: Option<Box<Metadata>>,
+}
+
+/// Assign properties from a new page.
+#[cfg(feature = "smart")]
+pub fn page_assign(page: &mut Page, new_page: Page) {
+    page.final_redirect_destination = new_page.final_redirect_destination;
+    page.anti_bot_tech = new_page.anti_bot_tech;
+    page.base = new_page.base;
+    page.blocked_crawl = new_page.blocked_crawl;
+    page.bytes_transferred = new_page.bytes_transferred;
+
+    #[cfg(feature = "remote_addr")]
+    {
+        page.remote_addr = new_page.remote_addr;
+    }
+    #[cfg(feature = "time")]
+    {
+        page.duration = new_page.duration;
+    }
+    #[cfg(feature = "page_error_status_details")]
+    {
+        page.error_status = new_page.error_status;
+    }
+    page.request_map = new_page.request_map;
+    page.response_map = new_page.response_map;
+    #[cfg(feature = "cookies")]
+    {
+        page.cookies = new_page.cookies;
+    }
+    #[cfg(feature = "headers")]
+    {
+        page.headers = new_page.headers;
+    }
+    page.waf_check = new_page.waf_check;
+    page.should_retry = new_page.should_retry;
+    page.signature = new_page.signature;
+    page.metadata = new_page.metadata;
+    page.status_code = new_page.status_code;
+
+    if new_page.html.is_some() {
+        page.html = new_page.html;
+    }
 }
 
 /// Validate link and push into the map
@@ -2534,8 +2573,7 @@ impl Page {
         browser: &crate::features::chrome::OnceBrowser,
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
-        use chromiumoxide::error::CdpError;
-        use lol_html::{doc_comments, element};
+        use lol_html::{element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2559,7 +2597,7 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
                     .await;
             } else {
-                let (tx, rx) = tokio::sync::oneshot::channel();
+                // let (tx, rx) = tokio::sync::oneshot::channel();
                 let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
@@ -2597,7 +2635,7 @@ impl Page {
                 }));
 
                 element_content_handlers.push(element!("script", |element| {
-                    if !static_app {
+                    if !static_app && !rerender.load(Ordering::Relaxed) {
                         if let Some(src) = element.get_attribute("src") {
                             if src.starts_with("/") {
                                 if src.starts_with("/_next/static/chunks/pages/")
@@ -2618,7 +2656,6 @@ impl Page {
                                                 .is_match(&p)
                                             {
                                                 rerender.swap(true, Ordering::Relaxed);
-                                                break;
                                             }
                                         }
                                     }
@@ -2663,35 +2700,59 @@ impl Page {
                             );
                         }
 
-                        el.remove();
-
                         Ok(())
                     }
                 ));
 
-                element_content_handlers.push(element!(
-                    "*:not(script):not(a):not(body):not(head):not(html)",
-                    |el| {
-                        el.remove();
-                        Ok(())
+                element_content_handlers.push(text!("noscript", |el| {
+                    if !rerender.load(Ordering::Relaxed) {
+                        if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                            rerender.swap(true, Ordering::Relaxed);
+                        }
                     }
-                ));
+                    Ok(())
+                }));
+
+                element_content_handlers.push(text!("script", |el| {
+                    let s = el.as_str();
+                    if !s.is_empty() {
+                        if !rerender.load(Ordering::Relaxed) {
+                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                rerender.swap(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    Ok(())
+                }));
+
+                element_content_handlers.push(element!("body", |el| {
+                    if !rerender.load(Ordering::Relaxed) {
+                        let mut swapped = false;
+                        if el.get_attribute("id").as_deref() == Some("__next") {
+                            rerender.swap(true, Ordering::Relaxed);
+                            swapped = true;
+                        }
+
+                        if !swapped {
+                            for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                if el.has_attribute(attr) {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                }));
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
-                    document_content_handlers: vec![doc_comments!(|c| {
-                        c.remove();
-                        Ok(())
-                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let (dtx, rdx) = tokio::sync::oneshot::channel();
-                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
-
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -2710,152 +2771,95 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
-
-                let mut rerender = rerender.load(Ordering::Relaxed);
-
-                if !rerender {
-                    if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&rewrited_bytes) {
-                        rerender = true;
-                    }
-                }
-
-                if rerender {
+                if rerender.load(Ordering::Relaxed) {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
                         })
                         .await
                     {
-                        let browser = browser_controller.browser.0.clone();
-                        let browser_id = browser_controller.browser.2.clone();
-                        let configuration = configuration.clone();
-                        // we should re-use the html content instead with events.
-                        let target_url = self.url.clone();
-                        let parent_host = parent_host.clone();
-
-                        crate::utils::spawn_task("page_render_fetch", async move {
-                            if let Ok(new_page) = crate::features::chrome::attempt_navigation(
-                                "about:blank",
-                                &browser,
-                                &configuration.request_timeout,
-                                &browser_id,
-                                &configuration.viewport,
-                            )
-                            .await
-                            {
-                                let (intercept_handle, _) = tokio::join!(
-                                    crate::features::chrome::setup_chrome_interception_base(
-                                        &new_page,
-                                        configuration.chrome_intercept.enabled,
-                                        &configuration.auth_challenge_response,
-                                        configuration.chrome_intercept.block_visuals,
-                                        &parent_host,
-                                    ),
-                                    crate::features::chrome::setup_chrome_events(
-                                        &new_page,
-                                        &configuration,
-                                    )
-                                );
-
-                                let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                    &html_resource,
+                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                            "about:blank",
+                            &browser_controller.browser.0,
+                            &configuration.request_timeout,
+                            &browser_controller.browser.2,
+                            &configuration.viewport,
+                        )
+                        .await
+                        {
+                            let (intercept_handle, _) = tokio::join!(
+                                crate::features::chrome::setup_chrome_interception_base(
                                     &new_page,
-                                    true,
-                                    true,
-                                    &configuration.wait_for,
-                                    &configuration.screenshot,
-                                    false,
-                                    &configuration.openai_config,
-                                    Some(&target_url),
-                                    &configuration.execution_scripts,
-                                    &configuration.automation_scripts,
-                                    &configuration.viewport,
-                                    &configuration.request_timeout,
-                                    &configuration.track_events,
-                                    configuration.referer.clone(),
-                                    configuration.max_page_bytes,
-                                    configuration.get_cache_options(),
-                                    &configuration.cache_policy,
+                                    configuration.chrome_intercept.enabled,
+                                    &configuration.auth_challenge_response,
+                                    configuration.chrome_intercept.block_visuals,
+                                    &parent_host,
+                                ),
+                                crate::features::chrome::setup_chrome_events(
+                                    &new_page,
+                                    &configuration,
                                 )
-                                .await;
+                            );
 
-                                if let Some(h) = intercept_handle {
-                                    let abort_handle = h.abort_handle();
-                                    if let Err(elasped) = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(15),
-                                        h,
-                                    )
-                                    .await
-                                    {
-                                        log::warn!("Handler timeout exceeded {elasped}");
-                                        abort_handle.abort();
-                                    }
-                                }
+                            let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                &html_resource,
+                                &new_page,
+                                true,
+                                true,
+                                &configuration.wait_for,
+                                &configuration.screenshot,
+                                false,
+                                &configuration.openai_config,
+                                Some(&self.url),
+                                &configuration.execution_scripts,
+                                &configuration.automation_scripts,
+                                &configuration.viewport,
+                                &configuration.request_timeout,
+                                &configuration.track_events,
+                                configuration.referer.clone(),
+                                configuration.max_page_bytes,
+                                configuration.get_cache_options(),
+                                &configuration.cache_policy,
+                            )
+                            .await;
 
-                                match page_resource {
-                                    Ok(resource) => {
-                                        if let Err(_) = tx.send(resource) {
-                                            log::info!("the receiver dropped - {target_url}");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let mut default_response: PageResponse = Default::default();
-
-                                        default_response.final_url = Some(target_url.clone());
-
-                                        match e {
-                                            CdpError::NotFound => {
-                                                default_response.status_code =
-                                                    StatusCode::NOT_FOUND;
-                                            }
-                                            CdpError::NoResponse => {
-                                                default_response.status_code =
-                                                    StatusCode::GATEWAY_TIMEOUT;
-                                            }
-                                            CdpError::LaunchTimeout(_) => {
-                                                default_response.status_code =
-                                                    StatusCode::REQUEST_TIMEOUT;
-                                            }
-                                            _ => (),
-                                        }
-
-                                        if let Err(_) = tx.send(default_response) {
-                                            log::info!("the receiver dropped - {target_url}");
-                                        }
-                                    }
+                            if let Some(h) = intercept_handle {
+                                let abort_handle = h.abort_handle();
+                                if let Err(elasped) =
+                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
+                                        .await
+                                {
+                                    log::warn!("Handler timeout exceeded {elasped}");
+                                    abort_handle.abort();
                                 }
                             }
-                        });
+
+                            if let Ok(resource) = page_resource {
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get().cloned().map(Box::new)
+                                } else {
+                                    base1.as_deref().cloned().map(Box::new)
+                                };
+
+                                let page_resource = match &resource.content {
+                                    Some(h) => auto_encode_bytes(&h),
+                                    _ => Default::default(),
+                                };
+
+                                let extended_map = self
+                                    .links_stream_base::<A>(selectors, &page_resource, &base)
+                                    .await;
+
+                                bytes_transferred = resource.bytes_transferred;
+
+                                let new_page = build(&self.url, resource);
+
+                                page_assign(self, new_page);
+
+                                map.extend(extended_map);
+                            };
+                        }
                     }
-
-                    match rx.await {
-                        Ok(v) => {
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get().cloned().map(Box::new)
-                            } else {
-                                base1.as_deref().cloned().map(Box::new)
-                            };
-
-                            let resource = match &v.content {
-                                Some(h) => auto_encode_bytes(&h),
-                                _ => Default::default(),
-                            };
-
-                            let extended_map = self
-                                .links_stream_base::<A>(selectors, &resource, &base)
-                                .await;
-
-                            bytes_transferred = v.bytes_transferred;
-
-                            *self = build(&self.url, v);
-
-                            map.extend(extended_map)
-                        }
-                        Err(e) => {
-                            crate::utils::log("receiver error", e.to_string());
-                        }
-                    };
                 }
             }
 
@@ -2914,7 +2918,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use chromiumoxide::error::CdpError;
-        use lol_html::{doc_comments, element};
+        use lol_html::{element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
@@ -2972,7 +2976,7 @@ impl Page {
                         Ok(())
                     }),
                     element!("script", |element| {
-                        if !static_app {
+                        if !static_app && !rerender.load(Ordering::Relaxed) {
                             if let Some(src) = element.get_attribute("src") {
                                 if src.starts_with("/") {
                                     if src.starts_with("/_next/static/chunks/pages/")
@@ -2993,7 +2997,6 @@ impl Page {
                                                     .is_match(&p)
                                                 {
                                                     rerender.swap(true, Ordering::Relaxed);
-                                                    break;
                                                 }
                                             }
                                         }
@@ -3036,12 +3039,43 @@ impl Page {
                             );
                         }
 
-                        el.remove();
-
                         Ok(())
                     }),
-                    element!("*:not(script):not(a):not(body):not(head):not(html)", |el| {
-                        el.remove();
+                    text!("noscript", |el| {
+                        if !rerender.load(Ordering::Relaxed) {
+                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                                rerender.swap(true, Ordering::Relaxed);
+                            }
+                        }
+                        Ok(())
+                    }),
+                    text!("script", |el| {
+                        let s = el.as_str();
+                        if !s.is_empty() {
+                            if !rerender.load(Ordering::Relaxed) {
+                                if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
+                        Ok(())
+                    }),
+                    element!("body", |el| {
+                        if !rerender.load(Ordering::Relaxed) {
+                            let mut swapped = false;
+
+                            if el.get_attribute("id").as_deref() == Some("__next") {
+                                rerender.swap(true, Ordering::Relaxed);
+                                swapped = true;
+                            }
+                            if !swapped {
+                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                    if el.has_attribute(attr) {
+                                        rerender.swap(true, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        }
                         Ok(())
                     }),
                 ];
@@ -3054,19 +3088,12 @@ impl Page {
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
-                    document_content_handlers: vec![doc_comments!(|c| {
-                        c.remove();
-                        Ok(())
-                    })],
                     adjust_charset_on_meta_tag: true,
                     ..lol_html::send::Settings::new_for_handler_types()
                 };
 
-                let (dtx, rdx) = tokio::sync::oneshot::channel();
-                let output_sink = crate::utils::HtmlOutputSink::new(dtx);
-
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), output_sink);
+                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
                 let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
@@ -3085,17 +3112,7 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let rewrited_bytes = if let Ok(c) = rdx.await { c } else { Vec::new() };
-
-                let mut rerender = rerender.load(Ordering::Relaxed);
-
-                if !rerender {
-                    if let Some(_) = DOM_SCRIPT_WATCH_METHODS.find(&rewrited_bytes) {
-                        rerender = true;
-                    }
-                }
-
-                if rerender {
+                if rerender.load(Ordering::Relaxed) {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
@@ -3622,13 +3639,13 @@ async fn test_status_code() {
     assert_eq!(page.status_code.as_u16(), 404);
 }
 
-#[cfg(all(feature = "time", not(feature = "decentralized")))]
 #[tokio::test]
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
 async fn test_duration() {
     let client = Client::default();
     let link_result = "https://choosealicense.com/";
     let page: Page = Page::new_page(&link_result, &client).await;
-    let duration_elasped = page.get_duration_elasped().as_millis();
+    let duration_elasped = page.get_duration_elapsed().as_millis();
 
     assert!(
         duration_elasped < 6000,
