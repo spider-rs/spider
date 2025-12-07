@@ -7383,8 +7383,8 @@ async fn crawl() {
     );
 }
 
-#[cfg(feature = "cron")]
 #[tokio::test]
+#[cfg(feature = "cron")]
 async fn crawl_cron() {
     let url = "https://choosealicense.com";
     let mut website: Website = Website::new(&url)
@@ -7417,8 +7417,8 @@ async fn crawl_cron() {
     let _ = join_handle.await;
 }
 
-#[cfg(feature = "cron")]
 #[tokio::test]
+#[cfg(feature = "cron")]
 async fn crawl_cron_own() {
     let url = "https://choosealicense.com";
     let mut website: Website = Website::new(&url)
@@ -7602,8 +7602,8 @@ async fn test_with_configuration() {
     );
 }
 
-#[cfg(all(feature = "glob", not(feature = "decentralized")))]
 #[tokio::test]
+#[cfg(all(feature = "glob", not(feature = "decentralized")))]
 async fn test_crawl_glob() {
     let mut website: Website =
         Website::new("https://choosealicense.com/licenses/{mit,apache-2.0,mpl-2.0}/");
@@ -7662,8 +7662,8 @@ async fn test_crawl_subscription() {
     assert!(count == website_links, "{:?}", true);
 }
 
-#[cfg(all(feature = "socks", not(feature = "decentralized")))]
 #[tokio::test]
+#[cfg(all(feature = "socks", not(feature = "decentralized")))]
 async fn test_crawl_proxy() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website

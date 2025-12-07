@@ -1809,62 +1809,15 @@ async fn set_document_content_if_requested(
     url_target: Option<&str>,
     block_bytes: &mut bool,
 ) {
-    let Ok(frame_opt) = page.mainframe().await else {
-        return;
-    };
+    let (html, main_frame, _) = tokio::join!(
+        rewrite_base_tag(&source, &url_target),
+        page.mainframe(),
+        page.set_page_lifecycles_enabled(true)
+    );
 
-    let html = rewrite_base_tag(&source, &url_target).await;
-
-    if let Err(e) = page
-        .send_command(
-            chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                frame_id: frame_opt.unwrap_or_default(),
-                html,
-            },
-        )
-        .await
-    {
-        log::info!(
-            "Set Content Error({:?}) - {:?}",
-            e,
-            log_target(source, url_target)
-        );
-        if is_timeout(&e) {
-            *block_bytes = true;
-        }
-    }
-}
-
-#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
-/// Set the document if requested cached.
-async fn set_document_content_if_requested_cached(
-    page: &chromiumoxide::Page,
-    source: &str,
-    url_target: Option<&str>,
-    block_bytes: &mut bool,
-    cache_options: &Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
-) {
-    let Ok(frame_opt) = page.mainframe().await else {
-        return;
-    };
-
-    let auth_opt = cache_auth_token(cache_options);
-    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
-    let cache_strategy = None;
-    let remote = Some("true");
-    let target_url = url_target.unwrap_or_default();
-    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(&target_url, auth_opt);
-
-    let _ = page
-        .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
-        .await;
-
-    let cache_future = async {
-        let html = rewrite_base_tag(&source, &url_target).await;
-
+    if let Ok(frame_opt) = main_frame {
         if let Err(e) = page
-            .send_command(
+            .execute(
                 chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
                     frame_id: frame_opt.unwrap_or_default(),
                     html,
@@ -1879,6 +1832,57 @@ async fn set_document_content_if_requested_cached(
             );
             if is_timeout(&e) {
                 *block_bytes = true;
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Set the document if requested cached.
+async fn set_document_content_if_requested_cached(
+    page: &chromiumoxide::Page,
+    source: &str,
+    url_target: Option<&str>,
+    block_bytes: &mut bool,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) {
+    let auth_opt = cache_auth_token(cache_options);
+    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+    let cache_strategy = None;
+    let remote = Some("true");
+    let target_url = url_target.unwrap_or_default();
+    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(&target_url, auth_opt);
+
+    let _ = page
+        .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
+        .await;
+
+    let cache_future = async {
+        let (html, main_frame, _) = tokio::join!(
+            rewrite_base_tag(&source, &url_target),
+            page.mainframe(),
+            page.set_page_lifecycles_enabled(true)
+        );
+
+        if let Ok(frame_opt) = main_frame {
+            if let Err(e) = page
+                .execute(
+                    chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
+                        frame_id: frame_opt.unwrap_or_default(),
+                        html,
+                    },
+                )
+                .await
+            {
+                log::info!(
+                    "Set Content Error({:?}) - {:?}",
+                    e,
+                    log_target(source, url_target)
+                );
+                if is_timeout(&e) {
+                    *block_bytes = true;
+                }
             }
         }
     };
@@ -2500,7 +2504,7 @@ pub async fn fetch_page_html_chrome_base(
     let run_events = !base_timeout.is_zero()
         && !block_bytes
         && !request_cancelled
-        && !chrome_http_req_res.is_empty()
+        && !(chrome_http_req_res.is_empty() && !content)
         && (!chrome_http_req_res.status_code.is_server_error()
             && !chrome_http_req_res.status_code.is_client_error()
             || chrome_http_req_res.status_code == *UNKNOWN_STATUS_ERROR
@@ -5381,39 +5385,39 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, _detect: bool) -> &Arc<Se
     semaphore
 }
 
-#[derive(Debug)]
-/// Html output sink for the rewriter.
-#[cfg(feature = "smart")]
-pub(crate) struct HtmlOutputSink {
-    /// The bytes collected.
-    pub(crate) data: Vec<u8>,
-    /// The sender to send once finished.
-    pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
-}
+// #[derive(Debug)]
+// /// Html output sink for the rewriter.
+// #[cfg(feature = "smart")]
+// pub(crate) struct HtmlOutputSink {
+//     /// The bytes collected.
+//     pub(crate) data: Vec<u8>,
+//     /// The sender to send once finished.
+//     pub(crate) sender: Option<tokio::sync::oneshot::Sender<Vec<u8>>>,
+// }
 
-#[cfg(feature = "smart")]
-impl HtmlOutputSink {
-    /// A new output sink.
-    pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
-        HtmlOutputSink {
-            data: Vec::new(),
-            sender: Some(sender),
-        }
-    }
-}
+// #[cfg(feature = "smart")]
+// impl HtmlOutputSink {
+//     /// A new output sink.
+//     pub(crate) fn new(sender: tokio::sync::oneshot::Sender<Vec<u8>>) -> Self {
+//         HtmlOutputSink {
+//             data: Vec::new(),
+//             sender: Some(sender),
+//         }
+//     }
+// }
 
-#[cfg(feature = "smart")]
-impl OutputSink for HtmlOutputSink {
-    fn handle_chunk(&mut self, chunk: &[u8]) {
-        self.data.extend_from_slice(chunk);
-        if chunk.len() == 0 {
-            if let Some(sender) = self.sender.take() {
-                let data_to_send = std::mem::take(&mut self.data);
-                let _ = sender.send(data_to_send);
-            }
-        }
-    }
-}
+// #[cfg(feature = "smart")]
+// impl OutputSink for HtmlOutputSink {
+//     fn handle_chunk(&mut self, chunk: &[u8]) {
+//         self.data.extend_from_slice(chunk);
+//         if chunk.len() == 0 {
+//             if let Some(sender) = self.sender.take() {
+//                 let data_to_send = std::mem::take(&mut self.data);
+//                 let _ = sender.send(data_to_send);
+//             }
+//         }
+//     }
+// }
 
 /// Consumes `set` and returns (left, right), where `left` are items matching `pred`.
 pub fn split_hashset_round_robin<T>(mut set: HashSet<T>, parts: usize) -> Vec<HashSet<T>>
