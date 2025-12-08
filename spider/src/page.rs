@@ -481,7 +481,14 @@ pub struct Page {
 /// Assign properties from a new page.
 #[cfg(feature = "smart")]
 pub fn page_assign(page: &mut Page, new_page: Page) {
-    page.final_redirect_destination = new_page.final_redirect_destination;
+    if new_page
+        .final_redirect_destination
+        .as_deref()
+        .is_some_and(|s| !s.is_empty() && !s.starts_with("about:blank"))
+    {
+        page.final_redirect_destination = new_page.final_redirect_destination;
+    }
+
     page.anti_bot_tech = new_page.anti_bot_tech;
     page.base = new_page.base;
     page.blocked_crawl = new_page.blocked_crawl;
@@ -503,11 +510,15 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     page.response_map = new_page.response_map;
     #[cfg(feature = "cookies")]
     {
-        page.cookies = new_page.cookies;
+        if new_page.cookies.is_some() {
+            page.cookies = new_page.cookies;
+        }
     }
     #[cfg(feature = "headers")]
     {
-        page.headers = new_page.headers;
+        if new_page.headers.is_some() {
+            page.headers = new_page.headers;
+        }
     }
     page.waf_check = new_page.waf_check;
     page.should_retry = new_page.should_retry;
