@@ -42,7 +42,10 @@ lazy_static! {
     /// Wildcard match all domains.
     static ref CASELESS_WILD_CARD: CaseInsensitiveString = CaseInsensitiveString::new("*");
     static ref SSG_CAPTURE: Regex =  Regex::new(r#""(.*?)""#).unwrap();
-    static ref GATSBY: Option<String> =  Some("gatsby-chunk-mapping".into());
+    /// Gatsby
+    static ref GATSBY: Option<&'static str> =  Some("gatsby-chunk-mapping");
+    /// Nuxt.
+    static ref NUXT: Option<&'static str> =  Some("__NUXT_DATA__");
     /// Unknown status (generic fallback)
     pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode =
         StatusCode::from_u16(599).expect("valid status code");
@@ -138,14 +141,16 @@ lazy_static! {
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
             "window.location", "document.location",
+            // APPS
+            "window.__NUXT__"
         ];
         aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
     };
 
     /// Attributes for JS requirements.
     static ref DOM_WATCH_ATTRIBUTE_PATTERNS: [&'static str; 5] = [
-            "__NEXT_DATA__", "__NUXT__", "data-reactroot",
-            "ng-version", "data-v-app",
+        "__NEXT_DATA__", "__NUXT__", "data-reactroot",
+        "ng-version", "data-v-app",
     ];
 }
 
@@ -2645,35 +2650,54 @@ impl Page {
                     Ok(())
                 }));
 
-                element_content_handlers.push(element!("script", |element| {
-                    if !static_app && !rerender.load(Ordering::Relaxed) {
-                        if let Some(src) = element.get_attribute("src") {
-                            if src.starts_with("/") {
-                                if src.starts_with("/_next/static/chunks/pages/")
-                                    || src.starts_with("/webpack-runtime-")
-                                    || element.get_attribute("id").eq(&*GATSBY)
-                                {
-                                    static_app = true;
-                                }
+                element_content_handlers.push(element!("script", |el| {
+                    if static_app || rerender.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
 
-                                if let Some(ref base) = base1 {
-                                    let abs = convert_abs_path(&base, &src);
+                    let id = el.get_attribute("id");
 
-                                    if let Ok(mut paths) =
-                                        abs.path_segments().ok_or_else(|| "cannot be base")
-                                    {
-                                        while let Some(p) = paths.next() {
-                                            if chromiumoxide::handler::network::ALLOWED_MATCHER
-                                                .is_match(&p)
-                                            {
-                                                rerender.swap(true, Ordering::Relaxed);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                    if id.as_deref() == *NUXT {
+                        static_app = true;
+                        rerender.store(true, Ordering::Relaxed);
+                        return Ok(());
+                    }
+
+                    let Some(src) = el.get_attribute("src") else {
+                        return Ok(());
+                    };
+
+                    if !src.starts_with('/') {
+                        return Ok(());
+                    }
+
+                    let is_next = src.starts_with("/_next/static/chunks/pages/")
+                        || src.starts_with("/webpack-runtime-");
+                    let is_gatsby = id.as_deref() == *GATSBY;
+
+                    let is_nuxt_asset = src.starts_with("/_nuxt/");
+
+                    if is_next || is_gatsby || is_nuxt_asset {
+                        static_app = true;
+                    }
+
+                    if is_nuxt_asset {
+                        rerender.store(true, Ordering::Relaxed);
+                        return Ok(());
+                    }
+
+                    if let Some(base) = base1.as_ref() {
+                        let abs = convert_abs_path(base, &src);
+
+                        if abs.path_segments().is_some_and(|mut segs| {
+                            segs.any(|p| {
+                                chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
+                            })
+                        }) {
+                            rerender.store(true, Ordering::Relaxed);
                         }
                     }
+
                     Ok(())
                 }));
 
@@ -2743,7 +2767,6 @@ impl Page {
                             rerender.swap(true, Ordering::Relaxed);
                             swapped = true;
                         }
-
                         if !swapped {
                             for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                 if el.has_attribute(attr) {
@@ -2986,37 +3009,56 @@ impl Page {
 
                         Ok(())
                     }),
-                    element!("script", |element| {
-                        if !static_app && !rerender.load(Ordering::Relaxed) {
-                            if let Some(src) = element.get_attribute("src") {
-                                if src.starts_with("/") {
-                                    if src.starts_with("/_next/static/chunks/pages/")
-                                        || src.starts_with("/webpack-runtime-")
-                                        || element.get_attribute("id").eq(&*GATSBY)
-                                    {
-                                        static_app = true;
-                                    }
+                    element_content_handlers.push(element!("script", |el| {
+                        if static_app || rerender.load(Ordering::Relaxed) {
+                            return Ok(());
+                        }
 
-                                    if let Some(ref base) = base1 {
-                                        let abs = convert_abs_path(&base, &src);
+                        let id = el.get_attribute("id");
 
-                                        if let Ok(mut paths) =
-                                            abs.path_segments().ok_or_else(|| "cannot be base")
-                                        {
-                                            while let Some(p) = paths.next() {
-                                                if chromiumoxide::handler::network::ALLOWED_MATCHER
-                                                    .is_match(&p)
-                                                {
-                                                    rerender.swap(true, Ordering::Relaxed);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                        if id.as_deref() == *NUXT {
+                            static_app = true;
+                            rerender.store(true, Ordering::Relaxed);
+                            return Ok(());
+                        }
+
+                        let Some(src) = el.get_attribute("src") else {
+                            return Ok(());
+                        };
+
+                        if !src.starts_with('/') {
+                            return Ok(());
+                        }
+
+                        let is_next = src.starts_with("/_next/static/chunks/pages/")
+                            || src.starts_with("/webpack-runtime-");
+                        let is_gatsby = id.as_deref() == *GATSBY;
+
+                        let is_nuxt_asset = src.starts_with("/_nuxt/");
+
+                        if is_next || is_gatsby || is_nuxt_asset {
+                            static_app = true;
+                        }
+
+                        if is_nuxt_asset {
+                            rerender.store(true, Ordering::Relaxed);
+                            return Ok(());
+                        }
+
+                        if let Some(base) = base1.as_ref() {
+                            let abs = convert_abs_path(base, &src);
+
+                            if abs.path_segments().is_some_and(|mut segs| {
+                                segs.any(|p| {
+                                    chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
+                                })
+                            }) {
+                                rerender.store(true, Ordering::Relaxed);
                             }
                         }
+
                         Ok(())
-                    }),
+                    })),
                     element!("a[href],script[src],link[href]", |el| {
                         let attribute = if el.tag_name() == "script" {
                             "src"
