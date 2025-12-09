@@ -489,7 +489,11 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     if new_page
         .final_redirect_destination
         .as_deref()
-        .is_some_and(|s| !s.is_empty() && !s.starts_with("about:blank"))
+        .is_some_and(|s| {
+            !s.is_empty()
+                && !s.starts_with("about:blank")
+                && !s.starts_with("chrome-error://chromewebdata")
+        })
     {
         page.final_redirect_destination = new_page.final_redirect_destination;
     }
@@ -975,7 +979,13 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
             error_status
         },
-        final_redirect_destination: res.final_url,
+        final_redirect_destination: if res.final_url.as_deref() == Some("about:blank")
+            || res.final_url.as_deref() == Some("chrome-error://chromewebdata/")
+        {
+            None
+        } else {
+            res.final_url
+        },
         #[cfg(feature = "chrome")]
         chrome_page: None,
         #[cfg(feature = "chrome")]
@@ -1822,8 +1832,12 @@ impl Page {
     pub async fn close_page(&mut self) {}
 
     /// Page request is empty. On chrome an empty page has bare html markup.
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.html.is_none() || self.get_html_bytes_u8() == *EMPTY_HTML
+        match self.html.as_deref() {
+            None => true,
+            Some(html) => html.is_empty() || html.eq(*EMPTY_HTML),
+        }
     }
 
     /// Url getter for page.
@@ -2976,7 +2990,6 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
                     .await;
             } else {
-                let (tx, rx) = tokio::sync::oneshot::channel();
                 let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
@@ -3172,133 +3185,84 @@ impl Page {
                         })
                         .await
                     {
-                        let browser = browser_controller.browser.0.clone();
-                        let browser_id = browser_controller.browser.2.clone();
-                        let configuration = configuration.clone();
-                        // we should re-use the html content instead with events.
-                        // let context_id = context_id.clone();
-                        let parent_host = parent_host.clone();
-
-                        crate::utils::spawn_task("page_render_fetch", async move {
-                            if let Ok(new_page) = crate::features::chrome::attempt_navigation(
-                                "about:blank",
-                                &browser,
-                                &configuration.request_timeout,
-                                &browser_id,
-                                &configuration.viewport,
-                            )
-                            .await
-                            {
-                                let (_, intercept_handle) = tokio::join!(
-                                    crate::features::chrome::setup_chrome_events(
-                                        &new_page,
-                                        &configuration,
-                                    ),
-                                    crate::features::chrome::setup_chrome_interception_base(
-                                        &new_page,
-                                        configuration.chrome_intercept.enabled,
-                                        &configuration.auth_challenge_response,
-                                        configuration.chrome_intercept.block_visuals,
-                                        &parent_host,
-                                    )
-                                );
-
-                                let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                    &html_resource,
+                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                            "about:blank",
+                            &browser_controller.browser.0,
+                            &configuration.request_timeout,
+                            &browser_controller.browser.2,
+                            &configuration.viewport,
+                        )
+                        .await
+                        {
+                            let (_, intercept_handle) = tokio::join!(
+                                crate::features::chrome::setup_chrome_events(
                                     &new_page,
-                                    true,
-                                    true,
-                                    &configuration.wait_for,
-                                    &configuration.screenshot,
-                                    false,
-                                    &configuration.openai_config,
-                                    Some(&target_url),
-                                    &configuration.execution_scripts,
-                                    &configuration.automation_scripts,
-                                    &configuration.viewport,
-                                    &configuration.request_timeout,
-                                    &configuration.track_events,
-                                    configuration.referer.clone(),
-                                    configuration.max_page_bytes,
-                                    configuration.get_cache_options(),
-                                    &configuration.cache_policy,
+                                    &configuration,
+                                ),
+                                crate::features::chrome::setup_chrome_interception_base(
+                                    &new_page,
+                                    configuration.chrome_intercept.enabled,
+                                    &configuration.auth_challenge_response,
+                                    configuration.chrome_intercept.block_visuals,
+                                    &parent_host,
                                 )
-                                .await;
+                            );
 
-                                if let Some(h) = intercept_handle {
-                                    let abort_handle = h.abort_handle();
-                                    if let Err(elasped) = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(15),
-                                        h,
-                                    )
-                                    .await
-                                    {
-                                        log::warn!("Handler timeout exceeded {elasped}");
-                                        abort_handle.abort();
-                                    }
-                                }
+                            let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                &html_resource,
+                                &new_page,
+                                true,
+                                true,
+                                &configuration.wait_for,
+                                &configuration.screenshot,
+                                false,
+                                &configuration.openai_config,
+                                Some(&target_url),
+                                &configuration.execution_scripts,
+                                &configuration.automation_scripts,
+                                &configuration.viewport,
+                                &configuration.request_timeout,
+                                &configuration.track_events,
+                                configuration.referer.clone(),
+                                configuration.max_page_bytes,
+                                configuration.get_cache_options(),
+                                &configuration.cache_policy,
+                            )
+                            .await;
 
-                                match page_resource {
-                                    Ok(resource) => {
-                                        if let Err(_) = tx.send(resource) {
-                                            log::info!("the receiver dropped - {target_url}");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let mut default_response: PageResponse = Default::default();
-
-                                        default_response.final_url = Some(target_url.clone());
-
-                                        match e {
-                                            CdpError::NotFound => {
-                                                default_response.status_code =
-                                                    StatusCode::NOT_FOUND;
-                                            }
-                                            CdpError::NoResponse => {
-                                                default_response.status_code =
-                                                    StatusCode::GATEWAY_TIMEOUT;
-                                            }
-                                            CdpError::LaunchTimeout(_) => {
-                                                default_response.status_code =
-                                                    StatusCode::REQUEST_TIMEOUT;
-                                            }
-                                            _ => (),
-                                        }
-
-                                        if let Err(_) = tx.send(default_response) {
-                                            log::info!("the receiver dropped - {target_url}");
-                                        }
-                                    }
+                            if let Some(h) = intercept_handle {
+                                let abort_handle = h.abort_handle();
+                                if let Err(elasped) =
+                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
+                                        .await
+                                {
+                                    log::warn!("Handler timeout exceeded {elasped}");
+                                    abort_handle.abort();
                                 }
                             }
-                        });
+
+                            if let Ok(v) = page_resource {
+                                let resource = match &v.content {
+                                    Some(h) => auto_encode_bytes(&h),
+                                    _ => Default::default(),
+                                };
+
+                                let extended_map = self
+                                    .links_stream_base::<A>(
+                                        selectors,
+                                        &resource,
+                                        &base.as_deref().cloned().map(Box::new),
+                                    )
+                                    .await;
+
+                                bytes_transferred = v.bytes_transferred;
+
+                                *self = build(&self.url, v);
+
+                                map.extend(extended_map)
+                            }
+                        }
                     }
-
-                    match rx.await {
-                        Ok(mut v) => {
-                            let resource = match &v.content {
-                                Some(h) => auto_encode_bytes(&h),
-                                _ => Default::default(),
-                            };
-
-                            let extended_map = self
-                                .links_stream_base::<A>(
-                                    selectors,
-                                    &resource,
-                                    &base.as_deref().cloned().map(Box::new),
-                                )
-                                .await;
-
-                            bytes_transferred = v.bytes_transferred;
-
-                            *self = build(&self.url, v);
-
-                            map.extend(extended_map)
-                        }
-                        Err(e) => {
-                            crate::utils::log("receiver error", e.to_string());
-                        }
-                    };
                 }
             }
 

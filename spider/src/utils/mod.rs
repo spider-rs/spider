@@ -29,6 +29,7 @@ use hashbrown::HashSet;
 
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
+use reqwest::header::CONTENT_LENGTH;
 use std::{
     future::Future,
     str::FromStr,
@@ -309,27 +310,34 @@ async fn cf_handle(
     b: &mut Vec<u8>,
     page: &chromiumoxide::Page,
     target_url: &str,
+    viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<bool, chromiumoxide::error::CdpError> {
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
-        // force upgrade https check.
-        if let Some(page_url) = page.url().await? {
-            if page_url == "about:blank" {
-                let target_url = if target_url.starts_with("http://") {
-                    let mut s = String::with_capacity(target_url.len() + 1);
-                    s.push_str("https://");
-                    s.push_str(&target_url["http://".len()..]);
-                    s
-                } else {
-                    target_url.to_string()
-                };
-                let _ = page.goto(target_url).await?.wait_for_navigation().await?;
+        let page_navigate = async {
+            // force upgrade https check.
+            if let Some(page_url) = page.url().await? {
+                if page_url == "about:blank" {
+                    let target_url = if target_url.starts_with("http://") {
+                        let mut s = String::with_capacity(target_url.len() + 1);
+                        s.push_str("https://");
+                        s.push_str(&target_url["http://".len()..]);
+                        s
+                    } else {
+                        target_url.to_string()
+                    };
+                    let _ = page.goto(target_url).await?.wait_for_navigation().await?;
+                }
+                else if page_url.starts_with("http://") {
+                    let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?;
+                }
             }
-            else if page_url.starts_with("http://") {
-                let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?;
-            }
-        }
+
+            Ok::<(), chromiumoxide::error::CdpError>(())
+        };
+
+        let _ = tokio::join!(page_navigate, perform_smart_mouse_movement(&page, &viewport));
 
         let mut wait_for = CF_WAIT_FOR.clone();
         page_wait(&page, &Some(wait_for.clone())).await;
@@ -366,7 +374,12 @@ async fn cf_handle(
 
         wait_for.page_navigations = true;
 
-        page_wait(&page, &Some(wait_for.clone())).await;
+        let wait = Some(wait_for.clone());
+
+        let _ = tokio::join!(
+            page_wait(&page, &wait),
+            perform_smart_mouse_movement(&page, &viewport)
+        );
 
         if let Ok(next_content) = page.outer_html_bytes().await {
             let next_content = if !detect_cf_turnstyle(&next_content) {
@@ -2487,8 +2500,17 @@ pub async fn fetch_page_html_chrome_base(
         })
         .await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+
         match last_redirect {
-            Ok(last) => last,
+            Ok(final_url) => {
+                if final_url.as_deref() == Some("about:blank")
+                    || final_url.as_deref() == Some("chrome-error://chromewebdata/")
+                {
+                    None
+                } else {
+                    final_url
+                }
+            }
             _ => None,
         }
     } else {
@@ -2547,16 +2569,11 @@ pub async fn fetch_page_html_chrome_base(
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             if execution_scripts.is_some() || automation_scripts.is_some() {
-                let target_url = if final_url.is_some() {
-                    match final_url.as_ref() {
-                        Some(ref u) => u.to_string(),
-                        _ => Default::default(),
-                    }
-                } else if url_target.is_some() {
-                    url_target.unwrap_or_default().to_string()
-                } else {
-                    source.to_string()
-                };
+                let target_url = final_url
+                    .as_deref()
+                    .or(url_target)
+                    .unwrap_or(source)
+                    .to_string();
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
                     let mut _metadata = Vec::new();
@@ -2631,7 +2648,9 @@ pub async fn fetch_page_html_chrome_base(
                     // detect the turnstile page.
                     if detect_cf_turnstyle(&res) {
                         if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(success) = cf_handle(&mut res, &page, &target_url).await {
+                            if let Ok(success) =
+                                cf_handle(&mut res, &page, &target_url, &viewport).await
+                            {
                                 if success {
                                     status_code = StatusCode::OK;
                                 }
@@ -2740,7 +2759,7 @@ pub async fn fetch_page_html_chrome_base(
 
         if content {
             if let Some(final_url) = &page_response.final_url {
-                if final_url == "about:blank" {
+                if final_url.starts_with("about:blank") {
                     page_response.final_url = None;
                 }
             }
@@ -2815,22 +2834,26 @@ pub async fn fetch_page_html_chrome_base(
     set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
-
     page_response.content = match content {
-        Some(c) => Some(c.into()),
-        None => {
-            if page_response.content.is_none() {
+        Some(c) if !c.is_empty() => Some(c.into()),
+        _ => {
+            let needs_fill = page_response
+                .content
+                .as_ref()
+                .map_or(true, |b| b.is_empty());
+
+            if needs_fill {
                 tokio::time::timeout(base_timeout, page.outer_html_bytes())
                     .await
                     .ok()
                     .and_then(Result::ok)
+                    .filter(|b| !b.is_empty())
                     .map(Into::into)
             } else {
                 page_response.content
             }
         }
     };
-
     if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
         page_response.status_code = StatusCode::OK;
     }
@@ -2940,7 +2963,13 @@ pub async fn fetch_page_html_chrome_base(
 
                 if anti_bot_tech == AntiBotTech::None {
                     let final_url = match &page_response.final_url {
-                        Some(final_url) => final_url,
+                        Some(final_url)
+                            if !final_url.is_empty()
+                                && !final_url.starts_with("about:blank")
+                                && !final_url.starts_with("chrome-error://chromewebdata") =>
+                        {
+                            final_url
+                        }
                         _ => target_url,
                     };
                     if let Some(h) = &page_response.headers {
@@ -3310,6 +3339,46 @@ pub async fn handle_response_bytes(
     let mut content: Option<Box<Vec<u8>>> = None;
     let mut anti_bot_tech = AntiBotTech::default();
 
+    let limit = *MAX_SIZE_BYTES;
+
+    if limit > 0 {
+        let base = res
+            .content_length()
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(0);
+
+        let hdr = res
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+
+        let current_size = base + hdr.saturating_sub(base);
+
+        if current_size > limit {
+            anti_bot_tech = detect_anti_bot_tech_response(
+                target_url,
+                &HeaderSource::HeaderMap(&headers),
+                &Default::default(),
+                None,
+            );
+            return PageResponse {
+                #[cfg(feature = "headers")]
+                headers: Some(headers),
+                #[cfg(feature = "remote_addr")]
+                remote_addr,
+                #[cfg(feature = "cookies")]
+                cookies,
+                content: None,
+                final_url: rd,
+                status_code,
+                anti_bot_tech,
+                ..Default::default()
+            };
+        }
+    }
+
     if !block_streaming(&res, only_html) {
         let mut data = match res.content_length() {
             Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
@@ -3329,8 +3398,6 @@ pub async fn handle_response_bytes(
                             break;
                         }
                     }
-
-                    let limit = *MAX_SIZE_BYTES;
 
                     if limit > 0 && data.len() + text.len() > limit {
                         break;
