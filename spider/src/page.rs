@@ -1849,6 +1849,12 @@ impl Page {
     #[cfg(not(feature = "headers"))]
     /// Get the timeout required for rate limiting. The max duration is 30 seconds for delay respecting. Requires the feature flag `headers`.
     pub fn get_timeout(&self) -> Option<Duration> {
+        if self.status_code == 429 {
+            return Some(Duration::from_millis(2_500));
+        } else if self.status_code == StatusCode::GATEWAY_TIMEOUT {
+            return Some(Duration::from_millis(1_500));
+        }
+
         None
     }
 
