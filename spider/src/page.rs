@@ -1857,7 +1857,7 @@ impl Page {
     pub fn get_timeout(&self) -> Option<Duration> {
         if self.status_code == 429 {
             const MAX_TIMEOUT: Duration = Duration::from_secs(30);
-            if let Some(ref headers) = self.headers {
+            if let Some(headers) = &self.headers {
                 if let Some(retry_after) = headers.get(reqwest::header::RETRY_AFTER) {
                     if let Ok(retry_after_str) = retry_after.to_str() {
                         if let Ok(seconds) = retry_after_str.parse::<u64>() {
@@ -1872,7 +1872,10 @@ impl Page {
                     }
                 }
             };
+        } else if self.status_code == StatusCode::GATEWAY_TIMEOUT {
+            return Some(Duration::from_millis(1_500));
         }
+
         None
     }
 

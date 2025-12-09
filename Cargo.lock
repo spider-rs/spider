@@ -445,7 +445,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.38.77",
+ "spider 2.38.78",
 ]
 
 [[package]]
@@ -723,9 +723,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.37.196"
+version = "2.37.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba895a9b0470c9d590b6d60a8298e74bb7af8544c78ff5b6de1ab9b16b99cd2"
+checksum = "ac4d8511c697958f97e4d5daf2aefef8982ce2ce9e124a9f7bc134b441ec24bf"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1611,9 +1611,9 @@ dependencies = [
 
 [[package]]
 name = "fast_html2md"
-version = "0.0.50"
+version = "0.0.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b76cab678adb7268b49671a685d02aebc76dd4a77f37655f56de370970ae2bba"
+checksum = "119ae5cbce673db80a0592dfa809fee7b94b0712cd3ba5e7ce21826e842a3875"
 dependencies = [
  "auto_encoder",
  "futures-util",
@@ -2586,9 +2586,9 @@ checksum = "7aedcccd01fc5fe81e6b489c15b247b8b0690feb23304303a9e560f37efc560a"
 
 [[package]]
 name = "icu_properties"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e93fcd3157766c0c8da2f8cff6ce651a31f0810eaa1c51ec363ef790bbb5fb99"
+checksum = "020bfc02fe870ec3a66d93e677ccca0562506e5872c650f893269e08615d74ec"
 dependencies = [
  "icu_collections",
  "icu_locale_core",
@@ -2600,9 +2600,9 @@ dependencies = [
 
 [[package]]
 name = "icu_properties_data"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02845b3647bb045f1100ecd6480ff52f34c35f82d9880e029d329c21d1054899"
+checksum = "616c294cf8d725c6afcd8f55abc17c56464ef6211f9ed59cccffe534129c77af"
 
 [[package]]
 name = "icu_provider"
@@ -3782,9 +3782,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.167"
+version = "2.1.168"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef2514878fde15b8d63698f66a1a8bbbc67229f7bc90724277c48c40e37bccd"
+checksum = "6faf5b87f44516ca3989e1e315a0413f7a4d4886e63664cbd4a5f492c73cad93"
 dependencies = [
  "psl-types",
 ]
@@ -4104,11 +4104,10 @@ checksum = "cadadef317c2f20755a64d7fdc48f9e7178ee6b0e1f7fce33fa60f1d68a276e6"
 
 [[package]]
 name = "reqwest"
-version = "0.12.24"
+version = "0.12.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d0946410b9f7b082a427e4ef5c8ff541a88b357bc6c637c40db3a68ac70a36f"
+checksum = "b6eff9328d40131d43bd911d42d79eb6a47312002a4daefc9e37f17e74a7701a"
 dependencies = [
- "async-compression",
  "base64 0.22.1",
  "bytes",
  "cookie",
@@ -4729,9 +4728,9 @@ dependencies = [
 
 [[package]]
 name = "simd-adler32"
-version = "0.3.7"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
+checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
 name = "simdutf8"
@@ -4849,9 +4848,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.38.64"
+version = "2.38.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e887eb19f1c18de6fca3d4db4d998aa19ea9d1bd63cc6b6bb3e59cee68c36401"
+checksum = "4620be360bcb19f86e25928dcf6e82ead39ca138fadf8c49e3edf261a55a6b6f"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4887,7 +4886,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.38.77"
+version = "2.38.78"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4995,7 +4994,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.38.77"
+version = "2.38.78"
 dependencies = [
  "clap",
  "env_logger",
@@ -5003,7 +5002,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.38.77",
+ "spider 2.38.78",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5018,9 +5017,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.38.77",
+ "spider 2.38.78",
  "spider_transformations",
- "spider_utils 2.38.64",
+ "spider_utils 2.38.77",
 ]
 
 [[package]]
@@ -5059,9 +5058,9 @@ dependencies = [
 
 [[package]]
 name = "spider_network_blocker"
-version = "0.0.36"
+version = "0.0.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f002d6c34f925a2916eafab3fc9381ce9a2210eefdfb2be8b97fc91bc231163e"
+checksum = "8a1cd52bfa7efce58843bcebf6dd8f4bb8f31c6dd88e602da88565d738b9cd15"
 dependencies = [
  "convert_case 0.8.0",
  "hashbrown 0.15.5",
@@ -5108,7 +5107,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.38.64",
+ "spider 2.38.77",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5117,9 +5116,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.38.64"
+version = "2.38.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39d043994f149000142d7033014093381abfbd716aecd63c6c23d793dfcb25fb"
+checksum = "2ff26bc8ab163c7b7256316664890d00452e9e367e0dd3dfdfedeef39158753c"
 dependencies = [
  "hashbrown 0.15.5",
  "lazy_static",
@@ -5132,7 +5131,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.38.77"
+version = "2.38.78"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5148,11 +5147,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.38.77"
+version = "2.38.78"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.38.77",
+ "spider 2.38.78",
  "warp",
 ]
 
@@ -6068,17 +6067,22 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.7"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf146f99d442e8e68e585f5d798ccd3cad9a7835b917e09728880a862706456"
+checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
+ "async-compression",
  "bitflags 2.10.0",
  "bytes",
+ "futures-core",
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
+ "http-body-util",
  "iri-string",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
