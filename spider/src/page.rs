@@ -172,30 +172,97 @@ lazy_static! {
 }
 
 lazy_static! {
-    /// Downloadable media types.
+    /// Downloadable media types [https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/MIME_types/Common_types].
     pub(crate) static ref DOWNLOADABLE_MEDIA_TYPES: phf::Set<&'static str> = phf_set! {
-        "audio/mpeg",    // mp3
-        "audio/wav",     // wav
-        "audio/ogg",     // ogg
-        "audio/flac",    // flac
-        "audio/aac",     // aac
-        "video/mp4",     // mp4
-        "video/webm",    // webm
-        "video/ogg",     // ogv
-        "video/x-matroska",    // mkv
-        "application/ogg",     // ogx for Ogg
-        "application/octet-stream", // general binary data, often used for downloads
-        "application/zip",     // zip archives
-        "application/x-rar-compressed", // rar archives
-        "application/x-7z-compressed",   // 7z archives
-        "application/x-tar",   // tar archives
-        "application/pdf",     // pdf
-        "application/rtf"     // rtf
+        // --- Audio ---
+        "audio/mpeg",        // mp3
+        "audio/wav",         // wav
+        "audio/ogg",         // ogg/oga/opus
+        "audio/flac",        // flac
+        "audio/aac",         // aac
+        "audio/webm",        // weba
+        "audio/midi",        // mid/midi
+        "audio/x-midi",      // mid/midi (common)
+        "audio/mp4",         // m4a (common)
+        "audio/x-m4a",       // m4a (common)
+        "audio/aiff",        // aiff (common)
+        "audio/x-aiff",      // aiff (common)
+        "audio/3gpp",        // 3gp (audio-only)
+        "audio/3gpp2",       // 3g2 (audio-only)
+        // --- Video ---
+        "video/mp4",         // mp4/m4v
+        "video/webm",        // webm
+        "video/ogg",         // ogv
+        "video/x-matroska",  // mkv
+        "video/x-msvideo",   // avi
+        "video/quicktime",   // mov
+        "video/x-ms-wmv",    // wmv
+        "video/x-flv",       // flv
+        "video/mpeg",        // mpeg
+        "video/mp2t",        // ts
+        "video/3gpp",        // 3gp (video)
+        "video/3gpp2",       // 3g2 (video)
+        // --- Images ---
+        "image/jpeg",        // jpg/jpeg
+        "image/png",         // png
+        "image/gif",         // gif
+        "image/webp",        // webp
+        "image/svg+xml",     // svg
+        "image/bmp",         // bmp
+        "image/tiff",        // tif/tiff
+        "image/vnd.microsoft.icon", // ico
+        "image/apng",        // apng
+        "image/avif",        // avif
+        "image/heic",        // heic (common)
+        "image/heif",        // heif (common)
+        // --- Fonts ---
+        "font/woff",         // woff
+        "font/woff2",        // woff2
+        "font/ttf",          // ttf
+        "font/otf",          // otf
+        "application/vnd.ms-fontobject", // eot
+        // --- Documents / ebooks ---
+        "application/pdf",   // pdf
+        "application/rtf",   // rtf
+        "text/plain",        // txt
+        "text/csv",          // csv
+        "text/markdown",     // md
+        "text/calendar",     // ics
+        "application/msword", // doc
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+        "application/vnd.ms-powerpoint", // ppt
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
+        "application/vnd.ms-excel", // xls
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
+        "application/vnd.oasis.opendocument.text", // odt
+        "application/vnd.oasis.opendocument.spreadsheet", // ods
+        "application/vnd.oasis.opendocument.presentation", // odp
+        "application/vnd.visio", // vsd
+        "application/epub+zip", // epub
+        "application/vnd.amazon.ebook", // azw
+        "application/x-abiword", // abw
+        // --- Archives / binaries / installers ---
+        "application/octet-stream", // generic binary downloads
+        "application/zip",          // zip
+        "application/x-zip-compressed", // zip (common non-standard)
+        "application/vnd.rar",      // rar
+        "application/x-rar-compressed", // rar (common)
+        "application/x-7z-compressed", // 7z
+        "application/x-tar",        // tar
+        "application/gzip",         // gz
+        "application/x-gzip",       // gz (common)
+        "application/x-bzip",       // bz
+        "application/x-bzip2",      // bz2
+        "application/java-archive", // jar
+        "application/x-freearc",    // arc
+        "application/vnd.apple.installer+xml", // mpkg
+        // --- Ogg container ---
+        "application/ogg",          // ogx
     };
 
     /// Visual assets to ignore.
     pub(crate) static ref IGNORE_ASSETS: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(64);
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(90);
 
         m.extend([
             "jpg", "jpeg", "png", "gif", "svg", "webp",      // Image files
@@ -207,9 +274,13 @@ lazy_static! {
             "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
             "mkv", "webm", "m4v",                            // Additional Video files
             "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps", "yaml", "yml", "rtf", "txt",             // Other additional files
-
-            // Including extensions with extra dot
+            "pdf", "eps", "yaml", "yml", "rtf", "txt",       // Other additional files
+            "doc", "docx", "csv", "eot", "epub", "gz",
+            "ics", "md", "webmanifest",
+            "apng", "avif",
+            "cda", "mid", "midi", "oga", "ogv", "ogx", "opus", "weba", "mpeg", "ts", "3gp", "3g2",
+            "arc", "bin", "bz", "bz2", "jar", "mpkg", "rar", "tar", "zip", "7z",
+            "abw", "azw", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "vsd",
             ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
             ".mp4", ".avi", ".mov", ".wmv", ".flv",
             ".mp3", ".wav", ".ogg",
@@ -219,7 +290,12 @@ lazy_static! {
             ".bmp", ".tiff", ".tif", ".heic", ".heif",
             ".mkv", ".webm", ".m4v",
             ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps", ".yaml", ".yml", ".rtf", ".txt"
+            ".pdf", ".eps", ".yaml", ".yml", ".rtf", ".txt",
+            ".doc", ".docx", ".csv", ".eot", ".epub", ".gz",
+            ".apng", ".avif", ".ics", ".md", ".webmanifest",
+            ".cda", ".mid", ".midi", ".oga", ".ogv", ".ogx", ".opus", ".weba", ".mpeg", ".ts", ".3gp", ".3g2",
+            ".arc", ".bin", ".bz", ".bz2", ".jar", ".mpkg", ".rar", ".tar", ".zip", ".7z",
+            ".abw", ".azw", ".odt", ".ods", ".odp", ".ppt", ".pptx", ".xls", ".xlsx", ".vsd",
         ].map(|s| s.into()));
 
         m
