@@ -315,6 +315,7 @@ async fn cf_handle(
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let mut force_delay = false;
         let page_navigate = async {
             // force upgrade https check.
             if let Some(page_url) = page.url().await? {
@@ -328,48 +329,68 @@ async fn cf_handle(
                         target_url.to_string()
                     };
                     let _ = page.goto(target_url).await?.wait_for_navigation().await?;
+                    force_delay = true;
                 }
                 else if page_url.starts_with("http://") {
                     let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?;
+                    force_delay = true;
                 }
             }
 
             Ok::<(), chromiumoxide::error::CdpError>(())
         };
 
+        // get the csp settings before hand
         let _ = tokio::join!(page_navigate, perform_smart_mouse_movement(&page, &viewport));
 
         let mut wait_for = CF_WAIT_FOR.clone();
-        page_wait(&page, &Some(wait_for.clone())).await;
+
+        if force_delay {
+            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                 core::time::Duration::from_millis(3_771),
+            )).into();
+            page_wait(&page, &Some(wait_for.clone())).await;
+        }
 
         let mut clicks = 0usize;
+        let mut hidden = false;
 
-        if let Ok(els) = page.find_elements(r#"
-        iframe,
-        input,
+        if let Ok(els) = page.find_elements_pierced(r#"
         #tgnx8,
         .cf-turnstile,
         div[id*="turnstile"],
         iframe[src*="challenges.cloudflare.com"],
         iframe[src*="turnstile"],
         iframe[title*="widget"],
-        .cb-lb input[type="checkbox"],
+        input[type="checkbox"],
         [class*="turnstile"]"#).await {
             for el in els {
-                let did_click = match el.clickable_point().await {
-                    Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
-                    Err(_) => el.click().await.is_ok(),
+                let f = async {
+                    match el.clickable_point().await {
+                        Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
+                        Err(_) => el.click().await.is_ok(),
+                    }
                 };
+
+                 let (did_click, _) = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
+
                 if did_click {
                     clicks += 1;
                 }
             }
+        } else {
+            hidden = true;
+            let wait = Some(wait_for.clone());
+            let _ = tokio::join!(
+                page_wait(&page, &wait),
+                perform_smart_mouse_movement(&page, &viewport)
+            );
         }
 
-        if clicks == 0 {
-            let _ = page
-                .evaluate(r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#)
-                .await;
+        if !hidden && clicks == 0 {
+            let f = page
+                .evaluate(r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#);
+            let _ = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
         }
 
         wait_for.page_navigations = true;
@@ -378,13 +399,12 @@ async fn cf_handle(
 
         let _ = tokio::join!(
             page_wait(&page, &wait),
-            perform_smart_mouse_movement(&page, &viewport)
+            perform_smart_mouse_movement(&page, &viewport),
         );
 
         if let Ok(next_content) = page.outer_html_bytes().await {
             let next_content = if !detect_cf_turnstyle(&next_content) {
                 validated = true;
-                // we should use wait for dom instead.
                 wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
                     core::time::Duration::from_secs(4),
                 ))

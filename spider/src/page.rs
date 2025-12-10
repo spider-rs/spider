@@ -2636,7 +2636,6 @@ impl Page {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
                     .await;
             } else {
-                // let (tx, rx) = tokio::sync::oneshot::channel();
                 let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
@@ -3147,6 +3146,7 @@ impl Page {
                                 for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                     if el.has_attribute(attr) {
                                         rerender.swap(true, Ordering::Relaxed);
+                                        break;
                                     }
                                 }
                             }
