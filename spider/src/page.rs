@@ -45,7 +45,10 @@ lazy_static! {
     /// Gatsby
     static ref GATSBY: Option<&'static str> =  Some("gatsby-chunk-mapping");
     /// Nuxt.
-    static ref NUXT: Option<&'static str> =  Some("__NUXT_DATA__");
+    static ref NUXT_DATA: Option<&'static str> =  Some("__NUXT_DATA__");
+    /// Nuxt.
+    static ref NUXT: Option<&'static str> =  Some("__nuxt");
+
     /// Unknown status (generic fallback)
     pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode =
         StatusCode::from_u16(599).expect("valid status code");
@@ -141,6 +144,8 @@ lazy_static! {
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
             "window.location", "document.location",
+            // Fetching required
+            "fetch",
             // APPS
             "window.__NUXT__"
         ];
@@ -152,6 +157,18 @@ lazy_static! {
         "__NEXT_DATA__", "__NUXT__", "data-reactroot",
         "ng-version", "data-v-app",
     ];
+
+    /// Hydration required
+    pub(crate) static ref HYDRATION_IDS: phf::Set<&'static str> = phf_set! {
+        "__nuxt",
+        "__nuxt-loader",
+        "__NUXT_DATA__",
+        "__next",
+        "__NEXT_DATA__",
+        "___gatsby",
+        "redwood-app",
+        "sapper"
+    };
 }
 
 lazy_static! {
@@ -178,7 +195,7 @@ lazy_static! {
 
     /// Visual assets to ignore.
     pub(crate) static ref IGNORE_ASSETS: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(62);
+        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(64);
 
         m.extend([
             "jpg", "jpeg", "png", "gif", "svg", "webp",      // Image files
@@ -190,7 +207,7 @@ lazy_static! {
             "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
             "mkv", "webm", "m4v",                            // Additional Video files
             "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps", "yaml", "yml", "rtf",              // Other additional files
+            "pdf", "eps", "yaml", "yml", "rtf", "txt",             // Other additional files
 
             // Including extensions with extra dot
             ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
@@ -202,7 +219,7 @@ lazy_static! {
             ".bmp", ".tiff", ".tif", ".heic", ".heif",
             ".mkv", ".webm", ".m4v",
             ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps", ".yaml", ".yml", ".rtf"
+            ".pdf", ".eps", ".yaml", ".yml", ".rtf", ".txt"
         ].map(|s| s.into()));
 
         m
@@ -2679,7 +2696,7 @@ impl Page {
 
                     let id = el.get_attribute("id");
 
-                    if id.as_deref() == *NUXT {
+                    if id.as_deref() == *NUXT_DATA {
                         static_app = true;
                         rerender.store(true, Ordering::Relaxed);
                         return Ok(());
@@ -2785,10 +2802,14 @@ impl Page {
                 element_content_handlers.push(element!("body", |el| {
                     if !rerender.load(Ordering::Relaxed) {
                         let mut swapped = false;
-                        if el.get_attribute("id").as_deref() == Some("__next") {
-                            rerender.swap(true, Ordering::Relaxed);
-                            swapped = true;
+
+                        if let Some(id) = el.get_attribute("id") {
+                            if HYDRATION_IDS.contains(&id) {
+                                rerender.swap(true, Ordering::Relaxed);
+                                swapped = true;
+                            }
                         }
+
                         if !swapped {
                             for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                 if el.has_attribute(attr) {
@@ -3037,7 +3058,7 @@ impl Page {
 
                         let id = el.get_attribute("id");
 
-                        if id.as_deref() == *NUXT {
+                        if id.as_deref() == *NUXT_DATA {
                             static_app = true;
                             rerender.store(true, Ordering::Relaxed);
                             return Ok(());
@@ -3138,10 +3159,13 @@ impl Page {
                         if !rerender.load(Ordering::Relaxed) {
                             let mut swapped = false;
 
-                            if el.get_attribute("id").as_deref() == Some("__next") {
-                                rerender.swap(true, Ordering::Relaxed);
-                                swapped = true;
+                            if let Some(id) = el.get_attribute("id") {
+                                if HYDRATION_IDS.contains(&id) {
+                                    rerender.swap(true, Ordering::Relaxed);
+                                    swapped = true;
+                                }
                             }
+
                             if !swapped {
                                 for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                     if el.has_attribute(attr) {
