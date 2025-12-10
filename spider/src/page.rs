@@ -579,22 +579,35 @@ pub struct Page {
 /// Assign properties from a new page.
 #[cfg(feature = "smart")]
 pub fn page_assign(page: &mut Page, new_page: Page) {
-    if new_page
-        .final_redirect_destination
-        .as_deref()
-        .is_some_and(|s| {
-            !s.is_empty()
-                && !s.starts_with("about:blank")
-                && !s.starts_with("chrome-error://chromewebdata")
-        })
-    {
-        page.final_redirect_destination = new_page.final_redirect_destination;
+    match new_page.final_redirect_destination.as_deref() {
+        Some(s) => {
+            let bad = match s.as_bytes().first().copied() {
+                None => true,
+                Some(b'a') => s.starts_with("about:blank"),
+                Some(b'c') => s.starts_with("chrome-error://chromewebdata"),
+                _ => false,
+            };
+            if !bad {
+                page.final_redirect_destination = Some(s.into());
+            }
+        }
+        None => {}
     }
+
+    let chrome_default_empty_200 =
+        new_page.status_code == 200 && new_page.bytes_transferred.is_none() && new_page.is_empty();
 
     page.anti_bot_tech = new_page.anti_bot_tech;
     page.base = new_page.base;
     page.blocked_crawl = new_page.blocked_crawl;
-    page.bytes_transferred = new_page.bytes_transferred;
+
+    if !chrome_default_empty_200 {
+        page.status_code = new_page.status_code;
+        page.bytes_transferred = new_page.bytes_transferred;
+        if new_page.html.is_some() {
+            page.html = new_page.html;
+        }
+    }
 
     #[cfg(feature = "remote_addr")]
     {
@@ -608,8 +621,10 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     {
         page.error_status = new_page.error_status;
     }
+
     page.request_map = new_page.request_map;
     page.response_map = new_page.response_map;
+
     #[cfg(feature = "cookies")]
     {
         if new_page.cookies.is_some() {
@@ -622,15 +637,11 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
             page.headers = new_page.headers;
         }
     }
+
     page.waf_check = new_page.waf_check;
     page.should_retry = new_page.should_retry;
     page.signature = new_page.signature;
     page.metadata = new_page.metadata;
-    page.status_code = new_page.status_code;
-
-    if new_page.html.is_some() {
-        page.html = new_page.html;
-    }
 }
 
 /// Validate link and push into the map
@@ -3366,7 +3377,9 @@ impl Page {
 
                                 bytes_transferred = v.bytes_transferred;
 
-                                *self = build(&self.url, v);
+                                let new_page = build(&self.url, v);
+
+                                page_assign(self, new_page);
 
                                 map.extend(extended_map)
                             }

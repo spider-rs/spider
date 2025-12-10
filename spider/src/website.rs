@@ -3102,7 +3102,7 @@ impl Website {
                 page.smart_links(&base, &self.configuration, &self.domain_parsed, &browser)
                     .await;
 
-            if let Some(ref domain) = page.final_redirect_destination {
+            if let Some(domain) = &page.final_redirect_destination {
                 let prior_domain = self.domain_parsed.take();
                 crate::utils::modify_selectors(
                     &prior_domain,
