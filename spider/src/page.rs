@@ -48,7 +48,8 @@ lazy_static! {
     static ref NUXT_DATA: Option<&'static str> =  Some("__NUXT_DATA__");
     /// Nuxt.
     static ref NUXT: Option<&'static str> =  Some("__nuxt");
-
+    /// React ssr app.
+    static ref REACT_SSR: Option<&'static str> =  Some("react-app.embeddedData");
     /// Unknown status (generic fallback)
     pub(crate) static ref UNKNOWN_STATUS_ERROR: StatusCode =
         StatusCode::from_u16(599).expect("valid status code");
@@ -2789,6 +2790,11 @@ impl Page {
                         return Ok(());
                     }
 
+                    if el.get_attribute("data-target").as_deref() == *REACT_SSR {
+                        rerender.store(true, Ordering::Relaxed);
+                        return Ok(());
+                    }
+
                     let Some(src) = el.get_attribute("src") else {
                         return Ok(());
                     };
@@ -2962,7 +2968,7 @@ impl Page {
                                 crate::features::chrome::setup_chrome_events(
                                     &new_page,
                                     &configuration,
-                                )
+                                ),
                             );
 
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
@@ -3151,6 +3157,11 @@ impl Page {
                             return Ok(());
                         }
 
+                        if el.get_attribute("data-target").as_deref() == *REACT_SSR {
+                            rerender.store(true, Ordering::Relaxed);
+                            return Ok(());
+                        }
+
                         let Some(src) = el.get_attribute("src") else {
                             return Ok(());
                         };
@@ -3314,17 +3325,17 @@ impl Page {
                         )
                         .await
                         {
-                            let (_, intercept_handle) = tokio::join!(
-                                crate::features::chrome::setup_chrome_events(
-                                    &new_page,
-                                    &configuration,
-                                ),
+                            let (intercept_handle, _) = tokio::join!(
                                 crate::features::chrome::setup_chrome_interception_base(
                                     &new_page,
                                     configuration.chrome_intercept.enabled,
                                     &configuration.auth_challenge_response,
                                     configuration.chrome_intercept.block_visuals,
                                     &parent_host,
+                                ),
+                                crate::features::chrome::setup_chrome_events(
+                                    &new_page,
+                                    &configuration,
                                 )
                             );
 
