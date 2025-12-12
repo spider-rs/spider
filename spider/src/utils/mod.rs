@@ -73,9 +73,9 @@ pub(crate) type RequestResponse = Response;
 /// The wait for duration timeouts.
 #[cfg(feature = "chrome")]
 const WAIT_TIMEOUTS: [u64; 6] = [0, 20, 50, 100, 100, 500];
-/// The wait for duration timeouts.
-#[cfg(feature = "chrome")]
-const DOM_WAIT_TIMEOUTS: [u64; 6] = [100, 200, 300, 300, 400, 500];
+// /// The wait for duration timeouts.
+// #[cfg(feature = "chrome")]
+// const DOM_WAIT_TIMEOUTS: [u64; 6] = [100, 200, 300, 300, 400, 500];
 
 /// Ignore the content types.
 pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
@@ -315,7 +315,6 @@ async fn cf_handle(
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
-        let mut force_delay = false;
         let page_navigate = async {
             // force upgrade https check.
             if let Some(page_url) = page.url().await? {
@@ -329,11 +328,11 @@ async fn cf_handle(
                         target_url.to_string()
                     };
                     let _ = page.goto(target_url).await?.wait_for_navigation().await?;
-                    force_delay = true;
                 }
                 else if page_url.starts_with("http://") {
                     let _ = page.goto(page_url.replacen("http://", "https://", 1)).await?;
-                    force_delay = true;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(3_500)).await;
                 }
             }
 
@@ -341,106 +340,101 @@ async fn cf_handle(
         };
 
         // get the csp settings before hand
-        let _ = tokio::join!(page_navigate, perform_smart_mouse_movement(&page, &viewport));
+        let _ = tokio::join!(page.disable_network_cache(true), page_navigate, perform_smart_mouse_movement(&page, &viewport));
 
-        let mut wait_for = CF_WAIT_FOR.clone();
+        for _ in 0..10 {
+            let mut wait_for = CF_WAIT_FOR.clone();
 
-        if force_delay {
-            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
-                 core::time::Duration::from_millis(3_771),
-            )).into();
-            page_wait(&page, &Some(wait_for.clone())).await;
-        }
+            let mut clicks = 0usize;
+            let mut hidden = false;
 
-        let mut clicks = 0usize;
-        let mut hidden = false;
+            if let Ok(els) = page
+                .find_elements_pierced(
+                    r#"
+                div[id*="turnstile"],
+                iframe[src*="challenges.cloudflare.com"],
+                iframe[src*="turnstile"],
+                iframe[title*="widget"],
+                input[type="checkbox"]"#,
+                )
+                .await
+            {
+                perform_smart_mouse_movement(&page, &viewport).await;
+                for el in els {
+                    let f = async {
+                        match el.clickable_point().await {
+                            Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
+                            Err(_) => el.click().await.is_ok(),
+                        }
+                    };
 
-        if let Ok(els) = page.find_elements_pierced(r#"
-        #tgnx8,
-        .cf-turnstile,
-        div[id*="turnstile"],
-        iframe[src*="challenges.cloudflare.com"],
-        iframe[src*="turnstile"],
-        iframe[title*="widget"],
-        input[type="checkbox"],
-        [class*="turnstile"]"#).await {
-            for el in els {
-                let f = async {
-                    match el.clickable_point().await {
-                        Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
-                        Err(_) => el.click().await.is_ok(),
+                    let (did_click, _) =
+                        tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
+
+                    if did_click {
+                        clicks += 1;
                     }
-                };
-
-                 let (did_click, _) = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
-
-                if did_click {
-                    clicks += 1;
-                }
-            }
-        } else {
-            hidden = true;
-            let wait = Some(wait_for.clone());
-            let _ = tokio::join!(
-                page_wait(&page, &wait),
-                perform_smart_mouse_movement(&page, &viewport)
-            );
-        }
-
-        if !hidden && clicks == 0 {
-            let f = page
-                .evaluate(r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#);
-            let _ = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
-        }
-
-        wait_for.page_navigations = true;
-
-        let wait = Some(wait_for.clone());
-
-        let _ = tokio::join!(
-            page_wait(&page, &wait),
-            perform_smart_mouse_movement(&page, &viewport),
-        );
-
-        if let Ok(next_content) = page.outer_html_bytes().await {
-            let next_content = if !detect_cf_turnstyle(&next_content) {
-                validated = true;
-                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
-                    core::time::Duration::from_secs(4),
-                ))
-                .into();
-                page_wait(&page, &Some(wait_for)).await;
-                match page.outer_html_bytes().await {
-                    Ok(nc) => nc,
-                    _ => next_content,
-                }
-            } else if contains_verification(&next_content) {
-                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
-                    core::time::Duration::from_millis(3500),
-                ))
-                .into();
-                page_wait(&page, &Some(wait_for.clone())).await;
-
-                let next_content = match page.outer_html_bytes().await {
-                    Ok(nc) => nc,
-                    _ => next_content,
-                };
-
-                if !detect_cf_turnstyle(&next_content) {
-                    validated = true;
-                    page_wait(&page, &Some(wait_for)).await;
-                    match page.outer_html_bytes().await {
-                        Ok(nc) => nc,
-                        _ => next_content,
-                    }
-                } else {
-                    next_content
                 }
             } else {
-                next_content
-            };
+                hidden = true;
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport)
+                );
+            }
 
-            *b = next_content;
+            if !hidden && clicks == 0 {
+                let f = page.evaluate(
+                    r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#,
+                );
+                let _ = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
+            }
+
+            wait_for.page_navigations = true;
+            let wait = Some(wait_for.clone());
+
+            let _ = tokio::join!(
+                page_wait(&page, &wait),
+                perform_smart_mouse_movement(&page, &viewport),
+            );
+
+            if let Ok(mut next_content) = page.outer_html_bytes().await {
+                if !detect_cf_turnstyle(&next_content) {
+                    validated = true;
+                    wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        core::time::Duration::from_secs(4),
+                    ))
+                    .into();
+                    page_wait(&page, &Some(wait_for)).await;
+                    if let Ok(nc) = page.outer_html_bytes().await {
+                        next_content = nc;
+                    }
+                } else if contains_verification(&next_content) {
+                    wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        core::time::Duration::from_millis(3500),
+                    ))
+                    .into();
+                    page_wait(&page, &Some(wait_for.clone())).await;
+
+                    if let Ok(nc) = page.outer_html_bytes().await {
+                        next_content = nc;
+                    }
+                    if !detect_cf_turnstyle(&next_content) {
+                        validated = true;
+                        page_wait(&page, &Some(wait_for)).await;
+                        if let Ok(nc) = page.outer_html_bytes().await {
+                            next_content = nc;
+                        }
+                    }
+                };
+
+                *b = next_content;
+
+                if validated {
+                    break;
+                }
+            }
         }
 
         Ok::<(), chromiumoxide::error::CdpError>(())
@@ -593,45 +587,27 @@ pub async fn wait_for_dom(
     timeout: Option<core::time::Duration>,
     selector: &str,
 ) {
-    let max_duration = timeout.unwrap_or_else(|| core::time::Duration::from_millis(500));
-    let mut deadline = tokio::time::Instant::now() + max_duration;
+    let max = timeout.unwrap_or_else(|| core::time::Duration::from_millis(1200));
 
-    let script = crate::features::chrome_common::generate_wait_for_dom_js_code_with_selector_base(
-        max_duration.as_millis() as u32,
+    let script = crate::features::chrome_common::generate_wait_for_dom_js_v2(
+        max.as_millis() as u32,
         selector,
+        500,
+        2,
+        true,
+        false,
     );
 
-    let wait_until = async {
-        let mut index = 0;
+    let hard = max + core::time::Duration::from_millis(200);
 
-        loop {
-            if tokio::time::Instant::now() >= deadline {
-                break;
+    let _ = tokio::time::timeout(hard, async {
+        if let Ok(v) = page.evaluate(script).await {
+            if let Some(val) = v.value().and_then(|x| x.as_bool()) {
+                let _ = val;
             }
-
-            let current_timeout = DOM_WAIT_TIMEOUTS[index];
-            let result = page.evaluate(script.clone()).await;
-
-            if let Ok(vv) = &result {
-                let value = vv.value();
-                if let Some(value) = value {
-                    if let Some(v) = value.as_bool() {
-                        if v {
-                            break;
-                        } else {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(current_timeout))
-                                .await;
-                            deadline = tokio::time::Instant::now() + max_duration;
-                        }
-                    }
-                }
-            }
-
-            index = (index + 1) % WAIT_TIMEOUTS.len();
         }
-    };
-
-    let _ = tokio::time::timeout(max_duration, wait_until).await;
+    })
+    .await;
 }
 
 /// Get the output path of a screenshot and create any parent folders if needed.
@@ -1782,19 +1758,6 @@ async fn cache_chrome_response_from_cdp_body(
     }
 }
 
-#[cfg(all(
-    feature = "chrome",
-    not(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))
-))]
-/// Cache a chrome response from CDP body.
-async fn cache_chrome_response_from_cdp_body(
-    _target_url: &str,
-    _body: &[u8],
-    _chrome_http_req_res: &ChromeHTTPReqRes,
-    _cache_options: &Option<CacheOptions>,
-) {
-}
-
 #[derive(Debug, Clone, Default)]
 #[cfg(feature = "chrome")]
 /// Map of the response.
@@ -1816,6 +1779,7 @@ struct ResponseBase {
     headers: Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
     /// The status code.
     status_code: Option<i64>,
+    #[cfg(feature = "cache_request")]
     /// Is the main document cached?
     main_doc_from_cache: bool,
 }
@@ -2128,6 +2092,35 @@ pub async fn run_navigate_or_content_set_core(
 }
 
 #[cfg(feature = "chrome")]
+/// Get the base redirect for the website.
+pub async fn get_final_redirect(
+    page: &chromiumoxide::Page,
+    source: &str,
+    base_timeout: Duration,
+) -> Option<String> {
+    let last_redirect = tokio::time::timeout(base_timeout, async {
+        match page.wait_for_navigation_response().await {
+            Ok(u) => get_last_redirect(&source, &u, &page).await,
+            _ => None,
+        }
+    })
+    .await;
+
+    match last_redirect {
+        Ok(final_url) => {
+            if final_url.as_deref() == Some("about:blank")
+                || final_url.as_deref() == Some("chrome-error://chromewebdata/")
+            {
+                None
+            } else {
+                final_url
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
     source: &str,
@@ -2170,6 +2163,7 @@ pub async fn fetch_page_html_chrome_base(
 
     let mut chrome_http_req_res = ChromeHTTPReqRes::default();
     let mut metadata: Option<Vec<crate::page::AutomationResults>> = None;
+    let mut block_bytes = false;
 
     // the base networking timeout to prevent any hard hangs.
     let mut base_timeout = match request_timeout {
@@ -2224,17 +2218,15 @@ pub async fn fetch_page_html_chrome_base(
         }
     );
 
-    let cache_request = !cache_options.is_none();
-    let cache_request = if cache_request {
-        match cache_options {
-            Some(CacheOptions::No) => false,
-            _ => true,
-        }
-    } else {
-        cache_request
+    #[cfg(feature = "cache_request")]
+    let cache_request = match cache_options {
+        Some(CacheOptions::No) => false,
+        _ => true,
     };
 
     let (tx, rx) = oneshot::channel::<bool>();
+
+    #[cfg(feature = "cache_request")]
     let (main_tx, main_rx) = if cache_request {
         let c = oneshot::channel::<RequestId>();
         (Some(c.0), Some(c.1))
@@ -2319,7 +2311,9 @@ pub async fn fetch_page_html_chrome_base(
 
             let mut status_code = None;
             let mut headers = None;
+            #[cfg(feature = "cache_request")]
             let mut main_doc_request_id: Option<RequestId> = None;
+            #[cfg(feature = "cache_request")]
             let mut main_doc_from_cache = false;
 
             let persist_event = asset || track_responses;
@@ -2340,12 +2334,16 @@ pub async fn fetch_page_html_chrome_base(
                             intial_request = true;
                             status_code = Some(event.response.status);
                             headers = Some(event.response.headers.clone());
-                            main_doc_request_id = Some(event.request_id.clone());
-                            // DevTools cache flags
-                            let from_disk = event.response.from_disk_cache.unwrap_or(false);
-                            let from_prefetch = event.response.from_prefetch_cache.unwrap_or(false);
-                            let from_sw = event.response.from_service_worker.unwrap_or(false);
-                            main_doc_from_cache = from_disk || from_prefetch || from_sw;
+                            #[cfg(feature = "cache_request")]
+                            {
+                                main_doc_request_id = Some(event.request_id.clone());
+                                // DevTools cache flags
+                                let from_disk = event.response.from_disk_cache.unwrap_or(false);
+                                let from_prefetch =
+                                    event.response.from_prefetch_cache.unwrap_or(false);
+                                let from_sw = event.response.from_service_worker.unwrap_or(false);
+                                main_doc_from_cache = from_disk || from_prefetch || from_sw;
+                            }
                             if !persist_event {
                                 break;
                             }
@@ -2380,6 +2378,7 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
 
+            #[cfg(feature = "cache_request")]
             if let Some(request_id) = &main_doc_request_id {
                 if let Some(tx) = main_tx {
                     let _ = tx.send(request_id.clone());
@@ -2390,6 +2389,7 @@ pub async fn fetch_page_html_chrome_base(
                 response_map,
                 status_code,
                 headers,
+                #[cfg(feature = "cache_request")]
                 main_doc_from_cache,
             }
         };
@@ -2437,8 +2437,6 @@ pub async fn fetch_page_html_chrome_base(
 
         (t1.0, t1.1, res_map, req_map)
     });
-
-    let mut block_bytes = false;
 
     let page_navigation = async {
         run_navigate_or_content_set_core(
@@ -2512,27 +2510,9 @@ pub async fn fetch_page_html_chrome_base(
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
-        let last_redirect = tokio::time::timeout(base_timeout, async {
-            match page.wait_for_navigation_response().await {
-                Ok(u) => get_last_redirect(&source, &u, &page).await,
-                _ => None,
-            }
-        })
-        .await;
+        let last_redirect = get_final_redirect(page, &source, base_timeout).await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
-
-        match last_redirect {
-            Ok(final_url) => {
-                if final_url.as_deref() == Some("about:blank")
-                    || final_url.as_deref() == Some("chrome-error://chromewebdata/")
-                {
-                    None
-                } else {
-                    final_url
-                }
-            }
-            _ => None,
-        }
+        last_redirect
     } else {
         None
     };
@@ -2799,8 +2779,7 @@ pub async fn fetch_page_html_chrome_base(
                 c = rx1 => {
                     if let Ok(c) = c {
                         if let Some(c) = c {
-                            let params =
-                            GetResponseBodyParams::new(c.clone());
+                            let params = GetResponseBodyParams::new(c);
 
                             if let Ok(command_response) = page.execute(params).await {
                               let body_response = command_response;
@@ -2813,7 +2792,10 @@ pub async fn fetch_page_html_chrome_base(
                               } else {
                                   body_response.body.as_bytes().to_vec()
                               };
-                              content = Some(media_file.into());
+
+                              if !media_file.is_empty() {
+                                  content = Some(media_file.into());
+                              }
                           }
                         }
                     }
@@ -2832,6 +2814,7 @@ pub async fn fetch_page_html_chrome_base(
                         page_response.status_code = chrome_http_req_res1.status_code;
                         page_response.waf_check = chrome_http_req_res1.waf_check;
 
+                        #[cfg(feature = "cache_request")]
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
@@ -2885,8 +2868,10 @@ pub async fn fetch_page_html_chrome_base(
     //     }
     // }
 
+    #[cfg(feature = "cache_request")]
     let mut modified_cache = false;
 
+    #[cfg(feature = "cache_request")]
     if cache_request {
         if let Some(mut main_rx) = main_rx {
             if let Ok(doc_req_id) = &main_rx.try_recv() {
@@ -2906,17 +2891,20 @@ pub async fn fetch_page_html_chrome_base(
                         } else {
                             body_result.body.clone().into_bytes()
                         };
-                        let _ = tokio::time::timeout(
-                            base_timeout,
-                            cache_chrome_response_from_cdp_body(
-                                cache_url,
-                                &raw_body,
-                                &chrome_http_req_res,
-                                &cache_options,
-                            ),
-                        )
-                        .await;
-                        modified_cache = true;
+
+                        if !raw_body.is_empty() {
+                            let _ = tokio::time::timeout(
+                                base_timeout,
+                                cache_chrome_response_from_cdp_body(
+                                    cache_url,
+                                    &raw_body,
+                                    &chrome_http_req_res,
+                                    &cache_options,
+                                ),
+                            )
+                            .await;
+                            modified_cache = true;
+                        }
                     }
                     Err(e) => {
                         log::error!("{:?}", e)
@@ -2927,11 +2915,9 @@ pub async fn fetch_page_html_chrome_base(
     }
 
     if cfg!(not(feature = "chrome_store_page")) {
-        let _ = tokio::time::timeout(
-            base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
-            page.send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default()),
-        )
-        .await;
+        let _ = page
+            .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+            .await;
 
         if let Ok((mut transferred, bytes_map, mut rs, request_map)) = bytes_collected_handle.await
         {
@@ -3017,7 +3003,7 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     }
                 }
-
+                #[cfg(feature = "cache_request")]
                 if cache_request && !page_set && !rs.main_doc_from_cache && !modified_cache {
                     let _ = tokio::time::timeout(
                         base_timeout,

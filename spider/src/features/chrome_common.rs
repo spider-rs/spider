@@ -617,6 +617,39 @@ impl core::fmt::Display for WebAutomation {
 
 #[cfg(feature = "chrome")]
 /// Generate the wait for Dom function targeting the element. This defaults to using the body.
+pub(crate) fn generate_wait_for_dom_js_v2(
+    timeout_ms: u32,
+    selector: &str,
+    quiet_ms: u32,
+    stable_frames: u32,
+    require_visible: bool,
+    require_images_complete: bool,
+) -> String {
+    let t = timeout_ms.min(crate::utils::FIVE_MINUTES);
+    let q = quiet_ms.max(50).min(t);
+    let f = stable_frames.max(1).min(10);
+    let s = if selector.is_empty() {
+        "body"
+    } else {
+        selector
+    };
+
+    format!(
+        r###"(()=>new Promise(R=>{{const S={s:?},T={t},Q={q},F={f},V={vis},I={img},P=["#__next","#__nuxt","#app","#root","main","body"],N=()=>performance.now(),W=e=>{{if(!e)return!1;const t=getComputedStyle(e);if("none"===t.display||"hidden"===t.visibility||"0"===t.opacity)return!1;const r=e.getBoundingClientRect();return r.width>0&&r.height>0}},M=e=>{{if(!e)return!1;const t=e.querySelectorAll("img");for(let e=0;e<t.length;e++){{const r=t[e];if(!r.complete)return!1;if(0===r.naturalWidth&&0===r.naturalHeight&&r.currentSrc)return!1}}return!0}},k=()=>{{let e=document.querySelector(S);if(e)return e;for(let t=0;t<P.length;t++){{if(e=document.querySelector(P[t]))return e}}return null}},s=N();let e=null,t=null,r=s,o=0;const a=n=>{{t&&t.disconnect(),t=new MutationObserver(()=>{{r=N(),o=0}}),t.observe(n,{{subtree:!0,childList:!0,attributes:!0,characterData:!0}})}},i=()=>{{const n=N();if(n-s>=T)return t&&t.disconnect(),void R(!1);(!e||!document.contains(e))&&(e=k())&&((r=n,o=0),a(e));e&&(V&&!W(e)?o=0:I&&!M(e)?o=0:n-r>=Q?(o++,o>=F&&(t&&t.disconnect(),R(!0))):o=0),requestAnimationFrame(i)}};i()}}))()"###,
+        t = t,
+        q = q,
+        f = f,
+        vis = if require_visible { "true" } else { "false" },
+        img = if require_images_complete {
+            "true"
+        } else {
+            "false"
+        },
+    )
+}
+
+#[cfg(feature = "chrome")]
+/// Generate the wait for Dom function targeting the element. This defaults to using the body.
 pub(crate) fn generate_wait_for_dom_js_code_with_selector(
     timeout: u32,
     selector: Option<&str>,
@@ -630,21 +663,21 @@ pub(crate) fn generate_wait_for_dom_js_code_with_selector(
     )
 }
 
-#[cfg(feature = "chrome")]
-/// Generate the wait for Dom function targeting the element. This defaults to using the body.
-pub(crate) fn generate_wait_for_dom_js_code_with_selector_base(
-    timeout: u32,
-    selector: &str,
-) -> String {
-    generate_wait_for_dom_js_code_with_selector(
-        timeout,
-        if selector.is_empty() {
-            None
-        } else {
-            Some(selector)
-        },
-    )
-}
+// #[cfg(feature = "chrome")]
+// /// Generate the wait for Dom function targeting the element. This defaults to using the body.
+// pub(crate) fn generate_wait_for_dom_js_code_with_selector_base(
+//     timeout: u32,
+//     selector: &str,
+// ) -> String {
+//     generate_wait_for_dom_js_code_with_selector(
+//         timeout,
+//         if selector.is_empty() {
+//             None
+//         } else {
+//             Some(selector)
+//         },
+//     )
+// }
 
 #[cfg(feature = "chrome")]
 const CLICKABLE_SELECTOR: &str = concat!(

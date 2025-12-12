@@ -144,7 +144,7 @@ lazy_static! {
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace",
-            "window.location", "document.location",
+            "window.location", "document.location", "window.applicationCache",
             // Fetching required
             "fetch",
             // APPS
@@ -2760,8 +2760,10 @@ impl Page {
                 };
 
                 let rerender = AtomicBool::new(false);
+                let script_src = AtomicBool::new(false);
 
                 let mut static_app = false;
+                let mut script_found = false;
                 let xml_file = self.get_url().ends_with(".xml");
 
                 let mut element_content_handlers =
@@ -2798,6 +2800,11 @@ impl Page {
                     let Some(src) = el.get_attribute("src") else {
                         return Ok(());
                     };
+
+                    if !script_found {
+                        script_found = true;
+                        script_src.store(true, Ordering::Relaxed);
+                    }
 
                     if !src.starts_with('/') {
                         return Ok(());
@@ -2941,7 +2948,9 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed) {
+                if rerender.load(Ordering::Relaxed)
+                    || map.is_empty() && script_src.load(Ordering::Relaxed)
+                {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
@@ -3131,8 +3140,10 @@ impl Page {
                 };
 
                 let rerender = AtomicBool::new(false);
+                let script_src = AtomicBool::new(false);
 
                 let mut static_app = false;
+                let mut script_found = false;
 
                 let mut element_content_handlers = vec![
                     element!("base", |el| {
@@ -3201,6 +3212,10 @@ impl Page {
                     })),
                     element!("a[href],script[src],link[href]", |el| {
                         let attribute = if el.tag_name() == "script" {
+                            if !script_found && el.get_attribute("src").is_ok() {
+                                script_found = true;
+                                script_src.store(true, Ordering::Relaxed);
+                            }
                             "src"
                         } else {
                             "href"
@@ -3309,7 +3324,9 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed) {
+                if rerender.load(Ordering::Relaxed)
+                    || map.is_empty() && script_src.load(Ordering::Relaxed)
+                {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
