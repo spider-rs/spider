@@ -813,90 +813,70 @@ pub async fn setup_chrome_interception_base(
 
 /// establish all the page events.
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
-    let ua = config
-        .user_agent
-        .as_deref()
-        .map(|a| a.as_str())
-        .unwrap_or("");
+    let ua_opt = config.user_agent.as_deref().filter(|ua| !ua.is_empty());
 
-    let mut emulation_config = spider_fingerprint::EmulationConfiguration::setup_defaults(&ua);
+    let ua_for_profiles: &str = ua_opt.as_deref().map_or("", |v| v);
+
+    let mut emulation_config =
+        spider_fingerprint::EmulationConfiguration::setup_defaults(ua_for_profiles);
 
     let stealth_mode = config.stealth_mode;
-    let stealth = stealth_mode.stealth();
+    let use_stealth = stealth_mode.stealth();
     let block_ads = config.chrome_intercept.block_ads;
 
     emulation_config.dismiss_dialogs = config.dismiss_dialogs.unwrap_or(true);
     emulation_config.fingerprint = config.fingerprint;
     emulation_config.tier = stealth_mode;
-    emulation_config.user_agent_data = Some(true); // Enable this until experimental is removed from userAgentData page.setUserAgent.
+    emulation_config.user_agent_data = Some(!ua_for_profiles.is_empty());
 
-    let viewport = if let Some(vp) = &config.viewport {
-        Some((*vp).into())
-    } else {
-        None
-    };
+    let viewport = config.viewport.as_ref().map(|vp| (*vp).into());
 
     let gpu_profile = spider_fingerprint::profiles::gpu::select_random_gpu_profile(
-        spider_fingerprint::get_agent_os(ua),
+        spider_fingerprint::get_agent_os(ua_for_profiles),
     );
 
     let merged_script = spider_fingerprint::emulate_with_profile(
-        ua,
+        ua_for_profiles,
         &emulation_config,
         &viewport.as_ref(),
         &config.evaluate_on_new_document,
         &gpu_profile,
     );
 
-    let stealth = async {
-        match config.user_agent.as_deref() {
-            Some(agent) if stealth => {
-                if block_ads {
-                    let _ = tokio::join!(
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
-                        chrome_page.set_ad_blocking_enabled(true),
-                        chrome_page.set_user_agent(agent.as_str()),
-                        chrome_page.emulate_hardware_concurrency(
-                            gpu_profile.hardware_concurrency.try_into().unwrap_or(8)
-                        ),
-                    );
-                } else {
-                    let _ = tokio::join!(
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
-                        chrome_page.set_user_agent(agent.as_str()),
-                    );
-                }
-            }
-            Some(agent) => {
-                if block_ads {
-                    let _ = tokio::join!(
-                        chrome_page.set_user_agent(agent.as_str()),
-                        chrome_page.set_ad_blocking_enabled(true),
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
-                    );
-                } else {
-                    let _ = tokio::join!(
-                        chrome_page.set_user_agent(agent.as_str()),
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script)
-                    );
-                }
-            }
-            None if stealth => {
-                if block_ads {
-                    let _ = tokio::join!(
-                        chrome_page.add_script_to_evaluate_on_new_document(merged_script),
-                        chrome_page.set_ad_blocking_enabled(true),
-                        chrome_page.emulate_hardware_concurrency(
-                            gpu_profile.hardware_concurrency.try_into().unwrap_or(8)
-                        ),
-                    );
-                } else {
+    let should_inject_script =
+        (use_stealth || config.evaluate_on_new_document.is_some()) && merged_script.is_some();
+
+    let hc: u32 = gpu_profile.hardware_concurrency.try_into().unwrap_or(8);
+
+    let apply_page_setup = {
+        async move {
+            let f_script = async {
+                if should_inject_script {
                     let _ = chrome_page
                         .add_script_to_evaluate_on_new_document(merged_script)
                         .await;
                 }
-            }
-            None => (),
+            };
+
+            let f_adblock = async {
+                if block_ads {
+                    let _ = chrome_page.set_ad_blocking_enabled(true).await;
+                }
+            };
+
+            let f_ua = async {
+                if !ua_for_profiles.is_empty() {
+                    let _ = chrome_page.set_user_agent(ua_for_profiles).await;
+                }
+            };
+
+            let f_hc = async {
+                if use_stealth {
+                    let _ = chrome_page.emulate_hardware_concurrency(hc.into()).await;
+                }
+            };
+
+            tokio::join!(f_script, f_adblock, f_ua, f_hc);
         }
     };
 
@@ -912,15 +892,16 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
-    if let Err(_) = tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
+    if tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
         tokio::join!(
-            stealth,
+            apply_page_setup,
             disable_log,
             bypass_csp,
-            configure_browser(&chrome_page, &config)
+            configure_browser(chrome_page, config),
         )
     })
     .await
+    .is_err()
     {
         log::error!("failed to setup event handlers within 15 seconds.");
     }
