@@ -330,6 +330,8 @@ pub struct Website {
     initial_status_code: StatusCode,
     /// The initial anti-bot tech found.
     initial_anti_bot_tech: AntiBotTech,
+    /// The initial bytes size of the first request.
+    initial_html_length: usize,
     /// The initial page had a waf detection.
     initial_page_waf_check: bool,
     /// The initial page should retry.
@@ -383,6 +385,7 @@ impl fmt::Debug for Website {
             .field("client_present", &self.client.is_some())
             // initial page info
             .field("initial_status_code", &self.initial_status_code)
+            .field("initial_html_length", &self.initial_html_length)
             .field("initial_anti_bot_tech", &self.initial_anti_bot_tech)
             .field("initial_page_waf_check", &self.initial_page_waf_check)
             .field("initial_page_should_retry", &self.initial_page_should_retry)
@@ -1102,6 +1105,11 @@ impl Website {
     /// Get the initial status code of the request
     pub fn get_initial_status_code(&self) -> &StatusCode {
         &self.initial_status_code
+    }
+
+    /// Get the initial html size of the request
+    pub fn get_initial_html_length(&self) -> usize {
+        self.initial_html_length
     }
 
     /// Get the initial anti-bot tech code used for the intitial request
@@ -2258,6 +2266,7 @@ impl Website {
             links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
+            self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
@@ -2468,6 +2477,7 @@ impl Website {
             }
 
             self.initial_status_code = page.status_code;
+            self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
@@ -2706,6 +2716,7 @@ impl Website {
             .await;
 
             self.initial_status_code = page.status_code;
+            self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
@@ -3006,6 +3017,7 @@ impl Website {
                 links.extend(links_ssg);
 
                 self.initial_status_code = page.status_code;
+                self.initial_html_length = page.get_html_bytes_u8().len();
                 self.initial_anti_bot_tech = page.anti_bot_tech;
                 self.initial_page_should_retry = page.should_retry;
                 self.initial_page_waf_check = page.waf_check;
@@ -3137,6 +3149,7 @@ impl Website {
             page.bytes_transferred = bytes_transferred;
 
             self.initial_status_code = page.status_code;
+            self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.should_retry;
             self.initial_page_waf_check = page.waf_check;
