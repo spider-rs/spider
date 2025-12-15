@@ -287,6 +287,8 @@ error was encountered while trying to use an ErrorDocument to handle the request
 
   /// Empty HTML.
   pub static ref EMPTY_HTML: &'static [u8; 39] = b"<html><head></head><body></body></html>";
+  /// Empty html.
+  pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
 }
 
 /// Detect if openresty hard 403 is forbidden and should not retry.

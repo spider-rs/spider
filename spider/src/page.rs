@@ -1,6 +1,7 @@
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
+use crate::utils::EMPTY_HTML_BASIC;
 use crate::utils::{
     css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
     get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
@@ -1941,7 +1942,7 @@ impl Page {
     pub fn is_empty(&self) -> bool {
         match self.html.as_deref() {
             None => true,
-            Some(html) => html.is_empty() || html.eq(*EMPTY_HTML),
+            Some(html) => html.is_empty() || html.eq(*EMPTY_HTML) || html.eq(*EMPTY_HTML_BASIC),
         }
     }
 
