@@ -1962,7 +1962,10 @@ impl Page {
     pub fn is_empty(&self) -> bool {
         match self.html.as_deref() {
             None => true,
-            Some(html) => html.is_empty() || html.eq(*EMPTY_HTML) || html.eq(*EMPTY_HTML_BASIC),
+            Some(html) => {
+                let html = html.trim_ascii();
+                html.is_empty() || html.eq(*EMPTY_HTML) || html.eq(*EMPTY_HTML_BASIC)
+            }
         }
     }
 
