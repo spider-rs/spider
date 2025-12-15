@@ -25,9 +25,53 @@ use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
+use lazy_static::lazy_static;
 #[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
+
+/// Scan bytes quickly for patterns.
+const PREFIX_SCAN: usize = 2048;
+/// 403 match.
+const PAT_TITLE_403: usize = 0;
+/// HTML resource.
+const PAT_HTML_TAG: usize = 1;
+
+lazy_static! {
+    /// False 403 match.
+    static ref FALSE_403_AC: AhoCorasick = AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .build(["<title>403 forbidden</title>", "<html",])
+        .expect("FALSE_403_AC build");
+}
+
+#[inline]
+/// False 403 match for invalid status codes.
+fn is_false_403(content: Option<&[u8]>) -> bool {
+    let bytes = match content {
+        Some(b) if !b.is_empty() => b,
+        _ => return false,
+    };
+
+    let head = &bytes[..bytes.len().min(PREFIX_SCAN)];
+
+    let mut has_title = false;
+    let mut has_html = false;
+
+    for m in FALSE_403_AC.find_iter(head) {
+        match m.pattern().as_usize() {
+            PAT_TITLE_403 => has_title = true,
+            PAT_HTML_TAG => has_html = true,
+            _ => {}
+        }
+        if has_title && has_html {
+            return true;
+        }
+    }
+
+    false
+}
 
 /// Allocate up to 16kb upfront for small pages.
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
@@ -1049,11 +1093,33 @@ pub fn build(url: &str, res: PageResponse) -> Page {
     let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
     let resource_found = validate_empty(&res.content, success);
 
-    let mut should_retry = resource_found && !success
-        || res.status_code.is_server_error()
-        || res.status_code == StatusCode::TOO_MANY_REQUESTS
-        || res.status_code == StatusCode::FORBIDDEN
-        || res.status_code == StatusCode::REQUEST_TIMEOUT;
+    let status = res.status_code;
+
+    let should_retry_status = status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN | StatusCode::REQUEST_TIMEOUT
+        );
+
+    let should_retry_resource = resource_found && !success;
+
+    let should_retry_antibot_false_403 = res.anti_bot_tech != AntiBotTech::None
+        && res.status_code.is_success()
+        && is_false_403(res.content.as_deref().map(|v| &**v));
+
+    let mut should_retry =
+        should_retry_resource || should_retry_status || should_retry_antibot_false_403;
+
+    let mut empty_page = false;
+
+    if let Some(final_url) = &res.final_url {
+        if final_url.starts_with("chrome-error://chromewebdata")
+            || final_url.starts_with("about:blank")
+        {
+            should_retry = false;
+            empty_page = true;
+        }
+    }
 
     Page {
         html: res.content,
@@ -1071,11 +1137,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             let error_status = get_error_status(&mut should_retry, res.error_for_status);
 
             if should_retry {
-                if let Some(final_url) = &res.final_url {
-                    if final_url == "chrome-error://chromewebdata/" {
-                        should_retry = false;
-                    }
-                }
                 if let Some(message) = &error_status {
                     if message.starts_with("error sending request for url ") {
                         should_retry = false;
@@ -1085,13 +1146,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
             error_status
         },
-        final_redirect_destination: if res.final_url.as_deref() == Some("about:blank")
-            || res.final_url.as_deref() == Some("chrome-error://chromewebdata/")
-        {
-            None
-        } else {
-            res.final_url
-        },
+        final_redirect_destination: if empty_page { None } else { res.final_url },
         #[cfg(feature = "chrome")]
         chrome_page: None,
         #[cfg(feature = "chrome")]
