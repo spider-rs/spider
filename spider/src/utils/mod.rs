@@ -13,6 +13,8 @@ pub mod header_utils;
 pub mod interner;
 /// A trie struct.
 pub mod trie;
+/// Validate html false positives.
+pub mod validation;
 
 use crate::{
     page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},

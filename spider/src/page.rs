@@ -25,53 +25,10 @@ use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
-use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use lazy_static::lazy_static;
 #[cfg(not(feature = "decentralized"))]
 use tokio_stream::StreamExt;
 use url::Url;
-
-/// Scan bytes quickly for patterns.
-const PREFIX_SCAN: usize = 2048;
-/// 403 match.
-const PAT_TITLE_403: usize = 0;
-/// HTML resource.
-const PAT_HTML_TAG: usize = 1;
-
-lazy_static! {
-    /// False 403 match.
-    static ref FALSE_403_AC: AhoCorasick = AhoCorasickBuilder::new()
-        .ascii_case_insensitive(true)
-        .build(["<title>403 forbidden</title>", "<html",])
-        .expect("FALSE_403_AC build");
-}
-
-#[inline]
-/// False 403 match for invalid status codes.
-fn is_false_403(content: Option<&[u8]>) -> bool {
-    let bytes = match content {
-        Some(b) if !b.is_empty() => b,
-        _ => return false,
-    };
-
-    let head = &bytes[..bytes.len().min(PREFIX_SCAN)];
-
-    let mut has_title = false;
-    let mut has_html = false;
-
-    for m in FALSE_403_AC.find_iter(head) {
-        match m.pattern().as_usize() {
-            PAT_TITLE_403 => has_title = true,
-            PAT_HTML_TAG => has_html = true,
-            _ => {}
-        }
-        if has_title && has_html {
-            return true;
-        }
-    }
-
-    false
-}
 
 /// Allocate up to 16kb upfront for small pages.
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
@@ -1090,6 +1047,8 @@ pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
 pub fn build(url: &str, res: PageResponse) -> Page {
+    use crate::utils::validation::is_false_403;
+
     let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
     let resource_found = validate_empty(&res.content, success);
 
@@ -1105,7 +1064,13 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
     let should_retry_antibot_false_403 = res.anti_bot_tech != AntiBotTech::None
         && res.status_code.is_success()
-        && is_false_403(res.content.as_deref().map(|v| &**v));
+        && is_false_403(
+            res.content.as_deref().map(|v| &**v),
+            res.headers
+                .as_ref()
+                .and_then(|h| h.get(reqwest::header::CONTENT_LANGUAGE))
+                .and_then(|v| v.to_str().ok()),
+        );
 
     let mut should_retry =
         should_retry_resource || should_retry_status || should_retry_antibot_false_403;
