@@ -486,6 +486,45 @@ pub enum WebAutomation {
         /// The vertical (Y) coordinate.
         y: f64,
     },
+    /// Click and hold on an element (uses the element clickable point).
+    ClickHold {
+        /// The selector of the element to click-hold.
+        selector: String,
+        /// How long to hold (ms).
+        hold_ms: u64,
+    },
+    /// Click and hold at a specific point.
+    ClickHoldPoint {
+        /// The horizontal (X) coordinate.
+        x: f64,
+        /// The vertical (Y) coordinate.
+        y: f64,
+        /// How long to hold (ms).
+        hold_ms: u64,
+    },
+    /// Click-and-drag from one element to another (uses clickable points).
+    ClickDrag {
+        /// Drag start selector
+        from: String,
+        /// Drag end selector
+        to: String,
+        /// Optional modifier (e.g. 8 for Shift). If None, no modifier.
+        modifier: Option<i64>,
+    },
+
+    /// Click-and-drag from one point to another.
+    ClickDragPoint {
+        /// Start X
+        from_x: f64,
+        /// Start Y
+        from_y: f64,
+        /// End X
+        to_x: f64,
+        /// End Y
+        to_y: f64,
+        /// Optional modifier (e.g. 8 for Shift). If None, no modifier.
+        modifier: Option<i64>,
+    },
     /// Clicks on all elements.
     ClickAllClickable(),
     /// Waits for a fixed duration in milliseconds.
@@ -550,6 +589,10 @@ impl WebAutomation {
         match self {
             Evaluate(_) => "Evaluate",
             Click(_) => "Click",
+            ClickDrag { .. } => "ClickDrag",
+            ClickDragPoint { .. } => "ClickDragPoint",
+            ClickHold { .. } => "ClickHold",
+            ClickHoldPoint { .. } => "ClickHoldPoint",
             ClickAll(_) => "ClickAll",
             ClickAllClickable() => "ClickAllClickable",
             ClickPoint { .. } => "ClickPoint",
@@ -575,6 +618,25 @@ impl WebAutomation {
         match self {
             Evaluate(_) => "Evaluate JS".into(),
             Click(s) => format!("Click {}", s),
+            ClickHold { selector, hold_ms } => {
+                format!("ClickHold {} ({}ms)", selector, hold_ms)
+            }
+            ClickHoldPoint { x, y, hold_ms } => {
+                format!("ClickHoldPoint x:{} y:{} ({}ms)", x, y, hold_ms)
+            }
+            ClickDrag { from, to, modifier } => {
+                format!("ClickDrag {} -> {} modifier={:?}", from, to, modifier)
+            }
+            ClickDragPoint {
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                modifier,
+            } => format!(
+                "ClickDragPoint ({},{}) -> ({},{}) modifier={:?}",
+                from_x, from_y, to_x, to_y, modifier
+            ),
             ClickAll(s) => format!("ClickAll {}", s),
             ClickAllClickable() => "ClickAllClickable".into(),
             Wait(ms) => format!("Wait {}ms", ms),
@@ -716,6 +778,7 @@ impl WebAutomation {
                     valid = ele.click().await.is_ok();
                 }
             }
+
             WebAutomation::WaitForWithTimeout { selector, timeout } => {
                 valid =
                     wait_for_selector(page, Some(Duration::from_millis(*timeout)), &selector).await;
@@ -724,12 +787,63 @@ impl WebAutomation {
                 tokio::time::sleep(Duration::from_millis(*ms)).await;
                 valid = true;
             }
+            WebAutomation::ClickHold { selector, hold_ms } => {
+                if let Ok(ele) = page.find_element(selector).await {
+                    if let Ok(pt) = ele.clickable_point().await {
+                        valid = page
+                            .click_and_hold(pt, Duration::from_millis(*hold_ms))
+                            .await
+                            .is_ok();
+                    }
+                }
+            }
+            WebAutomation::ClickHoldPoint { x, y, hold_ms } => {
+                let pt = chromiumoxide::layout::Point { x: *x, y: *y };
+                valid = page
+                    .click_and_hold(pt, Duration::from_millis(*hold_ms))
+                    .await
+                    .is_ok();
+            }
             WebAutomation::ClickAll(selector) => {
                 if let Ok(eles) = page.find_elements(selector).await {
                     for ele in eles {
                         valid = ele.click().await.is_ok();
                     }
                 }
+            }
+            WebAutomation::ClickDrag { from, to, modifier } => {
+                if let (Ok(from_el), Ok(to_el)) =
+                    (page.find_element(from).await, page.find_element(to).await)
+                {
+                    if let (Ok(p1), Ok(p2)) = (
+                        from_el.clickable_point().await,
+                        to_el.clickable_point().await,
+                    ) {
+                        valid = match modifier {
+                            Some(m) => page.click_and_drag_with_modifier(p1, p2, *m).await.is_ok(),
+                            None => page.click_and_drag(p1, p2).await.is_ok(),
+                        };
+                    }
+                }
+            }
+
+            WebAutomation::ClickDragPoint {
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                modifier,
+            } => {
+                let p1 = chromiumoxide::layout::Point {
+                    x: *from_x,
+                    y: *from_y,
+                };
+                let p2 = chromiumoxide::layout::Point { x: *to_x, y: *to_y };
+
+                valid = match modifier {
+                    Some(m) => page.click_and_drag_with_modifier(p1, p2, *m).await.is_ok(),
+                    None => page.click_and_drag(p1, p2).await.is_ok(),
+                };
             }
             WebAutomation::ClickAllClickable() => {
                 if let Ok(eles) = page.find_elements(CLICKABLE_SELECTOR).await {
