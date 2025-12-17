@@ -341,9 +341,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.15.1"
+version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b5ce75405893cd713f9ab8e297d8e438f624dde7d706108285f7e17a25a180f"
+checksum = "6a88aab2464f1f25453baa7a07c84c5b7684e274054ba06817f382357f77a288"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -351,9 +351,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.34.0"
+version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "179c3777a8b5e70e90ea426114ffc565b2c1a9f82f6c4a0c5a34aa6ef5e781b6"
+checksum = "b45afffdee1e7c9126814751f88dddc747f41d91da16c9551a0f1e8a11e788a1"
 dependencies = [
  "cc",
  "cmake",
@@ -445,7 +445,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.38.101",
+ "spider 2.38.102",
 ]
 
 [[package]]
@@ -600,9 +600,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.19.0"
+version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
+checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 
 [[package]]
 name = "bytemuck"
@@ -723,9 +723,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.37.226"
+version = "2.37.233"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0c41ca77a5d4cf0e426a1aacc4093ef41ea3d87d0e883ca664c7189dd214aa1"
+checksum = "2fb187184af75fc1db5c5ef78c7dc888dff39f03ec6d68899fddeb980c073f2b"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -2859,13 +2859,13 @@ checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libredox"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416f7e718bdb06000964960ffa43b4335ad4012ae8b99060261aa4a8088d5ccb"
+checksum = "df15f6eac291ed1cf25865b1ee60399f57e7c227e7f51bdbd4c5270396a9ed50"
 dependencies = [
  "bitflags 2.10.0",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.6.0",
 ]
 
 [[package]]
@@ -3493,7 +3493,7 @@ checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "cfg-if",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.5.18",
  "smallvec",
  "windows-link 0.2.1",
 ]
@@ -4049,6 +4049,15 @@ name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+dependencies = [
+ "bitflags 2.10.0",
+]
+
+[[package]]
+name = "redox_syscall"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec96166dafa0886eb81fe1c0a388bece180fbef2135f97c1e2cf8302e74b43b5"
 dependencies = [
  "bitflags 2.10.0",
 ]
@@ -4866,9 +4875,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.38.100"
+version = "2.38.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6992ac1792c3e5f6560ddad63eda3e000d6652884446666b39337eea26098cae"
+checksum = "cca6c3e3a7e372ee0382c0086b9e9292f155d4fa93c76ac57c4a683535606fcd"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -4904,7 +4913,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.38.101"
+version = "2.38.102"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5012,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.38.101"
+version = "2.38.102"
 dependencies = [
  "clap",
  "env_logger",
@@ -5020,7 +5029,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.38.101",
+ "spider 2.38.102",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5035,9 +5044,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.38.101",
+ "spider 2.38.102",
  "spider_transformations",
- "spider_utils 2.38.100",
+ "spider_utils 2.38.101",
 ]
 
 [[package]]
@@ -5076,9 +5085,9 @@ dependencies = [
 
 [[package]]
 name = "spider_network_blocker"
-version = "0.0.43"
+version = "0.0.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e4f3dce92a1f44b9f96329666abbe71f961d5b86d69d3a6882f15f8c340ae77"
+checksum = "fcb1d2696d1c0ec7fcfdb5b280955f231902c54e922a6733906fab8537aad557"
 dependencies = [
  "convert_case 0.8.0",
  "hashbrown 0.15.5",
@@ -5125,7 +5134,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.38.100",
+ "spider 2.38.101",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5134,9 +5143,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.38.100"
+version = "2.38.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11f2c76c7693a3cdb29ccc56d8f88b3f9866873ebe9abdcd67e27728b4f89aba"
+checksum = "709cb2f630671c445a0a11bd5a43e2344726d538f81444cb8ef4c67322161aea"
 dependencies = [
  "hashbrown 0.15.5",
  "lazy_static",
@@ -5149,7 +5158,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.38.101"
+version = "2.38.102"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5165,11 +5174,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.38.101"
+version = "2.38.102"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.38.101",
+ "spider 2.38.102",
  "warp",
 ]
 

@@ -967,6 +967,8 @@ pub struct RequestInterceptConfiguration {
     pub block_ads: bool,
     /// Intercept Manager
     pub intercept_manager: NetworkInterceptManager,
+    /// Whitelist patterns.
+    pub whitelist_patterns: Option<Vec<String>>,
 }
 
 impl RequestInterceptConfiguration {
@@ -1001,6 +1003,11 @@ impl RequestInterceptConfiguration {
     /// Setup the network request manager type.
     pub fn setup_intercept_manager(&mut self, url: &Option<Box<url::Url>>) {
         self.intercept_manager = NetworkInterceptManager::new(url);
+    }
+
+    /// Set the whitelist patterns.
+    pub fn set_whitelist_patterns(&mut self, whitelist_patterns: Option<Vec<String>>) {
+        self.whitelist_patterns = whitelist_patterns;
     }
 
     /// Block all request besides html and the important stuff.
