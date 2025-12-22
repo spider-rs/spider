@@ -205,7 +205,7 @@ lazy_static! {
 // const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
 
 /// the active status of the crawl.
-#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CrawlStatus {
     /// The crawl did not start yet.
@@ -238,7 +238,7 @@ pub enum CrawlStatus {
 }
 
 /// The link activity for the crawl.
-#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ProcessLinkStatus {
     /// The link can process.
@@ -251,7 +251,7 @@ pub enum ProcessLinkStatus {
 }
 
 /// The type of cron job to run
-#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CronType {
     #[default]
@@ -261,7 +261,7 @@ pub enum CronType {
     Scrape,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Generic website meta info for handling retries.
 pub enum WebsiteMetaInfo {
