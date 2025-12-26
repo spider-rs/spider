@@ -969,6 +969,8 @@ pub struct RequestInterceptConfiguration {
     pub intercept_manager: NetworkInterceptManager,
     /// Whitelist patterns.
     pub whitelist_patterns: Option<Vec<String>>,
+    /// Blacklist patterns.
+    pub blacklist_patterns: Option<Vec<String>>,
 }
 
 impl RequestInterceptConfiguration {
@@ -1008,6 +1010,11 @@ impl RequestInterceptConfiguration {
     /// Set the whitelist patterns.
     pub fn set_whitelist_patterns(&mut self, whitelist_patterns: Option<Vec<String>>) {
         self.whitelist_patterns = whitelist_patterns;
+    }
+
+    /// Set the blacklist patterns.
+    pub fn set_blacklist_patterns(&mut self, blacklist_patterns: Option<Vec<String>>) {
+        self.blacklist_patterns = blacklist_patterns;
     }
 
     /// Block all request besides html and the important stuff.

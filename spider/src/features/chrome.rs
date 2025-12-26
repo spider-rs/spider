@@ -264,6 +264,7 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         },
         ignore_visuals: config.chrome_intercept.block_visuals,
         whitelist_patterns: config.chrome_intercept.whitelist_patterns.clone(),
+        blacklist_patterns: config.chrome_intercept.blacklist_patterns.clone(),
         ignore_ads: config.chrome_intercept.block_ads,
         ignore_javascript: config.chrome_intercept.block_javascript,
         ignore_analytics: config.chrome_intercept.block_analytics,
@@ -369,6 +370,8 @@ pub async fn setup_browser_configuration(
                 browser_config.ignore_ads = config.chrome_intercept.block_ads;
                 browser_config.whitelist_patterns =
                     config.chrome_intercept.whitelist_patterns.clone();
+                browser_config.blacklist_patterns =
+                    config.chrome_intercept.blacklist_patterns.clone();
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
                 browser_config.ignore_analytics = config.chrome_intercept.block_analytics;
                 browser_config.extra_headers = match config.headers {
