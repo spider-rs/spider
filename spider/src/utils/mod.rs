@@ -32,6 +32,8 @@ use hashbrown::HashSet;
 use lol_html::{send::HtmlRewriter, OutputSink};
 use phf::phf_set;
 use reqwest::header::CONTENT_LENGTH;
+#[cfg(feature = "chrome")]
+use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
     future::Future,
     str::FromStr,
@@ -1803,38 +1805,133 @@ fn is_timeout(e: &chromiumoxide::error::CdpError) -> bool {
 }
 
 #[cfg(feature = "chrome")]
+/// Go to the html with interception.
+async fn goto_with_html_once(
+    page: &chromiumoxide::Page,
+    target_url: &str,
+    html: &str,
+    block_bytes: &mut bool,
+    resp_headers: &Option<reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    use base64::Engine;
+    use chromiumoxide::cdp::browser_protocol::fetch::{
+        DisableParams, EnableParams, EventRequestPaused, FulfillRequestParams, RequestPattern,
+        RequestStage,
+    };
+    use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+    use tokio_stream::StreamExt;
+
+    let mut paused = page.event_listener::<EventRequestPaused>().await?;
+
+    let url_prefix = target_url.to_string();
+    let fulfill_headers =
+        chrome_fulfill_headers_from_reqwest(resp_headers.as_ref(), "text/html; charset=utf-8");
+
+    let interception_required = chrome_intercept.map(|c| !c.enabled).unwrap_or(false);
+
+    if interception_required {
+        page.execute(EnableParams {
+            patterns: Some(vec![RequestPattern {
+                url_pattern: Some("*".into()),
+                resource_type: Some(ResourceType::Document),
+                request_stage: Some(RequestStage::Request),
+            }]),
+            handle_auth_requests: Some(false),
+        })
+        .await?;
+    }
+
+    let mut did_goto = false;
+
+    loop {
+        tokio::select! {
+            biased;
+            res = page.goto(target_url), if !did_goto => {
+                did_goto = true;
+                if let Err(e) = res {
+                    if matches!(e, chromiumoxide::error::CdpError::Timeout) {
+                        *block_bytes = true;
+                    }
+                    if interception_required {
+                        let _ = page.execute(DisableParams {}).await;
+                    } else {
+                        let _ = page.set_request_interception(true).await;
+                    }
+                    return Err(e);
+                }
+            }
+            maybe_ev = paused.next() => {
+                let Some(ev) = maybe_ev else {
+                    break;
+                };
+
+                if ev.resource_type != ResourceType::Document {
+                    continue;
+                }
+                if !ev.request.url.starts_with(&url_prefix) {
+                    continue;
+                }
+
+                let body_b64 = base64::engine::general_purpose::STANDARD.encode(html.as_bytes());
+
+                let res = page.execute(FulfillRequestParams {
+                    request_id: ev.request_id.clone(),
+                    response_code: 200,
+                    response_phrase: None,
+                    response_headers: Some(fulfill_headers.clone()),
+                    body: Some(chromiumoxide::Binary(body_b64)),
+                    binary_response_headers: None,
+                }).await;
+
+                if interception_required {
+                    let _ = page.execute(DisableParams {}).await;
+                } else {
+                    let _ = page.set_request_interception(true).await;
+                }
+
+                match res {
+                    Ok(_) => return Ok(()),
+                    Err(e) => {
+                        if matches!(e, chromiumoxide::error::CdpError::Timeout) {
+                            *block_bytes = true;
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+
+    if interception_required {
+        let _ = page.execute(DisableParams {}).await;
+    } else {
+        let _ = page.set_request_interception(true).await;
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "chrome")]
 /// Set the document if requested.
 async fn set_document_content_if_requested(
     page: &chromiumoxide::Page,
     source: &str,
     url_target: Option<&str>,
     block_bytes: &mut bool,
+    resp_headers: &Option<HeaderMap<HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) {
-    let (html, main_frame, _) = tokio::join!(
-        rewrite_base_tag(&source, &url_target),
-        page.mainframe(),
-        page.set_page_lifecycles_enabled(true)
-    );
-
-    if let Ok(frame_opt) = main_frame {
-        if let Err(e) = page
-            .execute(
-                chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                    frame_id: frame_opt.unwrap_or_default(),
-                    html,
-                },
-            )
-            .await
-        {
-            log::info!(
-                "Set Content Error({:?}) - {:?}",
-                e,
-                log_target(source, url_target)
-            );
-            if is_timeout(&e) {
-                *block_bytes = true;
-            }
-        }
+    if let Some(target_url) = url_target {
+        let _ = goto_with_html_once(
+            page,
+            target_url,
+            source,
+            block_bytes,
+            &resp_headers,
+            chrome_intercept,
+        )
+        .await;
     }
 }
 
@@ -1847,6 +1944,8 @@ async fn set_document_content_if_requested_cached(
     block_bytes: &mut bool,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    resp_headers: &Option<HeaderMap<HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) {
     let auth_opt = cache_auth_token(cache_options);
     let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
@@ -1860,31 +1959,16 @@ async fn set_document_content_if_requested_cached(
         .await;
 
     let cache_future = async {
-        let (html, main_frame, _) = tokio::join!(
-            rewrite_base_tag(&source, &url_target),
-            page.mainframe(),
-            page.set_page_lifecycles_enabled(true)
-        );
-
-        if let Ok(frame_opt) = main_frame {
-            if let Err(e) = page
-                .execute(
-                    chromiumoxide::cdp::browser_protocol::page::SetDocumentContentParams {
-                        frame_id: frame_opt.unwrap_or_default(),
-                        html,
-                    },
-                )
-                .await
-            {
-                log::info!(
-                    "Set Content Error({:?}) - {:?}",
-                    e,
-                    log_target(source, url_target)
-                );
-                if is_timeout(&e) {
-                    *block_bytes = true;
-                }
-            }
+        if let Some(target_url) = url_target {
+            let _ = goto_with_html_once(
+                page,
+                target_url,
+                source,
+                block_bytes,
+                &resp_headers,
+                chrome_intercept,
+            )
+            .await;
         }
     };
 
@@ -1998,6 +2082,8 @@ pub async fn run_navigate_or_content_set_core(
     block_bytes: &mut bool,
     _cache_options: &Option<CacheOptions>,
     _cache_policy: &Option<BasicCachePolicy>,
+    resp_headers: &Option<HeaderMap<HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2008,7 +2094,15 @@ pub async fn run_navigate_or_content_set_core(
         if detect_cf_turnstyle(source.as_bytes()) {
             chrome_http_req_res.anti_bot_tech = AntiBotTech::Cloudflare;
         }
-        set_document_content_if_requested(page, source, url_target, block_bytes).await;
+        set_document_content_if_requested(
+            page,
+            source,
+            url_target,
+            block_bytes,
+            resp_headers,
+            chrome_intercept,
+        )
+        .await;
         return Ok(());
     }
 
@@ -2041,6 +2135,8 @@ pub async fn run_navigate_or_content_set_core(
     block_bytes: &mut bool,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    resp_headers: &Option<HeaderMap<HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2062,10 +2158,20 @@ pub async fn run_navigate_or_content_set_core(
                 block_bytes,
                 cache_options,
                 cache_policy,
+                &resp_headers,
+                chrome_intercept,
             )
             .await;
         } else {
-            set_document_content_if_requested(page, source, url_target, block_bytes).await;
+            set_document_content_if_requested(
+                page,
+                source,
+                url_target,
+                block_bytes,
+                resp_headers,
+                chrome_intercept,
+            )
+            .await;
         }
         return Ok(());
     }
@@ -2125,6 +2231,65 @@ pub async fn get_final_redirect(
 }
 
 #[cfg(feature = "chrome")]
+/// Fullfil the headers.
+pub fn chrome_fulfill_headers_from_reqwest(
+    headers: Option<&reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
+    default_content_type: &'static str,
+) -> Vec<chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry> {
+    use chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry;
+
+    let mut out: Vec<HeaderEntry> = Vec::new();
+
+    // Convert reqwest headers -> CDP HeaderEntry (filter hop-by-hop)
+    if let Some(hm) = headers {
+        for (name, value) in hm.iter() {
+            let k = name.as_str();
+
+            // Hop-by-hop / unsafe in synthetic fulfill responses
+            match k.to_ascii_lowercase().as_str() {
+                "content-length" | "transfer-encoding" | "connection" | "keep-alive"
+                | "proxy-connection" | "te" | "trailers" | "upgrade" => continue,
+                _ => {}
+            }
+
+            let v = match value.to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            };
+
+            out.push(HeaderEntry {
+                name: k.to_string(),
+                value: v,
+            });
+        }
+    }
+
+    // Ensure Content-Type exists
+    let has_ct = out
+        .iter()
+        .any(|h| h.name.eq_ignore_ascii_case("content-type"));
+    if !has_ct {
+        out.push(HeaderEntry {
+            name: "Content-Type".into(),
+            value: default_content_type.into(),
+        });
+    }
+
+    // Good default for synthetic responses (avoid caching weirdness)
+    if !out
+        .iter()
+        .any(|h| h.name.eq_ignore_ascii_case("cache-control"))
+    {
+        out.push(HeaderEntry {
+            name: "Cache-Control".into(),
+            value: "no-store".into(),
+        });
+    }
+
+    out
+}
+
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
     source: &str,
@@ -2145,6 +2310,8 @@ pub async fn fetch_page_html_chrome_base(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    resp_headers: &Option<HeaderMap<HeaderValue>>,
+    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -2454,6 +2621,8 @@ pub async fn fetch_page_html_chrome_base(
             &mut block_bytes,
             &cache_options,
             &cache_policy,
+            resp_headers,
+            chrome_intercept,
         )
         .await
     };
@@ -3374,7 +3543,6 @@ pub async fn handle_response_bytes(
                 None,
             );
             return PageResponse {
-                #[cfg(feature = "headers")]
                 headers: Some(headers),
                 #[cfg(feature = "remote_addr")]
                 remote_addr,
@@ -3432,7 +3600,6 @@ pub async fn handle_response_bytes(
     }
 
     PageResponse {
-        #[cfg(feature = "headers")]
         headers: Some(headers),
         #[cfg(feature = "remote_addr")]
         remote_addr,
@@ -3843,6 +4010,7 @@ pub async fn fetch_page_html(
                 max_page_bytes,
                 cache_options,
                 cache_policy,
+                &None,
             )
             .await
             {
@@ -3855,7 +4023,6 @@ pub async fn fetch_page_html(
 
                     match client.get(target_url).send().await {
                         Ok(res) if valid_parsing_status(&res) => {
-                            #[cfg(feature = "headers")]
                             let headers = res.headers().clone();
                             let cookies = get_cookies(&res);
                             let status_code = res.status();
@@ -4203,6 +4370,8 @@ pub async fn fetch_page_html(
         max_page_bytes,
         cache_options,
         cache_policy,
+        &None,
+        &None,
     )
     .await
     {
@@ -4268,6 +4437,8 @@ pub async fn fetch_page_html_chrome(
                 max_page_bytes,
                 cache_options,
                 cache_policy,
+                &None,
+                &None,
             )
             .await
             {
@@ -4778,120 +4949,6 @@ pub fn clean_html_base(html: &str) -> String {
         Ok(r) => r,
         _ => html.into(),
     }
-}
-
-/// Make sure the base tag exist on the page.
-#[cfg(feature = "chrome")]
-pub async fn rewrite_base_tag(html: &str, base_url: &Option<&str>) -> String {
-    use lol_html::{element, html_content::ContentType};
-    use std::sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
-        Arc,
-    };
-
-    if html.is_empty() {
-        return String::new();
-    }
-
-    let base_href = match *base_url {
-        Some(s) if !s.is_empty() => s,
-        _ => return html.to_string(),
-    };
-
-    const UNSET: u8 = 0;
-    const INSERTED: u8 = 1;
-    const PRESENT: u8 = 2;
-
-    let state = Arc::new(AtomicU8::new(UNSET));
-    let saw_head = Arc::new(AtomicBool::new(false));
-
-    let base_tag = format!(r#"<base href="{}">"#, base_href);
-    let head_with_base = format!(r#"<head>{}</head>"#, base_tag);
-
-    let mut buffer = Vec::with_capacity(html.len() + base_href.len() + 64);
-
-    let state_for_base = state.clone();
-    let state_for_head = state.clone();
-    let state_for_body = state.clone();
-    let saw_head_for_head = saw_head.clone();
-    let saw_head_for_body = saw_head.clone();
-
-    let settings: lol_html::Settings<'_, '_, lol_html::send::SendHandlerTypes> =
-        lol_html::send::Settings {
-            element_content_handlers: vec![
-                element!("base", move |el| {
-                    if state_for_base.load(Ordering::Relaxed) == PRESENT {
-                        el.remove();
-                        return Ok(());
-                    }
-
-                    match el.get_attribute("href") {
-                        Some(href)
-                            if href.starts_with("http://") || href.starts_with("https://") =>
-                        {
-                            state_for_base.store(PRESENT, Ordering::Relaxed);
-                        }
-                        _ => el.remove(),
-                    }
-
-                    Ok(())
-                }),
-                element!("head", move |el: &mut lol_html::send::Element| {
-                    saw_head_for_head.store(true, Ordering::Relaxed);
-
-                    if let Some(handlers) = el.end_tag_handlers() {
-                        let state = state_for_head.clone();
-                        let base_tag = base_tag.clone();
-
-                        handlers.push(Box::new(move |end| {
-                            if state
-                                .compare_exchange(
-                                    UNSET,
-                                    INSERTED,
-                                    Ordering::Relaxed,
-                                    Ordering::Relaxed,
-                                )
-                                .is_ok()
-                            {
-                                end.before(&base_tag, ContentType::Html);
-                            }
-                            Ok(())
-                        }));
-                    }
-
-                    Ok(())
-                }),
-                element!("body", move |el: &mut lol_html::send::Element| {
-                    if !saw_head_for_body.load(Ordering::Relaxed) {
-                        if state_for_body
-                            .compare_exchange(UNSET, INSERTED, Ordering::Relaxed, Ordering::Relaxed)
-                            .is_ok()
-                        {
-                            el.before(&head_with_base, ContentType::Html);
-                        }
-                    }
-                    Ok(())
-                }),
-            ],
-            ..lol_html::send::Settings::new_for_handler_types()
-        };
-
-    let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |c: &[u8]| {
-        buffer.extend_from_slice(c);
-    });
-
-    for chunk in html.as_bytes().chunks(*STREAMING_CHUNK_SIZE) {
-        if state.load(Ordering::Relaxed) == PRESENT {
-            return html.to_string();
-        }
-        if rewriter.write(chunk).is_err() {
-            return html.to_string();
-        }
-    }
-
-    let _ = rewriter.end();
-
-    auto_encoder::auto_encode_bytes(&buffer)
 }
 
 /// Clean the HTML to slim fit GPT models. This removes base64 images from the prompt.

@@ -73,7 +73,7 @@ pub fn calc_limits(multiplier: usize) -> usize {
 static JS_SAFE_CHALLENGE_PATTERNS: &[&str] = &[
     r#"Enable JavaScript and cookies to continue"#, // Cloudflare
     r#"To continue, please enable JavaScript in your browser settings"#, // Akamai, F5
-    r#"Please enable JavaScript to view the page content"#,              // AWS WAF
+    r#"Please enable JavaScript to view the page content"#, // AWS WAF
 ];
 
 /// check if the page is a javascript challenge
@@ -2054,7 +2054,9 @@ impl Website {
     }
 
     /// Setup config for crawl.
-    pub async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+    pub async fn setup(
+        &mut self,
+    ) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         let setup = self.setup_base();
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
@@ -5125,7 +5127,11 @@ impl Website {
     /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed. The glob feature does not work with this at the moment.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    pub async fn crawl_concurrent_smart(
+        &mut self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+    ) {
         use tokio::sync::OnceCell;
         self.start();
         self.status = CrawlStatus::Active;
