@@ -472,7 +472,6 @@ pub struct Page {
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
     url: String,
-    #[cfg(feature = "headers")]
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "remote_addr")]
@@ -538,7 +537,6 @@ pub struct Page {
 pub struct Page {
     /// The bytes of the resource.
     html: Option<Box<Vec<u8>>>,
-    #[cfg(feature = "headers")]
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "cookies")]
@@ -634,11 +632,8 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
             page.cookies = new_page.cookies;
         }
     }
-    #[cfg(feature = "headers")]
-    {
-        if new_page.headers.is_some() {
-            page.headers = new_page.headers;
-        }
+    if new_page.headers.is_some() {
+        page.headers = new_page.headers;
     }
 
     page.waf_check = new_page.waf_check;
@@ -1088,7 +1083,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
     Page {
         html: res.content,
-        #[cfg(feature = "headers")]
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -1140,7 +1134,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 pub fn build(_: &str, res: PageResponse) -> Page {
     Page {
         html: res.content,
-        #[cfg(feature = "headers")]
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -3023,6 +3016,17 @@ impl Page {
                                 configuration.max_page_bytes,
                                 configuration.get_cache_options(),
                                 &configuration.cache_policy,
+                                {
+                                    #[cfg(feature = "headers")]
+                                    {
+                                        &self.headers
+                                    }
+                                    #[cfg(not(feature = "headers"))]
+                                    {
+                                        &None
+                                    }
+                                },
+                                &Some(&configuration.chrome_intercept),
                             )
                             .await;
 
@@ -3399,6 +3403,17 @@ impl Page {
                                 configuration.max_page_bytes,
                                 configuration.get_cache_options(),
                                 &configuration.cache_policy,
+                                {
+                                    #[cfg(feature = "headers")]
+                                    {
+                                        &self.headers
+                                    }
+                                    #[cfg(not(feature = "headers"))]
+                                    {
+                                        &None
+                                    }
+                                },
+                                &Some(&configuration.chrome_intercept),
                             )
                             .await;
 
