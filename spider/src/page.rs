@@ -142,13 +142,13 @@ lazy_static! {
             // DOM mutation hot paths
             ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
             ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
-            ".setProperty", "new DOMParser", "window.XMLHttpRequest",
+            ".setProperty", "new DOMParser",
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace", "location.reload",
             "window.location", "document.location", "window.applicationCache",
             // Fetching required
-            "fetch",
+            "fetch", "XMLHttpRequest",
             // APPS
             "window.__NUXT__"
         ];

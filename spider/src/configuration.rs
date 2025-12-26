@@ -548,28 +548,28 @@ impl Configuration {
     }
 
     /// Set the whitelist
-    pub(crate) fn set_whitelist(&mut self) {
+    pub fn set_whitelist(&mut self) {
         self.whitelist = AllowListSet(self.get_whitelist());
     }
 
     /// Configure the allow list.
-    pub(crate) fn configure_allowlist(&mut self) {
+    pub fn configure_allowlist(&mut self) {
         self.set_whitelist();
         self.set_blacklist();
     }
 
     /// Get the blacklist compiled.
-    pub(crate) fn get_blacklist_compiled(&self) -> &AllowList {
+    pub fn get_blacklist_compiled(&self) -> &AllowList {
         &self.blacklist.0
     }
 
     /// Setup the budget for crawling.
-    pub(crate) fn configure_budget(&mut self) {
+    pub fn configure_budget(&mut self) {
         self.inner_budget.clone_from(&self.budget);
     }
 
     /// Get the whitelist compiled.
-    pub(crate) fn get_whitelist_compiled(&self) -> &AllowList {
+    pub fn get_whitelist_compiled(&self) -> &AllowList {
         &self.whitelist.0
     }
 
@@ -596,7 +596,7 @@ impl Configuration {
 
     #[cfg(feature = "sitemap")]
     /// Add sitemap paths to the whitelist and track what was added.
-    pub(crate) fn add_sitemap_to_whitelist(&mut self) -> SitemapWhitelistChanges {
+    pub fn add_sitemap_to_whitelist(&mut self) -> SitemapWhitelistChanges {
         let mut changes = SitemapWhitelistChanges::default();
 
         if self.ignore_sitemap && !self.whitelist_url.is_some() {
@@ -628,7 +628,7 @@ impl Configuration {
 
     #[cfg(feature = "sitemap")]
     /// Revert any changes made to the whitelist by `add_sitemap_to_whitelist`.
-    pub(crate) fn remove_sitemap_from_whitelist(&mut self, changes: SitemapWhitelistChanges) {
+    pub fn remove_sitemap_from_whitelist(&mut self, changes: SitemapWhitelistChanges) {
         if let Some(list) = self.whitelist_url.as_mut() {
             if changes.added_default {
                 let default = CompactString::from("sitemap.xml");

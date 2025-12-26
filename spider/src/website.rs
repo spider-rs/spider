@@ -71,7 +71,7 @@ pub fn calc_limits(multiplier: usize) -> usize {
 
 /// Javascript challenge pages.
 static JS_SAFE_CHALLENGE_PATTERNS: &[&str] = &[
-    r#"<span id="challenge-error-text">Enable JavaScript and cookies to continue</span>"#, // Cloudflare
+    r#"Enable JavaScript and cookies to continue"#, // Cloudflare
     r#"To continue, please enable JavaScript in your browser settings"#, // Akamai, F5
     r#"Please enable JavaScript to view the page content"#,              // AWS WAF
 ];
@@ -105,7 +105,7 @@ pub fn is_safe_javascript_challenge(page: &Page) -> bool {
     not(feature = "wreq")
 ))]
 /// Bind connections only on the specified network interface.
-fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
+pub fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
     client.interface(&network_interface)
 }
 
@@ -123,14 +123,14 @@ fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilde
     target_os = "watchos",
 )))]
 /// Bind connections only on the specified network interface.
-fn set_interface(client: ClientBuilder, _interface: &str) -> ClientBuilder {
+pub fn set_interface(client: ClientBuilder, _interface: &str) -> ClientBuilder {
     client
 }
 
 lazy_static! {
     static ref AC_JS_CHALLENGE: aho_corasick::AhoCorasick =  aho_corasick::AhoCorasick::new(JS_SAFE_CHALLENGE_PATTERNS).expect("safe challenges");
     /// The default Semaphore limits.
-    static ref DEFAULT_PERMITS: usize = calc_limits(1);
+    pub static ref DEFAULT_PERMITS: usize = calc_limits(1);
     /// The shared global Semaphore.
     pub(crate) static ref SEM_SHARED: Arc<Semaphore> = {
         let base_limit = match std::env::var("SEMAPHORE_MULTIPLIER") {
@@ -417,7 +417,7 @@ impl Website {
         let domain_parsed: Option<Box<Url>> = parse_absolute_url(&url);
         let mut status = CrawlStatus::Start;
 
-        if let Some(ref u) = domain_parsed {
+        if let Some(u) = &domain_parsed {
             if check_firewall && crate::utils::abs::block_website(&u) {
                 status = CrawlStatus::FirewallBlocked;
             }
@@ -495,9 +495,9 @@ impl Website {
     }
 
     /// Single page request.
-    fn single_page(&self) -> bool {
-        match self.configuration.inner_budget {
-            Some(ref b) => match b.get(&*WILD_CARD_PATH) {
+    pub fn single_page(&self) -> bool {
+        match &self.configuration.inner_budget {
+            Some(b) => match b.get(&*WILD_CARD_PATH) {
                 Some(b) => b.eq(&1),
                 _ => false,
             },
@@ -554,7 +554,7 @@ impl Website {
 
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
+    pub async fn is_allowed_disk(&self, url_to_check: &str) -> bool {
         match &self.sqlite {
             Some(sqlite) => {
                 if !sqlite.ready() {
@@ -572,13 +572,13 @@ impl Website {
 
     /// Check if URL exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn is_allowed_disk(&self, _url_to_check: &str) -> bool {
+    pub async fn is_allowed_disk(&self, _url_to_check: &str) -> bool {
         true
     }
 
     /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn is_allowed_signature_disk(&self, signature_to_check: u64) -> bool {
+    pub async fn is_allowed_signature_disk(&self, signature_to_check: u64) -> bool {
         match &self.sqlite {
             Some(sqlite) => {
                 if !sqlite.ready() {
@@ -595,12 +595,12 @@ impl Website {
 
     /// Check if signature exists (ignore case). This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn is_allowed_signature_disk(&self, _signature_to_check: u64) -> bool {
+    pub async fn is_allowed_signature_disk(&self, _signature_to_check: u64) -> bool {
         true
     }
 
     /// Is the signature allowed.
-    async fn is_signature_allowed(&self, signature: u64) -> bool {
+    pub async fn is_signature_allowed(&self, signature: u64) -> bool {
         !self.signatures.contains(&signature) || self.is_allowed_signature_disk(signature).await
     }
 
@@ -632,7 +632,7 @@ impl Website {
 
     /// Insert a new URL to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn insert_url_disk(&self, new_url: &str) {
+    pub async fn insert_url_disk(&self, new_url: &str) {
         if let Some(sqlite) = &self.sqlite {
             sqlite.insert_url(sqlite.get_db_pool().await, new_url).await
         }
@@ -640,7 +640,7 @@ impl Website {
 
     /// Insert a new signature to disk if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn insert_signature_disk(&self, signature: u64) {
+    pub async fn insert_signature_disk(&self, signature: u64) {
         if let Some(sqlite) = &self.sqlite {
             sqlite
                 .insert_signature(sqlite.get_db_pool().await, signature)
@@ -650,7 +650,7 @@ impl Website {
 
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
+    pub async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
         let mem_load = crate::utils::detect_system::get_global_memory_state().await;
         let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
@@ -683,13 +683,13 @@ impl Website {
 
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn insert_link(&mut self, link: CaseInsensitiveString) {
+    pub async fn insert_link(&mut self, link: CaseInsensitiveString) {
         self.links_visited.insert(link);
     }
 
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn insert_signature(&mut self, new_signature: u64) {
+    pub async fn insert_signature(&mut self, new_signature: u64) {
         let mem_load = crate::utils::detect_system::get_global_memory_state().await;
         let beyond_memory_limits = self.signatures.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
@@ -722,13 +722,13 @@ impl Website {
 
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
-    async fn insert_signature(&mut self, new_signature: u64) {
+    pub async fn insert_signature(&mut self, new_signature: u64) {
         self.signatures.insert(new_signature);
     }
 
     /// Seed the DB and clear the Hashset. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
-    async fn seed(&mut self) -> Result<(), sqlx::Error> {
+    pub async fn seed(&mut self) -> Result<(), sqlx::Error> {
         let links = self.get_links();
 
         if let Some(sqlite) = &self.sqlite {
@@ -919,8 +919,8 @@ impl Website {
         if self.configuration.respect_robots_txt {
             if let Some(r) = &self.robot_file_parser {
                 return r.can_fetch(
-                    match self.configuration.user_agent {
-                        Some(ref ua) => ua,
+                    match &self.configuration.user_agent {
+                        Some(ua) => ua,
                         _ => "*",
                     },
                     link,
@@ -1321,7 +1321,7 @@ impl Website {
     }
 
     /// Crawls commenced from fresh run.
-    fn start(&mut self) {
+    pub fn start(&mut self) {
         self.shutdown = false;
     }
 
@@ -1357,7 +1357,7 @@ impl Website {
     }
 
     /// Setup strict a strict redirect policy for request. All redirects need to match the host.
-    fn setup_strict_policy(&self) -> Policy {
+    pub fn setup_strict_policy(&self) -> Policy {
         use crate::client::redirect::Attempt;
         use crate::page::domain_name;
         use std::sync::atomic::AtomicU8;
@@ -1414,7 +1414,7 @@ impl Website {
     }
 
     /// Setup redirect policy for reqwest.
-    fn setup_redirect_policy(&self) -> Policy {
+    pub fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
             RedirectPolicy::Loose => Policy::limited(*self.configuration.redirect_limit),
             RedirectPolicy::None => Policy::none(),
@@ -1457,7 +1457,7 @@ impl Website {
 
     #[cfg(all(not(feature = "wreq"), not(feature = "decentralized")))]
     /// Base client configuration.
-    fn configure_base_client(&self) -> ClientBuilder {
+    pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
 
         let user_agent = match &self.configuration.user_agent {
@@ -1539,7 +1539,7 @@ impl Website {
 
     #[cfg(all(feature = "wreq", not(feature = "decentralized")))]
     /// Base client configuration.
-    fn configure_base_client(&self) -> ClientBuilder {
+    pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
 
         let user_agent = match &self.configuration.user_agent {
@@ -1604,7 +1604,7 @@ impl Website {
 
     /// Build the HTTP client.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
-    fn configure_http_client_builder(&self) -> ClientBuilder {
+    pub fn configure_http_client_builder(&self) -> ClientBuilder {
         let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
@@ -1668,7 +1668,7 @@ impl Website {
 
     /// Build the HTTP client with caching enabled.
     #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
-    fn configure_http_client_builder(&self) -> reqwest_middleware::ClientBuilder {
+    pub fn configure_http_client_builder(&self) -> reqwest_middleware::ClientBuilder {
         use crate::utils::create_cache_key;
         let client = self.configure_base_client();
 
@@ -1759,7 +1759,7 @@ impl Website {
 
     /// Build the HTTP client with cookie configurations.
     #[cfg(all(not(feature = "decentralized"), feature = "cookies"))]
-    fn configure_http_client_cookies(
+    pub fn configure_http_client_cookies(
         &self,
         client: crate::client::ClientBuilder,
     ) -> crate::client::ClientBuilder {
@@ -1779,7 +1779,7 @@ impl Website {
 
     /// Build the client with cookie configurations. This does nothing with [cookies] flag enabled.
     #[cfg(all(not(feature = "decentralized"), not(feature = "cookies")))]
-    fn configure_http_client_cookies(
+    pub fn configure_http_client_cookies(
         &self,
         client: crate::client::ClientBuilder,
     ) -> crate::client::ClientBuilder {
@@ -1839,7 +1839,7 @@ impl Website {
             headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
         }
 
-        if let Some(ref h) = self.configuration.headers {
+        if let Some(h) = &self.configuration.headers {
             headers.extend(h.inner().clone());
         }
 
@@ -1907,7 +1907,7 @@ impl Website {
             headers.insert(reqwest::header::REFERER, HeaderValue::from(referer));
         }
 
-        if let Some(ref h) = self.configuration.headers {
+        if let Some(h) = &self.configuration.headers {
             headers.extend(h.inner().clone());
         }
 
@@ -1963,7 +1963,7 @@ impl Website {
 
     /// Setup atomic controller. This does nothing without the 'control' feature flag enabled.
     #[cfg(feature = "control")]
-    fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
+    pub fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
         use crate::utils::{Handler, CONTROLLER};
 
         if self.configuration.no_control_thread {
@@ -2000,13 +2000,13 @@ impl Website {
 
     #[cfg(not(feature = "control"))]
     /// Setup atomic controller. This does nothing without the 'control' feature flag enabled.
-    fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
+    pub fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
         None
     }
 
     /// Setup interception for chrome request.
     #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
-    async fn setup_chrome_interception(
+    pub async fn setup_chrome_interception(
         &self,
         page: &chromiumoxide::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
@@ -2022,7 +2022,7 @@ impl Website {
 
     /// Setup interception for chrome request
     #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
-    async fn setup_chrome_interception(
+    pub async fn setup_chrome_interception(
         &self,
         _chrome_page: &chromiumoxide::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
@@ -2030,7 +2030,7 @@ impl Website {
     }
 
     /// Setup selectors for handling link targets.
-    fn setup_selectors(&self) -> RelativeSelectors {
+    pub fn setup_selectors(&self) -> RelativeSelectors {
         setup_website_selectors(
             self.get_url().inner(),
             AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
@@ -2038,7 +2038,7 @@ impl Website {
     }
 
     /// Base configuration setup.
-    fn setup_base(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+    pub fn setup_base(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         self.determine_limits();
         self.setup_disk();
         self.configure_headers();
@@ -2054,7 +2054,7 @@ impl Website {
     }
 
     /// Setup config for crawl.
-    async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
+    pub async fn setup(&mut self) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         let setup = self.setup_base();
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
@@ -2066,7 +2066,7 @@ impl Website {
     }
 
     /// Setup shared concurrent configs.
-    fn setup_crawl(
+    pub fn setup_crawl(
         &self,
     ) -> (
         std::pin::Pin<Box<tokio::time::Interval>>,
@@ -2080,7 +2080,7 @@ impl Website {
 
     /// Get all the expanded links.
     #[cfg(feature = "glob")]
-    fn get_expanded_links(&self, domain_name: &str) -> Vec<CaseInsensitiveString> {
+    pub fn get_expanded_links(&self, domain_name: &str) -> Vec<CaseInsensitiveString> {
         let mut expanded = crate::features::glob::expand_url(&domain_name);
 
         if expanded.len() == 0 {
@@ -2093,7 +2093,7 @@ impl Website {
     }
 
     /// Set the initial crawl status by page output.
-    pub(crate) fn set_crawl_initial_status(
+    pub fn set_crawl_initial_status(
         &mut self,
         page: &crate::page::Page,
         links: &HashSet<CaseInsensitiveString>,
@@ -2124,9 +2124,9 @@ impl Website {
         }
     }
 
-    /// Expand links for crawl.
+    /// Expand links for crawl base establish.
     #[cfg(not(feature = "glob"))]
-    async fn _crawl_establish(
+    pub async fn _crawl_establish(
         &mut self,
         client: &Client,
         base: &mut RelativeSelectors,
@@ -2295,7 +2295,7 @@ impl Website {
         feature = "chrome",
         not(feature = "glob")
     ))]
-    async fn crawl_establish(
+    pub async fn crawl_establish(
         &mut self,
         client: &Client,
         base: &mut RelativeSelectors,
@@ -2502,7 +2502,7 @@ impl Website {
 
     /// Expand links for crawl.
     #[cfg(all(not(feature = "decentralized"), feature = "chrome",))]
-    async fn crawl_establish_chrome_one(
+    pub async fn crawl_establish_chrome_one(
         &self,
         client: &Client,
         base: &mut RelativeSelectors,
@@ -2631,7 +2631,7 @@ impl Website {
                 }
             }
 
-            if let Some(ref domain) = page.final_redirect_destination {
+            if let Some(domain) = &page.final_redirect_destination {
                 let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
                 let s = self.setup_selectors();
 
@@ -2682,7 +2682,7 @@ impl Website {
 
     /// Expand links for crawl.
     #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
-    async fn crawl_establish(
+    pub async fn crawl_establish(
         &mut self,
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
@@ -2742,7 +2742,7 @@ impl Website {
 
     /// Expand links for crawl.
     #[cfg(all(feature = "glob", feature = "decentralized"))]
-    async fn crawl_establish(
+    pub async fn crawl_establish(
         &mut self,
         client: &Client,
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
@@ -2802,7 +2802,7 @@ impl Website {
 
     /// Expand links for crawl.
     #[cfg(all(feature = "glob", feature = "chrome", not(feature = "decentralized")))]
-    async fn crawl_establish(
+    pub async fn crawl_establish(
         &mut self,
         client: &Client,
         base: &mut RelativeSelectors,
@@ -3045,7 +3045,7 @@ impl Website {
         not(feature = "decentralized"),
         feature = "smart"
     ))]
-    async fn crawl_establish_smart(
+    pub async fn crawl_establish_smart(
         &mut self,
         client: &Client,
         mut base: &mut RelativeSelectors,
@@ -3188,7 +3188,7 @@ impl Website {
         not(feature = "decentralized"),
         feature = "smart"
     ))]
-    async fn render_chrome_page(
+    pub async fn render_chrome_page(
         config: &Configuration,
         client: &Client,
         page: &mut Page,
@@ -3256,7 +3256,7 @@ impl Website {
     }
 
     /// Set the crawl status depending on crawl state. The crawl that only changes if the state is Start or Active.
-    fn set_crawl_status(&mut self) {
+    pub fn set_crawl_status(&mut self) {
         if self.status == CrawlStatus::Start || self.status == CrawlStatus::Active {
             self.status = if self.domain_parsed.is_none() {
                 CrawlStatus::Invalid
@@ -3267,7 +3267,7 @@ impl Website {
     }
 
     /// Setup the Semaphore for the crawl.
-    fn setup_semaphore(&self) -> Arc<Semaphore> {
+    pub fn setup_semaphore(&self) -> Arc<Semaphore> {
         if self.configuration.shared_queue {
             SEM_SHARED.clone()
         } else {
@@ -5003,14 +5003,14 @@ impl Website {
 
     /// Start to crawl website concurrently.
     #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
-    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.crawl_concurrent_raw(client, handle).await
     }
 
     /// Start to crawl website concurrently.
     #[cfg(feature = "decentralized")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
         self.configuration.configure_allowlist();
@@ -5125,7 +5125,7 @@ impl Website {
     /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed. The glob feature does not work with this at the moment.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    pub async fn crawl_concurrent_smart(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         use tokio::sync::OnceCell;
         self.start();
         self.status = CrawlStatus::Active;
@@ -5401,7 +5401,7 @@ impl Website {
 
     /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
     #[cfg(not(feature = "sitemap"))]
-    async fn sitemap_crawl_chain(
+    pub async fn sitemap_crawl_chain(
         &mut self,
         _client: &Client,
         _handle: &Option<Arc<AtomicI8>>,
@@ -5469,8 +5469,8 @@ impl Website {
                 selectors,
                 domain_parsed_ref,
             ));
-            let mut sitemaps = match self.configuration.sitemap_url {
-                Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
+            let mut sitemaps = match &self.configuration.sitemap_url {
+                Some(sitemap) => Vec::from([sitemap.to_owned()]),
                 _ => Default::default(),
             };
 
@@ -5703,8 +5703,8 @@ impl Website {
                     domain_parsed_ref,
                 ));
 
-                let mut sitemaps = match self.configuration.sitemap_url {
-                    Some(ref sitemap) => Vec::from([sitemap.to_owned()]),
+                let mut sitemaps = match &self.configuration.sitemap_url {
+                    Some(sitemap) => Vec::from([sitemap.to_owned()]),
                     _ => Default::default(),
                 };
 
@@ -6168,7 +6168,7 @@ impl Website {
         feature = "chrome",
         not(feature = "decentralized")
     ))]
-    async fn sitemap_crawl_chain(
+    pub async fn sitemap_crawl_chain(
         &mut self,
         client: &Client,
         handle: &Option<Arc<AtomicI8>>,
@@ -6182,7 +6182,7 @@ impl Website {
     /// Sitemap parse entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(feature = "sitemap")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn sitemap_parse(
+    pub async fn sitemap_parse(
         &mut self,
         client: &Client,
         first_request: &mut bool,
@@ -6192,7 +6192,7 @@ impl Website {
         let mut valid = *attempted_correct == false;
 
         if valid {
-            if let Some(ref domain) = self.domain_parsed {
+            if let Some(domain) = &self.domain_parsed {
                 // attempt to parse the sitemap from the html.
                 match client.get(domain.as_str()).send().await {
                     Ok(response) => {
@@ -6367,21 +6367,21 @@ impl Website {
 
     /// get base link for crawl establishing.
     #[cfg(feature = "regex")]
-    fn get_base_link(&self) -> &CaseInsensitiveString {
+    pub fn get_base_link(&self) -> &CaseInsensitiveString {
         &self.url
     }
 
     /// get base link for crawl establishing.
     #[cfg(not(feature = "regex"))]
-    fn get_base_link(&self) -> &CompactString {
+    pub fn get_base_link(&self) -> &CompactString {
         self.url.inner()
     }
 
     /// Guard the channel from closing until all subscription events complete.
-    async fn subscription_guard(&self) {
+    pub async fn subscription_guard(&self) {
         if let Some(channel) = &self.channel {
             if !channel.1.is_empty() {
-                if let Some(ref guard_counter) = self.channel_guard {
+                if let Some(guard_counter) = &self.channel_guard {
                     guard_counter.lock().await
                 }
             }
@@ -6390,7 +6390,7 @@ impl Website {
 
     /// Launch or connect to browser with setup.
     #[cfg(feature = "chrome")]
-    pub(crate) async fn setup_browser_base(
+    pub async fn setup_browser_base(
         config: &Configuration,
         url_parsed: &Option<Box<Url>>,
     ) -> Option<crate::features::chrome::BrowserController> {
@@ -7019,7 +7019,7 @@ impl Website {
     }
 
     /// Determine if the budget has a wildcard path and the depth limit distance. This does nothing without the `budget` flag enabled.
-    fn determine_limits(&mut self) {
+    pub fn determine_limits(&mut self) {
         self.configuration.configure_budget();
         if self.configuration.inner_budget.is_some() {
             let wild_card_budget = match &self.configuration.inner_budget {
@@ -7029,7 +7029,7 @@ impl Website {
             self.configuration.wild_card_budgeting = wild_card_budget;
         }
         if self.configuration.depth > 0 && self.domain_parsed.is_some() {
-            if let Some(ref domain) = self.domain_parsed {
+            if let Some(domain) = &self.domain_parsed {
                 if let Some(segments) = domain.path_segments() {
                     let segments_cnt = segments.count();
 
@@ -7265,7 +7265,7 @@ impl Website {
 }
 
 /// Channel broadcast send the Page to receivers.
-fn channel_send_page(
+pub fn channel_send_page(
     channel: &Option<(
         tokio::sync::broadcast::Sender<Page>,
         std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
