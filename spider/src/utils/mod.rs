@@ -4,6 +4,8 @@ pub mod abs;
 pub mod connect;
 /// Generic CSS selectors.
 pub mod css_selectors;
+#[cfg(feature = "chrome")]
+pub(crate) mod detect_chrome;
 #[cfg(any(feature = "balance", feature = "disk"))]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
@@ -15,7 +17,6 @@ pub mod interner;
 pub mod trie;
 /// Validate html false positives.
 pub mod validation;
-pub(crate) mod detect_chrome;
 
 use crate::{
     page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},

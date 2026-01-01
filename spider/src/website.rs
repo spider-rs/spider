@@ -2126,6 +2126,182 @@ impl Website {
         }
     }
 
+    /// Expand links for crawl base establish using a **command-based fetch**.
+    #[cfg(feature = "cmd")]
+    pub async fn _crawl_establish_cmd(
+        &mut self,
+        cmd: std::path::PathBuf,
+        cmd_args: Vec<String>,
+        base: &mut RelativeSelectors,
+        _ssg_build: bool,
+    ) -> HashSet<CaseInsensitiveString> {
+        if self.skip_initial {
+            return Default::default();
+        }
+
+        if !self
+            .is_allowed_default(self.get_base_link())
+            .eq(&ProcessLinkStatus::Allowed)
+        {
+            return HashSet::new();
+        }
+
+        let url = self.url.inner();
+
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links_ssg = links.clone();
+        let mut links_pages = if self.configuration.return_page_links {
+            Some(links.clone())
+        } else {
+            None
+        };
+
+        let mut page_links_settings =
+            PageLinkBuildSettings::new(true, self.configuration.full_resources);
+        page_links_settings.subdomains = self.configuration.subdomains;
+        page_links_settings.tld = self.configuration.tld;
+        page_links_settings.normalize = self.configuration.normalize;
+
+        let mut domain_parsed = self.domain_parsed.take();
+
+        let mut retry_count = self.configuration.retry;
+        let mut last_err: Option<std::io::Error> = None;
+
+        let build_error_page = |status: StatusCode, _err: std::io::Error| {
+            let mut p = Page::default();
+            p.url = url.to_string();
+            p.status_code = status;
+            #[cfg(feature = "page_error_status_details")]
+            {
+                p.error_for_status = Some(Err(_err));
+            }
+            p
+        };
+
+        let mut page: Page = loop {
+            let bytes = match Self::run_via_cmd(&cmd, &cmd_args, url).await {
+                Ok(b) => {
+                    if b.is_empty() {
+                        last_err = Some(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "cmd returned empty stdout",
+                        ));
+                        None
+                    } else {
+                        Some(b)
+                    }
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    None
+                }
+            };
+
+            if let Some(bytes) = bytes.as_deref() {
+                let mut domain_parsed_out = None;
+
+                let page = Page::new_page_streaming_from_bytes(
+                    url,
+                    bytes,
+                    base,
+                    &self.configuration.external_domains_caseless,
+                    &page_links_settings,
+                    &mut links,
+                    Some(&mut links_ssg),
+                    &mut domain_parsed,
+                    &mut domain_parsed_out,
+                    &mut links_pages,
+                )
+                .await;
+
+                if self.domain_parsed.is_none() {
+                    if let Some(mut dp) = domain_parsed.take() {
+                        convert_abs_url(&mut dp);
+                        self.domain_parsed.replace(dp);
+                    } else if let Some(mut dp) = domain_parsed_out.take() {
+                        convert_abs_url(&mut dp);
+                        self.domain_parsed.replace(dp);
+                    }
+                } else if self.domain_parsed.is_none() {
+                    self.domain_parsed = domain_parsed_out;
+                }
+
+                if page.should_retry && retry_count > 0 {
+                    retry_count -= 1;
+                    if let Some(timeout) = page.get_timeout() {
+                        tokio::time::sleep(timeout).await;
+                    } else {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    }
+                    continue;
+                }
+
+                break page;
+            }
+
+            if retry_count == 0 {
+                let err = last_err.take().unwrap_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "cmd fetch failed (unknown error)",
+                    )
+                });
+                break build_error_page(StatusCode::BAD_GATEWAY, err);
+            }
+
+            retry_count -= 1;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        };
+
+        if page.get_html_bytes_u8().starts_with(b"<?xml") {
+            page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
+                .await;
+        }
+
+        emit_log(url);
+
+        if let Some(signature) = page.signature {
+            if !self.is_signature_allowed(signature).await {
+                return Default::default();
+            }
+            self.insert_signature(signature).await;
+        }
+
+        let url_ci = match &self.on_link_find_callback {
+            Some(cb) => cb(*self.url.clone(), None).0,
+            _ => *self.url.clone(),
+        };
+        self.insert_link(url_ci).await;
+
+        if self.configuration.return_page_links {
+            page.page_links = links_pages
+                .filter(|pages: &HashSet<CaseInsensitiveString>| !pages.is_empty())
+                .map(Box::new);
+        }
+
+        links.extend(links_ssg);
+
+        self.initial_status_code = page.status_code;
+        self.initial_html_length = page.get_html_bytes_u8().len();
+        self.initial_anti_bot_tech = page.anti_bot_tech;
+        self.initial_page_should_retry = page.should_retry;
+        self.initial_page_waf_check = page.waf_check;
+
+        self.set_crawl_initial_status(&page, &links);
+
+        if let Some(cb) = self.on_should_crawl_callback {
+            if !cb(&page) {
+                page.blocked_crawl = true;
+                channel_send_page(&self.channel, page, &self.channel_guard);
+                return Default::default();
+            }
+        }
+
+        channel_send_page(&self.channel, page, &self.channel_guard);
+
+        links
+    }
+
     /// Expand links for crawl base establish.
     #[cfg(not(feature = "glob"))]
     pub async fn _crawl_establish(
@@ -2288,6 +2464,368 @@ impl Website {
             links
         } else {
             HashSet::new()
+        }
+    }
+
+    /// Run `cmd` and return stdout bytes.
+    #[cfg(feature = "cmd")]
+    pub async fn run_via_cmd(
+        cmd: &std::path::Path,
+        fixed_args: &[String],
+        url: &str,
+    ) -> std::io::Result<Vec<u8>> {
+        use tokio::process::Command;
+        let mut args: Vec<String> = Vec::with_capacity(fixed_args.len() + 1);
+        let mut used_placeholder = false;
+
+        for a in fixed_args {
+            if a.contains("{url}") {
+                used_placeholder = true;
+                args.push(a.replace("{url}", url));
+            } else {
+                args.push(a.clone());
+            }
+        }
+
+        if !used_placeholder {
+            args.push(url.to_string());
+        }
+
+        let out = Command::new(cmd)
+            .args(&args)
+            .kill_on_drop(true)
+            .output()
+            .await?;
+
+        if !out.status.success() {
+            let code = out.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("cmd exit={code} stderr={stderr}"),
+            ));
+        }
+
+        Ok(out.stdout)
+    }
+
+    /// Start to crawl website concurrently using a cmd executable.
+    /// - `cmd` is the executable (absolute preferred)
+    /// - `cmd_args` are fixed args; can include "{url}" placeholder, otherwise url is appended.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    #[cfg(feature = "cmd")]
+    pub async fn crawl_concurrent_cmd(
+        &mut self,
+        cmd: std::path::PathBuf,
+        cmd_args: Vec<String>,
+        handle: &Option<Arc<AtomicI8>>,
+    ) {
+        self.start();
+        self.status = CrawlStatus::Active;
+
+        let mut selector: (
+            CompactString,
+            smallvec::SmallVec<[CompactString; 2]>,
+            CompactString,
+        ) = self.setup_selectors();
+
+        if self.single_page() {
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+            let mut links_pages: Option<HashSet<CaseInsensitiveString>> =
+                if self.configuration.return_page_links {
+                    Some(HashSet::new())
+                } else {
+                    None
+                };
+
+            let mut relative_selectors = selector;
+            let mut domain_parsed = None;
+
+            let target = self
+                .domain_parsed
+                .as_ref()
+                .map(|u| u.as_str())
+                .unwrap_or(self.get_url());
+
+            let bytes = match Self::run_via_cmd(&cmd, &cmd_args, target).await {
+                Ok(b) => b,
+                Err(e) => {
+                    let mut page = Page::default();
+                    page.url = target.to_string();
+                    page.status_code = StatusCode::BAD_GATEWAY;
+                    #[cfg(feature = "page_error_status_details")]
+                    {
+                        page.error_for_status = Some(Err(e));
+                    }
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return;
+                }
+            };
+
+            let page = Page::new_page_streaming_from_bytes(
+                target,
+                &bytes,
+                &mut relative_selectors,
+                &self.configuration.external_domains_caseless,
+                &PageLinkBuildSettings::new_full(
+                    false,
+                    self.configuration.full_resources,
+                    self.configuration.subdomains,
+                    self.configuration.tld,
+                    self.configuration.normalize,
+                ),
+                &mut links,
+                None,
+                &self.domain_parsed,
+                &mut domain_parsed,
+                &mut links_pages,
+            )
+            .await;
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
+            return;
+        }
+
+        let on_should_crawl_callback = self.on_should_crawl_callback;
+        let return_page_links = self.configuration.return_page_links;
+        let full_resources = self.configuration.full_resources;
+        let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
+        let (mut interval, throttle) = self.setup_crawl();
+        let mut links: HashSet<CaseInsensitiveString> = self.drain_extra_links().collect();
+
+        links.extend(
+            self._crawl_establish_cmd(cmd.clone(), cmd_args.clone(), &mut selector, false)
+                .await,
+        );
+
+        self.configuration.configure_allowlist();
+        let semaphore = self.setup_semaphore();
+
+        let shared = Arc::new((
+            cmd,
+            cmd_args,
+            selector,
+            self.channel.clone(),
+            self.configuration.external_domains_caseless.clone(),
+            self.channel_guard.clone(),
+            self.configuration.retry,
+            return_page_links,
+            PageLinkBuildSettings::new_full(
+                false,
+                full_resources,
+                self.configuration.subdomains,
+                self.configuration.tld,
+                self.configuration.normalize,
+            ),
+            self.domain_parsed.clone(),
+            self.on_link_find_callback.clone(),
+        ));
+
+        let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
+
+        let mut exceeded_budget = false;
+        let concurrency = throttle.is_zero();
+
+        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
+        if !concurrency && !links.is_empty() {
+            tokio::time::sleep(*throttle).await;
+        }
+
+        let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+            Some(Instant::now())
+        } else {
+            None
+        };
+
+        'outer: loop {
+            let mut stream =
+                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+
+            loop {
+                if !concurrency {
+                    tokio::time::sleep(*throttle).await;
+                }
+
+                let semaphore = get_semaphore(&semaphore, !self.configuration.shared_queue).await;
+
+                tokio::select! {
+                    biased;
+
+                    Some(link) = stream.next(),
+                    if semaphore.available_permits() > 0
+                        && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker) =>
+                    {
+                        if !self.handle_process(handle, &mut interval, async {
+                            emit_log_shutdown(link.inner());
+                            let permits = set.len();
+                            set.shutdown().await;
+                            semaphore.add_permits(permits);
+                        }).await {
+                            while let Some(links) = stream.next().await {
+                                self.extra_links.insert(links);
+                            }
+                            break 'outer;
+                        }
+
+                        let allowed = self.is_allowed(&link);
+                        if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                            exceeded_budget = true;
+                            break;
+                        }
+                        if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                            continue;
+                        }
+
+                        emit_log(link.inner());
+                        self.insert_link(link.clone()).await;
+
+                        if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                            let shared = shared.clone();
+                            spawn_set("page_fetch_cmd", &mut set, async move {
+                                let link_result = match &shared.10 {
+                                    Some(cb) => cb(link, None),
+                                    _ => (link, None),
+                                };
+
+                                let mut out_links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                let mut links_pages = if shared.7 { Some(out_links.clone()) } else { None };
+
+                                let mut relative_selectors = shared.2.clone();
+                                let mut r_settings = shared.8;
+                                r_settings.ssg_build = true;
+
+                                let target_url = link_result.0.as_ref();
+
+                                // Run cmd -> bytes with retry
+                                let mut retry_count = shared.6;
+                                let mut last_err: Option<std::io::Error> = None;
+
+                                let bytes = loop {
+                                    match Self::run_via_cmd(&shared.0, &shared.1, target_url).await {
+                                        Ok(b) if !b.is_empty() => break Some(b),
+                                        Ok(_) => {
+                                            last_err = Some(std::io::Error::new(
+                                                std::io::ErrorKind::UnexpectedEof,
+                                                "cmd returned empty stdout",
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            last_err = Some(e);
+                                        }
+                                    }
+
+                                    if retry_count == 0 { break None; }
+                                    retry_count -= 1;
+
+                                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                };
+
+                                let mut domain_parsed = None;
+
+                                let mut page = if let Some(bytes) = bytes {
+                                    Page::new_page_streaming_from_bytes(
+                                        target_url,
+                                        &bytes,
+                                        &mut relative_selectors,
+                                        &shared.4,
+                                        &r_settings,
+                                        &mut out_links,
+                                        None,
+                                        &shared.9,
+                                        &mut domain_parsed,
+                                        &mut links_pages,
+                                    ).await
+                                } else {
+                                    // Build an error page
+                                    let mut p = Page::default();
+                                    p.url = target_url.to_string();
+                                    p.status_code = StatusCode::BAD_GATEWAY;
+                                    if let Some(e) = last_err {
+                                                    #[cfg(feature = "page_error_status_details")]
+                                                    {
+                                                        p.error_for_status = Some(Err(e));
+                                                    }
+                                    }
+                                    p
+                                };
+
+                                if shared.7 {
+                                    page.page_links = links_pages
+                                        .filter(|pages| !pages.is_empty())
+                                        .map(Box::new);
+                                }
+
+                                if let Some(cb) = on_should_crawl_callback {
+                                    if !cb(&page) {
+                                        page.blocked_crawl = true;
+                                        channel_send_page(&shared.3, page, &shared.5);
+                                        drop(permit);
+                                        return Default::default();
+                                    }
+                                }
+
+                                let signature = page.signature;
+                                channel_send_page(&shared.3, page, &shared.5);
+                                drop(permit);
+
+                                (out_links, signature)
+                            });
+                        }
+
+                        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+                    },
+
+                    Some(result) = set.join_next(), if !set.is_empty() => {
+                        if let Ok(res) = result {
+                            match res.1 {
+                                Some(signature) => {
+                                    if self.is_signature_allowed(signature).await {
+                                        self.insert_signature(signature).await;
+                                        self.links_visited.extend_links(&mut links, res.0);
+                                    }
+                                }
+                                _ => {
+                                    self.links_visited.extend_links(&mut links, res.0);
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+
+                    else => break,
+                }
+
+                self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
+                if (links.is_empty() && set.is_empty()) || exceeded_budget {
+                    if exceeded_budget {
+                        while let Some(links) = stream.next().await {
+                            self.extra_links.insert(links);
+                        }
+                        while let Some(links) = set.join_next().await {
+                            if let Ok(links) = links {
+                                self.extra_links.extend(links.0);
+                            }
+                        }
+                    }
+                    break 'outer;
+                }
+            }
+
+            self.subscription_guard().await;
+            self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
+            if links.is_empty() && set.is_empty() {
+                break;
+            }
+        }
+
+        if !links.is_empty() {
+            self.extra_links.extend(links);
         }
     }
 
@@ -7158,6 +7696,18 @@ impl Website {
     #[cfg(feature = "sync")]
     pub fn unsubscribe(&mut self) {
         self.channel.take();
+    }
+
+    /// Get the channel sender to send manual subscriptions.
+    pub fn get_channel(
+        &self,
+    ) -> &Option<(broadcast::Sender<Page>, Arc<broadcast::Receiver<Page>>)> {
+        &self.channel
+    }
+
+    /// Get the channel guard to send manual subscriptions from closing.
+    pub fn get_channel_guard(&self) -> &Option<ChannelGuard> {
+        &self.channel_guard
     }
 
     /// Setup subscription counter to track concurrent operation completions.

@@ -1,5 +1,5 @@
 use crate::features::chrome_args::CHROME_ARGS;
-use crate::utils::{log,detect_chrome::get_detect_chrome_executable};
+use crate::utils::{detect_chrome::get_detect_chrome_executable, log};
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
@@ -102,8 +102,6 @@ pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, 
         };
     }
 }
-
-
 
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]

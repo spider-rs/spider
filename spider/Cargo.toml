@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.38.110"
+version = "2.38.112"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -95,8 +95,8 @@ wreq = { version = "5", optional = true, features = [
     "cookies",
 ] }
 wreq-util = { version = "2", optional = true, features = ["emulation-serde"] }
-which = { version = "6.0" }
-home = { version = "0.5" }
+which = { version = "6.0", optional = true }
+home = { version = "0.5", optional = true }
 
 [dependencies.chromey]
 version = "2"
@@ -179,6 +179,7 @@ ua_generator = ["dep:ua_generator"]
 decentralized = ["serde", "flexbuffers"]
 control = []
 time = []
+cmd = ["tokio/process"]
 io_uring = ["dep:tokio-uring"]
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
@@ -213,7 +214,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand"]
+chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]

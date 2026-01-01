@@ -467,11 +467,11 @@ pub enum AntiBotTech {
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Box<Vec<u8>>>,
+    pub(crate) html: Option<Box<Vec<u8>>>,
     /// Base absolute url for page.
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
-    url: String,
+    pub(crate) url: String,
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "remote_addr")]
@@ -1686,6 +1686,218 @@ impl Page {
     pub async fn new(url: &str, client: &Client) -> Self {
         let page_resource = crate::utils::fetch_page_html(url, client).await;
         build(url, page_resource)
+    }
+
+    /// Instantiate a new page and gather the links from input bytes.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    #[cfg(feature = "cmd")]
+    pub async fn new_page_streaming_from_bytes<
+        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+    >(
+        url: &str,
+        input_bytes: &[u8],
+        selectors: &mut RelativeSelectors,
+        external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+        r_settings: &PageLinkBuildSettings,
+        map: &mut hashbrown::HashSet<A>,
+        ssg_map: Option<&mut hashbrown::HashSet<A>>,
+        prior_domain: &Option<Box<Url>>,
+        domain_parsed: &mut Option<Box<Url>>,
+        links_pages: &mut Option<hashbrown::HashSet<A>>,
+    ) -> Self {
+        use crate::utils::{modify_selectors, AllowedDomainTypes};
+
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
+
+        let duration = if cfg!(feature = "time") {
+            Some(tokio::time::Instant::now())
+        } else {
+            None
+        };
+
+        let encoding = AsciiCompatibleEncoding::utf_8();
+        let adjust_charset_on_meta_tag = true;
+
+        let base_input_url = tokio::sync::OnceCell::new();
+
+        let original_page = match Url::parse(url) {
+            Ok(u) => Some(u),
+            _ => None,
+        };
+
+        if ssg_map.is_some() {
+            let mut ci_url = Box::new(CaseInsensitiveString::new(url));
+            modify_selectors(
+                prior_domain,
+                url,
+                domain_parsed,
+                &mut ci_url,
+                selectors,
+                AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+            );
+        }
+
+        let base = if domain_parsed.is_none() {
+            prior_domain
+        } else {
+            domain_parsed
+        };
+
+        let parent_host = &selectors.1[0];
+        let parent_host_scheme = &selectors.1[1];
+        let base_input_domain = &selectors.2;
+        let sub_matcher = &selectors.0;
+
+        let xml_file = url.ends_with(".xml");
+
+        let base_links_settings = if r_settings.full_resources {
+            lol_html::element!("a[href],script[src],link[href]", |el| {
+                let tag_name = el.tag_name();
+                let attribute = if tag_name == "script" { "src" } else { "href" };
+
+                if let Some(href) = el.get_attribute(attribute) {
+                    let base = if relative_directory_url(&href) || base.is_none() {
+                        original_page.as_ref()
+                    } else {
+                        base.as_deref()
+                    };
+                    let base = if base_input_url.initialized() {
+                        base_input_url.get()
+                    } else {
+                        base
+                    };
+
+                    push_link(
+                        &base,
+                        &href,
+                        map,
+                        &selectors.0,
+                        parent_host,
+                        parent_host_scheme,
+                        base_input_domain,
+                        sub_matcher,
+                        &external_domains_caseless,
+                        links_pages,
+                    );
+                }
+
+                Ok(())
+            })
+        } else {
+            lol_html::element!(
+                if xml_file {
+                    BASE_CSS_SELECTORS_WITH_XML
+                } else {
+                    BASE_CSS_SELECTORS
+                },
+                |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        let base = if relative_directory_url(&href) || base.is_none() {
+                            original_page.as_ref()
+                        } else {
+                            base.as_deref()
+                        };
+                        let base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            base
+                        };
+
+                        push_link(
+                            &base,
+                            &href,
+                            map,
+                            &selectors.0,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            &external_domains_caseless,
+                            links_pages,
+                        );
+                    }
+                    Ok(())
+                }
+            )
+        };
+
+        let mut element_content_handlers =
+            Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
+
+        element_content_handlers.push(lol_html::element!("base", |el| {
+            if let Some(href) = el.get_attribute("href") {
+                if let Ok(parsed_base) = Url::parse(&href) {
+                    let _ = base_input_url.set(parsed_base);
+                }
+            }
+            Ok(())
+        }));
+
+        element_content_handlers.push(base_links_settings);
+
+        element_content_handlers.extend(metadata_handlers(
+            &mut meta_title,
+            &mut meta_description,
+            &mut meta_og_image,
+        ));
+
+        let settings = lol_html::send::Settings {
+            element_content_handlers,
+            adjust_charset_on_meta_tag,
+            encoding,
+            ..lol_html::send::Settings::new_for_handler_types()
+        };
+
+        let mut collected_bytes: Vec<u8> = match input_bytes.len() {
+            n if n >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE => Vec::with_capacity(n),
+            _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
+        };
+
+        let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |c: &[u8]| {
+            collected_bytes.extend_from_slice(c);
+        });
+
+        let _ = rewriter.write(input_bytes);
+        let _ = rewriter.end();
+
+        let mut page_response = PageResponse::default();
+        page_response.status_code = StatusCode::OK;
+
+        if r_settings.normalize {
+            page_response.signature = Some(hash_html(&collected_bytes).await);
+        }
+
+        if !collected_bytes.is_empty() {
+            page_response.content = Some(Box::new(collected_bytes));
+        }
+
+        let valid_meta = meta_title.is_some()
+            || meta_description.is_some()
+            || meta_og_image.is_some()
+            || metadata.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+            metadata_inner.image = meta_og_image;
+
+            if metadata_inner.exist() && metadata.is_some() {
+                set_metadata(&metadata, &mut metadata_inner);
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                page_response.metadata = metadata;
+            }
+        }
+
+        crate::utils::set_page_response_duration(&mut page_response, duration);
+
+        build(url, page_response)
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
