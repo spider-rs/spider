@@ -1,5 +1,5 @@
 use crate::features::chrome_args::CHROME_ARGS;
-use crate::utils::log;
+use crate::utils::{log,detect_chrome::get_detect_chrome_executable};
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
 use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
@@ -103,6 +103,8 @@ pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, 
     }
 }
 
+
+
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
@@ -154,13 +156,9 @@ pub fn get_browser_config(
         }
         _ => builder.args(CHROME_ARGS),
     };
-    let builder = if std::env::var("CHROME_BIN").is_ok() {
-        match std::env::var("CHROME_BIN") {
-            Ok(v) => builder.chrome_executable(v),
-            _ => builder,
-        }
-    } else {
-        builder
+    let builder = match get_detect_chrome_executable() {
+        Some(v) => builder.chrome_executable(v),
+        _ => builder,
     };
 
     match builder.viewport(viewport).build() {
@@ -229,13 +227,9 @@ pub fn get_browser_config(
         }
         _ => builder.args(chrome_args),
     };
-    let builder = if std::env::var("CHROME_BIN").is_ok() {
-        match std::env::var("CHROME_BIN") {
-            Ok(v) => builder.chrome_executable(v),
-            _ => builder,
-        }
-    } else {
-        builder
+    let builder = match get_detect_chrome_executable() {
+        Some(v) => builder.chrome_executable(v),
+        _ => builder,
     };
     match builder.viewport(viewport).build() {
         Ok(b) => Some(b),

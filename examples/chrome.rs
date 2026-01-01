@@ -8,7 +8,7 @@ use std::io::Result;
 
 async fn crawl_website(url: &str) -> Result<()> {
     let mut website: Website = Website::new(url)
-        .with_limit(100)
+        .with_limit(10)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_stealth(true)
         .build()
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let _ = tokio::join!(
         crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),
-        crawl_website("https://example.com"),
+        crawl_website("https://github.com/spider-rs"),
     );
 
     Ok(())
