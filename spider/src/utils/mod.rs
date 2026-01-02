@@ -4991,12 +4991,22 @@ pub async fn gemini_request_base(
                 system_prompt, url, resource, prompt
             );
 
-            // Build generation config
+            // Build generation config with JSON schema support
             let gen_config = gemini_rust::GenerationConfig {
                 max_output_tokens: Some(gemini_configs.max_tokens as i32),
                 temperature: gemini_configs.temperature,
                 top_p: gemini_configs.top_p,
                 top_k: gemini_configs.top_k,
+                response_mime_type: if gemini_configs.json_schema.is_some() {
+                    Some("application/json".to_string())
+                } else {
+                    None
+                },
+                response_schema: gemini_configs.json_schema.as_ref().and_then(|schema| {
+                    schema.schema.as_ref().and_then(|s| {
+                        serde_json::from_str::<serde_json::Value>(s).ok()
+                    })
+                }),
                 ..Default::default()
             };
 
