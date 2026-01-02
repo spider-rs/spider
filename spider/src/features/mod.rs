@@ -24,6 +24,12 @@ pub mod openai;
 /// Common modules for OpenAI
 pub mod openai_common;
 
+/// Gemini
+#[cfg(feature = "gemini")]
+pub mod gemini;
+/// Common modules for Gemini
+pub mod gemini_common;
+
 #[cfg(all(not(feature = "simd"), feature = "openai"))]
 pub(crate) use serde_json;
 #[cfg(all(feature = "simd", feature = "openai"))]

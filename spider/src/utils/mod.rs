@@ -493,6 +493,12 @@ pub struct PageResponse {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<crate::page::AIResults>>,
+    #[cfg(feature = "gemini")]
+    /// The credits used from Gemini in order.
+    pub gemini_credits_used: Option<Vec<crate::features::gemini_common::GeminiUsage>>,
+    #[cfg(feature = "gemini")]
+    /// The extra data from the Gemini AI.
+    pub extra_gemini_data: Option<Vec<crate::page::AIResults>>,
     /// A WAF was found on the page.
     pub waf_check: bool,
     /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
@@ -727,6 +733,26 @@ pub fn handle_openai_credits(
 pub fn handle_openai_credits(
     _page_response: &mut PageResponse,
     _tokens_used: crate::features::openai_common::OpenAIUsage,
+) {
+}
+
+#[cfg(feature = "gemini")]
+/// Handle the Gemini credits used.
+pub fn handle_gemini_credits(
+    page_response: &mut PageResponse,
+    tokens_used: crate::features::gemini_common::GeminiUsage,
+) {
+    match page_response.gemini_credits_used.as_mut() {
+        Some(v) => v.push(tokens_used),
+        None => page_response.gemini_credits_used = Some(vec![tokens_used]),
+    };
+}
+
+#[cfg(not(feature = "gemini"))]
+/// Handle the Gemini credits used. This does nothing without 'gemini' feature flag.
+pub fn handle_gemini_credits(
+    _page_response: &mut PageResponse,
+    _tokens_used: crate::features::gemini_common::GeminiUsage,
 ) {
 }
 
@@ -4877,6 +4903,198 @@ pub async fn openai_request(
             }
         }
         _ => openai_request_base(gpt_configs, resource, url, prompt).await,
+    }
+}
+
+#[cfg(feature = "gemini")]
+lazy_static! {
+    /// Semaphore for Gemini rate limiting
+    static ref GEMINI_SEM: tokio::sync::Semaphore = {
+        let sem_limit = (num_cpus::get() * 2).max(8);
+        tokio::sync::Semaphore::const_new(sem_limit)
+    };
+}
+
+#[cfg(not(feature = "gemini"))]
+/// Perform a request to Gemini. This does nothing without the 'gemini' flag enabled.
+pub async fn gemini_request(
+    _gemini_configs: &crate::configuration::GeminiConfigs,
+    _resource: String,
+    _url: &str,
+    _prompt: &str,
+) -> crate::features::gemini_common::GeminiReturn {
+    Default::default()
+}
+
+#[cfg(feature = "gemini")]
+/// Perform a request to Gemini Chat.
+pub async fn gemini_request_base(
+    gemini_configs: &crate::configuration::GeminiConfigs,
+    resource: String,
+    url: &str,
+    prompt: &str,
+) -> crate::features::gemini_common::GeminiReturn {
+    use crate::features::gemini_common::{GeminiReturn, GeminiUsage, DEFAULT_GEMINI_MODEL};
+
+    match GEMINI_SEM.acquire().await {
+        Ok(permit) => {
+            // Get API key from config or environment
+            let api_key = match &gemini_configs.api_key {
+                Some(key) if !key.is_empty() => key.clone(),
+                _ => match std::env::var("GEMINI_API_KEY") {
+                    Ok(key) => key,
+                    Err(_) => {
+                        return GeminiReturn {
+                            error: Some("GEMINI_API_KEY not set".to_string()),
+                            ..Default::default()
+                        };
+                    }
+                },
+            };
+
+            // Determine model to use
+            let model = if gemini_configs.model.is_empty() {
+                DEFAULT_GEMINI_MODEL.to_string()
+            } else {
+                gemini_configs.model.clone()
+            };
+
+            // Create Gemini client with model
+            let client = match gemini_rust::Gemini::with_model(&api_key, model) {
+                Ok(c) => c,
+                Err(e) => {
+                    drop(permit);
+                    return GeminiReturn {
+                        error: Some(format!("Failed to create Gemini client: {}", e)),
+                        ..Default::default()
+                    };
+                }
+            };
+
+            // Clean HTML to reduce token usage
+            let resource = clean_html(&resource);
+
+            // Build the combined prompt
+            let json_mode = gemini_configs.extra_ai_data;
+            let system_prompt = if json_mode {
+                format!(
+                    "{}\n\n{}",
+                    *crate::features::gemini::BROWSER_ACTIONS_SYSTEM_PROMPT,
+                    *crate::features::gemini::BROWSER_ACTIONS_SYSTEM_EXTRA_PROMPT
+                )
+            } else {
+                crate::features::gemini::BROWSER_ACTIONS_SYSTEM_PROMPT.clone()
+            };
+
+            let full_prompt = format!(
+                "{}\n\nURL: {}\nHTML: {}\n\nUser Request: {}",
+                system_prompt, url, resource, prompt
+            );
+
+            // Build generation config
+            let gen_config = gemini_rust::GenerationConfig {
+                max_output_tokens: Some(gemini_configs.max_tokens as i32),
+                temperature: gemini_configs.temperature,
+                top_p: gemini_configs.top_p,
+                top_k: gemini_configs.top_k,
+                ..Default::default()
+            };
+
+            // Execute request
+            let result = client
+                .generate_content()
+                .with_user_message(&full_prompt)
+                .with_generation_config(gen_config)
+                .execute()
+                .await;
+
+            drop(permit);
+
+            match result {
+                Ok(response) => {
+                    let text = response.text();
+
+                    // Extract usage metadata
+                    let usage = if let Some(meta) = response.usage_metadata {
+                        GeminiUsage {
+                            prompt_tokens: meta.prompt_token_count.unwrap_or(0) as u32,
+                            completion_tokens: meta.candidates_token_count.unwrap_or(0) as u32,
+                            total_tokens: meta.total_token_count.unwrap_or(0) as u32,
+                            cached: false,
+                        }
+                    } else {
+                        GeminiUsage::default()
+                    };
+
+                    GeminiReturn {
+                        response: text,
+                        usage,
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    log::error!("Gemini request failed: {:?}", e);
+                    GeminiReturn {
+                        error: Some(e.to_string()),
+                        ..Default::default()
+                    }
+                }
+            }
+        }
+        Err(e) => GeminiReturn {
+            error: Some(e.to_string()),
+            ..Default::default()
+        },
+    }
+}
+
+#[cfg(all(feature = "gemini", not(feature = "cache_gemini")))]
+/// Perform a request to Gemini Chat.
+pub async fn gemini_request(
+    gemini_configs: &crate::configuration::GeminiConfigs,
+    resource: String,
+    url: &str,
+    prompt: &str,
+) -> crate::features::gemini_common::GeminiReturn {
+    gemini_request_base(gemini_configs, resource, url, prompt).await
+}
+
+#[cfg(all(feature = "gemini", feature = "cache_gemini"))]
+/// Perform a request to Gemini Chat with caching.
+pub async fn gemini_request(
+    gemini_configs: &crate::configuration::GeminiConfigs,
+    resource: String,
+    url: &str,
+    prompt: &str,
+) -> crate::features::gemini_common::GeminiReturn {
+    match &gemini_configs.cache {
+        Some(cache) => {
+            use std::hash::{Hash, Hasher};
+            let mut s = ahash::AHasher::default();
+
+            url.hash(&mut s);
+            prompt.hash(&mut s);
+            gemini_configs.model.hash(&mut s);
+            gemini_configs.max_tokens.hash(&mut s);
+            gemini_configs.extra_ai_data.hash(&mut s);
+            resource.hash(&mut s);
+
+            let key = s.finish();
+
+            match cache.get(&key).await {
+                Some(cached) => {
+                    let mut c = cached;
+                    c.usage.cached = true;
+                    c
+                }
+                _ => {
+                    let r = gemini_request_base(gemini_configs, resource, url, prompt).await;
+                    let _ = cache.insert(key, r.clone()).await;
+                    r
+                }
+            }
+        }
+        _ => gemini_request_base(gemini_configs, resource, url, prompt).await,
     }
 }
 

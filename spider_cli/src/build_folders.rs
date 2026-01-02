@@ -88,9 +88,7 @@ pub fn build_local_path(base: &Path, url_path: &str) -> PathBuf {
     let raw_segments = url_path.split('/').filter(|s| !s.is_empty());
 
     // Sanitize only the meaningful segments
-    let mut clean: Vec<String> = raw_segments
-        .filter_map(|seg| sanitize_component(seg))
-        .collect();
+    let mut clean: Vec<String> = raw_segments.filter_map(sanitize_component).collect();
 
     // If nothing meaningful remains, write index.html at base
     if clean.is_empty() {

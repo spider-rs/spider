@@ -7254,6 +7254,15 @@ impl Website {
         self
     }
 
+    /// Use Gemini to get dynamic javascript to drive the browser. This does nothing without the `gemini` flag enabled.
+    pub fn with_gemini(
+        &mut self,
+        gemini_configs: Option<configuration::GeminiConfigs>,
+    ) -> &mut Self {
+        self.configuration.with_gemini(gemini_configs);
+        self
+    }
+
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);
@@ -8148,7 +8157,11 @@ async fn test_crawl_subdomains() {
 }
 
 #[tokio::test]
-#[cfg(all(not(feature = "regex"), not(feature = "openai")))]
+#[cfg(all(
+    not(feature = "regex"),
+    not(feature = "openai"),
+    not(feature = "gemini")
+))]
 async fn test_with_configuration() {
     let mut website = Website::new("https://choosealicense.com");
 

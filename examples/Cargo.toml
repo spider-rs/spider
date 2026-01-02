@@ -220,6 +220,11 @@ path = "openai_cache.rs"
 required-features = ["spider/sync", "spider/openai", "spider/cache_openai"]
 
 [[example]]
+name = "gemini"
+path = "gemini.rs"
+required-features = ["spider/sync", "spider/gemini"]
+
+[[example]]
 name = "encoding"
 path = "encoding.rs"
 required-features = ["spider/sync", "spider/encoding"]
