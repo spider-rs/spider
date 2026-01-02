@@ -37,7 +37,7 @@ use crate::build_folders::build_local_path;
 /// convert the headers to json
 fn headers_to_json(headers: &Option<HeaderMap<HeaderValue>>) -> Value {
     if let Some(headers) = &headers {
-        serde_json::to_value(&header_map_to_hash_map(headers)).unwrap_or_default()
+        serde_json::to_value(header_map_to_hash_map(headers)).unwrap_or_default()
     } else {
         Value::Null
     }
@@ -168,7 +168,7 @@ async fn main() {
 
     if let Some(proxy_url) = cli.proxy_url {
         if !proxy_url.is_empty() {
-            website.with_proxies(Some(vec![proxy_url.into()]));
+            website.with_proxies(Some(vec![proxy_url]));
         }
     }
 

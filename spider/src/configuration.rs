@@ -6,6 +6,7 @@ pub use crate::features::chrome_common::{
     ExecutionScriptsMap, ScreenShotConfig, ScreenshotParams, Viewport, WaitFor, WaitForDelay,
     WaitForIdleNetwork, WaitForSelector, WebAutomation,
 };
+pub use crate::features::gemini_common::GeminiConfigs;
 pub use crate::features::openai_common::GPTConfigs;
 use crate::utils::get_domain_from_url;
 use crate::utils::BasicCachePolicy;
@@ -135,7 +136,9 @@ pub struct RequestProxy {
     all(
         not(feature = "regex"),
         not(feature = "openai"),
-        not(feature = "cache_openai")
+        not(feature = "cache_openai"),
+        not(feature = "gemini"),
+        not(feature = "cache_gemini")
     ),
     derive(PartialEq)
 )]
@@ -213,6 +216,8 @@ pub struct Configuration {
     pub auth_challenge_response: Option<AuthChallengeResponse>,
     /// The OpenAI configs to use to help drive the chrome browser. This does nothing without the 'openai' flag.
     pub openai_config: Option<Box<GPTConfigs>>,
+    /// The Gemini configs to use to help drive the chrome browser. This does nothing without the 'gemini' flag.
+    pub gemini_config: Option<Box<GeminiConfigs>>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
     /// Return the page links in the subscription channels. This does nothing without the flag `sync` enabled.
@@ -778,6 +783,22 @@ impl Configuration {
         match openai_config {
             Some(openai_config) => self.openai_config = Some(Box::new(openai_config)),
             _ => self.openai_config = None,
+        };
+        self
+    }
+
+    #[cfg(not(feature = "gemini"))]
+    /// The Gemini configs to use to drive the browser. This method does nothing if the `gemini` is not enabled.
+    pub fn with_gemini(&mut self, _gemini_config: Option<GeminiConfigs>) -> &mut Self {
+        self
+    }
+
+    /// The Gemini configs to use to drive the browser. This method does nothing if the `gemini` is not enabled.
+    #[cfg(feature = "gemini")]
+    pub fn with_gemini(&mut self, gemini_config: Option<GeminiConfigs>) -> &mut Self {
+        match gemini_config {
+            Some(gemini_config) => self.gemini_config = Some(Box::new(gemini_config)),
+            _ => self.gemini_config = None,
         };
         self
     }

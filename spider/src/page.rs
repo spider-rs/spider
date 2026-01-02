@@ -507,6 +507,12 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
+    #[cfg(feature = "gemini")]
+    /// The credits used from Gemini in order.
+    pub gemini_credits_used: Option<Vec<crate::features::gemini_common::GeminiUsage>>,
+    #[cfg(feature = "gemini")]
+    /// The extra data from the Gemini AI.
+    pub extra_gemini_data: Option<Vec<AIResults>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
@@ -561,6 +567,12 @@ pub struct Page {
     #[cfg(feature = "openai")]
     /// The extra data from the AI, example extracting data etc...
     pub extra_ai_data: Option<Vec<AIResults>>,
+    #[cfg(feature = "gemini")]
+    /// The credits used from Gemini in order.
+    pub gemini_credits_used: Option<Vec<crate::features::gemini_common::GeminiUsage>>,
+    #[cfg(feature = "gemini")]
+    /// The extra data from the Gemini AI.
+    pub extra_gemini_data: Option<Vec<AIResults>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.

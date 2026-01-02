@@ -102,6 +102,7 @@
 //! - `real_browser`: Enables the ability to bypass protected pages.
 //! - `cron`: Enables the ability to start cron jobs for the website.
 //! - `openai`: Enables OpenAI to generate dynamic browser executable scripts. Make sure to use the env var `OPENAI_API_KEY`.
+//! - `gemini`: Enables Gemini AI to generate dynamic browser executable scripts. Make sure to use the env var `GEMINI_API_KEY`.
 //! - `smart`: Enables smart mode. This runs request as HTTP until JavaScript rendering is needed. This avoids sending multiple network request by re-using the content.
 //! - `encoding`: Enables handling the content with different encodings like Shift_JIS.
 //! - `spoof`: Spoof HTTP headers for the request.
@@ -131,6 +132,8 @@ pub extern crate async_openai;
 pub extern crate auto_encoder;
 #[cfg(feature = "flexbuffers")]
 pub extern crate flexbuffers;
+#[cfg(feature = "gemini")]
+pub extern crate gemini_rust;
 #[cfg(feature = "cache_request")]
 pub extern crate http_cache_reqwest;
 #[cfg(feature = "cache_openai")]
