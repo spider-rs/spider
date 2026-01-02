@@ -304,6 +304,7 @@ pub struct Website {
     pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     pub crawl_id: Box<String>,
+    #[cfg(feature = "extra_information")]
     /// Extra information to store.
     pub extra_info: Option<Box<String>>,
     /// All URLs visited.
@@ -7830,12 +7831,14 @@ impl Website {
         }
     }
 
-    /// Set extra info.
+    /// Set extra useful information.
+    #[cfg(feature = "extra_information")]
     pub fn set_extra_info(&mut self, info: Option<String>) {
         self.extra_info = info.map(|f| f.into());
     }
 
-    /// Get extra info stored
+    /// Get extra information stored.
+    #[cfg(feature = "extra_information")]
     pub fn get_extra_info(&self) -> Option<&Box<String>> {
         self.extra_info.as_ref()
     }

@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.38.113"
+version = "2.38.114"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -274,6 +274,7 @@ simd = ["dep:sonic-rs"]
 firewall = ["dep:spider_firewall", "chromey/firewall"]
 wreq = ["dep:wreq", "dep:wreq-util"]
 rquest_hickory_dns = ["wreq/hickory-dns"]
+extra_information = []
 
 # Allows full concurrency.
 cowboy = []

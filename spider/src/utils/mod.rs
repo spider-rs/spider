@@ -5003,9 +5003,10 @@ pub async fn gemini_request_base(
                     None
                 },
                 response_schema: gemini_configs.json_schema.as_ref().and_then(|schema| {
-                    schema.schema.as_ref().and_then(|s| {
-                        serde_json::from_str::<serde_json::Value>(s).ok()
-                    })
+                    schema
+                        .schema
+                        .as_ref()
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
                 }),
                 ..Default::default()
             };
