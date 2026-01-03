@@ -2318,6 +2318,10 @@ pub fn chrome_fulfill_headers_from_reqwest(
 }
 
 #[cfg(feature = "chrome")]
+/// Skip bytes tracker.
+const SKIP_BYTES_AMOUNT: f64 = 17.0;
+
+#[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
     source: &str,
@@ -2439,6 +2443,8 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
+    let html_source_size = source.len();
+
     // Listen for network events. todo: capture the last values endtime to track period.
     // TODO: optional check if spawn required.
     let bytes_collected_handle = tokio::spawn(async move {
@@ -2543,8 +2549,25 @@ pub async fn fetch_page_html_chrome_base(
                                 let from_sw = event.response.from_service_worker.unwrap_or(false);
                                 main_doc_from_cache = from_disk || from_prefetch || from_sw;
                             }
+
                             if !persist_event {
                                 break;
+                            }
+
+                            if content {
+                                if let Some(response_map) = response_map.as_mut() {
+                                    response_map.insert(
+                                        event.request_id.inner().clone(),
+                                        ResponseMap {
+                                            url: event.response.url.clone(),
+                                            // encoded length should add 78.0 via chrome
+                                            bytes_transferred: (html_source_size as f64)
+                                                + event.response.encoded_data_length,
+                                            skipped: true,
+                                        },
+                                    );
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -2570,7 +2593,7 @@ pub async fn fetch_page_html_chrome_base(
                                 bytes_transferred: event.response.encoded_data_length,
                                 skipped: *MASK_BYTES_INTERCEPTION
                                     && event.response.connection_id == 0.0
-                                    && event.response.encoded_data_length <= 17.0,
+                                    && event.response.encoded_data_length <= SKIP_BYTES_AMOUNT,
                             },
                         );
                     }
@@ -2619,7 +2642,6 @@ pub async fn fetch_page_html_chrome_base(
                 if let Ok(mut listener) = event_data_received {
                     let mut total_bytes: u64 = 0;
                     let total_max = f64_to_u64_floor(max_page_bytes.unwrap_or_default());
-
                     while let Some(event) = listener.next().await {
                         let encoded = event.encoded_data_length.max(0) as u64;
                         total_bytes = total_bytes.saturating_add(encoded);
