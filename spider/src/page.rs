@@ -1915,6 +1915,82 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     /// Instantiate a new page and gather the html.
+    pub(crate) async fn new_base(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide::Page,
+        wait_for: &Option<crate::configuration::WaitFor>,
+        screenshot: &Option<crate::configuration::ScreenShotConfig>,
+        page_set: bool,
+        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+        execution_scripts: &Option<ExecutionScripts>,
+        automation_scripts: &Option<AutomationScripts>,
+        viewport: &Option<crate::configuration::Viewport>,
+        request_timeout: &Option<Box<Duration>>,
+        track_events: &Option<crate::configuration::ChromeEventTracker>,
+        referrer: Option<String>,
+        max_page_bytes: Option<f64>,
+        cache_options: Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
+        seeded_resource: Option<String>,
+        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    ) -> Self {
+        let page_resource = if seeded_resource.is_some() {
+            crate::utils::fetch_page_html_seeded(
+                &url,
+                &client,
+                &page,
+                wait_for,
+                screenshot,
+                page_set,
+                openai_config,
+                execution_scripts,
+                automation_scripts,
+                viewport,
+                &request_timeout,
+                track_events,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                cache_policy,
+                seeded_resource,
+                jar,
+            )
+            .await
+        } else {
+            crate::utils::fetch_page_html(
+                &url,
+                &client,
+                &page,
+                wait_for,
+                screenshot,
+                page_set,
+                openai_config,
+                execution_scripts,
+                automation_scripts,
+                viewport,
+                &request_timeout,
+                track_events,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                cache_policy,
+            )
+            .await
+        };
+        let mut p = build(url, page_resource);
+
+        // store the chrome page to perform actions like screenshots etc.
+        if cfg!(feature = "chrome_store_page") {
+            p.chrome_page = Some(page.clone());
+        }
+
+        p
+    }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    /// Instantiate a new page and gather the html.
     pub async fn new(
         url: &str,
         client: &Client,
@@ -1933,10 +2009,10 @@ impl Page {
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
     ) -> Self {
-        let page_resource = crate::utils::fetch_page_html(
-            &url,
-            &client,
-            &page,
+        Self::new_base(
+            url,
+            client,
+            page,
             wait_for,
             screenshot,
             page_set,
@@ -1944,22 +2020,62 @@ impl Page {
             execution_scripts,
             automation_scripts,
             viewport,
-            &request_timeout,
+            request_timeout,
             track_events,
             referrer,
             max_page_bytes,
             cache_options,
             cache_policy,
+            None,
+            None,
         )
-        .await;
-        let mut p = build(url, page_resource);
+        .await
+    }
 
-        // store the chrome page to perform actions like screenshots etc.
-        if cfg!(feature = "chrome_store_page") {
-            p.chrome_page = Some(page.clone());
-        }
-
-        p
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    /// Instantiate a new page and gather the html seeded.
+    pub async fn new_seeded(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide::Page,
+        wait_for: &Option<crate::configuration::WaitFor>,
+        screenshot: &Option<crate::configuration::ScreenShotConfig>,
+        page_set: bool,
+        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+        execution_scripts: &Option<ExecutionScripts>,
+        automation_scripts: &Option<AutomationScripts>,
+        viewport: &Option<crate::configuration::Viewport>,
+        request_timeout: &Option<Box<Duration>>,
+        track_events: &Option<crate::configuration::ChromeEventTracker>,
+        referrer: Option<String>,
+        max_page_bytes: Option<f64>,
+        cache_options: Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
+        seeded_resource: Option<String>,
+        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    ) -> Self {
+        Self::new_base(
+            url,
+            client,
+            page,
+            wait_for,
+            screenshot,
+            page_set,
+            openai_config,
+            execution_scripts,
+            automation_scripts,
+            viewport,
+            request_timeout,
+            track_events,
+            referrer,
+            max_page_bytes,
+            cache_options,
+            cache_policy,
+            seeded_resource,
+            jar,
+        )
+        .await
     }
 
     /// Instantiate a new page and gather the links.
@@ -2956,6 +3072,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
+        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
@@ -3194,7 +3311,7 @@ impl Page {
                 {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
-                            crate::website::Website::setup_browser_base(&configuration, &base)
+                            crate::website::Website::setup_browser_base(&configuration, &base, jar)
                         })
                         .await
                     {
@@ -3220,6 +3337,28 @@ impl Page {
                                     &configuration,
                                 ),
                             );
+
+                            if let Some(cookie_jar) = jar {
+                                if let Some(u) = &original_page {
+                                    if !configuration.cookie_str.is_empty() {
+                                        let _ =
+                                            crate::features::chrome::seed_jar_from_cookie_header(
+                                                cookie_jar,
+                                                &configuration.cookie_str,
+                                                &u,
+                                            );
+                                    }
+
+                                    if let Ok(cps) = crate::features::chrome::cookie_params_from_jar(
+                                        cookie_jar, &u,
+                                    ) {
+                                        let _ = crate::features::chrome::set_page_cookies(
+                                            &new_page, cps,
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
 
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
                                 &html_resource,
@@ -3251,6 +3390,7 @@ impl Page {
                                     }
                                 },
                                 &Some(&configuration.chrome_intercept),
+                                jar,
                             )
                             .await;
 
@@ -3346,9 +3486,9 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
+        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
-        use chromiumoxide::error::CdpError;
         use lol_html::{element, text};
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -3407,7 +3547,7 @@ impl Page {
 
                         Ok(())
                     }),
-                    element_content_handlers.push(element!("script", |el| {
+                    element!("script", |el| {
                         if static_app || rerender.load(Ordering::Relaxed) {
                             return Ok(());
                         }
@@ -3461,10 +3601,10 @@ impl Page {
                         }
 
                         Ok(())
-                    })),
+                    }),
                     element!("a[href],script[src],link[href]", |el| {
                         let attribute = if el.tag_name() == "script" {
-                            if !script_found && el.get_attribute("src").is_ok() {
+                            if !script_found && el.get_attribute("src").is_some() {
                                 script_found = true;
                                 script_src.store(true, Ordering::Relaxed);
                             }
@@ -3544,7 +3684,7 @@ impl Page {
                     }),
                 ];
 
-                element_content_handlers.extend(&metadata_handlers(
+                element_content_handlers.extend(metadata_handlers(
                     &mut meta_title,
                     &mut meta_description,
                     &mut meta_og_image,
@@ -3581,7 +3721,7 @@ impl Page {
                 {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
-                            crate::website::Website::setup_browser_base(&configuration, &base)
+                            crate::website::Website::setup_browser_base(&configuration, &base, jar)
                         })
                         .await
                     {
@@ -3608,6 +3748,28 @@ impl Page {
                                 )
                             );
 
+                            if let Some(cookie_jar) = jar {
+                                if let Some(u) = &original_page {
+                                    if !configuration.cookie_str.is_empty() {
+                                        let _ =
+                                            crate::features::chrome::seed_jar_from_cookie_header(
+                                                cookie_jar,
+                                                &configuration.cookie_str,
+                                                &u,
+                                            );
+                                    }
+
+                                    if let Ok(cps) = crate::features::chrome::cookie_params_from_jar(
+                                        cookie_jar, &u,
+                                    ) {
+                                        let _ = crate::features::chrome::set_page_cookies(
+                                            &new_page, cps,
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
                                 &html_resource,
                                 &new_page,
@@ -3617,7 +3779,7 @@ impl Page {
                                 &configuration.screenshot,
                                 false,
                                 &configuration.openai_config,
-                                Some(&target_url),
+                                Some(&self.url),
                                 &configuration.execution_scripts,
                                 &configuration.automation_scripts,
                                 &configuration.viewport,
@@ -3638,6 +3800,7 @@ impl Page {
                                     }
                                 },
                                 &Some(&configuration.chrome_intercept),
+                                jar,
                             )
                             .await;
 
@@ -3936,6 +4099,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         page: &crate::features::chrome::OnceBrowser,
+        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
     ) -> (HashSet<CaseInsensitiveString>, Option<f64>) {
         match self.html.is_some() {
             false => Default::default(),
@@ -3948,6 +4112,7 @@ impl Page {
                     configuration,
                     base,
                     page,
+                    jar,
                 )
                 .await
             }

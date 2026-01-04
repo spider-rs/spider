@@ -14,6 +14,8 @@ use chromiumoxide::serde_json;
 use chromiumoxide::Page;
 use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
+#[cfg(feature = "cookies")]
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -25,11 +27,12 @@ lazy_static! {
 
 #[cfg(feature = "cookies")]
 /// Parse a cookie into a jar. This does nothing without the 'cookies' flag.
-pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieParam>, String> {
-    use reqwest::cookie::{CookieStore, Jar};
-    let jar = Jar::default();
-
-    jar.add_cookie_str(cookie_str, url);
+pub fn parse_cookies_with_jar(
+    jar: &Arc<reqwest::cookie::Jar>,
+    cookie_str: &str,
+    url: &Url,
+) -> Result<Vec<CookieParam>, String> {
+    use reqwest::cookie::CookieStore;
 
     // Retrieve cookies stored in the jar
     if let Some(header_value) = jar.cookies(url) {
@@ -85,21 +88,110 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
     Ok(Default::default())
 }
 
-/// Handle the browser cookie configurations.
-#[cfg(not(feature = "cookies"))]
-pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, browser: &Browser) {
+#[cfg(feature = "cookies")]
+/// Seed jar from cookie header.
+pub fn seed_jar_from_cookie_header(
+    jar: &std::sync::Arc<reqwest::cookie::Jar>,
+    cookie_header: &str,
+    url: &url::Url,
+) -> Result<(), String> {
+    for pair in cookie_header.split(';') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+
+        let (name, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("Invalid cookie pair: {pair}"))?;
+
+        let set_cookie = format!("{}={}; Path=/", name.trim(), value.trim());
+        jar.add_cookie_str(&set_cookie, url);
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "cookies", feature = "chrome"))]
+/// Set the page cookies.
+pub async fn set_page_cookies(
+    page: &chromiumoxide::Page,
+    cookies: Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>,
+) -> Result<(), String> {
+    use chromiumoxide::cdp::browser_protocol::network::SetCookiesParams;
+
+    if cookies.is_empty() {
+        return Ok(());
+    }
+
+    page.execute(SetCookiesParams::new(cookies))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[cfg(feature = "cookies")]
+/// Set cookie params from jar.
+pub fn cookie_params_from_jar(
+    jar: &std::sync::Arc<reqwest::cookie::Jar>,
+    url: &url::Url,
+) -> Result<Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>, String> {
+    use chromiumoxide::cdp::browser_protocol::network::CookieParam;
+    use reqwest::cookie::CookieStore;
+
+    let Some(header_value) = jar.cookies(url) else {
+        return Ok(Vec::new());
+    };
+
+    let s = header_value.to_str().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+
+    for pair in s.split(';') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+
+        let (name, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("Invalid cookie pair: {pair}"))?;
+
+        let cp = CookieParam::builder()
+            .name(name.trim())
+            .value(value.trim())
+            .url(url.as_str())
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        out.push(cp);
+    }
+
+    Ok(out)
 }
 
 /// Handle the browser cookie configurations.
 #[cfg(feature = "cookies")]
-pub async fn set_cookies(config: &Configuration, url_parsed: &Option<Box<Url>>, browser: &Browser) {
-    if !config.cookie_str.is_empty() {
-        if let Some(parsed) = url_parsed {
-            let cookies = parse_cookies_with_jar(&config.cookie_str, &*parsed);
-            if let Ok(co) = cookies {
-                let _ = browser.set_cookies(co).await;
-            };
-        };
+pub async fn set_cookies(
+    jar: &Arc<reqwest::cookie::Jar>,
+    config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
+    browser: &Browser,
+) {
+    if config.cookie_str.is_empty() {
+        return;
+    }
+
+    let Some(parsed) = url_parsed.as_deref() else {
+        return;
+    };
+
+    let _ = seed_jar_from_cookie_header(jar, &config.cookie_str, parsed);
+
+    match parse_cookies_with_jar(jar, &config.cookie_str, parsed) {
+        Ok(cookies) if !cookies.is_empty() => {
+            let _ = browser.set_cookies(cookies).await;
+        }
+        _ => {}
     }
 }
 
@@ -397,9 +489,10 @@ pub async fn setup_browser_configuration(
 }
 
 /// Launch a chromium browser with configurations and wait until the instance is up.
-pub async fn launch_browser(
+pub async fn launch_browser_base(
     config: &Configuration,
     url_parsed: &Option<Box<Url>>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
 ) -> Option<(
     Browser,
     tokio::task::JoinHandle<()>,
@@ -474,7 +567,9 @@ pub async fn launch_browser(
             if let Ok(c) = browser.create_browser_context(create_content).await {
                 let _ = browser.send_new_context(c.clone()).await;
                 let _ = context_id.insert(c);
-                set_cookies(&config, &url_parsed, &browser).await;
+                if let Some(jar) = jar.as_deref() {
+                    set_cookies(jar, &config, &url_parsed, &browser).await;
+                }
                 if let Some(id) = &browser.browser_context.id {
                     let cmd = SetDownloadBehaviorParamsBuilder::default();
 
@@ -495,6 +590,31 @@ pub async fn launch_browser(
         }
         _ => None,
     }
+}
+
+/// Launch a chromium browser with configurations and wait until the instance is up.
+pub async fn launch_browser(
+    config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
+) -> Option<(
+    Browser,
+    tokio::task::JoinHandle<()>,
+    Option<BrowserContextId>,
+)> {
+    launch_browser_base(config, url_parsed, None).await
+}
+
+/// Launch a chromium browser with configurations and wait until the instance is up.
+pub async fn launch_browser_cookies(
+    config: &Configuration,
+    url_parsed: &Option<Box<Url>>,
+    jar: Option<&Arc<reqwest::cookie::Jar>>,
+) -> Option<(
+    Browser,
+    tokio::task::JoinHandle<()>,
+    Option<BrowserContextId>,
+)> {
+    launch_browser_base(config, url_parsed, jar.as_deref()).await
 }
 
 /// Represents IP-based geolocation and network metadata.

@@ -5,6 +5,7 @@ use crate::configuration::{
     self, get_ua, AutomationScriptsMap, Configuration, ExecutionScriptsMap, RedirectPolicy,
     SerializableHeaderMap,
 };
+use crate::{page::build, utils::PageResponse};
 
 #[cfg(feature = "smart")]
 use crate::features::chrome::OnceBrowser;
@@ -307,6 +308,8 @@ pub struct Website {
     #[cfg(feature = "extra_information")]
     /// Extra information to store.
     pub extra_info: Option<Box<String>>,
+    /// Seed the initial html for crawling.
+    seed_html: Option<String>,
     /// All URLs visited.
     links_visited: Box<ListBucket>,
     /// All signatures.
@@ -355,6 +358,9 @@ pub struct Website {
     website_meta_info: WebsiteMetaInfo,
     /// Skip the initial link?
     skip_initial: bool,
+    #[cfg(feature = "cookies")]
+    /// Cookie jar between request.
+    pub cookie_jar: Arc<reqwest::cookie::Jar>,
 }
 
 impl fmt::Debug for Website {
@@ -1766,18 +1772,16 @@ impl Website {
         &self,
         client: crate::client::ClientBuilder,
     ) -> crate::client::ClientBuilder {
-        if !self.configuration.cookie_str.is_empty() && self.domain_parsed.is_some() {
-            match self.domain_parsed.clone() {
-                Some(p) => {
-                    let cookie_store = crate::client::cookie::Jar::default();
-                    cookie_store.add_cookie_str(&self.configuration.cookie_str, &p);
-                    client.cookie_provider(cookie_store.into())
-                }
-                _ => client.cookie_store(true),
+        let client = client.cookie_provider(self.cookie_jar.clone());
+
+        if !self.configuration.cookie_str.is_empty() {
+            if let Some(url) = self.domain_parsed.as_ref() {
+                self.cookie_jar
+                    .add_cookie_str(&self.configuration.cookie_str, url);
             }
-        } else {
-            client.cookie_store(true)
         }
+
+        client
     }
 
     /// Build the client with cookie configurations. This does nothing with [cookies] flag enabled.
@@ -2339,20 +2343,24 @@ impl Website {
 
             let mut domain_parsed = self.domain_parsed.take();
 
-            let mut page = Page::new_page_streaming(
-                url,
-                client,
-                false,
-                base,
-                &self.configuration.external_domains_caseless,
-                &page_links_settings,
-                &mut links,
-                Some(&mut links_ssg),
-                &mut domain_parsed, // original domain
-                &mut self.domain_parsed,
-                &mut links_pages,
-            )
-            .await;
+            let mut page = if let Some(seeded_page) = self.build_seed_page() {
+                seeded_page
+            } else {
+                Page::new_page_streaming(
+                    url,
+                    client,
+                    false,
+                    base,
+                    &self.configuration.external_domains_caseless,
+                    &page_links_settings,
+                    &mut links,
+                    Some(&mut links_ssg),
+                    &mut domain_parsed, // original domain
+                    &mut self.domain_parsed,
+                    &mut links_pages,
+                )
+                .await
+            };
 
             if page.get_html_bytes_u8().starts_with(b"<?xml") {
                 page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
@@ -2832,6 +2840,17 @@ impl Website {
         }
     }
 
+    /// Build a page from a seed.
+    fn build_seed_page(&self) -> Option<Page> {
+        if let Some(seeded_html) = self.get_seeded_html() {
+            let mut page_response = PageResponse::default();
+            page_response.content = Some(Box::new(seeded_html.as_bytes().to_vec()));
+            Some(build(&self.url.inner(), page_response))
+        } else {
+            None
+        }
+    }
+
     /// Expand links for crawl.
     #[cfg(all(
         not(feature = "decentralized"),
@@ -2858,25 +2877,49 @@ impl Website {
                 self.setup_chrome_interception(&chrome_page)
             );
 
-            let mut page = Page::new(
-                &self.url.inner(),
-                &client,
-                &chrome_page,
-                &self.configuration.wait_for,
-                &self.configuration.screenshot,
-                false, // we use the initial about:blank page.
-                &self.configuration.openai_config,
-                &self.configuration.execution_scripts,
-                &self.configuration.automation_scripts,
-                &self.configuration.viewport,
-                &self.configuration.request_timeout,
-                &self.configuration.track_events,
-                self.configuration.referer.clone(),
-                self.configuration.max_page_bytes,
-                self.configuration.get_cache_options(),
-                &self.configuration.cache_policy,
-            )
-            .await;
+            let mut page = if let Some(seeded_html) = self.get_seeded_html() {
+                Page::new_seeded(
+                    &self.url.inner(),
+                    &client,
+                    &chrome_page,
+                    &self.configuration.wait_for,
+                    &self.configuration.screenshot,
+                    false, // we use the initial about:blank page.
+                    &self.configuration.openai_config,
+                    &self.configuration.execution_scripts,
+                    &self.configuration.automation_scripts,
+                    &self.configuration.viewport,
+                    &self.configuration.request_timeout,
+                    &self.configuration.track_events,
+                    self.configuration.referer.clone(),
+                    self.configuration.max_page_bytes,
+                    self.configuration.get_cache_options(),
+                    &self.configuration.cache_policy,
+                    Some(seeded_html.clone()),
+                    Some(&self.cookie_jar),
+                )
+                .await
+            } else {
+                Page::new(
+                    &self.url.inner(),
+                    &client,
+                    &chrome_page,
+                    &self.configuration.wait_for,
+                    &self.configuration.screenshot,
+                    false, // we use the initial about:blank page.
+                    &self.configuration.openai_config,
+                    &self.configuration.execution_scripts,
+                    &self.configuration.automation_scripts,
+                    &self.configuration.viewport,
+                    &self.configuration.request_timeout,
+                    &self.configuration.track_events,
+                    self.configuration.referer.clone(),
+                    self.configuration.max_page_bytes,
+                    self.configuration.get_cache_options(),
+                    &self.configuration.cache_policy,
+                )
+                .await
+            };
 
             let mut retry_count = self.configuration.retry;
 
@@ -3604,7 +3647,11 @@ impl Website {
         {
             let url = self.url.inner();
 
-            let mut page = Page::new_page(&url, &client).await;
+            let mut page = if let Some(seeded_page) = self.build_seed_page() {
+                seeded_page
+            } else {
+                Page::new_page(&url, &client).await
+            };
 
             let mut retry_count = self.configuration.retry;
 
@@ -3654,8 +3701,14 @@ impl Website {
             }
 
             let (page_links, bytes_transferred): (HashSet<CaseInsensitiveString>, Option<f64>) =
-                page.smart_links(&base, &self.configuration, &self.domain_parsed, &browser)
-                    .await;
+                page.smart_links(
+                    &base,
+                    &self.configuration,
+                    &self.domain_parsed,
+                    &browser,
+                    Some(&self.cookie_jar),
+                )
+                .await;
 
             if let Some(domain) = &page.final_redirect_destination {
                 let prior_domain = self.domain_parsed.take();
@@ -3740,7 +3793,7 @@ impl Website {
         browser: &crate::features::chrome::OnceBrowser,
     ) {
         if let Some(browser_controller) = browser
-            .get_or_init(|| crate::website::Website::setup_browser_base(&config, &base))
+            .get_or_init(|| crate::website::Website::setup_browser_base(&config, &base, None))
             .await
         {
             if let Ok(chrome_page) = crate::features::chrome::attempt_navigation(
@@ -5716,6 +5769,7 @@ impl Website {
                 self.domain_parsed.clone(),
                 browser,
                 self.on_link_find_callback.clone(),
+                self.cookie_jar.clone(),
             ));
 
             let add_external = self.configuration.external_domains_caseless.len() > 0;
@@ -5861,7 +5915,7 @@ impl Website {
 
                                     let (links, bytes_transferred ) = page
                                         .smart_links(
-                                            &shared.1, &shared.4, &shared.5, &shared.6,
+                                            &shared.1, &shared.4, &shared.5, &shared.6, Some(&shared.8)
                                         )
                                         .await;
 
@@ -6940,8 +6994,9 @@ impl Website {
     pub async fn setup_browser_base(
         config: &Configuration,
         url_parsed: &Option<Box<Url>>,
+        jar: Option<&Arc<reqwest::cookie::Jar>>,
     ) -> Option<crate::features::chrome::BrowserController> {
-        match crate::features::chrome::launch_browser(&config, url_parsed).await {
+        match crate::features::chrome::launch_browser_cookies(&config, url_parsed, jar).await {
             Some((browser, browser_handle, context_id)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
                 let b = (browser, Some(browser_handle), context_id);
@@ -6955,7 +7010,12 @@ impl Website {
     /// Launch or connect to browser with setup.
     #[cfg(feature = "chrome")]
     pub async fn setup_browser(&self) -> Option<crate::features::chrome::BrowserController> {
-        Website::setup_browser_base(&self.configuration, self.get_url_parsed()).await
+        Website::setup_browser_base(
+            &self.configuration,
+            self.get_url_parsed(),
+            Some(&self.cookie_jar),
+        )
+        .await
     }
 
     /// Respect robots.txt file.
@@ -7841,6 +7901,16 @@ impl Website {
     #[cfg(feature = "extra_information")]
     pub fn get_extra_info(&self) -> Option<&Box<String>> {
         self.extra_info.as_ref()
+    }
+
+    /// Set the initial HTML page instead of firing a request to the URL.
+    pub fn set_seeded_html(&mut self, html: Option<String>) {
+        self.seed_html = html;
+    }
+
+    /// Get the initial seeded html.
+    pub fn get_seeded_html(&self) -> &Option<String> {
+        &self.seed_html
     }
 }
 

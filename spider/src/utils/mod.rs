@@ -2344,6 +2344,7 @@ pub async fn fetch_page_html_chrome_base(
     cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -2909,9 +2910,22 @@ pub async fn fetch_page_html_chrome_base(
 
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
+            let scope_url = if jar.is_some() {
+                let scope_url = page_response
+                    .final_url
+                    .as_deref()
+                    .filter(|u| !u.is_empty())
+                    .or(url_target)
+                    .unwrap_or(source);
+
+                url::Url::parse(scope_url).ok()
+            } else {
+                None
+            };
+
             let _ = tokio::time::timeout(
                 base_timeout,
-                set_page_response_cookies(&mut page_response, &page),
+                set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
             )
             .await;
 
@@ -2919,8 +2933,8 @@ pub async fn fetch_page_html_chrome_base(
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
                 let openai_request = run_openai_request(
-                    match url_target {
-                        Some(ref ut) => ut,
+                    match &url_target {
+                        Some(ut) => ut,
                         _ => source,
                     },
                     page,
@@ -2966,9 +2980,22 @@ pub async fn fetch_page_html_chrome_base(
             let mut page_response = set_page_response(!res.is_empty(), res, status_code, final_url);
 
             if !block_bytes {
+                let scope_url = if jar.is_some() {
+                    let scope_url = page_response
+                        .final_url
+                        .as_deref()
+                        .filter(|u| !u.is_empty())
+                        .or(url_target)
+                        .unwrap_or(source);
+
+                    url::Url::parse(scope_url).ok()
+                } else {
+                    None
+                };
+
                 let _ = tokio::time::timeout(
                     base_timeout,
-                    set_page_response_cookies(&mut page_response, &page),
+                    set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
                 )
                 .await;
             }
@@ -3025,11 +3052,24 @@ pub async fn fetch_page_html_chrome_base(
 
                     let mut page_response = PageResponse::default();
 
-                    let _ = tokio::time::timeout(
-                        base_timeout,
-                        set_page_response_cookies(&mut page_response, &page),
-                    )
-                    .await;
+            let scope_url = if jar.is_some() {
+                            let scope_url = page_response
+                .final_url
+                .as_deref()
+                .filter(|u| !u.is_empty())
+                .or(url_target)
+                .unwrap_or(source);
+
+              url::Url::parse(scope_url).ok()
+            } else {
+                None
+            };
+
+                let _ = tokio::time::timeout(
+                    base_timeout,
+                    set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
+                )
+                .await;
 
                     if let Some(mut chrome_http_req_res1) = chrome_http_req_res1 {
                         set_page_response_headers(&mut chrome_http_req_res1, &mut page_response);
@@ -3346,28 +3386,32 @@ fn set_page_response_headers_raw(
 ) {
 }
 
-/// Set the page response.
 #[cfg(all(feature = "chrome", feature = "cookies"))]
-async fn set_page_response_cookies(page_response: &mut PageResponse, page: &chromiumoxide::Page) {
+async fn set_page_response_cookies(
+    page_response: &mut PageResponse,
+    page: &chromiumoxide::Page,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    scope_url: Option<&url::Url>,
+) {
     if let Ok(mut cookies) = page.get_cookies().await {
         let mut cookies_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
 
         for cookie in cookies.drain(..) {
+            if let Some(scope_url) = scope_url {
+                if let Some(jar) = jar {
+                    let sc = format!("{}={}; Path=/", cookie.name, cookie.value);
+                    jar.add_cookie_str(&sc, scope_url);
+                }
+            }
             cookies_map.insert(cookie.name, cookie.value);
         }
 
         let response_headers = convert_headers(&cookies_map);
-
         if !response_headers.is_empty() {
             page_response.cookies = Some(response_headers);
         }
     }
-}
-
-/// Set the page response.
-#[cfg(all(feature = "chrome", not(feature = "cookies")))]
-async fn set_page_response_cookies(_page_response: &mut PageResponse, _page: &chromiumoxide::Page) {
 }
 
 /// Perform a screenshot shortcut.
@@ -4022,6 +4066,7 @@ pub async fn fetch_page_html(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -4061,6 +4106,7 @@ pub async fn fetch_page_html(
                 cache_options,
                 cache_policy,
                 &None,
+                jar,
             )
             .await
             {
@@ -4376,7 +4422,7 @@ pub async fn get_cached_url(
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
+pub async fn fetch_page_html_base(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -4393,8 +4439,14 @@ pub async fn fetch_page_html(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    seeded_resource: Option<String>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
 ) -> PageResponse {
-    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
+    let cached_html = if seeded_resource.is_some() {
+        seeded_resource
+    } else {
+        get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
+    };
     let cached = !cached_html.is_none();
 
     match fetch_page_html_chrome_base(
@@ -4422,6 +4474,7 @@ pub async fn fetch_page_html(
         cache_policy,
         &None,
         &None,
+        jar,
     )
     .await
     {
@@ -4433,9 +4486,9 @@ pub async fn fetch_page_html(
     }
 }
 
-#[cfg(feature = "chrome")]
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome(
+pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -4453,13 +4506,108 @@ pub async fn fetch_page_html_chrome(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
 ) -> PageResponse {
+    fetch_page_html_base(
+        target_url,
+        client,
+        page,
+        wait_for,
+        screenshot,
+        page_set,
+        openai_config,
+        execution_scripts,
+        automation_scripts,
+        viewport,
+        request_timeout,
+        track_events,
+        referrer,
+        max_page_bytes,
+        cache_options,
+        cache_policy,
+        None,
+        None,
+    )
+    .await
+}
+
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html_seeded(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
+    max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+    seeded_resource: Option<String>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+) -> PageResponse {
+    fetch_page_html_base(
+        target_url,
+        client,
+        page,
+        wait_for,
+        screenshot,
+        page_set,
+        openai_config,
+        execution_scripts,
+        automation_scripts,
+        viewport,
+        request_timeout,
+        track_events,
+        referrer,
+        max_page_bytes,
+        cache_options,
+        cache_policy,
+        seeded_resource,
+        jar,
+    )
+    .await
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+async fn _fetch_page_html_chrome(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
+    max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+    resource: Option<String>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
     } else {
         None
     };
 
-    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
+    let cached_html = if resource.is_some() {
+        resource
+    } else {
+        get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
+    };
+
     let cached = !cached_html.is_none();
 
     let mut page_response = match &page {
@@ -4489,6 +4637,7 @@ pub async fn fetch_page_html_chrome(
                 cache_policy,
                 &None,
                 &None,
+                jar,
             )
             .await
             {
@@ -4574,6 +4723,95 @@ pub async fn fetch_page_html_chrome(
     set_page_response_duration(&mut page_response, duration);
 
     page_response
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn fetch_page_html_chrome(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
+    max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+) -> PageResponse {
+    _fetch_page_html_chrome(
+        target_url,
+        client,
+        page,
+        wait_for,
+        screenshot,
+        page_set,
+        openai_config,
+        execution_scripts,
+        automation_scripts,
+        viewport,
+        request_timeout,
+        track_events,
+        referrer,
+        max_page_bytes,
+        cache_options,
+        cache_policy,
+        None,
+        jar,
+    )
+    .await
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a network request to a resource extracting all content as text streaming via chrome seeded.
+pub async fn fetch_page_html_chrome_seeded(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    wait_for: &Option<crate::configuration::WaitFor>,
+    screenshot: &Option<crate::configuration::ScreenShotConfig>,
+    page_set: bool,
+    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
+    execution_scripts: &Option<ExecutionScripts>,
+    automation_scripts: &Option<AutomationScripts>,
+    viewport: &Option<crate::configuration::Viewport>,
+    request_timeout: &Option<Box<std::time::Duration>>,
+    track_events: &Option<crate::configuration::ChromeEventTracker>,
+    referrer: Option<String>,
+    max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+    resource: Option<String>,
+    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+) -> PageResponse {
+    _fetch_page_html_chrome(
+        target_url,
+        client,
+        page,
+        wait_for,
+        screenshot,
+        page_set,
+        openai_config,
+        execution_scripts,
+        automation_scripts,
+        viewport,
+        request_timeout,
+        track_events,
+        referrer,
+        max_page_bytes,
+        cache_options,
+        cache_policy,
+        resource,
+        jar,
+    )
+    .await
 }
 
 #[cfg(not(feature = "openai"))]

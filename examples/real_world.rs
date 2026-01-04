@@ -105,6 +105,7 @@ async fn main() -> Result<()> {
         crawl_website("https://choosealicense.com"),
         crawl_website("https://jeffmendez.com"),
         crawl_website("https://example.com"),
+        crawl_website("https://rust-lang.org"),
     );
 
     Ok(())
