@@ -37,6 +37,7 @@ use reqwest::header::CONTENT_LENGTH;
 #[cfg(feature = "chrome")]
 use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
+    error::Error,
     future::Future,
     str::FromStr,
     sync::Arc,
@@ -866,6 +867,18 @@ pub fn detect_antibot_from_url(url: &str) -> Option<AntiBotTech> {
         None
     }
 }
+
+/// Flip http -> https protocols.
+pub fn flip_http_https(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("http://") {
+        Some(format!("https://{rest}"))
+    } else if let Some(rest) = url.strip_prefix("https://") {
+        Some(format!("http://{rest}"))
+    } else {
+        None
+    }
+}
+
 /// Detect the anti-bot used from the request.
 pub fn detect_anti_bot_tech_response(
     url: &str,
@@ -937,25 +950,191 @@ impl ChromeHTTPReqRes {
 }
 
 #[cfg(feature = "chrome")]
-/// Perform a http future with chrome.
+/// Is a cyper mismatch.
+fn is_cipher_mismatch(err: &chromiumoxide::error::CdpError) -> bool {
+    match err {
+        chromiumoxide::error::CdpError::ChromeMessage(msg) => {
+            msg.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
+        }
+        other => other
+            .to_string()
+            .contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH"),
+    }
+}
+
+#[cfg(feature = "chrome")]
+/// Perform a chrome http request.
 pub async fn perform_chrome_http_request(
     page: &chromiumoxide::Page,
     source: &str,
     referrer: Option<String>,
 ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
-    let mut waf_check = false;
-    let mut status_code = StatusCode::OK;
-    let mut method = String::from("GET");
-    let mut response_headers: std::collections::HashMap<String, String> =
-        std::collections::HashMap::default();
-    let mut request_headers = std::collections::HashMap::default();
-    let mut protocol = String::from("http/1.1");
-    let mut anti_bot_tech = AntiBotTech::default();
+    async fn attempt_once(
+        page: &chromiumoxide::Page,
+        source: &str,
+        referrer: Option<String>,
+    ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+        let mut waf_check = false;
+        let mut status_code = StatusCode::OK;
+        let mut method = String::from("GET");
+        let mut response_headers: std::collections::HashMap<String, String> =
+            std::collections::HashMap::default();
+        let mut request_headers = std::collections::HashMap::default();
+        let mut protocol = String::from("http/1.1");
+        let mut anti_bot_tech = AntiBotTech::default();
 
-    let frame_id = page.mainframe().await?;
+        let frame_id = page.mainframe().await?;
 
-    let page_base =
-        page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+        let page_base =
+            page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+                url: source.to_string(),
+                transition_type: Some(
+                    chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
+                ),
+                frame_id,
+                referrer,
+                referrer_policy: None,
+            })?;
+
+        match page_base.await {
+            Ok(page_base) => {
+                if let Some(http_request) = page_base {
+                    if let Some(http_method) = http_request.method.as_deref() {
+                        method = http_method.into();
+                    }
+
+                    request_headers.clone_from(&http_request.headers);
+
+                    if let Some(response) = &http_request.response {
+                        if let Some(p) = &response.protocol {
+                            protocol.clone_from(p);
+                        }
+
+                        if let Some(res_headers) = response.headers.inner().as_object() {
+                            for (k, v) in res_headers {
+                                response_headers.insert(k.to_string(), v.to_string());
+                            }
+                        }
+
+                        let mut firewall = false;
+
+                        waf_check = detect_antibot_from_url(&response.url).is_some();
+
+                        // IMPORTANT: compare against the attempted URL (source param),
+                        // so retries behave correctly.
+                        if !response.url.starts_with(source) {
+                            match &response.security_details {
+                                Some(security_details) => {
+                                    anti_bot_tech = detect_anti_bot_tech_response(
+                                        &response.url,
+                                        &HeaderSource::Map(&response_headers),
+                                        &Default::default(),
+                                        Some(&security_details.subject_name),
+                                    );
+                                    firewall = true;
+                                }
+                                _ => {
+                                    anti_bot_tech = detect_anti_bot_tech_response(
+                                        &response.url,
+                                        &HeaderSource::Map(&response_headers),
+                                        &Default::default(),
+                                        None,
+                                    );
+                                    if anti_bot_tech == AntiBotTech::Cloudflare {
+                                        if let Some(xframe_options) =
+                                            response_headers.get("x-frame-options")
+                                        {
+                                            if xframe_options == r#"\"DENY\""# {
+                                                firewall = true;
+                                            }
+                                        } else if let Some(encoding) =
+                                            response_headers.get("Accept-Encoding")
+                                        {
+                                            if encoding == r#"cf-ray"# {
+                                                firewall = true;
+                                            }
+                                        }
+                                    } else {
+                                        firewall = true;
+                                    }
+                                }
+                            };
+
+                            waf_check = waf_check
+                                || firewall && !matches!(anti_bot_tech, AntiBotTech::None);
+
+                            if !waf_check {
+                                waf_check = match &response.protocol {
+                                    Some(protocol) => protocol == "blob",
+                                    _ => false,
+                                }
+                            }
+                        }
+
+                        status_code = StatusCode::from_u16(response.status as u16)
+                            .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                    } else if let Some(failure_text) = &http_request.failure_text {
+                        if failure_text == "net::ERR_FAILED" {
+                            waf_check = true;
+                        }
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+
+        Ok(ChromeHTTPReqRes {
+            waf_check,
+            status_code,
+            method,
+            response_headers,
+            request_headers,
+            protocol,
+            anti_bot_tech,
+        })
+    }
+
+    match attempt_once(page, source, referrer.clone()).await {
+        Ok(ok) => Ok(ok),
+        Err(e) => {
+            if is_cipher_mismatch(&e) {
+                if let Some(flipped) = flip_http_https(source) {
+                    return attempt_once(page, &flipped, referrer).await;
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
+/// Perform a http future with chrome cached.
+pub async fn perform_chrome_http_request_cache(
+    page: &chromiumoxide::Page,
+    source: &str,
+    referrer: Option<String>,
+    cache_options: &Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+    async fn attempt_once(
+        page: &chromiumoxide::Page,
+        source: &str,
+        referrer: Option<String>,
+        cache_options: &Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
+    ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+        let mut waf_check = false;
+        let mut status_code = StatusCode::OK;
+        let mut method = String::from("GET");
+        let mut response_headers: std::collections::HashMap<String, String> =
+            std::collections::HashMap::default();
+        let mut request_headers = std::collections::HashMap::default();
+        let mut protocol = String::from("http/1.1");
+        let mut anti_bot_tech = AntiBotTech::default();
+
+        let frame_id = page.mainframe().await?;
+
+        let cmd = chromiumoxide::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
             transition_type: Some(
                 chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
@@ -963,11 +1142,23 @@ pub async fn perform_chrome_http_request(
             frame_id,
             referrer,
             referrer_policy: None,
-        })?;
+        };
 
-    match page_base.await {
-        Ok(page_base) => {
-            if let Some(http_request) = page_base {
+        let auth_opt = cache_auth_token(cache_options);
+        let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+        let cache_strategy = None;
+        let remote = None;
+
+        let page_base = page.http_future_with_cache_intercept_enabled(
+            cmd,
+            auth_opt,
+            cache_policy,
+            cache_strategy,
+            remote,
+        );
+
+        match page_base.await {
+            Ok(http_request) => {
                 if let Some(http_method) = http_request.method.as_deref() {
                     method = http_method.into();
                 }
@@ -1040,164 +1231,38 @@ pub async fn perform_chrome_http_request(
 
                     status_code = StatusCode::from_u16(response.status as u16)
                         .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
-                } else {
-                    if let Some(failure_text) = &http_request.failure_text {
-                        if failure_text == "net::ERR_FAILED" {
-                            waf_check = true;
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => return Err(e),
-    }
-
-    Ok(ChromeHTTPReqRes {
-        waf_check,
-        status_code,
-        method,
-        response_headers,
-        request_headers,
-        protocol,
-        anti_bot_tech,
-    })
-}
-
-#[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
-/// Perform a http future with chrome cached.
-pub async fn perform_chrome_http_request_cache(
-    page: &chromiumoxide::Page,
-    source: &str,
-    referrer: Option<String>,
-    cache_options: &Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
-) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
-    let mut waf_check = false;
-    let mut status_code = StatusCode::OK;
-    let mut method = String::from("GET");
-    let mut response_headers: std::collections::HashMap<String, String> =
-        std::collections::HashMap::default();
-    let mut request_headers = std::collections::HashMap::default();
-    let mut protocol = String::from("http/1.1");
-    let mut anti_bot_tech = AntiBotTech::default();
-
-    let frame_id = page.mainframe().await?;
-
-    let cmd = chromiumoxide::cdp::browser_protocol::page::NavigateParams {
-        url: source.to_string(),
-        transition_type: Some(chromiumoxide::cdp::browser_protocol::page::TransitionType::Other),
-        frame_id,
-        referrer,
-        referrer_policy: None,
-    };
-
-    let auth_opt = cache_auth_token(cache_options);
-    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
-    let cache_strategy = None;
-    let remote = None;
-
-    let page_base = page.http_future_with_cache_intercept_enabled(
-        cmd,
-        auth_opt,
-        cache_policy,
-        cache_strategy,
-        remote,
-    );
-
-    match page_base.await {
-        Ok(http_request) => {
-            if let Some(http_method) = http_request.method.as_deref() {
-                method = http_method.into();
-            }
-
-            request_headers.clone_from(&http_request.headers);
-
-            if let Some(response) = &http_request.response {
-                if let Some(p) = &response.protocol {
-                    protocol.clone_from(p);
-                }
-
-                if let Some(res_headers) = response.headers.inner().as_object() {
-                    for (k, v) in res_headers {
-                        response_headers.insert(k.to_string(), v.to_string());
-                    }
-                }
-
-                let mut firewall = false;
-
-                waf_check = detect_antibot_from_url(&response.url).is_some();
-
-                if !response.url.starts_with(source) {
-                    match &response.security_details {
-                        Some(security_details) => {
-                            anti_bot_tech = detect_anti_bot_tech_response(
-                                &response.url,
-                                &HeaderSource::Map(&response_headers),
-                                &Default::default(),
-                                Some(&security_details.subject_name),
-                            );
-                            firewall = true;
-                        }
-                        _ => {
-                            anti_bot_tech = detect_anti_bot_tech_response(
-                                &response.url,
-                                &HeaderSource::Map(&response_headers),
-                                &Default::default(),
-                                None,
-                            );
-                            if anti_bot_tech == AntiBotTech::Cloudflare {
-                                if let Some(xframe_options) =
-                                    response_headers.get("x-frame-options")
-                                {
-                                    if xframe_options == r#"\"DENY\""# {
-                                        firewall = true;
-                                    }
-                                } else if let Some(encoding) =
-                                    response_headers.get("Accept-Encoding")
-                                {
-                                    if encoding == r#"cf-ray"# {
-                                        firewall = true;
-                                    }
-                                }
-                            } else {
-                                firewall = true;
-                            }
-                        }
-                    };
-
-                    waf_check =
-                        waf_check || firewall && !matches!(anti_bot_tech, AntiBotTech::None);
-
-                    if !waf_check {
-                        waf_check = match &response.protocol {
-                            Some(protocol) => protocol == "blob",
-                            _ => false,
-                        }
-                    }
-                }
-
-                status_code = StatusCode::from_u16(response.status as u16)
-                    .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
-            } else {
-                if let Some(failure_text) = &http_request.failure_text {
+                } else if let Some(failure_text) = &http_request.failure_text {
                     if failure_text == "net::ERR_FAILED" {
                         waf_check = true;
                     }
                 }
             }
+            Err(e) => return Err(e),
         }
-        Err(e) => return Err(e),
+
+        Ok(ChromeHTTPReqRes {
+            waf_check,
+            status_code,
+            method,
+            response_headers,
+            request_headers,
+            protocol,
+            anti_bot_tech,
+        })
     }
 
-    Ok(ChromeHTTPReqRes {
-        waf_check,
-        status_code,
-        method,
-        response_headers,
-        request_headers,
-        protocol,
-        anti_bot_tech,
-    })
+    match attempt_once(page, source, referrer.clone(), cache_options, cache_policy).await {
+        Ok(ok) => Ok(ok),
+        Err(e) => {
+            if is_cipher_mismatch(&e) {
+                if let Some(flipped) = flip_http_https(source) {
+                    return attempt_once(page, &flipped, referrer, cache_options, cache_policy)
+                        .await;
+                }
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Use OpenAI to extend the crawl. This does nothing without 'openai' feature flag.
@@ -3803,36 +3868,84 @@ pub(crate) fn valid_parsing_status(res: &Response) -> bool {
     res.status().is_success() || res.status() == 404
 }
 
+/// Build the error page response.
+fn build_error_page_response(target_url: &str, err: reqwest::Error) -> PageResponse {
+    log::info!("error fetching {}", target_url);
+
+    let mut page_response = PageResponse::default();
+    if let Some(status_code) = err.status() {
+        page_response.status_code = status_code;
+    } else {
+        page_response.status_code = crate::page::get_error_http_status_code(&err);
+    }
+    page_response.error_for_status = Some(Err(err));
+    page_response
+}
+
+/// Error chain handshake failure.
+fn error_chain_contains_handshake_failure(err: &reqwest::Error) -> bool {
+    if err.to_string().to_lowercase().contains("handshake failure") {
+        return true;
+    }
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = err.source();
+
+    while let Some(e) = cur {
+        let s = e.to_string().to_lowercase();
+        if s.contains("handshake failure") {
+            return true;
+        }
+        cur = e.source();
+    }
+
+    false
+}
+
 /// Perform a network request to a resource extracting all content streaming.
 async fn fetch_page_html_raw_base(
     target_url: &str,
     client: &Client,
     only_html: bool,
 ) -> PageResponse {
+    async fn attempt_once(
+        url: &str,
+        client: &Client,
+        only_html: bool,
+    ) -> Result<PageResponse, reqwest::Error> {
+        let res = client.get(url).send().await?;
+        Ok(handle_response_bytes(res, url, only_html).await)
+    }
+
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
     } else {
         None
     };
-    let mut page_response = match client.get(target_url).send().await {
-        Ok(res) => handle_response_bytes(res, target_url, only_html).await,
+
+    let mut page_response = match attempt_once(target_url, client, only_html).await {
+        Ok(pr) => pr,
         Err(err) => {
-            log::info!("error fetching {}", target_url);
-            let mut page_response = PageResponse::default();
-
-            if let Some(status_code) = err.status() {
-                page_response.status_code = status_code;
+            let should_retry = error_chain_contains_handshake_failure(&err);
+            if should_retry {
+                if let Some(flipped) = flip_http_https(target_url) {
+                    log::info!(
+                        "TLS handshake failure for {}; retrying with flipped scheme: {}",
+                        target_url,
+                        flipped
+                    );
+                    match attempt_once(&flipped, client, only_html).await {
+                        Ok(pr2) => pr2,
+                        Err(err2) => build_error_page_response(&flipped, err2),
+                    }
+                } else {
+                    build_error_page_response(target_url, err)
+                }
             } else {
-                page_response.status_code = crate::page::get_error_http_status_code(&err);
+                build_error_page_response(target_url, err)
             }
-
-            page_response.error_for_status = Some(Err(err));
-            page_response
         }
     };
 
     set_page_response_duration(&mut page_response, duration);
-
     page_response
 }
 
