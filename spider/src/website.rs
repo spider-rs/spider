@@ -1454,7 +1454,10 @@ impl Website {
                 // always remove the referer header.
                 if let Some(referer) = headers.remove(REFERER) {
                     if let Ok(v) = referer.to_str() {
-                        self.configuration.referer = Some(v.into())
+                        // modify the default referer
+                        if self.configuration.referer.is_none() && !v.is_empty() {
+                            self.configuration.referer = Some(v.into())
+                        }
                     }
                 }
                 self.configuration

@@ -9,8 +9,8 @@ pub fn setup_default_headers(
     client_builder: crate::client::ClientBuilder,
     configuration: &Configuration,
 ) -> crate::client::ClientBuilder {
-    let mut headers = match configuration.headers {
-        Some(ref h) => *h.clone(),
+    let mut headers = match &configuration.headers {
+        Some(h) => *h.clone(),
         None => crate::configuration::SerializableHeaderMap::default(),
     };
 

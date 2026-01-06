@@ -356,7 +356,8 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
         extra_headers: match &config.headers {
             Some(headers) => {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
-                hm.remove("user-agent");
+
+                cleanup_invalid_headers(&mut hm);
 
                 if cfg!(feature = "real_browser") {
                     crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
@@ -394,6 +395,14 @@ pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> 
     Some(chromiumoxide::handler::viewport::Viewport::from(
         get_random_viewport(),
     ))
+}
+
+/// Cleanup the headermap.
+pub fn cleanup_invalid_headers(hm: &mut std::collections::HashMap<String, String>) {
+    hm.remove("user-agent");
+    hm.remove("host");
+    hm.remove("connection");
+    hm.remove("content-length");
 }
 
 /// Setup the browser configuration.
@@ -458,12 +467,12 @@ pub async fn setup_browser_configuration(
                     config.chrome_intercept.blacklist_patterns.clone();
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
                 browser_config.ignore_analytics = config.chrome_intercept.block_analytics;
-                browser_config.extra_headers = match config.headers {
-                    Some(ref headers) => {
+                browser_config.extra_headers = match &config.headers {
+                    Some(headers) => {
                         let mut hm =
                             crate::utils::header_utils::header_map_to_hash_map(headers.inner());
 
-                        hm.remove("user-agent");
+                        cleanup_invalid_headers(&mut hm);
 
                         crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
 
