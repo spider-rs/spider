@@ -23,13 +23,11 @@ async fn main() {
     let prompt_url_map = HashMap::from([
         (
             CaseInsensitiveString::new(website_url),
-            Box::new(
-                GPTConfigs::new(
-                    "gpt-4o-2024-05-13",
-                    "Search for Movies",
-                    500,
-                ),
-            )
+            Box::new(GPTConfigs::new(
+                "gpt-4o-2024-05-13",
+                "Search for Movies",
+                500,
+            )),
         ),
         (
             CaseInsensitiveString::new(

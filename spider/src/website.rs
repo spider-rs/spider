@@ -1111,27 +1111,52 @@ impl Website {
         self.extra_links.drain()
     }
 
-    /// Get the initial status code of the request
+    /// Set the initial status code of the request.
+    pub fn set_initial_status_code(&mut self, initial_status_code: StatusCode) {
+        self.initial_status_code = initial_status_code;
+    }
+
+    /// Get the initial status code of the request.
     pub fn get_initial_status_code(&self) -> &StatusCode {
         &self.initial_status_code
     }
 
-    /// Get the initial html size of the request
+    /// Set the initial html size of the request.
+    pub fn set_initial_html_length(&mut self, initial_html_length: usize) {
+        self.initial_html_length = initial_html_length;
+    }
+
+    /// Get the initial html size of the request.
     pub fn get_initial_html_length(&self) -> usize {
         self.initial_html_length
     }
 
-    /// Get the initial anti-bot tech code used for the intitial request
+    /// Set the initial anti-bot tech code used for the intitial request.
+    pub fn set_initial_anti_bot_tech(&mut self, initial_anti_bot_tech: AntiBotTech) {
+        self.initial_anti_bot_tech = initial_anti_bot_tech;
+    }
+
+    /// Get the initial anti-bot tech code used for the intitial request.
     pub fn get_initial_anti_bot_tech(&self) -> &AntiBotTech {
         &self.initial_anti_bot_tech
     }
 
-    /// Get the initial waf detected used for the intitial request
+    /// Set the initial waf detected used for the intitial request
+    pub fn set_initial_page_waf_check(&mut self, initial_page_waf_check: bool) {
+        self.initial_page_waf_check = initial_page_waf_check;
+    }
+
+    /// Get the initial waf detected used for the intitial request.
     pub fn get_initial_page_waf_check(&self) -> bool {
         self.initial_page_waf_check
     }
 
-    /// Get the initial page should retry determination used for the intitial request
+    /// Set the initial page should retry determination used for the intitial request.
+    pub fn set_initial_page_should_retry(&mut self, initial_page_should_retry: bool) {
+        self.initial_page_should_retry = initial_page_should_retry;
+    }
+
+    /// Get the initial page should retry determination used for the intitial request.
     pub fn get_initial_page_should_retry(&self) -> bool {
         self.initial_page_should_retry
     }
