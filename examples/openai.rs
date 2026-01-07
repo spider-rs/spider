@@ -23,17 +23,27 @@ async fn main() {
     let prompt_url_map = HashMap::from([
         (
             CaseInsensitiveString::new(website_url),
-            GPTConfigs::new("gpt-4o-2024-05-13", "Search for Movies", 500),
+            Box::new(
+                GPTConfigs::new(
+                    "gpt-4o-2024-05-13",
+                    "Search for Movies",
+                    500,
+                ),
+            )
         ),
         (
             CaseInsensitiveString::new(
                 &((website_url.to_owned()) + "/search/howsearchworks/?fg=1"),
             ),
-            GPTConfigs::new("gpt-4o-2024-05-13", "Change the background blue", 500),
+            Box::new(GPTConfigs::new(
+                "gpt-4o-2024-05-13",
+                "Change the background blue",
+                500,
+            )),
         ),
     ]);
 
-    gpt_config.prompt_url_map = Some(prompt_url_map);
+    gpt_config.prompt_url_map = Some(Box::new(prompt_url_map));
 
     let mut website: Website = Website::new(website_url)
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
