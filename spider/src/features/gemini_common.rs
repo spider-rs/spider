@@ -11,6 +11,8 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-flash-latest";
 #[cfg_attr(
     all(
         not(feature = "regex"),
+        not(feature = "openai"),
+        not(feature = "cache_openai"),
         not(feature = "gemini"),
         not(feature = "cache_gemini")
     ),
