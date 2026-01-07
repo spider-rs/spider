@@ -3869,7 +3869,7 @@ pub(crate) fn valid_parsing_status(res: &Response) -> bool {
 }
 
 /// Build the error page response.
-fn build_error_page_response(target_url: &str, err: reqwest::Error) -> PageResponse {
+fn build_error_page_response(target_url: &str, err: RequestError) -> PageResponse {
     log::info!("error fetching {}", target_url);
 
     let mut page_response = PageResponse::default();
@@ -3883,7 +3883,7 @@ fn build_error_page_response(target_url: &str, err: reqwest::Error) -> PageRespo
 }
 
 /// Error chain handshake failure.
-fn error_chain_contains_handshake_failure(err: &reqwest::Error) -> bool {
+fn error_chain_contains_handshake_failure(err: &RequestError) -> bool {
     if err.to_string().to_lowercase().contains("handshake failure") {
         return true;
     }
@@ -3910,7 +3910,7 @@ async fn fetch_page_html_raw_base(
         url: &str,
         client: &Client,
         only_html: bool,
-    ) -> Result<PageResponse, reqwest::Error> {
+    ) -> Result<PageResponse, RequestError> {
         let res = client.get(url).send().await?;
         Ok(handle_response_bytes(res, url, only_html).await)
     }
