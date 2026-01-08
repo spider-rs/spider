@@ -7493,6 +7493,18 @@ impl Website {
         self
     }
 
+    /// Add a referer to the request.
+    pub fn with_referer(&mut self, referer: Option<String>) -> &mut Self {
+        self.configuration.with_referer(referer);
+        self
+    }
+
+    /// Add a referer to the request.
+    pub fn with_referrer(&mut self, referer: Option<String>) -> &mut Self {
+        self.configuration.with_referrer(referer);
+        self
+    }
+
     /// Determine whether to collect all the resources found on pages.
     pub fn with_full_resources(&mut self, full_resources: bool) -> &mut Self {
         self.configuration.with_full_resources(full_resources);
