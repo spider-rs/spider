@@ -1896,6 +1896,19 @@ impl Website {
             }
         }
 
+        if !self.configuration.modify_headers && self.configuration.modify_http_client_headers {
+            if let Some(ua) = &self.configuration.user_agent {
+                crate::utils::header_utils::extend_headers(
+                    &mut headers,
+                    ua,
+                    &self.configuration.headers,
+                    &None,
+                    &self.configuration.viewport,
+                    &self.domain_parsed,
+                );
+            }
+        }
+
         // should unwrap using native-tls-alpn
         unsafe {
             match &self.configuration.request_timeout {
@@ -1977,6 +1990,19 @@ impl Website {
             }
             create_cache_key(req, Some(req.method.as_str()), auth_token)
         }));
+
+        if !self.configuration.modify_headers && self.configuration.modify_http_client_headers {
+            if let Some(ua) = &self.configuration.user_agent {
+                crate::utils::header_utils::extend_headers(
+                    &mut headers,
+                    ua,
+                    &self.configuration.headers,
+                    &None,
+                    &self.configuration.viewport,
+                    &self.domain_parsed,
+                );
+            }
+        }
 
         let client = ClientBuilder::new(unsafe {
             match &self.configuration.request_timeout {
@@ -7229,6 +7255,16 @@ impl Website {
     /// Modify the headers to mimic a real browser.
     pub fn with_modify_headers(&mut self, modify_headers: bool) -> &mut Self {
         self.configuration.with_modify_headers(modify_headers);
+        self
+    }
+
+    /// Modify the HTTP client headers to mimic a real browser.
+    pub fn with_modify_http_client_headers(
+        &mut self,
+        modify_http_client_headers: bool,
+    ) -> &mut Self {
+        self.configuration
+            .with_modify_http_client_headers(modify_http_client_headers);
         self
     }
 

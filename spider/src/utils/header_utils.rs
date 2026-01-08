@@ -21,6 +21,18 @@ pub fn setup_default_headers(
             }
         }
     }
+    if !configuration.modify_headers && configuration.modify_http_client_headers {
+        if let Some(ua) = &configuration.user_agent {
+            crate::utils::header_utils::extend_headers(
+                &mut headers.0,
+                ua.as_str(),
+                &configuration.headers,
+                &None,
+                &configuration.viewport,
+                &None,
+            );
+        }
+    }
 
     client_builder.default_headers(headers.0)
 }

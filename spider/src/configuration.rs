@@ -243,6 +243,8 @@ pub struct Configuration {
     pub shared: bool,
     /// Modify the headers to act like a real-browser
     pub modify_headers: bool,
+    /// Modify the HTTP client headers only to act like a real-browser
+    pub modify_http_client_headers: bool,
     /// Cache the page following HTTP caching rules.
     #[cfg(any(
         feature = "cache_request",
@@ -1506,6 +1508,15 @@ impl Configuration {
     /// Modify the headers to mimic a real browser.
     pub fn with_modify_headers(&mut self, modify_headers: bool) -> &mut Self {
         self.modify_headers = modify_headers;
+        self
+    }
+
+    /// Modify the HTTP client headers to mimic a real browser.
+    pub fn with_modify_http_client_headers(
+        &mut self,
+        modify_http_client_headers: bool,
+    ) -> &mut Self {
+        self.modify_http_client_headers = modify_http_client_headers;
         self
     }
 
