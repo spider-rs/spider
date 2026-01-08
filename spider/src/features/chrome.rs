@@ -359,13 +359,12 @@ fn create_handler_config(config: &Configuration) -> HandlerConfig {
 
                 cleanup_invalid_headers(&mut hm);
 
-                if cfg!(feature = "real_browser") {
-                    crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
-                }
-
                 if hm.is_empty() {
                     None
                 } else {
+                    if cfg!(feature = "real_browser") {
+                        crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
+                    }
                     Some(hm)
                 }
             }
@@ -399,10 +398,14 @@ pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> 
 
 /// Cleanup the headermap.
 pub fn cleanup_invalid_headers(hm: &mut std::collections::HashMap<String, String>) {
+    hm.remove("User-Agent");
     hm.remove("user-agent");
     hm.remove("host");
+    hm.remove("Host");
     hm.remove("connection");
+    hm.remove("Connection");
     hm.remove("content-length");
+    hm.remove("Content-Length");
 }
 
 /// Setup the browser configuration.
@@ -474,11 +477,12 @@ pub async fn setup_browser_configuration(
 
                         cleanup_invalid_headers(&mut hm);
 
-                        crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
-
                         if hm.is_empty() {
                             None
                         } else {
+                            if cfg!(feature = "real_browser") {
+                                crate::utils::header_utils::rewrite_headers_to_title_case(&mut hm);
+                            }
                             Some(hm)
                         }
                     }
