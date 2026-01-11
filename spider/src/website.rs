@@ -284,6 +284,28 @@ pub type OnLinkFindCallback = Arc<
         + Sync,
 >;
 
+/// Callback closure that determines if a link should be crawled or not.
+pub trait OnShouldCrawlClosure: Fn(&Page) -> bool + Send + Sync + 'static {}
+impl<F: Fn(&Page) -> bool + Send + Sync + 'static> OnShouldCrawlClosure for F {}
+
+/// Callback closure or function pointer that determines if a link should be crawled or not.
+#[derive(Clone)]
+pub enum OnShouldCrawlCallback {
+    /// Static function pointer.
+    Fn(fn(&Page) -> bool),
+
+    /// Closure.
+    Closure(Arc<dyn OnShouldCrawlClosure>),
+}
+impl OnShouldCrawlCallback {
+    fn call(&self, page: &Page) -> bool {
+        match self {
+            Self::Fn(func) => func(page),
+            Self::Closure(closure) => closure(page),
+        }
+    }
+}
+
 /// Represents a website to crawl and gather all links or page content.
 /// ```rust
 /// use spider::website::Website;
@@ -302,7 +324,7 @@ pub struct Website {
     /// The callback when a link is found.
     pub on_link_find_callback: Option<OnLinkFindCallback>,
     /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
-    pub on_should_crawl_callback: Option<fn(&Page) -> bool>,
+    pub on_should_crawl_callback: Option<OnShouldCrawlCallback>,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     pub crawl_id: Box<String>,
     #[cfg(feature = "extra_information")]
@@ -2350,8 +2372,8 @@ impl Website {
 
         self.set_crawl_initial_status(&page, &links);
 
-        if let Some(cb) = self.on_should_crawl_callback {
-            if !cb(&page) {
+        if let Some(ref cb) = self.on_should_crawl_callback {
+            if !cb.call(&page) {
                 page.blocked_crawl = true;
                 channel_send_page(&self.channel, page, &self.channel_guard);
                 return Default::default();
@@ -2516,8 +2538,8 @@ impl Website {
 
             self.set_crawl_initial_status(&page, &links);
 
-            if let Some(cb) = self.on_should_crawl_callback {
-                if !cb(&page) {
+            if let Some(ref cb) = self.on_should_crawl_callback {
+                if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
@@ -2652,7 +2674,7 @@ impl Website {
             return;
         }
 
-        let on_should_crawl_callback = self.on_should_crawl_callback;
+        let on_should_crawl_callback = self.on_should_crawl_callback.clone();
         let return_page_links = self.configuration.return_page_links;
         let full_resources = self.configuration.full_resources;
         let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
@@ -2749,6 +2771,7 @@ impl Website {
 
                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                             let shared = shared.clone();
+                            let on_should_crawl_callback = on_should_crawl_callback.clone();
                             spawn_set("page_fetch_cmd", &mut set, async move {
                                 let link_result = match &shared.10 {
                                     Some(cb) => cb(link, None),
@@ -2823,8 +2846,8 @@ impl Website {
                                         .map(Box::new);
                                 }
 
-                                if let Some(cb) = on_should_crawl_callback {
-                                    if !cb(&page) {
+                                if let Some(ref cb) = on_should_crawl_callback {
+                                    if !cb.call(&page) {
                                         page.blocked_crawl = true;
                                         channel_send_page(&shared.3, page, &shared.5);
                                         drop(permit);
@@ -3124,8 +3147,8 @@ impl Website {
 
             self.set_crawl_initial_status(&page, &links);
 
-            if let Some(cb) = self.on_should_crawl_callback {
-                if !cb(&page) {
+            if let Some(ref cb) = self.on_should_crawl_callback {
+                if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
@@ -3304,8 +3327,8 @@ impl Website {
                     .await;
             }
 
-            if let Some(cb) = self.on_should_crawl_callback {
-                if !cb(&page) {
+            if let Some(ref cb) = self.on_should_crawl_callback {
+                if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
@@ -3664,8 +3687,8 @@ impl Website {
 
                 self.set_crawl_initial_status(&page, &links);
 
-                if let Some(cb) = self.on_should_crawl_callback {
-                    if !cb(&page) {
+                if let Some(ref cb) = self.on_should_crawl_callback {
+                    if !cb.call(&page) {
                         page.blocked_crawl = true;
                         channel_send_page(&self.channel, page, &self.channel_guard);
                         return Default::default();
@@ -3814,8 +3837,8 @@ impl Website {
                 };
             }
 
-            if let Some(cb) = self.on_should_crawl_callback {
-                if !cb(&page) {
+            if let Some(cb) = &mut self.on_should_crawl_callback {
+                if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return Default::default();
@@ -4323,7 +4346,7 @@ impl Website {
         if self.single_page() {
             self._crawl_establish(client, &mut selector, false).await;
         } else {
-            let on_should_crawl_callback = self.on_should_crawl_callback;
+            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
             let only_html = self.configuration.only_html && !full_resources;
@@ -4419,6 +4442,7 @@ impl Website {
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
+                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -4503,8 +4527,8 @@ impl Website {
                                         page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
                                     }
 
-                                    if let Some(cb) = on_should_crawl_callback {
-                                        if !cb(&page) {
+                                    if let Some(ref cb) = on_should_crawl_callback {
+                                        if !cb.call(&page) {
                                             page.blocked_crawl = true;
                                             channel_send_page(&shared.2, page, &shared.4);
                                             drop(permit);
@@ -4642,7 +4666,7 @@ impl Website {
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_should_crawl_callback = self.on_should_crawl_callback;
+                            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             let mut exceeded_budget = false;
@@ -4711,6 +4735,7 @@ impl Website {
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
+                                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
@@ -4842,8 +4867,8 @@ impl Website {
                                                                 page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                                             }
 
-                                                            if let Some(cb) = on_should_crawl_callback {
-                                                                if !cb(&page) {
+                                                            if let Some(ref cb) = on_should_crawl_callback {
+                                                                if !cb.call(&page) {
                                                                     page.blocked_crawl = true;
                                                                     channel_send_page(&shared.2, page, &shared.4);
                                                                     drop(permit);
@@ -4966,7 +4991,7 @@ impl Website {
             website._crawl_establish(client, &mut selector, false).await;
             website
         } else {
-            let on_should_crawl_callback = self.on_should_crawl_callback;
+            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
             let only_html = self.configuration.only_html && !full_resources;
@@ -5059,7 +5084,7 @@ impl Website {
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
-
+                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5144,8 +5169,8 @@ impl Website {
                                         page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
                                     }
 
-                                    if let Some(cb) = on_should_crawl_callback {
-                                        if !cb(&page) {
+                                    if let Some(ref cb) = on_should_crawl_callback {
+                                        if !cb.call(&page) {
                                             page.blocked_crawl = true;
                                             channel_send_page(&shared.2, page, &shared.4);
                                             drop(permit);
@@ -5295,7 +5320,7 @@ impl Website {
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_should_crawl_callback = self.on_should_crawl_callback;
+                            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             let mut exceeded_budget = false;
@@ -5366,7 +5391,7 @@ impl Website {
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
-
+                                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
@@ -5498,8 +5523,8 @@ impl Website {
                                                                 page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                                             }
 
-                                                            if let Some(cb) = on_should_crawl_callback {
-                                                                if !cb(&page) {
+                                                            if let Some(ref cb) = on_should_crawl_callback {
+                                                                if !cb.call(&page) {
                                                                     page.blocked_crawl = true;
                                                                     channel_send_page(&shared.2, page, &shared.4);
                                                                     drop(permit);
@@ -5801,7 +5826,7 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> = self.drain_extra_links().collect();
 
             let (mut interval, throttle) = self.setup_crawl();
-            let on_should_crawl_callback = self.on_should_crawl_callback;
+            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let return_page_links = self.configuration.return_page_links;
 
             links.extend(
@@ -5889,7 +5914,7 @@ impl Website {
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
-
+                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.7 {
                                         Some(cb) => cb(link, None),
@@ -5980,8 +6005,8 @@ impl Website {
                                         page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                     }
 
-                                    if let Some(cb) = on_should_crawl_callback {
-                                        if !cb(&page) {
+                                    if let Some(ref cb) = on_should_crawl_callback {
+                                        if !cb.call(&page) {
                                             page.blocked_crawl = true;
                                             channel_send_page(&shared.2, page, &shared.3);
                                             drop(permit);
@@ -7323,7 +7348,21 @@ impl Website {
         on_should_crawl_callback: Option<fn(&Page) -> bool>,
     ) -> &mut Self {
         match on_should_crawl_callback {
-            Some(callback) => self.on_should_crawl_callback = Some(callback),
+            Some(callback) => self.on_should_crawl_callback = Some(OnShouldCrawlCallback::Fn(callback)),
+            _ => self.on_should_crawl_callback = None,
+        };
+        self
+    }
+
+    /// Use an immutable closure to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
+    /// 
+    /// Slightly slower than [`with_on_should_crawl_callback`].
+    pub fn with_on_should_crawl_callback_closure<F: OnShouldCrawlClosure>(
+        &mut self,
+        on_should_crawl_closure: Option<F>,
+    ) -> &mut Self {
+        match on_should_crawl_closure {
+            Some(callback) => self.on_should_crawl_callback = Some(OnShouldCrawlCallback::Closure(Arc::new(callback))),
             _ => self.on_should_crawl_callback = None,
         };
         self
