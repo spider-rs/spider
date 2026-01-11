@@ -2372,8 +2372,8 @@ impl Website {
 
         self.set_crawl_initial_status(&page, &links);
 
-        if let Some(cb) = self.on_should_crawl_callback {
-            if !cb(&page) {
+        if let Some(ref cb) = self.on_should_crawl_callback {
+            if !cb.call(&page) {
                 page.blocked_crawl = true;
                 channel_send_page(&self.channel, page, &self.channel_guard);
                 return Default::default();
@@ -2674,7 +2674,7 @@ impl Website {
             return;
         }
 
-        let on_should_crawl_callback = self.on_should_crawl_callback;
+        let on_should_crawl_callback = self.on_should_crawl_callback.clone();
         let return_page_links = self.configuration.return_page_links;
         let full_resources = self.configuration.full_resources;
         let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
@@ -2771,6 +2771,7 @@ impl Website {
 
                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                             let shared = shared.clone();
+                            let on_should_crawl_callback = on_should_crawl_callback.clone();
                             spawn_set("page_fetch_cmd", &mut set, async move {
                                 let link_result = match &shared.10 {
                                     Some(cb) => cb(link, None),
@@ -2845,7 +2846,7 @@ impl Website {
                                         .map(Box::new);
                                 }
 
-                                if let Some(cb) = on_should_crawl_callback {
+                                if let Some(ref cb) = on_should_crawl_callback {
                                     if !cb.call(&page) {
                                         page.blocked_crawl = true;
                                         channel_send_page(&shared.3, page, &shared.5);
@@ -3146,7 +3147,7 @@ impl Website {
 
             self.set_crawl_initial_status(&page, &links);
 
-            if let Some(cb) = self.on_should_crawl_callback {
+            if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
@@ -3326,7 +3327,7 @@ impl Website {
                     .await;
             }
 
-            if let Some(cb) = self.on_should_crawl_callback {
+            if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
                     channel_send_page(&self.channel, page, &self.channel_guard);
@@ -3686,7 +3687,7 @@ impl Website {
 
                 self.set_crawl_initial_status(&page, &links);
 
-                if let Some(cb) = self.on_should_crawl_callback {
+                if let Some(ref cb) = self.on_should_crawl_callback {
                     if !cb.call(&page) {
                         page.blocked_crawl = true;
                         channel_send_page(&self.channel, page, &self.channel_guard);
@@ -4665,7 +4666,7 @@ impl Website {
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_should_crawl_callback = self.on_should_crawl_callback;
+                            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             let mut exceeded_budget = false;
@@ -4734,6 +4735,7 @@ impl Website {
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
+                                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
@@ -4865,8 +4867,8 @@ impl Website {
                                                                 page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                                             }
 
-                                                            if let Some(cb) = on_should_crawl_callback {
-                                                                if !cb(&page) {
+                                                            if let Some(ref cb) = on_should_crawl_callback {
+                                                                if !cb.call(&page) {
                                                                     page.blocked_crawl = true;
                                                                     channel_send_page(&shared.2, page, &shared.4);
                                                                     drop(permit);
@@ -5318,7 +5320,7 @@ impl Website {
                             ));
 
                             let add_external = shared.3.len() > 0;
-                            let on_should_crawl_callback = self.on_should_crawl_callback;
+                            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             let mut exceeded_budget = false;
@@ -5389,7 +5391,7 @@ impl Website {
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
-
+                                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
@@ -5521,8 +5523,8 @@ impl Website {
                                                                 page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                                             }
 
-                                                            if let Some(cb) = on_should_crawl_callback {
-                                                                if !cb(&page) {
+                                                            if let Some(ref cb) = on_should_crawl_callback {
+                                                                if !cb.call(&page) {
                                                                     page.blocked_crawl = true;
                                                                     channel_send_page(&shared.2, page, &shared.4);
                                                                     drop(permit);
@@ -5824,7 +5826,7 @@ impl Website {
             let mut links: HashSet<CaseInsensitiveString> = self.drain_extra_links().collect();
 
             let (mut interval, throttle) = self.setup_crawl();
-            let on_should_crawl_callback = self.on_should_crawl_callback;
+            let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let return_page_links = self.configuration.return_page_links;
 
             links.extend(
@@ -5912,7 +5914,7 @@ impl Website {
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
-
+                                let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.7 {
                                         Some(cb) => cb(link, None),
@@ -6003,8 +6005,8 @@ impl Website {
                                         page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
                                     }
 
-                                    if let Some(cb) = on_should_crawl_callback {
-                                        if !cb(&page) {
+                                    if let Some(ref cb) = on_should_crawl_callback {
+                                        if !cb.call(&page) {
                                             page.blocked_crawl = true;
                                             channel_send_page(&shared.2, page, &shared.3);
                                             drop(permit);
