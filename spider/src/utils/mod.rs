@@ -120,7 +120,23 @@ static VERIFY_PATTERNS: &[&[u8]] = &[
     b"checking if the site connection is secure",
 ];
 
+/// Imperva iframe patterns.
+static IMPERVA_IFRAME_PATTERNS: &[&[u8]] = &[
+    b"geo.captcha-delivery.com",
+    b"captcha-delivery.com",
+    b"Verification system",
+    b"Verification Required",
+    b"Verification successful",
+    b"Verifying device",
+];
+
 lazy_static! {
+    /// Imperva check
+    static ref AC_IMPERVA_IFRAME: aho_corasick::AhoCorasick = aho_corasick::AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .build(IMPERVA_IFRAME_PATTERNS)
+        .expect("valid imperva iframe patterns");
     /// Bot verify.
     static ref AC: AhoCorasick =  aho_corasick::AhoCorasickBuilder::new()
         .match_kind(aho_corasick::MatchKind::LeftmostLongest)
@@ -298,23 +314,53 @@ error was encountered while trying to use an ErrorDocument to handle the request
   pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
 }
 
+/// “Challenge-sized” heuristic.
+///
+/// Tune this threshold as you see real traffic:
+/// - Imperva / captcha pages are often small HTML shells.
+/// - Real pages can also be small, so we ALSO require iframe signatures.
+#[inline(always)]
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+pub fn imperva_challenge_sized(content_len: usize) -> bool {
+    // keep it branch-light; adjust if needed
+    content_len > 0 && content_len <= 200_000
+}
+
+#[inline(always)]
+/// Detect imperva verification iframe.
+pub fn detect_imperva_verification_iframe(html: &[u8]) -> bool {
+    AC_IMPERVA_IFRAME.is_match(html)
+}
+
+/// A combined “looks like Imperva verification page” check.
+/// Use this before deciding that X-Cdn: Imperva implies Imperva.
+#[inline(always)]
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+pub fn looks_like_imperva_verify(content_len: usize, html: &[u8]) -> bool {
+    imperva_challenge_sized(content_len) && detect_imperva_verification_iframe(html)
+}
+
 /// Detect if openresty hard 403 is forbidden and should not retry.
+#[inline(always)]
 pub fn detect_open_resty_forbidden(b: &[u8]) -> bool {
     b.starts_with(*OPEN_RESTY_FORBIDDEN)
 }
 
 /// Detect if a page is forbidden and should not retry.
+#[inline(always)]
 pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
     b == *APACHE_FORBIDDEN || detect_open_resty_forbidden(b)
 }
 
 /// Needs bot verification.
+#[inline(always)]
 pub fn contains_verification(text: &Vec<u8>) -> bool {
     AC.is_match(text)
 }
 
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
 async fn cf_handle(
     b: &mut Vec<u8>,
     page: &chromiumoxide::Page,
@@ -458,10 +504,481 @@ async fn cf_handle(
 
 /// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
+#[inline(always)]
 async fn cf_handle(
     _b: &mut Vec<u8>,
     _page: &chromiumoxide::Page,
     _target_url: &str,
+    _viewport: &Option<crate::configuration::Viewport>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    Ok(())
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
+/// Handle imperva protected pages via chrome. This does nothing without the real_browser feature enabled.
+async fn imperva_handle(
+    b: &mut Vec<u8>,
+    page: &chromiumoxide::Page,
+    _target_url: &str,
+    viewport: &Option<crate::configuration::Viewport>,
+) -> Result<bool, chromiumoxide::error::CdpError> {
+    // ------------------------------------------------------------
+    // Fast, no-alloc detection helpers (best perf)
+    // ------------------------------------------------------------
+    #[inline(always)]
+    fn imperva_challenge_sized(len: usize) -> bool {
+        len > 0 && len <= 220_000
+    }
+
+    #[inline(always)]
+    fn memeq(h: &[u8], n: &[u8]) -> bool {
+        h.len() == n.len() && h.iter().zip(n).all(|(a, b)| a == b)
+    }
+
+    #[inline(always)]
+    fn contains(h: &[u8], needle: &[u8]) -> bool {
+        let nl = needle.len();
+        if nl == 0 {
+            return true;
+        }
+        if nl > h.len() {
+            return false;
+        }
+        h.windows(nl).any(|w| memeq(w, needle))
+    }
+
+    // Wait screen like your screenshot.
+    #[inline(always)]
+    fn looks_like_imperva_wait_screen(html: &[u8]) -> bool {
+        if !imperva_challenge_sized(html.len()) {
+            return false;
+        }
+        contains(html, b"Verifying the device")
+            || contains(html, b"Verifying the device...")
+            || contains(
+                html,
+                b"The requested content will be available after verification",
+            )
+            || contains(html, b"available after verification")
+    }
+
+    // Imperva iframe/verification system present (slider phase).
+    #[inline(always)]
+    fn looks_like_imperva_iframe_phase(html: &[u8]) -> bool {
+        if !imperva_challenge_sized(html.len()) {
+            return false;
+        }
+        contains(html, b"geo.captcha-delivery.com")
+            || contains(html, b"captcha-delivery.com")
+            || contains(html, b"Verification system")
+    }
+
+    // hCaptcha iframe present (pokemoncenter appears to do this)
+    #[inline(always)]
+    fn looks_like_hcaptcha_iframe(html: &[u8]) -> bool {
+        if !imperva_challenge_sized(html.len()) {
+            return false;
+        }
+        // typical iframe src host(s) + keyword
+        contains(html, b"newassets.hcaptcha.com")
+            || contains(html, b"hcaptcha.com/captcha")
+            || contains(html, b"Widget containing checkbox for hCaptcha")
+            || contains(html, b"data-hcaptcha-widget-id")
+    }
+
+    #[inline(always)]
+    fn looks_like_imperva_any(html: &[u8]) -> bool {
+        looks_like_imperva_wait_screen(html)
+            || looks_like_imperva_iframe_phase(html)
+            || looks_like_hcaptcha_iframe(html)
+    }
+
+    // If the caller buffer doesn't look like Imperva challenge at all, do nothing.
+    if !looks_like_imperva_any(b.as_slice()) {
+        return Ok(false);
+    }
+
+    // ------------------------------------------------------------
+    // Drag helpers
+    // ------------------------------------------------------------
+    #[inline(always)]
+    fn pt(x: f64, y: f64) -> chromiumoxide::layout::Point {
+        chromiumoxide::layout::Point { x, y }
+    }
+
+    #[inline(always)]
+    fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
+        if v < lo {
+            lo
+        } else if v > hi {
+            hi
+        } else {
+            v
+        }
+    }
+
+    // JS drag builder (fast): 1 String alloc + one write!
+    #[inline(always)]
+    fn build_js_drag(fx: f64, fy: f64, tx: f64, ty: f64) -> String {
+        use core::fmt::Write as _;
+        let mut s = String::with_capacity(1024);
+        let _ = write!(
+            &mut s,
+            r#"(function(){{const fx={:.3},fy={:.3},tx={:.3},ty={:.3};
+const at=(x,y)=>document.elementFromPoint(x,y);
+const fire=(el,type,x,y)=>{{if(!el)return;const o={{bubbles:true,cancelable:true,clientX:x,clientY:y,buttons:1}};el.dispatchEvent(new MouseEvent(type,o));try{{const p=type==='mousedown'?'pointerdown':type==='mousemove'?'pointermove':type==='mouseup'?'pointerup':type;el.dispatchEvent(new PointerEvent(p,{{bubbles:true,cancelable:true,clientX:x,clientY:y,buttons:1,pointerId:1,isPrimary:true}}));}}catch(e){{}}}};
+const el0=at(fx,fy);fire(el0,'mousedown',fx,fy);
+for(let i=1;i<=18;i++){{const t=i/18,x=fx+(tx-fx)*t,y=fy+(ty-fy)*t;fire(at(x,y)||el0,'mousemove',x,y);}}
+fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
+            fx, fy, tx, ty
+        );
+        s
+    }
+
+    // ------------------------------------------------------------
+    // Main loop
+    // ------------------------------------------------------------
+    let mut validated = false;
+
+    let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let _ = tokio::join!(
+            page.disable_network_cache(true),
+            perform_smart_mouse_movement(&page, &viewport)
+        );
+
+        for _ in 0..10 {
+            let mut wait_for = CF_WAIT_FOR.clone();
+
+            // Pull HTML once per iteration.
+            let cur_html = match page.outer_html_bytes().await {
+                Ok(h) => h,
+                Err(_) => {
+                    let wait = Some(wait_for.clone());
+                    let _ = tokio::join!(
+                        page_wait(&page, &wait),
+                        perform_smart_mouse_movement(&page, &viewport),
+                    );
+                    continue;
+                }
+            };
+
+            *b = cur_html;
+
+            // If we left the challenge, done.
+            if !looks_like_imperva_any(b.as_slice()) {
+                validated = true;
+                break;
+            }
+
+            // ------------------------------------------------------------
+            // 0) hCaptcha checkbox flow
+            // ------------------------------------------------------------
+            // If an hCaptcha iframe is present, click the checkbox with id="checkbox" inside it.
+            // Keep it simple: pierce into iframes and click #checkbox; then wait a little.
+            let hcaptcha_iframe_present = page
+                .find_elements_pierced(
+                    r#"iframe[src*="hcaptcha.com"], iframe[src*="newassets.hcaptcha.com"]"#,
+                )
+                .await
+                .map(|els| !els.is_empty())
+                .unwrap_or(false);
+
+            if hcaptcha_iframe_present || looks_like_hcaptcha_iframe(b.as_slice()) {
+                if let Ok(boxes) = page.find_elements_pierced(r#"#checkbox"#).await {
+                    if let Some(cb_el) = boxes.into_iter().next() {
+                        // Click the checkbox. Prefer clickable_point if available.
+                        let clicked = match cb_el.clickable_point().await {
+                            Ok(p) => page.click(p).await.is_ok() || cb_el.click().await.is_ok(),
+                            Err(_) => cb_el.click().await.is_ok(),
+                        };
+
+                        if clicked {
+                            // Give it a moment to render/transition.
+                            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(
+                                Some(core::time::Duration::from_millis(900)),
+                            )
+                            .into();
+                            wait_for.idle_network =
+                                crate::features::chrome_common::WaitForIdleNetwork::new(
+                                    core::time::Duration::from_secs(6).into(),
+                                )
+                                .into();
+                            wait_for.page_navigations = true;
+
+                            let wait = Some(wait_for.clone());
+                            let _ = tokio::join!(
+                                page_wait(&page, &wait),
+                                perform_smart_mouse_movement(&page, &viewport),
+                            );
+
+                            if let Ok(nc) = page.outer_html_bytes().await {
+                                *b = nc;
+                                if !looks_like_imperva_any(b.as_slice()) {
+                                    validated = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            // Even if click failed, wait a bit; sometimes it becomes clickable after.
+                            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(
+                                Some(core::time::Duration::from_millis(650)),
+                            )
+                            .into();
+                            let wait = Some(wait_for.clone());
+                            let _ = tokio::join!(
+                                page_wait(&page, &wait),
+                                perform_smart_mouse_movement(&page, &viewport),
+                            );
+                        }
+
+                        // Continue loop; might transition into slider phase or pass.
+                        continue;
+                    }
+                }
+
+                // If we didn't find #checkbox yet, act like CF: wait for iframe content to load.
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_millis(900),
+                ))
+                .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    core::time::Duration::from_secs(6).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport),
+                );
+                if let Ok(nc) = page.outer_html_bytes().await {
+                    *b = nc;
+                    if !looks_like_imperva_any(b.as_slice()) {
+                        validated = true;
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            // ------------------------------------------------------------
+            // 1) WAIT SCREEN (no iframe yet): wait until it progresses
+            // ------------------------------------------------------------
+            if looks_like_imperva_wait_screen(b.as_slice()) {
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_millis(1100),
+                ))
+                .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    core::time::Duration::from_secs(7).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport),
+                );
+
+                if let Ok(nc) = page.outer_html_bytes().await {
+                    *b = nc;
+                }
+                continue;
+            }
+
+            // ------------------------------------------------------------
+            // 2) Imperva iframe/slider phase: drag
+            // ------------------------------------------------------------
+            let verify_iframe_present = page
+                .find_elements_pierced(
+                    r#"
+                    iframe[src*="geo.captcha-delivery.com"],
+                    iframe[src*="captcha-delivery.com"],
+                    iframe[title*="Verification system"],
+                    iframe[title*="verification system"]
+                    "#,
+                )
+                .await
+                .map(|els| !els.is_empty())
+                .unwrap_or(false);
+
+            if verify_iframe_present || looks_like_imperva_iframe_phase(b.as_slice()) {
+                let mut did_drag = false;
+
+                // Prefer handle drag if present
+                if let Ok(handles) = page
+                    .find_elements_pierced(
+                        r#"
+                        .slider,
+                        [class*="sliderHandle"],
+                        [class*="slider-handle"],
+                        [class*="slider"]
+                        "#,
+                    )
+                    .await
+                {
+                    if let Some(h) = handles.into_iter().next() {
+                        if let (Ok(hb), Ok(conts)) = (
+                            h.bounding_box().await,
+                            page.find_elements_pierced(
+                                r#"
+                                .sliderContainer,
+                                [class*="sliderContainer"],
+                                .slider-container,
+                                [class*="slider-container"]
+                                "#,
+                            )
+                            .await,
+                        ) {
+                            if let Some(c) = conts.into_iter().next() {
+                                if let Ok(cb) = c.bounding_box().await {
+                                    let from = pt(hb.x + hb.width * 0.5, hb.y + hb.height * 0.5);
+
+                                    let to_x = cb.x + cb.width - 8.0;
+                                    let to_y = cb.y + cb.height * 0.5;
+                                    let to = pt(
+                                        clamp(to_x, cb.x + 2.0, cb.x + cb.width - 2.0),
+                                        clamp(to_y, cb.y + 2.0, cb.y + cb.height - 2.0),
+                                    );
+
+                                    let _ = tokio::join!(
+                                        perform_smart_mouse_movement(&page, &viewport),
+                                        async {
+                                            let _ = page.move_mouse(from).await;
+                                        }
+                                    );
+
+                                    if page.click_and_drag(from, to).await.is_ok() {
+                                        did_drag = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // JS fallback using container bbox
+                if !did_drag {
+                    if let Ok(conts) = page
+                        .find_elements_pierced(
+                            r#"
+                            .sliderContainer,
+                            [class*="sliderContainer"],
+                            .slider-container,
+                            [class*="slider-container"]
+                            "#,
+                        )
+                        .await
+                    {
+                        if let Some(c) = conts.into_iter().next() {
+                            if let Ok(cb) = c.bounding_box().await {
+                                let from_x = clamp(cb.x + 10.0, cb.x + 2.0, cb.x + cb.width - 2.0);
+                                let from_y = clamp(
+                                    cb.y + cb.height * 0.5,
+                                    cb.y + 2.0,
+                                    cb.y + cb.height - 2.0,
+                                );
+                                let to_x = clamp(
+                                    cb.x + cb.width - 10.0,
+                                    cb.x + 2.0,
+                                    cb.x + cb.width - 2.0,
+                                );
+                                let to_y = from_y;
+
+                                let js = build_js_drag(from_x, from_y, to_x, to_y);
+                                let _ = page.evaluate(js).await;
+                                did_drag = true;
+                            }
+                        }
+                    }
+                }
+
+                // Wait after interaction
+                if did_drag {
+                    wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        core::time::Duration::from_millis(900),
+                    ))
+                    .into();
+                    wait_for.idle_network =
+                        crate::features::chrome_common::WaitForIdleNetwork::new(
+                            core::time::Duration::from_secs(6).into(),
+                        )
+                        .into();
+                    wait_for.page_navigations = true;
+                } else {
+                    wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        core::time::Duration::from_millis(650),
+                    ))
+                    .into();
+                    wait_for.page_navigations = true;
+                }
+
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport),
+                );
+
+                if let Ok(nc) = page.outer_html_bytes().await {
+                    *b = nc;
+                    if !looks_like_imperva_any(b.as_slice()) {
+                        validated = true;
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            // ------------------------------------------------------------
+            // 3) Unknown interstitial: do a CF-style wait and re-check.
+            // ------------------------------------------------------------
+            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                core::time::Duration::from_millis(900),
+            ))
+            .into();
+            wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                core::time::Duration::from_secs(6).into(),
+            )
+            .into();
+            wait_for.page_navigations = true;
+
+            let wait = Some(wait_for.clone());
+            let _ = tokio::join!(
+                page_wait(&page, &wait),
+                perform_smart_mouse_movement(&page, &viewport),
+            );
+
+            if let Ok(nc) = page.outer_html_bytes().await {
+                *b = nc;
+                if !looks_like_imperva_any(b.as_slice()) {
+                    validated = true;
+                    break;
+                }
+            }
+        }
+
+        Ok::<(), chromiumoxide::error::CdpError>(())
+    })
+    .await;
+
+    match page_result {
+        Ok(_) => Ok(validated),
+        _ => Err(chromiumoxide::error::CdpError::Timeout),
+    }
+}
+
+/// Handle imperva protected pages via chrome. This does nothing without the real_browser feature enabled.
+#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
+#[inline(always)]
+async fn imperva_handle(
+    _b: &mut Vec<u8>,
+    _page: &chromiumoxide::Page,
+    _target_url: &str,
+    _viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     Ok(())
 }
@@ -792,34 +1309,65 @@ pub enum HeaderSource<'a> {
     Map(&'a std::collections::HashMap<String, String>),
 }
 
-/// Detect from headers.
-pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTech> {
-    macro_rules! has_key {
-        ($key:expr) => {
-            match headers {
-                HeaderSource::HeaderMap(hm) => hm.contains_key($key),
-                HeaderSource::Map(map) => map.contains_key($key),
-            }
-        };
+#[inline(always)]
+/// Has the header value.
+fn header_value<'a>(headers: &'a HeaderSource, key: &str) -> Option<&'a str> {
+    match headers {
+        HeaderSource::HeaderMap(hm) => hm.get(key).and_then(|v| v.to_str().ok()),
+        HeaderSource::Map(map) => map.get(key).map(|s| s.as_str()),
     }
+}
 
-    if has_key!("cf-chl-bypass") || has_key!("cf-ray") {
+#[inline(always)]
+/// Has the header key.
+fn has_key(headers: &HeaderSource, key: &str) -> bool {
+    match headers {
+        HeaderSource::HeaderMap(hm) => hm.contains_key(key),
+        HeaderSource::Map(map) => map.contains_key(key),
+    }
+}
+
+#[inline(always)]
+/// Equal case.
+fn eq_icase_trim(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b)
+}
+
+/// Detect from headers (optimized: minimal lookups, no allocations).
+#[inline]
+pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTech> {
+    // Cloudflare
+    if has_key(headers, "cf-chl-bypass") || has_key(headers, "cf-ray") {
         return Some(AntiBotTech::Cloudflare);
     }
-    if has_key!("x-captcha-endpoint") {
+
+    // DataDome
+    if has_key(headers, "x-captcha-endpoint") {
         return Some(AntiBotTech::DataDome);
     }
-    if has_key!("x-perimeterx") || has_key!("pxhd") {
+
+    // PerimeterX
+    if has_key(headers, "x-perimeterx") || has_key(headers, "pxhd") {
         return Some(AntiBotTech::PerimeterX);
     }
-    if has_key!("x-akamaibot") {
+
+    // Akamai
+    if has_key(headers, "x-akamaibot") {
         return Some(AntiBotTech::AkamaiBotManager);
     }
-    if has_key!("x-imperva-id") || has_key!("x-iinfo") {
+
+    // Imperva (strong signals first)
+    if has_key(headers, "x-imperva-id") || has_key(headers, "x-iinfo") {
         return Some(AntiBotTech::Imperva);
     }
-    if has_key!("x-reblaze-uuid") {
+
+    // Reblaze
+    if has_key(headers, "x-reblaze-uuid") {
         return Some(AntiBotTech::Reblaze);
+    }
+
+    if header_value(headers, "x-cdn").is_some_and(|v| eq_icase_trim(v, "imperva")) {
+        return Some(AntiBotTech::Imperva);
     }
 
     None
@@ -2950,6 +3498,22 @@ pub async fn fetch_page_html_chrome_base(
                             validate_cf = true;
                         }
                     }
+                } else if anti_bot_tech == AntiBotTech::Imperva {
+                    if looks_like_imperva_verify(res.len(), &*res) {
+                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                            if let Ok(success) =
+                                imperva_handle(&mut res, &page, &target_url, &viewport).await
+                            {
+                                if success {
+                                    status_code = StatusCode::OK;
+                                }
+                            }
+                        })
+                        .await
+                        {
+                            validate_cf = true;
+                        }
+                    }
                 }
             }
 
@@ -3260,7 +3824,7 @@ pub async fn fetch_page_html_chrome_base(
                             response_map.len() <= 4 && anti_bot_tech == AntiBotTech::None;
 
                         for item in response_map {
-                            if detect_anti_bots && item.1.url.contains("_Incapsula_Resource?") {
+                            if detect_anti_bots && item.1.url.starts_with("/_Incapsula_Resource?") {
                                 anti_bot_tech = AntiBotTech::Imperva;
                             }
 
