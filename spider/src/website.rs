@@ -7348,21 +7348,26 @@ impl Website {
         on_should_crawl_callback: Option<fn(&Page) -> bool>,
     ) -> &mut Self {
         match on_should_crawl_callback {
-            Some(callback) => self.on_should_crawl_callback = Some(OnShouldCrawlCallback::Fn(callback)),
+            Some(callback) => {
+                self.on_should_crawl_callback = Some(OnShouldCrawlCallback::Fn(callback))
+            }
             _ => self.on_should_crawl_callback = None,
         };
         self
     }
 
     /// Use an immutable closure to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
-    /// 
+    ///
     /// Slightly slower than [`with_on_should_crawl_callback`].
     pub fn with_on_should_crawl_callback_closure<F: OnShouldCrawlClosure>(
         &mut self,
         on_should_crawl_closure: Option<F>,
     ) -> &mut Self {
         match on_should_crawl_closure {
-            Some(callback) => self.on_should_crawl_callback = Some(OnShouldCrawlCallback::Closure(Arc::new(callback))),
+            Some(callback) => {
+                self.on_should_crawl_callback =
+                    Some(OnShouldCrawlCallback::Closure(Arc::new(callback)))
+            }
             _ => self.on_should_crawl_callback = None,
         };
         self

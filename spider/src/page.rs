@@ -142,7 +142,7 @@ lazy_static! {
             // DOM mutation hot paths
             ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
             ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
-            ".setProperty", "new DOMParser",
+            ".setProperty", "new DOMParser", "sessionStorage.",
             // SPA routing
             "history.pushState", "history.replaceState",
             "location.assign", "location.replace", "location.reload",
