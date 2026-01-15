@@ -983,6 +983,458 @@ async fn imperva_handle(
     Ok(())
 }
 
+/// Handle reCAPTCHA checkbox (anchor iframe) via chrome.
+/// This does nothing without the real_browser feature enabled.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
+async fn recaptcha_handle(
+    b: &mut Vec<u8>,
+    page: &chromiumoxide::Page,
+    viewport: &Option<crate::configuration::Viewport>,
+) -> Result<bool, chromiumoxide::error::CdpError> {
+    #[inline(always)]
+    fn memeq(h: &[u8], n: &[u8]) -> bool {
+        h.len() == n.len() && h.iter().zip(n).all(|(a, b)| a == b)
+    }
+
+    #[inline(always)]
+    fn contains(h: &[u8], needle: &[u8]) -> bool {
+        let nl = needle.len();
+        if nl == 0 {
+            return true;
+        }
+        if nl > h.len() {
+            return false;
+        }
+        h.windows(nl).any(|w| memeq(w, needle))
+    }
+
+    #[inline(always)]
+    fn looks_like_recaptcha(html: &[u8]) -> bool {
+        // anchor iframe url / common markers
+        contains(html, b"/recaptcha/api2/anchor")
+            || contains(html, b"www.google.com/recaptcha/api2/anchor")
+            || contains(html, b"reCAPTCHA")
+            || contains(html, b"recaptcha-anchor")
+    }
+
+    // If not a recaptcha-ish page, do nothing.
+    if !looks_like_recaptcha(b.as_slice()) {
+        return Ok(false);
+    }
+
+    let mut validated = false;
+
+    let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let _ = tokio::join!(
+            page.disable_network_cache(true),
+            perform_smart_mouse_movement(&page, &viewport)
+        );
+
+        // Up to 10 loops like cf/imperva
+        for _ in 0..10 {
+            let mut wait_for = CF_WAIT_FOR.clone();
+
+            // Refresh HTML and see if we still need to handle recaptcha
+            if let Ok(cur) = page.outer_html_bytes().await {
+                *b = cur;
+            }
+
+            if !looks_like_recaptcha(b.as_slice()) {
+                validated = true;
+                break;
+            }
+
+            // 1) Ensure the reCAPTCHA anchor iframe exists
+            let anchor_iframe_present = page
+                .find_elements_pierced(r#"iframe[src*="/recaptcha/api2/anchor"]"#)
+                .await
+                .map(|els| !els.is_empty())
+                .unwrap_or(false);
+
+            if !anchor_iframe_present {
+                // Wait for it to load (CF-style)
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_millis(900),
+                ))
+                .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    core::time::Duration::from_secs(6).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport),
+                );
+
+                continue;
+            }
+
+            // 2) Click the checkbox inside iframe:
+            // Prefer #recaptcha-anchor (the actual checkbox)
+            // Fallback to .recaptcha-checkbox-checkmark
+            let mut clicked = false;
+
+            if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
+                if let Some(el) = els.into_iter().next() {
+                    clicked = match el.clickable_point().await {
+                        Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                        Err(_) => el.click().await.is_ok(),
+                    };
+                }
+            }
+
+            if !clicked {
+                if let Ok(els) = page
+                    .find_elements_pierced(r#".recaptcha-checkbox-checkmark"#)
+                    .await
+                {
+                    if let Some(el) = els.into_iter().next() {
+                        clicked = match el.clickable_point().await {
+                            Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                            Err(_) => el.click().await.is_ok(),
+                        };
+                    }
+                }
+            }
+
+            // 3) After clicking, wait like cf_handle for challenge processing / navigation.
+            // Even if click failed, still wait a bit because the element may become clickable after motion.
+            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(if clicked {
+                core::time::Duration::from_millis(1100)
+            } else {
+                core::time::Duration::from_millis(700)
+            }))
+            .into();
+            wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                core::time::Duration::from_secs(7).into(),
+            )
+            .into();
+            wait_for.page_navigations = true;
+
+            let wait = Some(wait_for.clone());
+            let _ = tokio::join!(
+                page_wait(&page, &wait),
+                perform_smart_mouse_movement(&page, &viewport),
+            );
+
+            // Refresh and check if we cleared it
+            if let Ok(nc) = page.outer_html_bytes().await {
+                *b = nc;
+                if !looks_like_recaptcha(b.as_slice()) {
+                    validated = true;
+                    break;
+                }
+            }
+        }
+
+        Ok::<(), chromiumoxide::error::CdpError>(())
+    })
+    .await;
+
+    match page_result {
+        Ok(_) => Ok(validated),
+        _ => Err(chromiumoxide::error::CdpError::Timeout),
+    }
+}
+
+/// Handle reCAPTCHA checkbox (anchor iframe) via chrome.
+/// This does nothing without the real_browser feature enabled.
+#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
+#[inline(always)]
+async fn recaptcha_handle(
+    _b: &mut Vec<u8>,
+    _page: &chromiumoxide::Page,
+    _target_url: &str,
+    _viewport: &Option<crate::configuration::Viewport>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    Ok(())
+}
+
+/// Handle GeeTest presence via chrome (detect + wait + open widget + TODO slider action).
+/// Does NOT include slider-solving logic.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
+async fn geetest_handle(
+    b: &mut Vec<u8>,
+    page: &chromiumoxide::Page,
+    viewport: &Option<crate::configuration::Viewport>,
+) -> Result<bool, chromiumoxide::error::CdpError> {
+    // -----------------------------
+    // Fast byte helpers (no alloc)
+    // -----------------------------
+    #[inline(always)]
+    fn memeq(h: &[u8], n: &[u8]) -> bool {
+        h.len() == n.len() && h.iter().zip(n).all(|(a, b)| a == b)
+    }
+    #[inline(always)]
+    fn contains(h: &[u8], needle: &[u8]) -> bool {
+        let nl = needle.len();
+        if nl == 0 {
+            return true;
+        }
+        if nl > h.len() {
+            return false;
+        }
+        h.windows(nl).any(|w| memeq(w, needle))
+    }
+
+    #[inline(always)]
+    fn looks_like_geetest(html: &[u8]) -> bool {
+        contains(html, b"api.geetest.com")
+            || contains(html, b"static.geetest.com")
+            || contains(html, b"geetest_")
+            || contains(html, b"Loading GeeTest")
+            || contains(html, b"geetest_radar")
+            || contains(html, b"geetest_widget")
+            || contains(html, b"geetest_slider")
+    }
+
+    #[inline(always)]
+    fn looks_like_geetest_loading(html: &[u8]) -> bool {
+        contains(html, b"Loading GeeTest")
+            || contains(html, b"geetest_wait")
+            || contains(html, b"geetest_init")
+    }
+
+    #[inline(always)]
+    fn looks_like_geetest_challenge_visible(html: &[u8]) -> bool {
+        contains(html, b"geetest_widget")
+            || contains(html, b"geetest_slider_button")
+            || contains(html, b"geetest_canvas")
+            || contains(html, b"geetest_canvas_slice")
+    }
+
+    // Gate: only run when page looks like GeeTest.
+    if !looks_like_geetest(b.as_slice()) {
+        return Ok(false);
+    }
+
+    let mut progressed = false;
+
+    let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+        let _ = tokio::join!(
+            page.disable_network_cache(true),
+            perform_smart_mouse_movement(&page, &viewport)
+        );
+
+        for _ in 0..10 {
+            let mut wait_for = CF_WAIT_FOR.clone();
+
+            // refresh html
+            if let Ok(cur) = page.outer_html_bytes().await {
+                *b = cur;
+            }
+
+            // If GeeTest disappeared, page progressed past it.
+            if !looks_like_geetest(b.as_slice()) {
+                progressed = true;
+                break;
+            }
+
+            // 1) If still loading, wait CF-style.
+            if looks_like_geetest_loading(b.as_slice()) {
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    core::time::Duration::from_millis(1000),
+                ))
+                .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    core::time::Duration::from_secs(7).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, &viewport),
+                );
+
+                continue;
+            }
+
+            // 2) Try to click “Click to verify” radar to open the widget UI.
+            let mut clicked = false;
+
+            if let Ok(els) = page.find_elements_pierced(r#".geetest_radar"#).await {
+                if let Some(el) = els.into_iter().next() {
+                    clicked = match el.clickable_point().await {
+                        Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                        Err(_) => el.click().await.is_ok(),
+                    };
+                }
+            }
+
+            if !clicked {
+                if let Ok(els) = page
+                    .find_elements_pierced(r#".geetest_radar_tip_content"#)
+                    .await
+                {
+                    if let Some(el) = els.into_iter().next() {
+                        clicked = match el.clickable_point().await {
+                            Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                            Err(_) => el.click().await.is_ok(),
+                        };
+                    }
+                }
+            }
+
+            // 3) Wait after click for widget to render.
+            wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(if clicked {
+                core::time::Duration::from_millis(900)
+            } else {
+                core::time::Duration::from_millis(700)
+            }))
+            .into();
+            wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                core::time::Duration::from_secs(6).into(),
+            )
+            .into();
+            wait_for.page_navigations = true;
+
+            let wait = Some(wait_for.clone());
+            let _ = tokio::join!(
+                page_wait(&page, &wait),
+                perform_smart_mouse_movement(&page, &viewport),
+            );
+
+            // Refresh and decide next steps
+            if let Ok(nc) = page.outer_html_bytes().await {
+                *b = nc;
+
+                // If slider/challenge is visible, run placeholder + then wait like cf_handle.
+                if looks_like_geetest_challenge_visible(b.as_slice()) {
+                    // TODO: rng iterate 10times the slider different positions.
+                    if let Ok(bg_els) = page.find_elements_pierced(r#".geetest_slicebg"#).await {
+                        if let Some(bg) = bg_els.into_iter().next() {
+                            if let Ok(track_bb) = bg.bounding_box().await {
+                                // Track bbox (x,y,w,h)
+                                let track_left = track_bb.x;
+                                let track_right = track_bb.x + track_bb.width;
+                                let track_mid_y = track_bb.y + track_bb.height * 0.5;
+
+                                // 2) Find slider button + bbox
+                                if let Ok(btn_els) = page
+                                    .find_elements_pierced(r#".geetest_slider_button"#)
+                                    .await
+                                {
+                                    if let Some(btn) = btn_els.into_iter().next() {
+                                        if let Ok(btn_bb) = btn.bounding_box().await {
+                                            // Start point: center of the slider button
+                                            let from_x = btn_bb.x + btn_bb.width * 0.5;
+                                            let from_y = btn_bb.y + btn_bb.height * 0.5;
+
+                                            // End point (computed): near the end of track
+                                            // (keep a little margin so you don't go out of bounds)
+                                            let to_x = track_right - 4.0;
+                                            let to_y = track_mid_y;
+
+                                            // Optional: clamp helper
+                                            #[inline(always)]
+                                            fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
+                                                if v < lo {
+                                                    lo
+                                                } else if v > hi {
+                                                    hi
+                                                } else {
+                                                    v
+                                                }
+                                            }
+
+                                            let from_x =
+                                                clamp(from_x, track_left + 2.0, track_right - 2.0);
+                                            let from_y = clamp(
+                                                from_y,
+                                                track_bb.y + 2.0,
+                                                track_bb.y + track_bb.height - 2.0,
+                                            );
+                                            let to_x =
+                                                clamp(to_x, track_left + 2.0, track_right - 2.0);
+                                            let to_y = clamp(
+                                                to_y,
+                                                track_bb.y + 2.0,
+                                                track_bb.y + track_bb.height - 2.0,
+                                            );
+
+                                            let from = chromiumoxide::layout::Point {
+                                                x: from_x - 20.0,
+                                                y: from_y,
+                                            };
+                                            let to =
+                                                chromiumoxide::layout::Point { x: to_x, y: to_y };
+
+                                            // can also run `#geetest_refresh_1` anchor to refresh.
+                                            let _ = page.click_and_drag(from, to).await;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut wf = CF_WAIT_FOR.clone();
+                    wf.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        core::time::Duration::from_millis(1100),
+                    ))
+                    .into();
+                    wf.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                        core::time::Duration::from_secs(7).into(),
+                    )
+                    .into();
+                    wf.page_navigations = true;
+
+                    let wait = Some(wf.clone());
+                    let _ = tokio::join!(
+                        page_wait(&page, &wait),
+                        perform_smart_mouse_movement(&page, &viewport),
+                    );
+
+                    if let Ok(nc2) = page.outer_html_bytes().await {
+                        *b = nc2;
+                        if !looks_like_geetest(b.as_slice()) {
+                            progressed = true;
+                            break;
+                        }
+                    }
+
+                    // Continue looping; GeeTest may still be present.
+                    continue;
+                }
+
+                // If GeeTest disappeared, we progressed.
+                if !looks_like_geetest(b.as_slice()) {
+                    progressed = true;
+                    break;
+                }
+            }
+        }
+
+        Ok::<(), chromiumoxide::error::CdpError>(())
+    })
+    .await;
+
+    match page_result {
+        Ok(_) => Ok(progressed),
+        _ => Err(chromiumoxide::error::CdpError::Timeout),
+    }
+}
+
+/// Handle GeeTest presence via chrome (detect + wait + open widget + TODO slider action).
+/// Does NOT include slider-solving logic.
+#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
+#[inline(always)]
+async fn geetest_handle(
+    _b: &mut Vec<u8>,
+    _page: &chromiumoxide::Page,
+    _target_url: &str,
+    _viewport: &Option<crate::configuration::Viewport>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    Ok(())
+}
+
 /// The response of a web page.
 #[derive(Debug, Default)]
 pub struct PageResponse {
