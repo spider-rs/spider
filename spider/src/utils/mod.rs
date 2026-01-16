@@ -2807,6 +2807,21 @@ pub async fn fetch_page_html_chrome_base(
                         {
                             validate_cf = true;
                         }
+                    } else if crate::features::solvers::detect_lemin(&res) {
+                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                            if let Ok(solved) =
+                                crate::features::solvers::lemin_handle(&mut res, &page, &viewport)
+                                    .await
+                            {
+                                if solved {
+                                    status_code = StatusCode::OK;
+                                }
+                            }
+                        })
+                        .await
+                        {
+                            validate_cf = true;
+                        }
                     }
                 }
             }

@@ -92,6 +92,8 @@ static RC_ENTERPRISE_GUARD_PATTERNS: &[&[u8]] = &[
     b"rc-imageselect-tile",
 ];
 
+static LEMIN_PATTERNS: &[&[u8]] = &[b"id=\"lemin-cropped-captcha\""];
+
 /// RC verify btn patterns.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 static RC_VERIFY_BUTTON_PATTERNS: &[&[u8]] = &[b"id=\"recaptcha-verify-button\"", b">Verify<"];
@@ -186,6 +188,12 @@ lazy_static! {
         .match_kind(aho_corasick::MatchKind::LeftmostFirst)
         .build(IMPERVA_IFRAME_PHASE_PATTERNS)
         .expect("valid Imperva iframe‑phase patterns");
+    /// Lemin match.
+    static ref LEMIN_AC: AhoCorasick = AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .build(LEMIN_PATTERNS)
+        .expect("valid lemin patterns");
 }
 
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
@@ -230,15 +238,21 @@ lazy_static! {
 }
 
 #[inline(always)]
-/// Detect recaptcha
+/// Detect recaptcha.
 pub fn detect_recaptcha(html: &[u8]) -> bool {
     RECAPTCHA_AC.is_match(html)
 }
 
 #[inline(always)]
-/// Detect GeeTest
+/// Detect GeeTest.
 pub fn detect_geetest(html: &[u8]) -> bool {
     GEETEST_AC.is_match(html)
+}
+
+#[inline(always)]
+/// Detect lemin.
+pub fn detect_lemin(html: &[u8]) -> bool {
+    LEMIN_AC.is_match(html)
 }
 
 /// Looks like GeeTest.
@@ -513,18 +527,6 @@ pub async fn cf_handle(
         Ok(_) => Ok(validated),
         _ => Err(chromiumoxide::error::CdpError::Timeout),
     }
-}
-
-/// Handle protected pages via chrome. This does nothing without the real_browser feature enabled.
-#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
-#[inline(always)]
-pub async fn cf_handle(
-    _b: &mut Vec<u8>,
-    _page: &chromiumoxide::Page,
-    _target_url: &str,
-    _viewport: &Option<crate::configuration::Viewport>,
-) -> Result<(), chromiumoxide::error::CdpError> {
-    Ok(())
 }
 
 /// Handle imperva protected pages via chrome. This does nothing without the real_browser feature enabled.
@@ -922,17 +924,6 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
         Ok(_) => Ok(validated),
         _ => Err(chromiumoxide::error::CdpError::Timeout),
     }
-}
-/// Handle imperva protected pages via chrome. This does nothing without the real_browser feature enabled.
-#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
-#[inline(always)]
-pub async fn imperva_handle(
-    _b: &mut Vec<u8>,
-    _page: &chromiumoxide::Page,
-    _target_url: &str,
-    _viewport: &Option<crate::configuration::Viewport>,
-) -> Result<(), chromiumoxide::error::CdpError> {
-    Ok(())
 }
 
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
@@ -1501,29 +1492,422 @@ pub async fn recaptcha_handle(
     }
 }
 
-/// Handle reCAPTCHA checkbox (anchor iframe) via chrome.
-/// This does nothing without the real_browser feature enabled.
-#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
-#[inline(always)]
-async fn recaptcha_handle(
-    _b: &mut Vec<u8>,
-    _page: &chromiumoxide::Page,
-    _target_url: &str,
-    _viewport: &Option<crate::configuration::Viewport>,
-) -> Result<(), chromiumoxide::error::CdpError> {
-    Ok(())
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+/// Remove solve lemin external.
+pub async fn solve_lemin_with_external_gemini(image_dataurl: &str, timeout_ms: u64) -> (f64, f64) {
+    let api_key = match std::env::var("GEMINI_API_KEY") {
+        Ok(k) => k,
+        Err(_) => return (0.0, 0.0),
+    };
+
+    /* ----------------------------------------------------------------- *
+     * 2️⃣  Acquire the semaphore that throttles concurrent Gemini calls.
+     * ----------------------------------------------------------------- */
+    if crate::utils::GEMINI_SEM.acquire().await.is_err() {
+        return (0.0, 0.0);
+    }
+
+    /* ----------------------------------------------------------------- *
+     * 3️⃣  Decode the `data:` URL into raw PNG bytes.
+     * ----------------------------------------------------------------- */
+    let b64_part = match image_dataurl.splitn(2, ',').nth(1) {
+        Some(p) => p.trim(),
+        None => return (0.0, 0.0),
+    };
+
+    let img_bytes = match BASE64_STANDARD.decode(b64_part) {
+        Ok(b) => b,
+        Err(_) => return (0.0, 0.0),
+    };
+
+    /* ----------------------------------------------------------------- *
+     * 4️⃣  Build the Gemini request payload – we ask for a JSON array `[x,y]`.
+     * ----------------------------------------------------------------- */
+    let request_body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {
+                    "text": "Give me the centre (x and y coordinates) of the missing puzzle piece in this image. Return a JSON array like [x, y] with numbers only."
+                },
+                {
+                    "inlineData": {
+                        "mimeType": "image/png",
+                        "data": BASE64_STANDARD.encode(&img_bytes)
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 16,
+            "temperature": 0.0
+        }
+    });
+
+    /* ----------------------------------------------------------------- *
+     * 5️⃣  Perform the HTTP request, respecting a per‑tile timeout.
+     * ----------------------------------------------------------------- */
+    let per_tile = Duration::from_millis(timeout_ms / 2);
+    let resp = match tokio::time::timeout(
+        per_tile,
+        GEMINI_CLIENT
+            .post(&*GEMINI_VISION_ENDPOINT)
+            .header("x-goog-api-key", api_key)
+            .json(&request_body)
+            .send(),
+    )
+    .await
+    {
+        Ok(Ok(r)) => r,
+        _ => return (0.0, 0.0), // timeout or transport error
+    };
+
+    /* ----------------------------------------------------------------- *
+     * 6️⃣  Verify we received a 200 OK.
+     * ----------------------------------------------------------------- */
+    if !resp.status().is_success() {
+        return (0.0, 0.0);
+    }
+
+    /* ----------------------------------------------------------------- *
+     * 7️⃣  Pull the textual answer out of Gemini’s JSON envelope.
+     * ----------------------------------------------------------------- */
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(_) => return (0.0, 0.0),
+    };
+
+    let txt = match json
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.get(0))
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())
+    {
+        Some(t) => t.trim(),
+        None => return (0.0, 0.0),
+    };
+
+    /* ----------------------------------------------------------------- *
+     * 8️⃣  Parse the `[x, y]` JSON array we asked Gemini for.
+     * ----------------------------------------------------------------- */
+    let coords: Vec<f64> = match serde_json::from_str(txt) {
+        Ok(v) => v,
+        Err(_) => return (0.0, 0.0),
+    };
+
+    if coords.len() == 2 {
+        (coords[0], coords[1])
+    } else {
+        (0.0, 0.0)
+    }
 }
 
-/// Handle GeeTest presence via chrome (detect + wait + open widget).
-#[cfg(all(feature = "chrome", not(feature = "real_browser")))]
-#[inline(always)]
-async fn geetest_handle(
-    _b: &mut Vec<u8>,
-    _page: &chromiumoxide::Page,
-    _target_url: &str,
-    _viewport: &Option<crate::configuration::Viewport>,
-) -> Result<(), chromiumoxide::error::CdpError> {
-    Ok(())
+/// Lemin in page helper.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn solve_lemin_with_inpage_helper(
+    page: &Page,
+    image_dataurl: &str,
+    timeout_ms: u64,
+) -> Result<(f64, f64), CdpError> {
+    let script = format!(
+        r#"(async () => {{
+            try {{
+                const session = await LanguageModel.create({{
+                    expectedInputs: [
+                        {{ type: "text", languages: ["en"] }},
+                        {{ type: "image" }},
+                    ],
+                    expectedOutputs: [{{ type: "text", languages: ["en"] }}],
+                }});
+                const imgResp = await fetch("{image_dataurl}");
+                if (!imgResp.ok) return null;
+                const blob = await imgResp.blob();
+                const prompt = [{{
+                    role: "user",
+                    content: [
+                        {{ type: "text", value: "Give me the centre (x and y coordinates) of the missing puzzle piece in this image. Return a JSON array like [x, y] with numbers only." }},
+                        {{ type: "image", value: blob }},
+                    ],
+                }}];
+                const answer = await session.prompt(prompt);
+                const txt = (answer || "").toString().trim();
+                try {{ return JSON.parse(txt); }}
+                catch {{ return null; }}
+            }} catch (e) {{ throw e; }}
+        }})()"#
+    );
+
+    let eval_fut = page.evaluate(
+        EvaluateParams::builder()
+            .expression(&script)
+            .await_promise(true)
+            .build()
+            .unwrap(),
+    );
+
+    let eval_res = tokio::time::timeout(Duration::from_millis(timeout_ms + 5_000), eval_fut)
+        .await
+        .map_err(|_| CdpError::Timeout)?; // outer timeout → CdpError::Timeout
+
+    match eval_res {
+        Ok(eval) => match eval.value() {
+            Some(serde_json::Value::Array(arr)) if arr.len() == 2 => {
+                let x = arr[0]
+                    .as_f64()
+                    .ok_or_else(|| CdpError::msg("Gemini did not return a numeric x"))?;
+                let y = arr[1]
+                    .as_f64()
+                    .ok_or_else(|| CdpError::msg("Gemini did not return a numeric y"))?;
+                Ok((x, y))
+            }
+            _ => Err(CdpError::msg("Gemini did not return a valid [x, y] array")),
+        },
+        Err(e) => Err(e), // propagate Chrome errors (including missing helper)
+    }
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+/// Lemin solve handler.
+pub async fn lemin_handle(
+    b: &mut Vec<u8>,
+    page: &Page,
+    viewport: &Option<crate::configuration::Viewport>,
+) -> Result<bool, CdpError> {
+    // -----------------------------------------------------------------
+    // Fast‑gate – bail out early if the page does not contain a Lemin widget.
+    // -----------------------------------------------------------------
+    if !detect_lemin(b.as_slice()) {
+        return Ok(false);
+    }
+
+    let mut progressed = false;
+
+    // -----------------------------------------------------------------
+    // Whole routine lives inside a 30 s timeout (same pattern as the rest).
+    // -----------------------------------------------------------------
+    let page_result = tokio::time::timeout(Duration::from_secs(30), async {
+        // Disable cache + a little “human” mouse movement.
+        let _ = tokio::join!(
+            page.disable_network_cache(true),
+            perform_smart_mouse_movement(page, viewport)
+        );
+
+        for _ in 0..10 {
+            // ---------------------------------------------------------
+            // a) Refresh the HTML source.
+            // ---------------------------------------------------------
+            if let Ok(cur) = page.outer_html_bytes().await {
+                *b = cur;
+            }
+
+            // ---------------------------------------------------------
+            // b) If Lemin vanished → success.
+            // ---------------------------------------------------------
+            if !detect_lemin(b.as_slice()) {
+                progressed = true;
+                break;
+            }
+
+            // ---------------------------------------------------------
+            // c) Click the hidden checkbox that activates the puzzle.
+            // ---------------------------------------------------------
+            if let Ok(checkboxes) = page
+                .find_elements_pierced(
+                    r#"div[id*="lemin-cropped-captcha"] input[type="checkbox"]"#,
+                )
+                .await
+            {
+                if let Some(cb) = checkboxes.into_iter().next() {
+                    let clicked = match cb.clickable_point().await {
+                        Ok(p) => page.click(p).await.is_ok() || cb.click().await.is_ok(),
+                        Err(_) => cb.click().await.is_ok(),
+                    };
+                    if clicked {
+                        let mut wait_for = CF_WAIT_FOR.clone();
+                        wait_for.delay =
+                            crate::features::chrome_common::WaitForDelay::new(Some(
+                                Duration::from_millis(900),
+                            ))
+                            .into();
+                        wait_for.idle_network =
+                            crate::features::chrome_common::WaitForIdleNetwork::new(
+                                Duration::from_secs(6).into(),
+                            )
+                            .into();
+                        wait_for.page_navigations = true;
+                        let wait = Some(wait_for.clone());
+                        let _ = tokio::join!(
+                            page_wait(page, &wait),
+                            perform_smart_mouse_movement(page, viewport),
+                        );
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------
+            // d) Locate the **full background image** and turn it into a data‑URL.
+            // ---------------------------------------------------------
+            let img_el = match page
+                .find_elements_pierced(
+                    r#"div[id*="lemin-captcha-popup"] img[src][width][height]"#,
+                )
+                .await
+            {
+                Ok(mut els) => els.pop(),
+                Err(_) => None,
+            };
+
+            let dataurl = if let Some(img) = &img_el {
+                // Use a temporary canvas to read the image as a data‑URL.
+                let call = CallFunctionOnParams::builder()
+                    .object_id(img.remote_object_id.clone())
+                    .function_declaration(
+                        "(function(){ const canvas = document.createElement('canvas'); \
+                           canvas.width = this.naturalWidth || this.width; \
+                           canvas.height = this.naturalHeight || this.height; \
+                           const ctx = canvas.getContext('2d'); \
+                           ctx.drawImage(this,0,0); \
+                           return canvas.toDataURL(); })",
+                    )
+                    .await_promise(true)
+                    .build()
+                    .unwrap();
+
+                let eval = page.evaluate_function(call).await?;
+                eval.value()
+                    .and_then(|v| v.as_str().map(|s| s.to_owned()))
+                    .ok_or_else(|| CdpError::msg("failed to get data‑url from Lemin image"))?
+            } else {
+                return Err(CdpError::msg(
+                    "Lemin puzzle image not found – cannot continue",
+                ));
+            };
+
+            // ---------------------------------------------------------
+            // e) Ask Gemini for the missing piece centre (x, y) – first try the
+            //    in‑page helper, then fall back to the remote call.
+            // ---------------------------------------------------------
+            let (target_x, target_y) = match solve_lemin_with_inpage_helper(page, &dataurl, 20_000).await {
+                Ok(p) => p,
+                Err(e) if is_missing_helper_error(&e) => {
+                    // -----------------------------------------------------------------
+                    // Remote fallback – this is the same behaviour you already have
+                    // for Recaptcha‑Enterprise.
+                    // -----------------------------------------------------------------
+                    solve_lemin_with_external_gemini(&dataurl, 20_000)
+                        .await
+                }
+                Err(e) => return Err(e), // any other Chrome error bubbles up
+            };
+
+            // ---------------------------------------------------------
+            // f) Locate the **draggable piece**.
+            // ---------------------------------------------------------
+            let piece_el = match page
+                .find_elements_pierced(
+                    r#"div[style*="touch-action: none"][style*="cursor: move"][style*="position: absolute"]"#,
+                )
+                .await
+            {
+                Ok(mut els) => els.pop(),
+                Err(_) => None,
+            };
+
+            let piece_bb = if let Some(el) = piece_el {
+                el.bounding_box().await?
+            } else {
+                return Err(CdpError::msg(
+                    "Lemin draggable piece not found – cannot solve",
+                ));
+            };
+
+            // ---------------------------------------------------------
+            // g) Transform the coordinates returned by Gemini (relative to the
+            //    full image) into absolute page coordinates.
+            // ---------------------------------------------------------
+            let img_bb = if let Some(img) = &img_el {
+                img.bounding_box().await?
+            } else {
+                return Err(CdpError::msg(
+                    "Lemin full image missing when calculating drag target",
+                ));
+            };
+
+            // The image might be scaled, so compute a scale factor.
+            let scale_x = img_bb.width / img_bb.width.max(1.0);
+            let scale_y = img_bb.height / img_bb.height.max(1.0);
+            let page_target_x = img_bb.x + target_x * scale_x;
+            let page_target_y = img_bb.y + target_y * scale_y;
+
+            // ---------------------------------------------------------
+            // h) Drag the piece to the target.
+            // ---------------------------------------------------------
+            let from = Point {
+                x: piece_bb.x + piece_bb.width * 0.5,
+                y: piece_bb.y + piece_bb.height * 0.5,
+            };
+            let to = Point {
+                x: page_target_x,
+                y: page_target_y,
+            };
+            let _ = page.click_and_drag(from, to).await;
+
+            // ---------------------------------------------------------
+            // i) Click the **Verify** button (if present).
+            // ---------------------------------------------------------
+            if let Ok(btns) = page
+                .find_elements_pierced(r#"button.verify-button, button[id*="verify-button"]"#)
+                .await
+            {
+                if let Some(btn) = btns.into_iter().next() {
+                    let _ = btn.click().await;
+                }
+            }
+
+            // ---------------------------------------------------------
+            // j) Wait a little, then check whether the widget disappeared.
+            // ---------------------------------------------------------
+            let mut wf = CF_WAIT_FOR.clone();
+            wf.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                Duration::from_millis(1_100),
+            ))
+            .into();
+            wf.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                Duration::from_secs(7).into(),
+            )
+            .into();
+            wf.page_navigations = true;
+            let wait = Some(wf.clone());
+            let _ = tokio::join!(
+                page_wait(page, &wait),
+                perform_smart_mouse_movement(page, viewport),
+            );
+
+            // ---------------------------------------------------------
+            // k) Final check – if the Lemin widget vanished we are done.
+            // ---------------------------------------------------------
+            if let Ok(nc2) = page.outer_html_bytes().await {
+                *b = nc2;
+                if !detect_lemin(b.as_slice()) {
+                    progressed = true;
+                    break;
+                }
+            }
+
+            // If we get here the puzzle was not solved – the outer loop will retry.
+        }
+
+        Ok::<(), CdpError>(())
+    })
+    .await;
+
+    match page_result {
+        Ok(_) => Ok(progressed),
+        Err(_) => Err(CdpError::Timeout),
+    }
 }
 
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
@@ -1741,12 +2125,10 @@ pub fn extract_rc_enterprise_challenge<'a>(html: &'a [u8]) -> Option<RcEnterpris
         Some(out)
     }
 }
-
-/// Gemini  helper.
 #[cfg(feature = "gemini")]
 mod gemini {
     use super::*;
-    use anyhow::anyhow;
+    // ----  no `anyhow` import any more  ----
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize)]
@@ -1765,7 +2147,14 @@ mod gemini {
     }
 
     /// Calls Gemini‑Pro‑Vision and returns the x‑coordinate of the gap.
-    pub async fn solve_with_gemini(api_key: &str, image_dataurl: &str) -> anyhow::Result<f64> {
+    ///
+    /// The function now returns a plain `Result<f64, Box<dyn std::error::Error>>`,
+    /// which works with the `?` operator for every error type that `reqwest`
+    /// (and `serde_json`) may produce.
+    pub async fn solve_with_gemini(
+        api_key: &str,
+        image_dataurl: &str,
+    ) -> Result<f64, Box<dyn std::error::Error>> {
         // Prompt that works best for GeeTest sliders.
         const PROMPT: &str = r#"
 You are shown a screenshot of a GeeTest sliding‑puzzle captcha.
@@ -1785,6 +2174,9 @@ Do NOT return any extra text, JSON keys, or explanations.
             *GEMINI_VISION_ENDPOINT, api_key
         );
 
+        // All intermediate errors (`reqwest::Error`, `serde_json::Error`, …)
+        // are automatically converted into `Box<dyn Error>` via the `From`
+        // implementations that the standard library provides.
         let resp = GEMINI_CLIENT
             .post(&url)
             .json(&payload)
@@ -1878,9 +2270,9 @@ pub async fn solve_geetest_with_inpage_helper(
             if is_missing_helper_error(&err) {
                 #[cfg(feature = "gemini")]
                 {
-                    let api_key = env::var("GEMINI_API_KEY")
+                    let api_key = std::env::var("GEMINI_API_KEY")
                         .map_err(|_| CdpError::msg("GEMINI_API_KEY not set"))?;
-                    return crate::gemini::solve_with_gemini(&api_key, canvas_dataurl)
+                    return gemini::solve_with_gemini(&api_key, canvas_dataurl)
                         .await
                         .map_err(|e| CdpError::msg(format!("Gemini external error: {e}")));
                 }
@@ -2113,8 +2505,8 @@ pub async fn geetest_handle(
                         Err(e) if is_missing_helper_error(&e) => {
                             #[cfg(feature = "gemini")]
                             {
-                                let api_key = env::var("GEMINI_API_KEY")
-                                    .map_err(|_| CdpError::msg("GEMINI_API_KEY not set".into()))?;
+                                let api_key = std::env::var("GEMINI_API_KEY")
+                                    .map_err(|_| CdpError::msg("GEMINI_API_KEY not set"))?;
                                 gemini::solve_with_gemini(&api_key, &dataurl)
                                     .await
                                     .map_err(|e| {
