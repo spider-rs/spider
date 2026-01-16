@@ -12,9 +12,7 @@ async fn main() {
     configuration.with_limit(250);
 
     let website_list = vec![
-        "https://rsseau.fr/en",
         "https://choosealicense.com",
-        "https://a11ywatch.com",
         "https://spider.cloud",
     ];
 
@@ -40,12 +38,8 @@ async fn main() {
             });
 
             let start = std::time::Instant::now();
-            if u == "https://spider.cloud" {
-                website.crawl().await;
-            } else {
-                website.crawl_raw().await;
-            };
 
+            website.crawl_raw().await;
             website.unsubscribe();
             let duration = start.elapsed();
             let mut stdout = join_handle.await.unwrap();
