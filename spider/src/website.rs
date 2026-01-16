@@ -5797,6 +5797,28 @@ impl Website {
         }
     }
 
+    #[cfg(all(feature = "chrome", feature = "real_browser"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    /// Warm up the gemini model.
+    pub async fn warm_up_gemini(&mut self) {
+        use crate::features::chrome::attempt_navigation;
+
+        if let Some(mut b) = self.setup_browser().await {
+            if let Ok(page) = attempt_navigation(
+                "about:blank",
+                &b.browser.0,
+                &self.configuration.request_timeout,
+                &b.browser.2,
+                &self.configuration.viewport,
+            )
+            .await
+            {
+                let _ = crate::features::solvers::warm_gemini_model(&page).await;
+                b.dispose();
+            }
+        }
+    }
+
     /// Start to crawl website concurrently using HTTP by default and chrome Javascript Rendering as needed. The glob feature does not work with this at the moment.
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]

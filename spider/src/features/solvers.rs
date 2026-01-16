@@ -1188,6 +1188,22 @@ async fn solve_with_external_gemini(
     }
 }
 
+/// Warm‑up the in‑page Gemini `LanguageModel` for the given Chrome page.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+pub async fn warm_gemini_model(page: &Page) -> Result<(), CdpError> {
+    let eval_params = EvaluateParams::builder()
+        .expression(r#"(async()=>{try{const s=await LanguageModel.create({expectedInputs:[{type:"text",languages:["en"]}],expectedOutputs:[{type:"text",languages:["en"]}]});await s.prompt([{role:"user",content:[{type:"text",value:"ping"}]}])}catch(_){}})()"#)
+        .await_promise(true)
+        .build()
+        .expect("valid evaluate params");
+
+    tokio::time::timeout(Duration::from_secs(60), page.evaluate(eval_params))
+        .await
+        .map_err(|_| CdpError::Timeout)??;
+
+    Ok(())
+}
+
 /// Handle reCAPTCHA checkbox (anchor iframe) via chrome.
 /// This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
