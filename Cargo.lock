@@ -471,7 +471,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.39.4",
+ "spider 2.39.12",
 ]
 
 [[package]]
@@ -4556,9 +4556,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.13.2"
+version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e6f2ab2928ca4291b86736a8bd920a277a399bba1589409d72154ff87c1282"
+checksum = "4910321ebe4151be888e35fe062169554e74aad01beafed60410131420ceffbc"
 dependencies = [
  "web-time",
  "zeroize",
@@ -5098,7 +5098,45 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.39.4"
+version = "2.39.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e03541b7924433e0ebb1a6fd8311c4727624a5008fd61b46f0d7b7025831c8c"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "auto_encoder",
+ "bytes",
+ "case_insensitive_string",
+ "h2 0.4.13",
+ "hashbrown 0.15.5",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.11.3",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "smallvec",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum 0.26.3",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "url",
+]
+
+[[package]]
+name = "spider"
+version = "2.39.12"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5169,44 +5207,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spider"
-version = "2.39.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fcce21cd006423417a0b505949a0bc67db8d6dc02c5490edda160ad7c875332"
-dependencies = [
- "ahash",
- "aho-corasick",
- "auto_encoder",
- "bytes",
- "case_insensitive_string",
- "h2 0.4.13",
- "hashbrown 0.15.5",
- "lazy_static",
- "libc",
- "log",
- "lol_html",
- "num_cpus",
- "percent-encoding",
- "phf 0.11.3",
- "pin-project-lite",
- "quick-xml",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_regex",
- "smallvec",
- "spider_fingerprint",
- "string-interner",
- "string_concat",
- "strum 0.26.3",
- "tokio",
- "tokio-stream",
- "tower 0.5.3",
- "url",
-]
-
-[[package]]
 name = "spider_chromiumoxide_cdp"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5247,7 +5247,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.39.4"
+version = "2.39.12"
 dependencies = [
  "clap",
  "env_logger",
@@ -5255,7 +5255,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.39.4",
+ "spider 2.39.12",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5270,9 +5270,9 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.39.4",
+ "spider 2.39.12",
  "spider_transformations",
- "spider_utils 2.39.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spider_utils 2.39.7",
 ]
 
 [[package]]
@@ -5360,7 +5360,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.39.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spider 2.39.7",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -5369,7 +5369,22 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.39.4"
+version = "2.39.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0608d7ac252d08373e457c0a6e76794e31b0f1d9ddf3e3d81cfc9a9f2aff5a0c"
+dependencies = [
+ "hashbrown 0.15.5",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
+ "tokio-stream",
+]
+
+[[package]]
+name = "spider_utils"
+version = "2.39.12"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5384,27 +5399,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "spider_utils"
-version = "2.39.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d8022d5df6de4c49d580e20a35ddb6a6e78d9fe65e1b7728094f3a941dc736d"
-dependencies = [
- "hashbrown 0.15.5",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
- "tokio-stream",
-]
-
-[[package]]
 name = "spider_worker"
-version = "2.39.4"
+version = "2.39.12"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.39.4",
+ "spider 2.39.12",
  "warp",
 ]
 

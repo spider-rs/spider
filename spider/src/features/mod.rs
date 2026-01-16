@@ -30,6 +30,9 @@ pub mod gemini;
 /// Common modules for Gemini
 pub mod gemini_common;
 
+/// Solve all.
+pub mod solvers;
+
 #[cfg(all(not(feature = "simd"), feature = "openai"))]
 pub(crate) use serde_json;
 #[cfg(all(feature = "simd", feature = "openai"))]

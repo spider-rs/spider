@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.39.4"
+version = "2.39.12"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -159,7 +159,7 @@ __basic = [
     "string_interner_buffer_backend",
     "balance",
     "real_browser",
-    "disk_native_tls"
+    "disk_native_tls",
 ]
 basic_tls = [
     "reqwest_native_tls_native_roots",
@@ -215,7 +215,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies"]
+chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies", "reqwest_json"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]

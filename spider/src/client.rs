@@ -33,6 +33,7 @@ pub use wreq_util;
 /// The asynchronous Client to make requests with HTTP Cache.
 #[cfg(feature = "cache_request")]
 pub type Client = reqwest_middleware::ClientWithMiddleware;
+
 #[cfg(feature = "cache_request")]
 /// The asynchronous Client Builder.
 pub type ClientBuilder = reqwest::ClientBuilder;
