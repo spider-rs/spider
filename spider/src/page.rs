@@ -1,7 +1,7 @@
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::utils::abs::convert_abs_path;
-use crate::utils::EMPTY_HTML_BASIC;
+use crate::utils::templates::EMPTY_HTML_BASIC;
 use crate::utils::{
     css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
     get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
@@ -11,7 +11,7 @@ use crate::utils::{BasicCachePolicy, CacheOptions};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
-use crate::{compact_str::CompactString, utils::EMPTY_HTML};
+use crate::{compact_str::CompactString, utils::templates::EMPTY_HTML};
 use auto_encoder::auto_encode_bytes;
 use hashbrown::HashSet;
 use lol_html::AsciiCompatibleEncoding;
