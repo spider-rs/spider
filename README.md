@@ -22,6 +22,7 @@ A web crawler and scraper, building blocks for data curation workloads.
 - [Adblocker](https://github.com/spider-rs/spider_network_blocker)
 - [Firewall](https://github.com/spider-rs/spider_firewall)
 - Smart Mode
+- Anti-measure handling (deterministic + [AI built in](https://developer.chrome.com/docs/ai/prompt-api))
 - Proxy Support
 - Subscriptions
 - Disk persistence
