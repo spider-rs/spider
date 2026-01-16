@@ -62,6 +62,9 @@ use reqwest::{Response, StatusCode};
 #[cfg(feature = "wreq")]
 use wreq::{Response, StatusCode};
 
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+use chromiumoxide::error::CdpError;
+
 /// The request error.
 #[cfg(all(not(feature = "cache_request"), not(feature = "wreq")))]
 pub(crate) type RequestError = reqwest::Error;
@@ -983,69 +986,517 @@ async fn imperva_handle(
     Ok(())
 }
 
+/// Calls the in‑page JS helper defined above and returns the ids that the model said “yes”.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+pub async fn solve_enterprise_with_browser_gemini(
+    page: &chromiumoxide::Page,
+    challenge: &RcEnterpriseChallenge<'_>,
+    timeout_ms: u64,
+) -> Result<Vec<u8>, CdpError> {
+    match solve_with_inpage_helper(page, challenge, timeout_ms).await {
+        Ok(ids) => return Ok(ids),
+        Err(e) if !is_missing_helper_error(&e) => return Err(e),
+        Err(_) => {}
+    }
+
+    solve_with_external_gemini(challenge, timeout_ms)
+        .await
+        .map_err(|e| CdpError::ChromeMessage(format!("external‑gemini failed: {e}")))
+}
+
+/* --------------------------------------------------------------------- *
+ * 2a. In‑page helper – exactly the code you already wrote (only
+ *      extracted into its own function to keep the outer one tidy).
+ * --------------------------------------------------------------------- */
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn solve_with_inpage_helper(
+    page: &chromiumoxide::Page,
+    challenge: &RcEnterpriseChallenge<'_>,
+    timeout_ms: u64,
+) -> Result<Vec<u8>, CdpError> {
+    let tiles_json = challenge
+        .tiles
+        .iter()
+        .map(|t| serde_json::json!({ "id": t.id, "src": t.img_src }))
+        .collect::<Vec<_>>();
+
+    let target = challenge.target.unwrap_or("target object").to_string();
+
+    let script_template = r#"
+        async function solveRecaptchaEnterpriseWithGemini(tiles, target, timeout) {
+          return new Promise(async (resolve, reject) => {
+            try {
+              const session = await LanguageModel.create({
+                expectedInputs: [
+                  { type: "text", languages: ["en"] },
+                  { type: "image" },
+                ],
+                expectedOutputs: [{ type: "text", languages: ["en"] }],
+              });
+              const yesIds = [];
+              for (const tile of tiles) {
+                const resp = await fetch(tile.src, { mode: "cors" });
+                if (!resp.ok) continue;
+                const blob = await resp.blob();
+                const prompt = [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        value: `Does this image contain a ${target}? Answer only with "yes" or "no".`,
+                      },
+                      { type: "image", value: blob },
+                    ],
+                  },
+                ];
+                const answer = await session.prompt(prompt);
+                const txt = (answer || "").toString().trim().toLowerCase();
+                if (txt.includes("yes")) {
+                  yesIds.push(tile.id);
+                }
+              }
+              resolve(yesIds);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        }
+
+        (async () => {
+          const result = await solveRecaptchaEnterpriseWithGemini(
+            %tiles%,
+            %target%,
+            %timeout%
+          );
+          return result;
+        })()
+    "#;
+
+    let script = script_template
+        .replace("%tiles%", &serde_json::to_string(&tiles_json).unwrap())
+        .replace("%target%", &serde_json::to_string(&target).unwrap())
+        .replace("%timeout%", &timeout_ms.to_string());
+
+    // ---------- 3️⃣  Ask Chrome to evaluate ----------
+    let params = chromiumoxide::cdp::js_protocol::runtime::EvaluateParams::builder()
+        .expression(script)
+        .await_promise(true)
+        .build()
+        .unwrap();
+
+    // The Chrome call itself may time‑out; we give it a little extra margin.
+    let eval_fut = page.evaluate(params);
+    let eval_res = tokio::time::timeout(Duration::from_millis(timeout_ms + 5_000), eval_fut).await;
+
+    // -----------------------------------------------------------------
+    // 4️⃣  Turn the JS result into a Vec<u8>.
+    // -----------------------------------------------------------------
+    match eval_res {
+        Ok(Ok(eval)) => match eval.value() {
+            Some(serde_json::Value::Array(arr)) => {
+                let ids = arr
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                Ok(ids)
+            }
+            _ => Ok(vec![]), // empty / not an array → nothing matched
+        },
+        // Chrome returned an error – we forward it as‑is; the caller decides
+        // whether it is a “missing helper” situation.
+        Ok(Err(e)) => Err(e),
+        Err(_elapsed) => Err(CdpError::Timeout),
+    }
+}
+
+/* --------------------------------------------------------------------- *
+ * 2b. Helper that decides whether the error we received means
+ *     “the in‑page helper does not exist”.  The exact message differs
+ *     between Chrome versions, so we look for a few well‑known substrings.
+ * --------------------------------------------------------------------- */
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+fn is_missing_helper_error(err: &CdpError) -> bool {
+    // The `CdpError` we get from `page.evaluate` is usually a `ChromeMessage`.
+    // We simply search the string representation.
+    let txt = format!("{err}");
+    txt.contains("LanguageModel is not defined")
+        || txt.contains("ReferenceError")
+        || txt.contains("Uncaught ReferenceError")
+        || txt.contains("cannot read property 'create' of undefined")
+}
+
+/* --------------------------------------------------------------------- *
+ * 2c. External‑Gemini fallback – pure Rust.
+ *
+ *   • We download each tile image with `reqwest`.
+ *   • We call the Gemini‑Pro‑Vision HTTP API (or any compatible endpoint).
+ *   • The prompt is the same as the in‑page version.
+ *
+ *   The function returns the same `Vec<u8>` as the in‑page helper.
+ * --------------------------------------------------------------------- */
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn solve_with_external_gemini(
+    challenge: &RcEnterpriseChallenge<'_>,
+    timeout_ms: u64,
+) -> Result<Vec<u8>, RequestError> {
+    if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+        if let Ok(_sem) = GEMINI_SEM
+            .acquire_many(challenge.tiles.len().try_into().unwrap_or(1))
+            .await
+        {
+            // For the official Google Gemini‑Pro‑Vision endpoint:
+            let endpoint = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={api_key}"
+    );
+
+            // -----------------------------------------------------------------
+            // 1️⃣  Build the HTTP client – we reuse a single client for all tiles.
+            // -----------------------------------------------------------------
+            let client = Client::builder()
+                .timeout(Duration::from_millis(timeout_ms))
+                .build()?;
+
+            // -----------------------------------------------------------------
+            // 2️⃣  Prepare the *target* word.
+            // -----------------------------------------------------------------
+            let target = challenge.target.unwrap_or("target object").to_string();
+
+            // -----------------------------------------------------------------
+            // 3️⃣  Iterate over tiles, ask Gemini, collect the ids that get a “yes”.
+            // -----------------------------------------------------------------
+            let mut yes_ids = Vec::new();
+
+            for tile in &challenge.tiles {
+                // -------------------------------------------------------------
+                // a) Download the image bytes.
+                // -------------------------------------------------------------
+                let img_bytes = match client.get(tile.img_src).send().await {
+                    Ok(resp) if resp.status().is_success() => resp.bytes().await?,
+                    _ => continue, // if we cannot fetch the image we just skip it
+                };
+
+                // -------------------------------------------------------------
+                // b) Build the Gemini request body.
+                // -------------------------------------------------------------
+                // Gemini expects a JSON object with a `contents` array.
+                // Each element contains a `parts` array.  We send one text part and
+                // one image part (base64‑encoded).
+                let request_body = serde_json::json!({
+                    "contents": [{
+                        "role": "user",
+                        "parts": [
+                            {
+                                "text": format!("Does this image contain a {}? Answer only with \"yes\" or \"no\".", target)
+                            },
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",   // recaptcha images are JPEGs
+                                    "data": base64::encode(&img_bytes)
+                                }
+                            }
+                        ]
+                    }],
+                    // The model may be asked to stop after it emits the answer.
+                    "generationConfig": {
+                        "maxOutputTokens": 5,
+                        "temperature": 0.0
+                    }
+                });
+
+                // -------------------------------------------------------------
+                // c) Send the request (with a per‑tile timeout that is a fraction of
+                //    the total timeout we were given).
+                // -------------------------------------------------------------
+                let per_tile_timeout =
+                    Duration::from_millis(timeout_ms / (challenge.tiles.len() as u64 + 1));
+                let resp = tokio::time::timeout(
+                    per_tile_timeout,
+                    client.post(&endpoint).json(&request_body).send(),
+                )
+                .await;
+
+                let resp = match resp {
+                    Ok(Ok(r)) => r,
+                    // Either the HTTP request timed out or returned an error – skip.
+                    _ => continue,
+                };
+
+                // -------------------------------------------------------------
+                // d) Parse the Gemini answer.
+                // -------------------------------------------------------------
+                let resp_json: serde_json::Value = resp.json().await?;
+                // The answer text lives in `candidates[0].content.parts[0].text`.
+                let answer_text = resp_json
+                    .get("candidates")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("content"))
+                    .and_then(|c| c.get("parts"))
+                    .and_then(|p| p.get(0))
+                    .and_then(|p| p.get("text"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_ascii_lowercase();
+
+                if answer_text.contains("yes") {
+                    yes_ids.push(tile.id);
+                }
+            }
+
+            Ok(yes_ids)
+        } else {
+            Ok(Vec::new())
+        }
+    } else {
+        Ok(Vec::new())
+    }
+}
+
 /// Handle reCAPTCHA checkbox (anchor iframe) via chrome.
 /// This does nothing without the real_browser feature enabled.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 #[inline(always)]
-async fn recaptcha_handle(
+pub async fn recaptcha_handle(
     b: &mut Vec<u8>,
     page: &chromiumoxide::Page,
     viewport: &Option<crate::configuration::Viewport>,
-) -> Result<bool, chromiumoxide::error::CdpError> {
+) -> Result<bool, CdpError> {
     #[inline(always)]
     fn memeq(h: &[u8], n: &[u8]) -> bool {
         h.len() == n.len() && h.iter().zip(n).all(|(a, b)| a == b)
     }
-
     #[inline(always)]
     fn contains(h: &[u8], needle: &[u8]) -> bool {
-        let nl = needle.len();
-        if nl == 0 {
-            return true;
-        }
-        if nl > h.len() {
-            return false;
-        }
-        h.windows(nl).any(|w| memeq(w, needle))
+        h.windows(needle.len()).any(|w| memeq(w, needle))
     }
 
     #[inline(always)]
-    fn looks_like_recaptcha(html: &[u8]) -> bool {
-        // anchor iframe url / common markers
-        contains(html, b"/recaptcha/api2/anchor")
+    fn looks_like_any_recaptcha(html: &[u8]) -> bool {
+        // classic markers
+        let classic = contains(html, b"/recaptcha/api2/anchor")
             || contains(html, b"www.google.com/recaptcha/api2/anchor")
             || contains(html, b"reCAPTCHA")
-            || contains(html, b"recaptcha-anchor")
+            || contains(html, b"recaptcha-anchor");
+        // enterprise markers (the same ones `extract_rc_enterprise_challenge` uses)
+        let enterprise = contains(html, b"__recaptcha_api")
+            && contains(html, b"/recaptcha/enterprise/")
+            && contains(html, b"rc-imageselect")
+            && contains(html, b"rc-imageselect-tile");
+        classic || enterprise
     }
 
-    // If not a recaptcha-ish page, do nothing.
-    if !looks_like_recaptcha(b.as_slice()) {
+    // -----------------------------------------------------------------
+    // Fast‑path – if we don’t see any Recaptcha at all, bail out.
+    // -----------------------------------------------------------------
+    if !looks_like_any_recaptcha(b.as_slice()) {
         return Ok(false);
     }
 
+    // -----------------------------------------------------------------
+    // Main loop (≤10 attempts, 30 s total timeout).
+    // -----------------------------------------------------------------
     let mut validated = false;
 
-    let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+    let overall = tokio::time::timeout(Duration::from_secs(30), async {
+        // Keep the mouse moving a little – helps not being flagged as a bot.
         let _ = tokio::join!(
             page.disable_network_cache(true),
-            perform_smart_mouse_movement(&page, &viewport)
+            perform_smart_mouse_movement(page, viewport)
         );
 
-        // Up to 10 loops like cf/imperva
         for _ in 0..10 {
-            let mut wait_for = CF_WAIT_FOR.clone();
-
-            // Refresh HTML and see if we still need to handle recaptcha
+            // ---------------------------------------------------------
+            // a) Refresh HTML into the caller’s buffer.
+            // ---------------------------------------------------------
             if let Ok(cur) = page.outer_html_bytes().await {
                 *b = cur;
             }
 
-            if !looks_like_recaptcha(b.as_slice()) {
+            // ---------------------------------------------------------
+            // b) If Recaptcha vanished → success.
+            // ---------------------------------------------------------
+            if !looks_like_any_recaptcha(b.as_slice()) {
                 validated = true;
                 break;
             }
 
-            // 1) Ensure the reCAPTCHA anchor iframe exists
+            // ---------------------------------------------------------
+            // c) **Enterprise** handling – now solved with the built‑in Gemini.
+            // ---------------------------------------------------------
+            if let Some(_) = extract_rc_enterprise_challenge(b.as_slice()) {
+                // 1️⃣  Ensure the anchor iframe exists (first click).
+                let anchor_present = page
+                    .find_elements_pierced(r#"iframe[src*="/recaptcha/api2/anchor"]"#)
+                    .await
+                    .map(|els| !els.is_empty())
+                    .unwrap_or(false);
+
+                if !anchor_present {
+                    // Wait for it to appear – same CF‑style wait.
+                    let mut wait_for = CF_WAIT_FOR.clone();
+                    wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                        Duration::from_millis(900),
+                    ))
+                    .into();
+                    wait_for.idle_network =
+                        crate::features::chrome_common::WaitForIdleNetwork::new(
+                            Duration::from_secs(6).into(),
+                        )
+                        .into();
+                    wait_for.page_navigations = true;
+                    let wait = Some(wait_for.clone());
+                    let _ = tokio::join!(
+                        page_wait(&page, &wait),
+                        perform_smart_mouse_movement(&page, viewport),
+                    );
+                    continue; // retry outer loop
+                }
+
+                // 2️⃣  Click the classic checkbox (same logic as before).
+                async fn click_anchor(page: &chromiumoxide::Page) -> bool {
+                    if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
+                        if let Some(el) = els.into_iter().next() {
+                            return match el.clickable_point().await {
+                                Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                                Err(_) => el.click().await.is_ok(),
+                            };
+                        }
+                    }
+                    if let Ok(els) = page
+                        .find_elements_pierced(r#".recaptcha-checkbox-checkmark"#)
+                        .await
+                    {
+                        if let Some(el) = els.into_iter().next() {
+                            return match el.clickable_point().await {
+                                Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                                Err(_) => el.click().await.is_ok(),
+                            };
+                        }
+                    }
+                    false
+                }
+
+                let clicked = click_anchor(page).await;
+
+                // 3️⃣  Wait a bit for the grid iframe to load.
+                let mut wait_for = CF_WAIT_FOR.clone();
+                wait_for.delay =
+                    crate::features::chrome_common::WaitForDelay::new(Some(if clicked {
+                        Duration::from_millis(1_100)
+                    } else {
+                        Duration::from_millis(700)
+                    }))
+                    .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    Duration::from_secs(7).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, viewport),
+                );
+
+                // ---------------------------------------------------------
+                // d) Grab the grid HTML again – we need the *latest* tile URLs.
+                // ---------------------------------------------------------
+                let grid_html = match page.outer_html_bytes().await {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                };
+                *b = grid_html.clone();
+
+                // If the grid disappeared after the click, we’re done.
+                if !looks_like_any_recaptcha(b.as_slice()) {
+                    validated = true;
+                    break;
+                }
+
+                // Extract the challenge *again* (now we are sure the grid is present).
+                let challenge = match extract_rc_enterprise_challenge(&grid_html) {
+                    Some(c) => c,
+                    None => continue,
+                };
+
+                // ---------------------------------------------------------
+                // e) **Solve with the built‑in Gemini** (the function above).
+                // ---------------------------------------------------------
+                let yes_ids = solve_enterprise_with_browser_gemini(page, &challenge, 20_000)
+                    .await
+                    .map_err(|e| {
+                        CdpError::ChromeMessage(format!("gemini in‑page failed: {}", e))
+                    })?;
+
+                // ---------------------------------------------------------
+                // f) Click every tile that received a “yes”.
+                // ---------------------------------------------------------
+                for id in yes_ids {
+                    if let Some(tile) = challenge.tiles.iter().find(|t| t.id == id) {
+                        // Build a selector that matches the exact `<img src="…">`.
+                        let selector = format!(r#"img[src="{}"]"#, tile.img_src);
+                        if let Ok(els) = page.find_elements_pierced(&selector).await {
+                            if let Some(el) = els.into_iter().next() {
+                                let _ = el.click().await; // ignore possible errors
+                            }
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // g) Click the Verify button if it exists.
+                // ---------------------------------------------------------
+                if challenge.has_verify_button {
+                    if let Ok(btns) = page
+                        .find_elements_pierced(
+                            r#"button[id*="recaptcha-verify-button"], button:contains("Verify")"#,
+                        )
+                        .await
+                    {
+                        if let Some(btn) = btns.into_iter().next() {
+                            let _ = btn.click().await;
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // h) Final wait for navigation / network idle.
+                // ---------------------------------------------------------
+                let mut wait_for = CF_WAIT_FOR.clone();
+                wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
+                    Duration::from_millis(1_500),
+                ))
+                .into();
+                wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
+                    Duration::from_secs(8).into(),
+                )
+                .into();
+                wait_for.page_navigations = true;
+                let wait = Some(wait_for.clone());
+                let _ = tokio::join!(
+                    page_wait(&page, &wait),
+                    perform_smart_mouse_movement(&page, viewport),
+                );
+
+                // ---------------------------------------------------------
+                // i) Refresh HTML one last time – if the whole Recaptcha is gone we’re finished.
+                // ---------------------------------------------------------
+                if let Ok(new_html) = page.outer_html_bytes().await {
+                    *b = new_html;
+                    if !looks_like_any_recaptcha(b.as_slice()) {
+                        validated = true;
+                        break;
+                    }
+                }
+
+                // If we are still here the grid is still present – loop again (maybe a slider appears).
+                continue;
+            }
+
+            // -------------------------------------------------------------
+            // Classic Recaptcha handling – unchanged from the original code.
+            // -------------------------------------------------------------
             let anchor_iframe_present = page
                 .find_elements_pierced(r#"iframe[src*="/recaptcha/api2/anchor"]"#)
                 .await
@@ -1053,31 +1504,26 @@ async fn recaptcha_handle(
                 .unwrap_or(false);
 
             if !anchor_iframe_present {
-                // Wait for it to load (CF-style)
+                let mut wait_for = CF_WAIT_FOR.clone();
                 wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(
-                    core::time::Duration::from_millis(900),
+                    Duration::from_millis(900),
                 ))
                 .into();
                 wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
-                    core::time::Duration::from_secs(6).into(),
+                    Duration::from_secs(6).into(),
                 )
                 .into();
                 wait_for.page_navigations = true;
-
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
                     page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, &viewport),
+                    perform_smart_mouse_movement(&page, viewport),
                 );
-
                 continue;
             }
 
-            // 2) Click the checkbox inside iframe:
-            // Prefer #recaptcha-anchor (the actual checkbox)
-            // Fallback to .recaptcha-checkbox-checkmark
+            // Click the classic checkbox (same logic you already had)
             let mut clicked = false;
-
             if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                 if let Some(el) = els.into_iter().next() {
                     clicked = match el.clickable_point().await {
@@ -1086,7 +1532,6 @@ async fn recaptcha_handle(
                     };
                 }
             }
-
             if !clicked {
                 if let Ok(els) = page
                     .find_elements_pierced(r#".recaptcha-checkbox-checkmark"#)
@@ -1101,43 +1546,43 @@ async fn recaptcha_handle(
                 }
             }
 
-            // 3) After clicking, wait like cf_handle for challenge processing / navigation.
-            // Even if click failed, still wait a bit because the element may become clickable after motion.
+            let mut wait_for = CF_WAIT_FOR.clone();
             wait_for.delay = crate::features::chrome_common::WaitForDelay::new(Some(if clicked {
-                core::time::Duration::from_millis(1100)
+                Duration::from_millis(1_100)
             } else {
-                core::time::Duration::from_millis(700)
+                Duration::from_millis(700)
             }))
             .into();
             wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(
-                core::time::Duration::from_secs(7).into(),
+                Duration::from_secs(7).into(),
             )
             .into();
             wait_for.page_navigations = true;
-
             let wait = Some(wait_for.clone());
             let _ = tokio::join!(
                 page_wait(&page, &wait),
-                perform_smart_mouse_movement(&page, &viewport),
+                perform_smart_mouse_movement(&page, viewport),
             );
 
-            // Refresh and check if we cleared it
-            if let Ok(nc) = page.outer_html_bytes().await {
-                *b = nc;
-                if !looks_like_recaptcha(b.as_slice()) {
+            if let Ok(new_html) = page.outer_html_bytes().await {
+                *b = new_html;
+                if !looks_like_any_recaptcha(b.as_slice()) {
                     validated = true;
                     break;
                 }
             }
         }
 
-        Ok::<(), chromiumoxide::error::CdpError>(())
+        Ok::<(), CdpError>(())
     })
     .await;
 
-    match page_result {
+    // -----------------------------------------------------------------
+    // Propagate the result exactly like the original implementation.
+    // -----------------------------------------------------------------
+    match overall {
         Ok(_) => Ok(validated),
-        _ => Err(chromiumoxide::error::CdpError::Timeout),
+        Err(_) => Err(CdpError::Timeout),
     }
 }
 
@@ -1154,8 +1599,7 @@ async fn recaptcha_handle(
     Ok(())
 }
 
-/// Handle GeeTest presence via chrome (detect + wait + open widget + TODO slider action).
-/// Does NOT include slider-solving logic.
+/// Handle GeeTest presence via chrome (detect + wait + open widget).
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 #[inline(always)]
 async fn geetest_handle(
@@ -1163,9 +1607,6 @@ async fn geetest_handle(
     page: &chromiumoxide::Page,
     viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<bool, chromiumoxide::error::CdpError> {
-    // -----------------------------
-    // Fast byte helpers (no alloc)
-    // -----------------------------
     #[inline(always)]
     fn memeq(h: &[u8], n: &[u8]) -> bool {
         h.len() == n.len() && h.iter().zip(n).all(|(a, b)| a == b)
@@ -1422,8 +1863,7 @@ async fn geetest_handle(
     }
 }
 
-/// Handle GeeTest presence via chrome (detect + wait + open widget + TODO slider action).
-/// Does NOT include slider-solving logic.
+/// Handle GeeTest presence via chrome (detect + wait + open widget).
 #[cfg(all(feature = "chrome", not(feature = "real_browser")))]
 #[inline(always)]
 async fn geetest_handle(
@@ -1433,6 +1873,223 @@ async fn geetest_handle(
     _viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     Ok(())
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[derive(Debug, Clone)]
+/// The RC tile reference.
+pub struct RcTileRef<'a> {
+    /// The id.
+    pub id: u8,
+    /// The img src.
+    pub img_src: &'a str,
+}
+
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+/// Enterprise challenge.
+#[derive(Debug, Default, Clone)]
+pub struct RcEnterpriseChallenge<'a> {
+    /// e.g. "bridges" (from `<strong>bridges</strong>`)
+    pub target: Option<&'a str>,
+    /// full instruction line if you want it
+    pub instruction_text: Option<&'a str>,
+    /// The tile space.
+    pub tiles: Vec<RcTileRef<'a>>,
+    /// Has the verification button.
+    pub has_verify_button: bool,
+}
+
+/// Extracts recaptcha enterprise image-grid metadata from the iframe inner HTML.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[inline(always)]
+pub fn extract_rc_enterprise_challenge<'a>(html: &'a [u8]) -> Option<RcEnterpriseChallenge<'a>> {
+    #[inline(always)]
+    fn memeq(a: &[u8], b: &[u8]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y)
+    }
+    #[inline(always)]
+    fn find(h: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+        let nl = needle.len();
+        if nl == 0 || start >= h.len() || nl > (h.len() - start) {
+            return None;
+        }
+        h[start..]
+            .windows(nl)
+            .position(|w| memeq(w, needle))
+            .map(|p| start + p)
+    }
+    #[inline(always)]
+    fn contains(h: &[u8], needle: &[u8]) -> bool {
+        find(h, needle, 0).is_some()
+    }
+    #[inline(always)]
+    fn find_quote_end(h: &[u8], start: usize) -> Option<usize> {
+        h.get(start..)?
+            .iter()
+            .position(|&c| c == b'"')
+            .map(|p| start + p)
+    }
+    #[inline(always)]
+    fn is_digit(b: u8) -> bool {
+        (b'0'..=b'9').contains(&b)
+    }
+    #[inline(always)]
+    fn parse_u8_1digit(b: u8) -> Option<u8> {
+        if is_digit(b) {
+            Some(b - b'0')
+        } else {
+            None
+        }
+    }
+
+    // Quick gate: must look like enterprise iframe + image grid.
+    if !contains(html, b"__recaptcha_api")
+        || !contains(html, b"/recaptcha/enterprise/")
+        || !contains(html, b"rc-imageselect")
+        || !contains(html, b"rc-imageselect-tile")
+    {
+        return None;
+    }
+
+    let mut out = RcEnterpriseChallenge {
+        target: None,
+        instruction_text: None,
+        tiles: Vec::with_capacity(12),
+        has_verify_button: contains(html, b"id=\"recaptcha-verify-button\"")
+            || contains(html, b">Verify<"),
+    };
+
+    // ----------------------------
+    // 1) Extract target word from:
+    //    Select all images with <strong>bridges</strong>
+    // ----------------------------
+    // Primary: grab inside `<strong ...>WORD</strong>` near rc-imageselect-desc
+    const DESC_PAT: &[u8] = b"rc-imageselect-desc";
+    const STRONG_OPEN: &[u8] = b"<strong";
+    const GT: &[u8] = b">";
+    const STRONG_CLOSE: &[u8] = b"</strong>";
+
+    if let Some(desc_pos) = find(html, DESC_PAT, 0) {
+        // scan forward in a bounded window for strong tag
+        let win_end = (desc_pos + 900).min(html.len());
+        if let Some(strong_pos) = find(html, STRONG_OPEN, desc_pos) {
+            if strong_pos < win_end {
+                if let Some(gt_pos) = find(html, GT, strong_pos) {
+                    let text_start = gt_pos + 1;
+                    if let Some(close_pos) = find(html, STRONG_CLOSE, text_start) {
+                        if close_pos <= win_end {
+                            if let Ok(word) = core::str::from_utf8(&html[text_start..close_pos]) {
+                                // trim whitespace
+                                let word = word.trim();
+                                if !word.is_empty() {
+                                    out.target = Some(word);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Optional: extract the whole desc text node (cheap-ish)
+        // Find the first '>' after rc-imageselect-desc and then '<' end.
+        if let Some(tag_end) = find(html, b">", desc_pos) {
+            let t0 = tag_end + 1;
+            // find first '<' after that
+            if let Some(t1) = find(html, b"<", t0) {
+                if let Ok(txt) = core::str::from_utf8(&html[t0..t1]) {
+                    let txt = txt.trim();
+                    if !txt.is_empty() {
+                        out.instruction_text = Some(txt);
+                    }
+                }
+            }
+        }
+    }
+
+    // ----------------------------
+    // 2) Extract tiles:
+    //    <td ... id="0" class="rc-imageselect-tile" ...>
+    //    <img ... src="https://www.google.com/recaptcha/enterprise/payload?...">
+    // ----------------------------
+    const TILE_CLASS: &[u8] = b"rc-imageselect-tile";
+    const ID_PAT: &[u8] = b"id=\"";
+    const SRC_PAT: &[u8] = b"src=\"";
+    const PAYLOAD_PREFIX: &[u8] = b"https://www.google.com/recaptcha/enterprise/payload";
+
+    let mut i = 0usize;
+    while i < html.len() {
+        let tile_pos = match find(html, TILE_CLASS, i) {
+            Some(p) => p,
+            None => break,
+        };
+
+        // bounded backscan to find id="X" close to this tile
+        let back = tile_pos.saturating_sub(240);
+        let id_pos = match find(html, ID_PAT, back) {
+            Some(p) if p < tile_pos => p,
+            _ => {
+                i = tile_pos + TILE_CLASS.len();
+                continue;
+            }
+        };
+
+        let id = match html
+            .get(id_pos + ID_PAT.len())
+            .copied()
+            .and_then(parse_u8_1digit)
+        {
+            Some(v) => v,
+            None => {
+                i = tile_pos + TILE_CLASS.len();
+                continue;
+            }
+        };
+
+        // find img src after tile_pos
+        let src_pos = match find(html, SRC_PAT, tile_pos) {
+            Some(p) => p,
+            None => {
+                i = tile_pos + TILE_CLASS.len();
+                continue;
+            }
+        };
+
+        let url_start = src_pos + SRC_PAT.len();
+        if html.get(url_start..url_start + PAYLOAD_PREFIX.len()) != Some(PAYLOAD_PREFIX) {
+            i = tile_pos + TILE_CLASS.len();
+            continue;
+        }
+
+        let url_end = match find_quote_end(html, url_start) {
+            Some(e) => e,
+            None => {
+                i = tile_pos + TILE_CLASS.len();
+                continue;
+            }
+        };
+
+        let url = match core::str::from_utf8(&html[url_start..url_end]) {
+            Ok(s) => s,
+            Err(_) => {
+                i = tile_pos + TILE_CLASS.len();
+                continue;
+            }
+        };
+
+        // dedupe by id (recaptcha can re-render)
+        if !out.tiles.iter().any(|t| t.id == id) {
+            out.tiles.push(RcTileRef { id, img_src: url });
+        }
+
+        i = url_end + 1;
+    }
+
+    if out.tiles.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 /// The response of a web page.
@@ -6295,7 +6952,7 @@ pub async fn openai_request(
     }
 }
 
-#[cfg(feature = "gemini")]
+#[cfg(any(feature = "gemini", feature = "real_browser"))]
 lazy_static! {
     /// Semaphore for Gemini rate limiting
     static ref GEMINI_SEM: tokio::sync::Semaphore = {
