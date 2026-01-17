@@ -22,6 +22,8 @@ use tokio::time::Duration;
 
 #[cfg(all(feature = "time", not(feature = "decentralized")))]
 use tokio::time::Instant;
+#[cfg(all(not(feature = "time"), not(feature = "decentralized")))]
+use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
@@ -2518,6 +2520,20 @@ impl Page {
     #[cfg(not(feature = "encoding"))]
     pub fn get_html_encoded(&self, _label: &str) -> String {
         self.get_html()
+    }
+
+    /// Set the elasped duration of the page since scraped from duration.
+    #[inline]
+    #[cfg(all(feature = "time", not(feature = "decentralized")))]
+    pub fn set_duration_elapsed(&mut self, scraped_at: Option<Instant>) {
+        self.duration = scraped_at;
+    }
+
+    /// Set the elasped duration of the page since scraped from duration.
+    #[inline]
+    #[cfg(all(feature = "time", not(feature = "decentralized")))]
+    pub fn set_duration_elapsed_from_duration(&mut self, elapsed: Option<std::time::Duration>) {
+        self.duration = elapsed.map(|d| Instant::now().checked_sub(d).unwrap_or_else(Instant::now));
     }
 
     /// Get the elasped duration of the page since scraped.
