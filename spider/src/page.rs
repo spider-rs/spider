@@ -940,8 +940,8 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSel
 #[cfg(not(feature = "decentralized"))]
 /// Is the resource valid?
 pub fn validate_empty(content: &Option<Box<Vec<u8>>>, is_success: bool) -> bool {
-    match content {
-        Some(ref content) => {
+    match &content {
+        Some(content) => {
             // is_success && content.starts_with(br#"<html style=\"height:100%\"><head><META NAME=\"ROBOTS\" CONTENT=\"NOINDEX, NOFOLLOW\"><meta name=\"format-detection\" content=\"telephone=no\"><meta name=\"viewport\" content=\"initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge,chrome=1\"></head><body style=\"margin:0px;height:100%\"><iframe id=\"main-iframe\" src=\"/_Incapsula_"#)
             !( content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
                      content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") &&
@@ -1093,6 +1093,14 @@ pub fn build(url: &str, res: PageResponse) -> Page {
             should_retry = false;
             empty_page = true;
         }
+    }
+
+    if should_retry
+        && !resource_found
+        && res.status_code == StatusCode::FORBIDDEN
+        && res.headers.is_some()
+    {
+        should_retry = false;
     }
 
     Page {
