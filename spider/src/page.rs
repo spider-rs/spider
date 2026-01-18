@@ -1136,6 +1136,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         openai_credits_used: res.openai_credits_used,
         #[cfg(feature = "openai")]
         extra_ai_data: res.extra_ai_data,
+        #[cfg(feature = "gemini")]
+        gemini_credits_used: res.gemini_credits_used,
+        #[cfg(feature = "gemini")]
+        extra_gemini_data: res.extra_gemini_data,
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
