@@ -22,13 +22,13 @@ A web crawler and scraper, building blocks for data curation workloads.
 - [Adblocker](https://github.com/spider-rs/spider_network_blocker)
 - [Firewall](https://github.com/spider-rs/spider_firewall)
 - Smart Mode
-- Anti-measure handling (deterministic + [AI built in](https://developer.chrome.com/docs/ai/prompt-api))
+- Web challenges (deterministic + [AI built in](https://developer.chrome.com/docs/ai/prompt-api))
 - Proxy Support
 - Subscriptions
 - Disk persistence
 - Caching memory, disk, or remote hybrid between HTTP and chrome
 - Blacklisting, Whitelisting, and Budgeting Depth
-- Dynamic AI Prompt Scripting Headless with Step Caching
+- AI automated workflows
 - CSS/Xpath Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
 - Cron Jobs
 
