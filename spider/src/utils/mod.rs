@@ -21,6 +21,8 @@ pub mod trie;
 /// Validate html false positives.
 pub mod validation;
 
+#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+use crate::features::automation::RemoteMultimodalConfigs;
 use crate::{
     page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},
     RelativeSelectors,
@@ -1094,8 +1096,8 @@ pub async fn run_openai_request(
     ok: bool,
 ) {
     if let Some(gpt_configs) = openai_config {
-        let gpt_configs = match gpt_configs.prompt_url_map {
-            Some(ref h) => {
+        let gpt_configs = match &gpt_configs.prompt_url_map {
+            Some(h) => {
                 let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
 
                 if !c.is_some() && gpt_configs.paths_map {
@@ -2213,6 +2215,7 @@ pub async fn fetch_page_html_chrome_base(
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -2887,6 +2890,42 @@ pub async fn fetch_page_html_chrome_base(
                 let _ = tokio::time::timeout(base_timeout, openai_request).await;
             }
 
+            if remote_multimodal.is_some() && !base_timeout.is_zero() {
+                use crate::features::automation::run_remote_multimodal_if_enabled;
+
+                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+
+                let multi_modal_request = run_remote_multimodal_if_enabled(
+                    remote_multimodal,
+                    page,
+                    match &url_target {
+                        Some(ut) => ut,
+                        _ => source,
+                    },
+                );
+
+                let multimodal_success =
+                    match tokio::time::timeout(base_timeout, multi_modal_request).await {
+                        Ok(Ok(Some(result))) => result.success,
+                        Ok(Ok(None)) => false,
+                        Ok(Err(_e)) => false,
+                        Err(_elapsed) => false,
+                    };
+
+                if multimodal_success {
+                    let next_content = tokio::time::timeout(base_timeout, page.outer_html_bytes())
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .filter(|b| !b.is_empty())
+                        .map(|b| Box::new(b.into()));
+
+                    if next_content.is_some() {
+                        page_response.content = next_content;
+                    }
+                }
+            }
+
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
                 let _ = tokio::time::timeout(
                     base_timeout + tokio::time::Duration::from_secs(30),
@@ -2990,10 +3029,10 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     }
 
-                    let mut page_response = PageResponse::default();
+            let mut page_response = PageResponse::default();
 
             let scope_url = if jar.is_some() {
-                            let scope_url = page_response
+            let scope_url = page_response
                 .final_url
                 .as_deref()
                 .filter(|u| !u.is_empty())
@@ -3365,8 +3404,8 @@ pub async fn perform_screenshot(
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
 
-    match screenshot {
-        Some(ref ss) => {
+    match &screenshot {
+        Some(ss) => {
             let output_format = string_concat!(
                 ".",
                 ss.params
@@ -4429,6 +4468,7 @@ pub async fn fetch_page_html_base(
     cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     let cached_html = if seeded_resource.is_some() {
         seeded_resource
@@ -4463,6 +4503,7 @@ pub async fn fetch_page_html_base(
         &None,
         &None,
         jar,
+        remote_multimodal,
     )
     .await
     {
@@ -4493,6 +4534,7 @@ pub async fn fetch_page_html(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -4513,6 +4555,7 @@ pub async fn fetch_page_html(
         cache_policy,
         None,
         None,
+        remote_multimodal,
     )
     .await
 }
@@ -4538,6 +4581,7 @@ pub async fn fetch_page_html_seeded(
     cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -4558,6 +4602,7 @@ pub async fn fetch_page_html_seeded(
         cache_policy,
         seeded_resource,
         jar,
+        remote_multimodal,
     )
     .await
 }
@@ -4583,6 +4628,7 @@ async fn _fetch_page_html_chrome(
     cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -4626,6 +4672,7 @@ async fn _fetch_page_html_chrome(
                 &None,
                 &None,
                 jar,
+                remote_multimodal,
             )
             .await
             {
@@ -4733,6 +4780,7 @@ pub async fn fetch_page_html_chrome(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -4753,6 +4801,7 @@ pub async fn fetch_page_html_chrome(
         cache_policy,
         None,
         jar,
+        remote_multimodal,
     )
     .await
 }
@@ -4778,6 +4827,7 @@ pub async fn fetch_page_html_chrome_seeded(
     cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -4798,6 +4848,7 @@ pub async fn fetch_page_html_chrome_seeded(
         cache_policy,
         resource,
         jar,
+        remote_multimodal,
     )
     .await
 }
@@ -4853,8 +4904,8 @@ pub async fn openai_request_base(
             let gpt_base = chat_completion_defaults
                 .max_tokens(gpt_configs.max_tokens)
                 .model(&gpt_configs.model);
-            let gpt_base = match gpt_configs.user {
-                Some(ref user) => gpt_base.user(user),
+            let gpt_base = match &gpt_configs.user {
+                Some(user) => gpt_base.user(user),
                 _ => gpt_base,
             };
             let gpt_base = match gpt_configs.temperature {
@@ -4871,8 +4922,8 @@ pub async fn openai_request_base(
                 _ => None,
             };
 
-            let (tokens, prompt_tokens) = match core_bpe {
-                Some(ref core_bpe) => (
+            let (tokens, prompt_tokens) = match &core_bpe {
+                Some(core_bpe) => (
                     core_bpe.encode_with_special_tokens(&resource),
                     core_bpe.encode_with_special_tokens(&prompt),
                 ),
@@ -4905,8 +4956,8 @@ pub async fn openai_request_base(
                     &prompt,
                 );
 
-                let (tokens, prompt_tokens) = match core_bpe {
-                    Some(ref core_bpe) => (
+                let (tokens, prompt_tokens) = match &core_bpe {
+                    Some(core_bpe) => (
                         core_bpe.encode_with_special_tokens(&r),
                         core_bpe.encode_with_special_tokens(&prompt),
                     ),
@@ -4929,8 +4980,8 @@ pub async fn openai_request_base(
                         &prompt,
                     );
 
-                    let (tokens, prompt_tokens) = match core_bpe {
-                        Some(ref core_bpe) => (
+                    let (tokens, prompt_tokens) = match &core_bpe {
+                        Some(core_bpe) => (
                             core_bpe.encode_with_special_tokens(&r),
                             core_bpe.encode_with_special_tokens(&prompt),
                         ),
@@ -4964,8 +5015,8 @@ pub async fn openai_request_base(
                     async_openai::types::ResponseFormat::Text
                 };
 
-                if let Some(ref structure) = gpt_configs.json_schema {
-                    if let Some(ref schema) = structure.schema {
+                if let Some(structure) = &gpt_configs.json_schema {
+                    if let Some(schema) = &structure.schema {
                         if let Ok(mut schema) =
                             crate::features::serde_json::from_str::<serde_json::Value>(&schema)
                         {
@@ -5034,8 +5085,8 @@ pub async fn openai_request_base(
                         .build()
                     {
                         Ok(request) => {
-                            let res = match gpt_configs.api_key {
-                                Some(ref key) => {
+                            let res = match &gpt_configs.api_key {
+                                Some(key) => {
                                     if !key.is_empty() {
                                         let conf = CLIENT.config().to_owned();
                                         async_openai::Client::with_config(conf.with_api_key(key))
@@ -5357,13 +5408,15 @@ pub async fn gemini_request(
     }
 }
 
-/// Clean the html removing css and js default using the scraper crate.
+/// Clean the html removing css and js default (raw passthrough).
+#[inline]
 pub fn clean_html_raw(html: &str) -> String {
     html.to_string()
 }
 
-/// Clean the html removing css and js
-#[cfg(feature = "openai")]
+/// Clean the html removing css and js (base).
+///
+/// Uses `lol_html` to strip noisy elements and reduce prompt size.
 pub fn clean_html_base(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
@@ -5430,10 +5483,10 @@ pub fn clean_html_base(html: &str) -> String {
     }
 }
 
-/// Clean the HTML to slim fit GPT models. This removes base64 images from the prompt.
-#[cfg(feature = "openai")]
+/// Clean the HTML to slim-fit models. This removes base64 images and heavy nodes.
 pub fn clean_html_slim(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+
     match rewrite_str(
         html,
         RewriteStrSettings {
@@ -5479,6 +5532,8 @@ pub fn clean_html_slim(html: &str) -> String {
                     Ok(())
                 }),
                 element!("picture", |el| {
+                    // picture usually has nested sources; still remove if it’s inline-data heavy
+                    // (this is conservative; keep if you want structure)
                     if let Some(src) = el.get_attribute("src") {
                         if src.starts_with("data:image") {
                             el.remove();
@@ -5529,8 +5584,8 @@ pub fn clean_html_slim(html: &str) -> String {
     }
 }
 
-/// Clean the most of the extra properties in the html to fit the context.
-#[cfg(feature = "openai")]
+/// Clean the most extra properties in the html to fit the context.
+/// Removes nav/footer, trims meta, and prunes most attributes except id/class/data-*.
 pub fn clean_html_full(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
@@ -5544,28 +5599,24 @@ pub fn clean_html_full(html: &str) -> String {
                 }),
                 element!("meta", |el| {
                     let name = el.get_attribute("name").map(|n| n.to_lowercase());
-
                     if !matches!(name.as_deref(), Some("viewport") | Some("charset")) {
                         el.remove();
                     }
-
                     Ok(())
                 }),
                 element!("*", |el| {
-                    let attrs_to_keep = ["id", "data-", "class"];
-                    let attributes_list = el.attributes().iter();
-                    let mut remove_list = Vec::new();
-
-                    for attr in attributes_list {
-                        if !attrs_to_keep.contains(&attr.name().as_str()) {
-                            remove_list.push(attr.name());
+                    // Keep only: id, class, data-*
+                    let mut to_remove: Vec<String> = Vec::new();
+                    for attr in el.attributes().iter() {
+                        let n = attr.name();
+                        let keep = n == "id" || n == "class" || n.starts_with("data-");
+                        if !keep {
+                            to_remove.push(n);
                         }
                     }
-
-                    for attr in remove_list {
+                    for attr in to_remove {
                         el.remove_attribute(&attr);
                     }
-
                     Ok(())
                 }),
             ],
@@ -5581,28 +5632,20 @@ pub fn clean_html_full(html: &str) -> String {
     }
 }
 
-/// Clean the html removing css and js
-#[cfg(not(feature = "openai"))]
-pub fn clean_html(html: &str) -> String {
-    clean_html_raw(html)
-}
-
-/// Clean the html removing css and js
-#[cfg(all(feature = "openai", not(feature = "openai_slim_fit")))]
-pub fn clean_html(html: &str) -> String {
-    clean_html_base(html)
-}
-
-/// Clean the html removing css and js
-#[cfg(all(feature = "openai", feature = "openai_slim_fit"))]
+/// Default cleaner used by the engine.
+///
+/// If you still want a “slim fit” toggle, keep the feature gate here (safe).
+#[cfg(feature = "openai_slim_fit")]
+#[inline]
 pub fn clean_html(html: &str) -> String {
     clean_html_slim(html)
 }
 
-#[cfg(not(feature = "openai"))]
-/// Clean and remove all base64 images from the prompt.
-pub fn clean_html_slim(html: &str) -> String {
-    html.into()
+/// Default cleaner used by the engine (non-slim build).
+#[cfg(not(feature = "openai_slim_fit"))]
+#[inline]
+pub fn clean_html(html: &str) -> String {
+    clean_html_base(html)
 }
 
 /// Log to console if configuration verbose.
@@ -5637,53 +5680,53 @@ lazy_static! {
 #[cfg(feature = "control")]
 /// Pause a target website running crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn pause(target: &str) {
-    match CONTROLLER
+    if let Err(e) = CONTROLLER
         .write()
         .await
         .0
         .send((target.into(), Handler::Pause))
     {
-        _ => (),
-    };
+        log::error!("PAUSE: {:?}", e);
+    }
 }
 
 #[cfg(feature = "control")]
 /// Resume a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn resume(target: &str) {
-    match CONTROLLER
+    if let Err(e) = CONTROLLER
         .write()
         .await
         .0
         .send((target.into(), Handler::Resume))
     {
-        _ => (),
-    };
+        log::error!("RESUME: {:?}", e);
+    }
 }
 
 #[cfg(feature = "control")]
 /// Shutdown a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn shutdown(target: &str) {
-    match CONTROLLER
+    if let Err(e) = CONTROLLER
         .write()
         .await
         .0
         .send((target.into(), Handler::Shutdown))
     {
-        _ => (),
-    };
+        log::error!("SHUTDOWN: {:?}", e);
+    }
 }
 
 #[cfg(feature = "control")]
 /// Reset a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn reset(target: &str) {
-    match CONTROLLER
+    if let Err(e) = CONTROLLER
         .write()
         .await
         .0
         .send((target.into(), Handler::Start))
     {
-        _ => (),
-    };
+        log::error!("RESET: {:?}", e);
+    }
 }
 
 /// Setup selectors for handling link targets.

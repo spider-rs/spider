@@ -2974,6 +2974,7 @@ impl Website {
                     &self.configuration.cache_policy,
                     Some(seeded_html.clone()),
                     Some(&self.cookie_jar),
+                    &self.configuration.remote_multimodal,
                 )
                 .await
             } else {
@@ -2994,6 +2995,7 @@ impl Website {
                     self.configuration.max_page_bytes,
                     self.configuration.get_cache_options(),
                     &self.configuration.cache_policy,
+                    &self.configuration.remote_multimodal,
                 )
                 .await
             };
@@ -3036,6 +3038,7 @@ impl Website {
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
                             &self.configuration.cache_policy,
+                            &self.configuration.remote_multimodal,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -3062,6 +3065,7 @@ impl Website {
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
                         &self.configuration.cache_policy,
+                        &self.configuration.remote_multimodal,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -3198,6 +3202,7 @@ impl Website {
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
+                &self.configuration.remote_multimodal,
             )
             .await;
 
@@ -3239,6 +3244,7 @@ impl Website {
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
                             &self.configuration.cache_policy,
+                            &self.configuration.remote_multimodal,
                         )
                         .await;
                         page.clone_from(&next_page);
@@ -3265,6 +3271,7 @@ impl Website {
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
                         &self.configuration.cache_policy,
+                        &self.configuration.remote_multimodal,
                     )
                     .await;
                     page.clone_from(&next_page);
@@ -3506,6 +3513,7 @@ impl Website {
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
+                &self.configuration.remote_multimodal,
             )
             .await;
 
@@ -3910,6 +3918,7 @@ impl Website {
                     config.max_page_bytes,
                     config.get_cache_options(),
                     &config.cache_policy,
+                    &config.remote_multimodal,
                 )
                 .await;
 
@@ -4775,6 +4784,7 @@ impl Website {
                                                                 shared.6.max_page_bytes,
                                                                 shared.6.get_cache_options(),
                                                                 &shared.6.cache_policy,
+                                                                &shared.6.remote_multimodal,
                                                             )
                                                             .await;
 
@@ -4803,7 +4813,8 @@ impl Website {
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
                                                                             shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy
+                                                                            &shared.6.cache_policy,
+                                                                            &shared.6.remote_multimodal,
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -4828,7 +4839,8 @@ impl Website {
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
                                                                             shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy
+                                                                            &shared.6.cache_policy,
+                                                                            &shared.6.remote_multimodal,
                                                                         )
                                                                         .await,
                                                                     );
@@ -5430,7 +5442,8 @@ impl Website {
                                                                 shared.6.referer.clone(),
                                                                 shared.6.max_page_bytes,
                                                                 shared.6.get_cache_options(),
-                                                                &shared.6.cache_policy
+                                                                &shared.6.cache_policy,
+                                                                &shared.6.remote_multimodal,
                                                             )
                                                             .await;
 
@@ -5459,7 +5472,8 @@ impl Website {
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
                                                                             shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy
+                                                                            &shared.6.cache_policy,
+                                                                            &shared.6.remote_multimodal,
                                                                         ).await;
                                                                         page.clone_from(&p);
 
@@ -5484,7 +5498,8 @@ impl Website {
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
                                                                             shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy
+                                                                            &shared.6.cache_policy,
+                                                                            &shared.6.remote_multimodal,
                                                                         )
                                                                         .await,
                                                                     );
@@ -6483,7 +6498,8 @@ impl Website {
                                         self.configuration.referer.clone(),
                                         self.configuration.max_page_bytes,
                                         self.configuration.get_cache_options(),
-                                        &self.configuration.cache_policy
+                                        &self.configuration.cache_policy,
+                                        &self.configuration.remote_multimodal,
                                     )
                                     .await;
 
@@ -6570,7 +6586,8 @@ impl Website {
                                                                     shared.3.referer.clone(),
                                                                     shared.3.max_page_bytes,
                                                                     shared.3.get_cache_options(),
-                                                                    &shared.3.cache_policy
+                                                                    &shared.3.cache_policy,
+                                                                    &shared.3.remote_multimodal,
                                                                 )
                                                                 .await;
 
@@ -6697,7 +6714,8 @@ impl Website {
                                                             shared.3.referer.clone(),
                                                             shared.3.max_page_bytes,
                                                             shared.3.get_cache_options(),
-                                                            &shared.3.cache_policy
+                                                            &shared.3.cache_policy,
+                                                            &shared.3.remote_multimodal,
                                                         )
                                                         .await;
 
@@ -7442,6 +7460,87 @@ impl Website {
     /// Use OpenAI to get dynamic javascript to drive the browser. This does nothing without the `openai` flag enabled.
     pub fn with_openai(&mut self, openai_configs: Option<configuration::GPTConfigs>) -> &mut Self {
         self.configuration.with_openai(openai_configs);
+        self
+    }
+
+    /// Use a remote multimodal model (vision + HTML + URL) to drive browser automation.
+    ///
+    /// When enabled, Spider can ask an OpenAI-compatible “chat completions” endpoint to
+    /// generate a JSON plan (a list of `WebAutomation` steps), execute those steps against a
+    /// live Chrome page, then re-capture state and iterate until the model reports it is done
+    /// (or the configured limits are hit). The default system prompt is set to handle web challenges that can be adjusted if required.
+    /// Take a look at `DEFAULT_SYSTEM_PROMPT` at spider::features::automation::DEFAULT_SYSTEM_PROMPT for a base line.
+    ///
+    /// This is useful for:
+    /// - handling captchas,
+    /// - dismissing popups / cookie banners,
+    /// - navigating to a target page (pricing, docs, etc.),
+    /// - clicking through multi-step UI flows,
+    /// - recovering from dynamic page state that plain HTML scraping can’t handle.
+    ///
+    /// # Feature gate
+    /// This method only has an effect when the crate is built with `feature="chrome"`.
+    /// Without `chrome`, the method is not available.
+    ///
+    /// # Parameters
+    /// - `cfg`: The remote multimodal configuration bundle (endpoint, model, prompts, and runtime knobs).
+    ///   Pass `None` to disable remote multimodal automation.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # #[cfg(feature = "chrome")]
+    /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+    /// use spider::website::Website;
+    /// use spider::configuration::Configuration;
+    /// use spider::features::automation::{RemoteMultimodalConfigs, RemoteMultimodalConfig};
+    ///
+    /// // Build the engine configs (similar to GPTConfigs::new(...))
+    /// let mm_cfgs = RemoteMultimodalConfigs::new(
+    ///     "http://localhost:11434/v1/chat/completions",
+    ///     "qwen2.5-vl", // any OpenAI-compatible model id your endpoint understands
+    /// )
+    /// .with_api_key(None)
+    /// .with_system_prompt_extra(Some("Never log in. Prefer closing popups and continuing."))
+    /// .with_user_message_extra(Some("Goal: reach the pricing page, then stop."))
+    /// .with_cfg(RemoteMultimodalConfig {
+    ///     // keep HTML smaller if you want lower token usage
+    ///     include_html: true,
+    ///     html_max_bytes: 24_000,
+    ///     include_url: true,
+    ///     include_title: true,
+    ///     // loop controls
+    ///     max_rounds: 6,
+    ///     post_plan_wait_ms: 400,
+    ///     ..Default::default()
+    /// })
+    /// .with_concurrency_limit(Some(8));
+    ///
+    /// // Attach to the crawler configuration
+    /// let mut cfg = Configuration::new();
+    /// cfg.with_remote_multimodal(Some(mm_cfgs));
+    ///
+    /// // Use the configuration in a Website (example)
+    /// let mut site = Website::new("https://example.com");
+    /// site.configuration = cfg;
+    ///
+    /// // Start crawling/scraping as you normally would...
+    /// // site.crawl().await?;
+    ///
+    /// Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Notes
+    /// - Remote multimodal automation typically requires `feature="serde"` if you deserialize model
+    ///   steps into `WebAutomation`.
+    /// - If your endpoint does not support `response_format: {"type":"json_object"}`, disable that
+    ///   in `RemoteMultimodalConfig` (`request_json_object = false`).
+    #[cfg(feature = "chrome")]
+    pub fn with_remote_multimodal(
+        &mut self,
+        cfg: Option<crate::features::automation::RemoteMultimodalConfigs>,
+    ) -> &mut Self {
+        self.configuration.with_remote_multimodal(cfg);
         self
     }
 

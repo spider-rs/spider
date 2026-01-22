@@ -218,6 +218,8 @@ pub struct Configuration {
     pub openai_config: Option<Box<GPTConfigs>>,
     /// The Gemini configs to use to help drive the chrome browser. This does nothing without the 'gemini' flag.
     pub gemini_config: Option<Box<GeminiConfigs>>,
+    /// Remote multimodal automation config (vision + LLM-driven steps).
+    pub remote_multimodal: Option<Box<crate::features::automation::RemoteMultimodalConfigs>>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
     /// Return the page links in the subscription channels. This does nothing without the flag `sync` enabled.
@@ -512,6 +514,32 @@ impl Configuration {
         }
     }
 
+    /// Build a `RemoteMultimodalEngine` from `RemoteMultimodalConfigs`.
+    pub fn build_remote_multimodal_engine(
+        &self,
+    ) -> Option<crate::features::automation::RemoteMultimodalEngine> {
+        let cfgs = self.remote_multimodal.as_ref()?;
+        let sem = cfgs
+            .concurrency_limit
+            .filter(|&n| n > 0)
+            .map(|n| std::sync::Arc::new(tokio::sync::Semaphore::new(n)));
+
+        Some(
+            crate::features::automation::RemoteMultimodalEngine::new(
+                cfgs.api_url.clone(),
+                cfgs.model_name.clone(),
+                cfgs.system_prompt.clone(),
+            )
+            .with_api_key(cfgs.api_key.as_deref())
+            .with_system_prompt_extra(cfgs.system_prompt_extra.as_deref())
+            .with_user_message_extra(cfgs.user_message_extra.as_deref())
+            .with_remote_multimodal_config(cfgs.cfg.clone())
+            .with_prompt_url_gate(cfgs.prompt_url_gate.clone())
+            .with_semaphore(sem)
+            .to_owned(),
+        )
+    }
+
     /// Determine if the agent should be set to a Chrome Agent.
     #[cfg(not(feature = "chrome"))]
     pub(crate) fn only_chrome_agent(&self) -> bool {
@@ -770,6 +798,16 @@ impl Configuration {
     /// Preserve the HOST header.
     pub fn with_preserve_host_header(&mut self, preserve: bool) -> &mut Self {
         self.preserve_host_header = preserve;
+        self
+    }
+
+    /// Use a remote multimodal model to drive browser automation.
+    /// This method does nothing if the `chrome` feature is not enabled.
+    pub fn with_remote_multimodal(
+        &mut self,
+        remote_multimodal: Option<crate::features::automation::RemoteMultimodalConfigs>,
+    ) -> &mut Self {
+        self.remote_multimodal = remote_multimodal.map(Box::new);
         self
     }
 

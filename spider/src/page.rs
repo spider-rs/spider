@@ -1,5 +1,7 @@
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 use crate::configuration::{AutomationScripts, ExecutionScripts};
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+use crate::features::automation::RemoteMultimodalConfigs;
 use crate::utils::abs::convert_abs_path;
 use crate::utils::templates::EMPTY_HTML_BASIC;
 use crate::utils::{
@@ -1948,6 +1950,7 @@ impl Page {
         cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
@@ -1969,6 +1972,7 @@ impl Page {
                 cache_policy,
                 seeded_resource,
                 jar,
+                remote_multimodal,
             )
             .await
         } else {
@@ -1989,6 +1993,7 @@ impl Page {
                 max_page_bytes,
                 cache_options,
                 cache_policy,
+                remote_multimodal,
             )
             .await
         };
@@ -2022,6 +2027,7 @@ impl Page {
         max_page_bytes: Option<f64>,
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
+        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     ) -> Self {
         Self::new_base(
             url,
@@ -2042,6 +2048,7 @@ impl Page {
             cache_policy,
             None,
             None,
+            remote_multimodal,
         )
         .await
     }
@@ -2068,6 +2075,7 @@ impl Page {
         cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     ) -> Self {
         Self::new_base(
             url,
@@ -2088,6 +2096,7 @@ impl Page {
             cache_policy,
             seeded_resource,
             jar,
+            remote_multimodal,
         )
         .await
     }
@@ -3419,6 +3428,7 @@ impl Page {
                                 },
                                 &Some(&configuration.chrome_intercept),
                                 jar,
+                                &configuration.remote_multimodal,
                             )
                             .await;
 
@@ -3829,6 +3839,7 @@ impl Page {
                                 },
                                 &Some(&configuration.chrome_intercept),
                                 jar,
+                                &configuration.remote_multimodal,
                             )
                             .await;
 

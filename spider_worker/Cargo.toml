@@ -1,6 +1,6 @@
 [package]
 name = "spider_worker"
-version = "2.39.21"
+version = "2.40.2"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The fastest web crawler as a worker or proxy."
 repository = "https://github.com/spider-rs/spider"

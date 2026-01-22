@@ -37,3 +37,6 @@ pub mod solvers;
 pub(crate) use serde_json;
 #[cfg(all(feature = "simd", feature = "openai"))]
 pub(crate) use sonic_rs as serde_json;
+
+/// Automation scripts.
+pub mod automation;
