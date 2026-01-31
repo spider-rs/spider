@@ -1355,59 +1355,6 @@ pub(crate) fn metadata_handlers<'h>(
     ]
 }
 
-/// Extract metadata from HTML bytes.
-/// This is used for non-streaming page fetching where metadata isn't extracted during streaming.
-pub(crate) fn extract_metadata_from_bytes(html_bytes: &[u8]) -> Option<Box<Metadata>> {
-    let mut meta_title: Option<CompactString> = None;
-    let mut meta_description: Option<CompactString> = None;
-    let mut meta_og_image: Option<CompactString> = None;
-
-    let element_content_handlers = metadata_handlers(
-        &mut meta_title,
-        &mut meta_description,
-        &mut meta_og_image,
-    );
-
-    let rewriter_settings = lol_html::Settings {
-        element_content_handlers,
-        adjust_charset_on_meta_tag: true,
-        ..lol_html::send::Settings::new_for_handler_types()
-    };
-
-    let mut rewriter =
-        lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
-
-    // Process in chunks to handle large pages efficiently
-    let chunks = html_bytes.chunks(8192);
-
-    for chunk in chunks {
-        if rewriter.write(chunk).is_err() {
-            break;
-        }
-    }
-
-    let _ = rewriter.end();
-
-    let valid_meta =
-        meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
-
-    if valid_meta {
-        let metadata = Metadata {
-            title: meta_title,
-            description: meta_description,
-            image: meta_og_image,
-            #[cfg(feature = "chrome")]
-            automation: None,
-        };
-
-        if metadata.exist() {
-            return Some(Box::new(metadata));
-        }
-    }
-
-    None
-}
-
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -4491,37 +4438,6 @@ fn test_page_without_metadata() {
     let page_metadata = page.get_metadata();
 
     assert!(page_metadata.is_none(), "Page without metadata should return None");
-}
-
-/// Test metadata extraction from real HTML using new_page.
-#[tokio::test]
-#[cfg(all(
-    not(feature = "decentralized"),
-    not(feature = "chrome"),
-    not(feature = "cache_request")
-))]
-async fn test_metadata_from_real_page() {
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .unwrap();
-
-    let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new_page(link_result, &client).await;
-    let page_metadata = page.get_metadata();
-
-    assert!(
-        page_metadata.is_some(),
-        "choosealicense.com should have metadata"
-    );
-
-    let meta = page_metadata.as_ref().unwrap();
-
-    // choosealicense.com has a title
-    assert!(
-        meta.title.is_some(),
-        "choosealicense.com should have a title"
-    );
 }
 
 /// Test metadata extraction using new_page_streaming_from_bytes with crafted HTML.
