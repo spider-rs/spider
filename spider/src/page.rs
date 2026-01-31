@@ -1355,6 +1355,59 @@ pub(crate) fn metadata_handlers<'h>(
     ]
 }
 
+/// Extract metadata from HTML bytes.
+/// This is used for non-streaming page fetching where metadata isn't extracted during streaming.
+pub(crate) fn extract_metadata_from_bytes(html_bytes: &[u8]) -> Option<Box<Metadata>> {
+    let mut meta_title: Option<CompactString> = None;
+    let mut meta_description: Option<CompactString> = None;
+    let mut meta_og_image: Option<CompactString> = None;
+
+    let element_content_handlers = metadata_handlers(
+        &mut meta_title,
+        &mut meta_description,
+        &mut meta_og_image,
+    );
+
+    let rewriter_settings = lol_html::Settings {
+        element_content_handlers,
+        adjust_charset_on_meta_tag: true,
+        ..lol_html::send::Settings::new_for_handler_types()
+    };
+
+    let mut rewriter =
+        lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+
+    // Process in chunks to handle large pages efficiently
+    let chunks = html_bytes.chunks(8192);
+
+    for chunk in chunks {
+        if rewriter.write(chunk).is_err() {
+            break;
+        }
+    }
+
+    let _ = rewriter.end();
+
+    let valid_meta =
+        meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+    if valid_meta {
+        let metadata = Metadata {
+            title: meta_title,
+            description: meta_description,
+            image: meta_og_image,
+            #[cfg(feature = "chrome")]
+            automation: None,
+        };
+
+        if metadata.exist() {
+            return Some(Box::new(metadata));
+        }
+    }
+
+    None
+}
+
 impl Page {
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -1685,9 +1738,9 @@ impl Page {
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
 
-            if metadata_inner.exist() && metadata.is_some() {
+            if metadata_inner.exist() {
+                // Preserve automation results from existing metadata if present
                 set_metadata(&metadata, &mut metadata_inner);
-
                 metadata.replace(Box::new(metadata_inner));
             }
 
@@ -1913,7 +1966,8 @@ impl Page {
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
 
-            if metadata_inner.exist() && metadata.is_some() {
+            if metadata_inner.exist() {
+                // Preserve automation results from existing metadata if present
                 set_metadata(&metadata, &mut metadata_inner);
                 metadata.replace(Box::new(metadata_inner));
             }
@@ -4285,5 +4339,684 @@ async fn test_duration() {
         duration_elasped < 6000,
         "Duration took longer than expected {}.",
         duration_elasped,
+    );
+}
+
+// ============================================================================
+// Metadata Tests
+// ============================================================================
+
+/// Test that Metadata::exist returns false when all fields are None.
+#[test]
+fn test_metadata_exist_empty() {
+    let metadata = Metadata::default();
+    assert!(!metadata.exist(), "Empty metadata should not exist");
+}
+
+/// Test that Metadata::exist returns true when title is set.
+#[test]
+fn test_metadata_exist_with_title() {
+    let metadata = Metadata {
+        title: Some(CompactString::from("Test Title")),
+        ..Default::default()
+    };
+    assert!(metadata.exist(), "Metadata with title should exist");
+}
+
+/// Test that Metadata::exist returns true when description is set.
+#[test]
+fn test_metadata_exist_with_description() {
+    let metadata = Metadata {
+        description: Some(CompactString::from("Test Description")),
+        ..Default::default()
+    };
+    assert!(metadata.exist(), "Metadata with description should exist");
+}
+
+/// Test that Metadata::exist returns true when image is set.
+#[test]
+fn test_metadata_exist_with_image() {
+    let metadata = Metadata {
+        image: Some(CompactString::from("https://example.com/image.png")),
+        ..Default::default()
+    };
+    assert!(metadata.exist(), "Metadata with image should exist");
+}
+
+/// Test that Metadata::exist returns true when all fields are set.
+#[test]
+fn test_metadata_exist_all_fields() {
+    let metadata = Metadata {
+        title: Some(CompactString::from("Test Title")),
+        description: Some(CompactString::from("Test Description")),
+        image: Some(CompactString::from("https://example.com/image.png")),
+        #[cfg(feature = "chrome")]
+        automation: None,
+    };
+    assert!(metadata.exist(), "Metadata with all fields should exist");
+}
+
+/// Test metadata extraction via build function with PageResponse.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_metadata_via_build() {
+    use crate::utils::PageResponse;
+
+    let metadata = Metadata {
+        title: Some(CompactString::from("Build Test Title")),
+        description: Some(CompactString::from("Build Test Description")),
+        image: Some(CompactString::from("https://example.com/build-image.png")),
+        #[cfg(feature = "chrome")]
+        automation: None,
+    };
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        metadata: Some(Box::new(metadata)),
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+    let page_metadata = page.get_metadata();
+
+    assert!(page_metadata.is_some(), "Page should have metadata");
+
+    let meta = page_metadata.as_ref().unwrap();
+    assert_eq!(
+        meta.title.as_deref(),
+        Some("Build Test Title"),
+        "Title should match"
+    );
+    assert_eq!(
+        meta.description.as_deref(),
+        Some("Build Test Description"),
+        "Description should match"
+    );
+    assert_eq!(
+        meta.image.as_deref(),
+        Some("https://example.com/build-image.png"),
+        "Image should match"
+    );
+}
+
+/// Test metadata extraction via build_with_parse function.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_metadata_via_build_with_parse() {
+    use crate::utils::PageResponse;
+
+    let metadata = Metadata {
+        title: Some(CompactString::from("Parse Test Title")),
+        description: Some(CompactString::from("Parse Test Description")),
+        image: Some(CompactString::from("https://example.com/parse-image.png")),
+        #[cfg(feature = "chrome")]
+        automation: None,
+    };
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        metadata: Some(Box::new(metadata)),
+        ..Default::default()
+    };
+
+    let page = build_with_parse("https://example.com/page", page_response);
+    let page_metadata = page.get_metadata();
+
+    assert!(page_metadata.is_some(), "Page should have metadata after build_with_parse");
+
+    let meta = page_metadata.as_ref().unwrap();
+    assert_eq!(
+        meta.title.as_deref(),
+        Some("Parse Test Title"),
+        "Title should match after build_with_parse"
+    );
+}
+
+/// Test that Page without metadata returns None from get_metadata.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_page_without_metadata() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        metadata: None,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+    let page_metadata = page.get_metadata();
+
+    assert!(page_metadata.is_none(), "Page without metadata should return None");
+}
+
+/// Test metadata extraction from real HTML using new_page.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn test_metadata_from_real_page() {
+    let client = Client::builder()
+        .user_agent(TEST_AGENT_NAME)
+        .build()
+        .unwrap();
+
+    let link_result = "https://choosealicense.com/";
+    let page: Page = Page::new_page(link_result, &client).await;
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "choosealicense.com should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+
+    // choosealicense.com has a title
+    assert!(
+        meta.title.is_some(),
+        "choosealicense.com should have a title"
+    );
+}
+
+/// Test metadata extraction using new_page_streaming_from_bytes with crafted HTML.
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_from_streaming_bytes() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Streaming Test Title</title>
+    <meta name="description" content="Streaming Test Description">
+    <meta property="og:image" content="https://example.com/streaming-image.png">
+</head>
+<body>
+    <a href="/page1">Link 1</a>
+    <a href="/page2">Link 2</a>
+</body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page from streaming bytes should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+
+    assert_eq!(
+        meta.title.as_deref(),
+        Some("Streaming Test Title"),
+        "Title should be extracted from streaming bytes"
+    );
+    assert_eq!(
+        meta.description.as_deref(),
+        Some("Streaming Test Description"),
+        "Description should be extracted from streaming bytes"
+    );
+    assert_eq!(
+        meta.image.as_deref(),
+        Some("https://example.com/streaming-image.png"),
+        "OG image should be extracted from streaming bytes"
+    );
+}
+
+/// Test metadata extraction with partial metadata (only title).
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_partial_title_only() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Only Title Here</title>
+</head>
+<body></body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page with only title should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+
+    assert_eq!(
+        meta.title.as_deref(),
+        Some("Only Title Here"),
+        "Title should be extracted"
+    );
+    assert!(meta.description.is_none(), "Description should be None");
+    assert!(meta.image.is_none(), "Image should be None");
+}
+
+/// Test metadata extraction with partial metadata (only description).
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_partial_description_only() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head>
+    <meta name="description" content="Only Description Here">
+</head>
+<body></body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page with only description should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+
+    assert!(meta.title.is_none(), "Title should be None");
+    assert_eq!(
+        meta.description.as_deref(),
+        Some("Only Description Here"),
+        "Description should be extracted"
+    );
+    assert!(meta.image.is_none(), "Image should be None");
+}
+
+/// Test metadata extraction with partial metadata (only og:image).
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_partial_image_only() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head>
+    <meta property="og:image" content="https://example.com/only-image.png">
+</head>
+<body></body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page with only og:image should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+
+    assert!(meta.title.is_none(), "Title should be None");
+    assert!(meta.description.is_none(), "Description should be None");
+    assert_eq!(
+        meta.image.as_deref(),
+        Some("https://example.com/only-image.png"),
+        "OG image should be extracted"
+    );
+}
+
+/// Test that page with no metadata tags returns None.
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_empty_html() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head></head>
+<body><p>No metadata here</p></body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_none(),
+        "Page without any metadata tags should return None"
+    );
+}
+
+/// Test metadata with special characters in content.
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_special_characters() {
+    let html = br#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Title with &amp; special &lt;characters&gt;</title>
+    <meta name="description" content="Description with &quot;quotes&quot; and 'apostrophes'">
+    <meta property="og:image" content="https://example.com/image?param=value&amp;other=1">
+</head>
+<body></body>
+</html>"#;
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page with special characters should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+    assert!(meta.title.is_some(), "Title with special chars should be extracted");
+    assert!(meta.description.is_some(), "Description with special chars should be extracted");
+    assert!(meta.image.is_some(), "Image URL with special chars should be extracted");
+}
+
+/// Test metadata with unicode content.
+#[tokio::test]
+#[cfg(all(feature = "cmd", not(feature = "decentralized")))]
+async fn test_metadata_unicode() {
+    let html = r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>日本語タイトル - Japanese Title</title>
+    <meta name="description" content="中文描述 - Chinese Description - Описание на русском">
+    <meta property="og:image" content="https://example.com/画像.png">
+</head>
+<body></body>
+</html>"#
+        .as_bytes();
+
+    let url = "https://example.com/test";
+    let mut selectors = get_page_selectors(url, false, false);
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let r_settings = PageLinkBuildSettings::default();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let prior_domain: Option<Box<Url>> = None;
+    let mut domain_parsed: Option<Box<Url>> = None;
+    let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let page = Page::new_page_streaming_from_bytes::<CaseInsensitiveString>(
+        url,
+        html,
+        &mut selectors,
+        &external_domains,
+        &r_settings,
+        &mut map,
+        None,
+        &prior_domain,
+        &mut domain_parsed,
+        &mut links_pages,
+    )
+    .await;
+
+    let page_metadata = page.get_metadata();
+
+    assert!(
+        page_metadata.is_some(),
+        "Page with unicode content should have metadata"
+    );
+
+    let meta = page_metadata.as_ref().unwrap();
+    assert!(
+        meta.title
+            .as_ref()
+            .map(|t| t.contains("日本語"))
+            .unwrap_or(false),
+        "Title should contain Japanese characters"
+    );
+    assert!(
+        meta.description
+            .as_ref()
+            .map(|d| d.contains("中文"))
+            .unwrap_or(false),
+        "Description should contain Chinese characters"
+    );
+}
+
+/// Test metadata with chrome feature - AutomationResults structure.
+#[test]
+#[cfg(feature = "chrome")]
+fn test_automation_results_structure() {
+    let automation_result = AutomationResults {
+        input: "Test prompt".to_string(),
+        content_output: serde_json::json!({"result": "test"}),
+        screenshot_output: Some("base64_screenshot_data".to_string()),
+        error: None,
+    };
+
+    assert_eq!(automation_result.input, "Test prompt");
+    assert!(automation_result.screenshot_output.is_some());
+    assert!(automation_result.error.is_none());
+}
+
+/// Test metadata with automation results (chrome feature).
+#[test]
+#[cfg(feature = "chrome")]
+fn test_metadata_with_automation() {
+    let automation_results = vec![AutomationResults {
+        input: "Click the button".to_string(),
+        content_output: serde_json::json!({"clicked": true}),
+        screenshot_output: None,
+        error: None,
+    }];
+
+    let metadata = Metadata {
+        title: Some(CompactString::from("Automation Test")),
+        description: None,
+        image: None,
+        automation: Some(automation_results),
+    };
+
+    assert!(metadata.exist(), "Metadata with title should exist");
+    assert!(
+        metadata.automation.is_some(),
+        "Automation results should be present"
+    );
+    assert_eq!(
+        metadata.automation.as_ref().unwrap().len(),
+        1,
+        "Should have one automation result"
+    );
+}
+
+/// Test set_metadata function preserves automation results (chrome feature).
+#[test]
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+fn test_set_metadata_preserves_automation() {
+    let automation_results = vec![AutomationResults {
+        input: "Original automation".to_string(),
+        content_output: serde_json::json!({"original": true}),
+        screenshot_output: None,
+        error: None,
+    }];
+
+    let existing_metadata = Metadata {
+        title: Some(CompactString::from("Original Title")),
+        description: None,
+        image: None,
+        automation: Some(automation_results),
+    };
+
+    let existing = Some(Box::new(existing_metadata));
+
+    let mut new_metadata = Metadata {
+        title: Some(CompactString::from("New Title")),
+        description: Some(CompactString::from("New Description")),
+        image: None,
+        automation: None,
+    };
+
+    set_metadata(&existing, &mut new_metadata);
+
+    assert!(
+        new_metadata.automation.is_some(),
+        "Automation should be preserved from existing metadata"
+    );
+}
+
+/// Test metadata via Page::new with chrome feature.
+#[tokio::test]
+#[cfg(all(
+    feature = "chrome",
+    not(feature = "decentralized"),
+    not(feature = "cache_request")
+))]
+async fn test_metadata_chrome_real_page() {
+    use crate::website::Website;
+
+    let mut website = Website::new("https://choosealicense.com")
+        .with_limit(1)
+        .build()
+        .unwrap();
+
+    let mut rx = website.subscribe(16).unwrap();
+
+    let handle = tokio::spawn(async move {
+        let mut metadata_found = false;
+        while let Ok(page) = rx.recv().await {
+            if page.get_metadata().is_some() {
+                metadata_found = true;
+                break;
+            }
+        }
+        metadata_found
+    });
+
+    website.crawl().await;
+    website.unsubscribe();
+
+    let metadata_found = handle.await.unwrap();
+    assert!(
+        metadata_found,
+        "At least one page should have metadata when crawling with chrome"
     );
 }

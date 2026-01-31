@@ -3574,6 +3574,8 @@ pub async fn handle_response_bytes(
     target_url: &str,
     only_html: bool,
 ) -> PageResponse {
+    use crate::page::extract_metadata_from_bytes;
+
     let u = res.url().as_str();
 
     let rd = if target_url != u {
@@ -3590,6 +3592,7 @@ pub async fn handle_response_bytes(
 
     let mut content: Option<Box<Vec<u8>>> = None;
     let mut anti_bot_tech = AntiBotTech::default();
+    let mut metadata = None;
 
     let limit = *MAX_SIZE_BYTES;
 
@@ -3669,6 +3672,10 @@ pub async fn handle_response_bytes(
             &data,
             None,
         );
+
+        // Extract metadata from content
+        metadata = extract_metadata_from_bytes(&data);
+
         content.replace(Box::new(data.into()));
     }
 
@@ -3682,6 +3689,7 @@ pub async fn handle_response_bytes(
         final_url: rd,
         status_code,
         anti_bot_tech,
+        metadata,
         ..Default::default()
     }
 }
