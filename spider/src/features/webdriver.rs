@@ -456,3 +456,300 @@ pub fn get_random_webdriver_viewport() -> (u32, u32) {
 pub fn get_random_webdriver_viewport() -> (u32, u32) {
     (1920, 1080)
 }
+
+// ============================================================================
+// WebDriver Automation Support
+// ============================================================================
+
+use crate::features::chrome_common::WebAutomation;
+
+/// Run a single WebAutomation action on the WebDriver.
+pub async fn run_automation(
+    driver: &WebDriver,
+    action: &WebAutomation,
+) -> bool {
+    let mut valid = false;
+
+    match action {
+        WebAutomation::Evaluate(js) => {
+            valid = driver.execute(js.as_str(), vec![]).await.is_ok();
+        }
+        WebAutomation::Click(selector) => {
+            if let Ok(ele) = driver.find(By::Css(selector)).await {
+                valid = ele.click().await.is_ok();
+            }
+        }
+        WebAutomation::ClickAll(selector) => {
+            if let Ok(eles) = driver.find_all(By::Css(selector)).await {
+                for ele in eles {
+                    valid = ele.click().await.is_ok();
+                }
+            }
+        }
+        WebAutomation::ClickPoint { x, y } => {
+            // WebDriver doesn't have direct click at coordinates, use JS
+            let js = format!(
+                "document.elementFromPoint({}, {})?.click()",
+                x, y
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ClickHold { selector, hold_ms } => {
+            // Simulate with JS since WebDriver doesn't have native click-hold
+            let js = format!(
+                r#"
+                const el = document.querySelector('{}');
+                if (el) {{
+                    const evt = new MouseEvent('mousedown', {{ bubbles: true }});
+                    el.dispatchEvent(evt);
+                    await new Promise(r => setTimeout(r, {}));
+                    el.dispatchEvent(new MouseEvent('mouseup', {{ bubbles: true }}));
+                }}
+                "#,
+                selector.replace('\'', "\\'"),
+                hold_ms
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ClickHoldPoint { x, y, hold_ms } => {
+            let js = format!(
+                r#"
+                const el = document.elementFromPoint({}, {});
+                if (el) {{
+                    el.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true }}));
+                    await new Promise(r => setTimeout(r, {}));
+                    el.dispatchEvent(new MouseEvent('mouseup', {{ bubbles: true }}));
+                }}
+                "#,
+                x, y, hold_ms
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ClickDrag { from, to, modifier: _ } => {
+            // Simulate drag with JS
+            let js = format!(
+                r#"
+                const fromEl = document.querySelector('{}');
+                const toEl = document.querySelector('{}');
+                if (fromEl && toEl) {{
+                    const fromRect = fromEl.getBoundingClientRect();
+                    const toRect = toEl.getBoundingClientRect();
+                    fromEl.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true, clientX: fromRect.x, clientY: fromRect.y }}));
+                    toEl.dispatchEvent(new MouseEvent('mousemove', {{ bubbles: true, clientX: toRect.x, clientY: toRect.y }}));
+                    toEl.dispatchEvent(new MouseEvent('mouseup', {{ bubbles: true, clientX: toRect.x, clientY: toRect.y }}));
+                }}
+                "#,
+                from.replace('\'', "\\'"),
+                to.replace('\'', "\\'")
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ClickDragPoint { from_x, from_y, to_x, to_y, modifier: _ } => {
+            let js = format!(
+                r#"
+                const fromEl = document.elementFromPoint({}, {});
+                const toEl = document.elementFromPoint({}, {});
+                if (fromEl) {{
+                    fromEl.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true, clientX: {}, clientY: {} }}));
+                    (toEl || fromEl).dispatchEvent(new MouseEvent('mousemove', {{ bubbles: true, clientX: {}, clientY: {} }}));
+                    (toEl || fromEl).dispatchEvent(new MouseEvent('mouseup', {{ bubbles: true, clientX: {}, clientY: {} }}));
+                }}
+                "#,
+                from_x, from_y, to_x, to_y, from_x, from_y, to_x, to_y, to_x, to_y
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ClickAllClickable() => {
+            let clickable_selector = "a, button, input[type='button'], input[type='submit'], [onclick], [role='button']";
+            if let Ok(eles) = driver.find_all(By::Css(clickable_selector)).await {
+                for ele in eles {
+                    let _ = ele.click().await;
+                    valid = true;
+                }
+            }
+        }
+        WebAutomation::Wait(ms) => {
+            tokio::time::sleep(Duration::from_millis(*ms)).await;
+            valid = true;
+        }
+        WebAutomation::WaitForNavigation => {
+            // Wait for page to finish loading
+            let js = r#"
+                return new Promise(resolve => {
+                    if (document.readyState === 'complete') {
+                        resolve(true);
+                    } else {
+                        window.addEventListener('load', () => resolve(true));
+                    }
+                });
+            "#;
+            valid = driver.execute(js, vec![]).await.is_ok();
+        }
+        WebAutomation::WaitForDom { selector, timeout } => {
+            let timeout_duration = Duration::from_millis(*timeout as u64);
+            if let Some(sel) = selector {
+                valid = driver
+                    .query(By::Css(sel))
+                    .wait(timeout_duration, Duration::from_millis(100))
+                    .first()
+                    .await
+                    .is_ok();
+            } else {
+                // Wait for DOM to be stable
+                tokio::time::sleep(timeout_duration).await;
+                valid = true;
+            }
+        }
+        WebAutomation::WaitFor(selector) => {
+            valid = driver
+                .query(By::Css(selector))
+                .wait(Duration::from_secs(60), Duration::from_millis(100))
+                .first()
+                .await
+                .is_ok();
+        }
+        WebAutomation::WaitForWithTimeout { selector, timeout } => {
+            valid = driver
+                .query(By::Css(selector))
+                .wait(Duration::from_millis(*timeout), Duration::from_millis(100))
+                .first()
+                .await
+                .is_ok();
+        }
+        WebAutomation::WaitForAndClick(selector) => {
+            if let Ok(ele) = driver
+                .query(By::Css(selector))
+                .wait(Duration::from_secs(60), Duration::from_millis(100))
+                .first()
+                .await
+            {
+                valid = ele.click().await.is_ok();
+            }
+        }
+        WebAutomation::ScrollX(px) => {
+            let js = format!("window.scrollBy({}, 0)", px);
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::ScrollY(px) => {
+            let js = format!("window.scrollBy(0, {})", px);
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::InfiniteScroll(duration) => {
+            let timeout = (*duration).min(300); // Cap at 5 minutes
+            let js = format!(
+                r#"
+                const endTime = Date.now() + {} * 1000;
+                const scroll = () => {{
+                    window.scrollBy(0, window.innerHeight);
+                    if (Date.now() < endTime) {{
+                        setTimeout(scroll, 500);
+                    }}
+                }};
+                scroll();
+                "#,
+                timeout
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+            // Wait for the scroll to complete
+            tokio::time::sleep(Duration::from_secs(timeout as u64)).await;
+        }
+        WebAutomation::Fill { selector, value } => {
+            if let Ok(ele) = driver.find(By::Css(selector)).await {
+                // Clear and type
+                if ele.clear().await.is_ok() {
+                    valid = ele.send_keys(value).await.is_ok();
+                }
+            }
+        }
+        WebAutomation::Type { value, modifier: _ } => {
+            // Type into the active element
+            let js = format!(
+                r#"
+                const el = document.activeElement;
+                if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {{
+                    el.value = (el.value || '') + '{}';
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }}
+                "#,
+                value.replace('\'', "\\'").replace('\n', "\\n")
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::Screenshot { full_page: _, omit_background: _, output } => {
+            #[cfg(feature = "webdriver_screenshot")]
+            {
+                if let Ok(png_data) = driver.screenshot_as_png().await {
+                    valid = tokio::fs::write(output, png_data).await.is_ok();
+                }
+            }
+            #[cfg(not(feature = "webdriver_screenshot"))]
+            {
+                let _ = output;
+                log::warn!("Screenshot feature not enabled");
+            }
+        }
+        WebAutomation::ValidateChain => {
+            // This is a control flow marker, always returns current valid state
+            valid = true;
+        }
+    }
+
+    valid
+}
+
+/// Run a list of WebAutomation actions on the WebDriver.
+pub async fn run_automation_scripts(
+    driver: &WebDriver,
+    scripts: &[WebAutomation],
+) -> bool {
+    let mut valid = false;
+
+    for script in scripts {
+        if script == &WebAutomation::ValidateChain && !valid {
+            break;
+        }
+        match tokio::time::timeout(
+            Duration::from_secs(60),
+            run_automation(driver, script),
+        )
+        .await
+        {
+            Ok(result) => valid = result,
+            Err(_) => {
+                log::warn!("Automation script timed out: {:?}", script.name());
+                valid = false;
+            }
+        }
+    }
+
+    valid
+}
+
+/// Run execution scripts (JavaScript) for a specific URL.
+pub async fn run_execution_scripts(
+    driver: &WebDriver,
+    url: &str,
+    execution_scripts: &Option<crate::features::chrome_common::ExecutionScripts>,
+) {
+    if let Some(scripts) = execution_scripts {
+        if let Some(js) = scripts.search(url) {
+            if let Err(e) = driver.execute(js.as_str(), vec![]).await {
+                log::warn!("Failed to execute script for {}: {:?}", url, e);
+            }
+        }
+    }
+}
+
+/// Run automation scripts for a specific URL.
+pub async fn run_url_automation_scripts(
+    driver: &WebDriver,
+    url: &str,
+    automation_scripts: &Option<crate::features::chrome_common::AutomationScripts>,
+) -> bool {
+    if let Some(scripts) = automation_scripts {
+        if let Some(actions) = scripts.search(url) {
+            return run_automation_scripts(driver, actions).await;
+        }
+    }
+    true
+}
