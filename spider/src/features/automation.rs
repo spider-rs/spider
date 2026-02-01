@@ -333,6 +333,22 @@ pub struct RemoteMultimodalConfig {
     /// Maximum number of concurrent LLM HTTP requests for this engine instance.
     /// If `None`, no throttling is applied.
     pub max_inflight_requests: Option<usize>,
+
+    // -----------------------------------------------------------------
+    // Extraction
+    // -----------------------------------------------------------------
+    /// Enable extraction mode to return structured data from pages.
+    ///
+    /// When enabled, the model is instructed to include an `extracted` field
+    /// in its JSON response containing data extracted from the page.
+    /// This data is stored in the `AutomationResult.extracted` field.
+    pub extra_ai_data: bool,
+    /// Optional custom extraction prompt appended to the system prompt.
+    ///
+    /// Example: "Extract all product names and prices as a JSON array."
+    pub extraction_prompt: Option<String>,
+    /// Take a screenshot after automation completes and include it in results.
+    pub screenshot: bool,
 }
 
 impl Default for RemoteMultimodalConfig {
@@ -352,6 +368,9 @@ impl Default for RemoteMultimodalConfig {
             capture_profiles: Vec::new(),
             post_plan_wait_ms: 350,
             max_inflight_requests: None,
+            extra_ai_data: false,
+            extraction_prompt: None,
+            screenshot: false,
         }
     }
 }
@@ -619,6 +638,54 @@ impl RemoteMultimodalConfigs {
         self.concurrency_limit = limit;
         self
     }
+
+    /// Enable extraction mode to return structured data from pages.
+    ///
+    /// When enabled, the model is instructed to include an `extracted` field
+    /// in its JSON response containing data extracted from the page.
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider::features::automation::RemoteMultimodalConfigs;
+    /// let mm = RemoteMultimodalConfigs::new("http://localhost:11434/v1/chat/completions", "model")
+    ///     .with_extra_ai_data(true);
+    /// ```
+    pub fn with_extra_ai_data(mut self, enabled: bool) -> Self {
+        self.cfg.extra_ai_data = enabled;
+        self
+    }
+
+    /// Set a custom extraction prompt.
+    ///
+    /// This prompt is appended to the system prompt when `extra_ai_data` is enabled.
+    /// Use it to specify what data to extract from the page.
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider::features::automation::RemoteMultimodalConfigs;
+    /// let mm = RemoteMultimodalConfigs::new("http://localhost:11434/v1/chat/completions", "model")
+    ///     .with_extra_ai_data(true)
+    ///     .with_extraction_prompt(Some("Extract all product names and prices as a JSON array."));
+    /// ```
+    pub fn with_extraction_prompt(mut self, prompt: Option<&str>) -> Self {
+        self.cfg.extraction_prompt = prompt.map(|p| p.to_string());
+        self
+    }
+
+    /// Enable screenshot capture after automation completes.
+    ///
+    /// When enabled, a screenshot is taken and returned in the `AutomationResult`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider::features::automation::RemoteMultimodalConfigs;
+    /// let mm = RemoteMultimodalConfigs::new("http://localhost:11434/v1/chat/completions", "model")
+    ///     .with_screenshot(true);
+    /// ```
+    pub fn with_screenshot(mut self, enabled: bool) -> Self {
+        self.cfg.screenshot = enabled;
+        self
+    }
 }
 
 impl PromptUrlGate {
@@ -780,6 +847,24 @@ impl RemoteMultimodalEngine {
         self
     }
 
+    /// Enable extraction mode to return structured data from pages.
+    pub fn with_extra_ai_data(&mut self, enabled: bool) -> &mut Self {
+        self.cfg.extra_ai_data = enabled;
+        self
+    }
+
+    /// Set a custom extraction prompt.
+    pub fn with_extraction_prompt(&mut self, prompt: Option<&str>) -> &mut Self {
+        self.cfg.extraction_prompt = prompt.map(|p| p.to_string());
+        self
+    }
+
+    /// Enable screenshot capture after automation completes.
+    pub fn with_screenshot(&mut self, enabled: bool) -> &mut Self {
+        self.cfg.screenshot = enabled;
+        self
+    }
+
     /// Acquire the permit.
     pub async fn acquire_llm_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         match &self.semaphore {
@@ -803,9 +888,23 @@ impl RemoteMultimodalEngine {
             }
         }
 
+        // Add extraction instructions when extra_ai_data is enabled
+        if effective_cfg.extra_ai_data {
+            s.push_str("\n\n---\nEXTRACTION MODE ENABLED:\n");
+            s.push_str("Include an \"extracted\" field in your JSON response containing structured data extracted from the page.\n");
+            s.push_str("The \"extracted\" field should be a JSON object or array with the relevant data.\n");
+            if let Some(extraction_prompt) = &effective_cfg.extraction_prompt {
+                s.push_str("\nExtraction instructions: ");
+                s.push_str(extraction_prompt.trim());
+                s.push('\n');
+            }
+            s.push_str("\nExample response with extraction:\n");
+            s.push_str("{\n  \"label\": \"extract_products\",\n  \"done\": true,\n  \"steps\": [],\n  \"extracted\": {\"products\": [{\"name\": \"Product A\", \"price\": 19.99}]}\n}\n");
+        }
+
         s.push_str("\n\n---\nRUNTIME CONFIG (read-only):\n");
         s.push_str(&format!(
-            "- include_url: {}\n- include_title: {}\n- include_html: {}\n- html_max_bytes: {}\n- temperature: {}\n- max_tokens: {}\n- request_json_object: {}\n- best_effort_json_extract: {}\n- max_rounds: {}\n",
+            "- include_url: {}\n- include_title: {}\n- include_html: {}\n- html_max_bytes: {}\n- temperature: {}\n- max_tokens: {}\n- request_json_object: {}\n- best_effort_json_extract: {}\n- max_rounds: {}\n- extra_ai_data: {}\n",
             effective_cfg.include_url,
             effective_cfg.include_title,
             effective_cfg.include_html,
@@ -815,6 +914,7 @@ impl RemoteMultimodalEngine {
             effective_cfg.request_json_object,
             effective_cfg.best_effort_json_extract,
             effective_cfg.max_rounds,
+            effective_cfg.extra_ai_data,
         ));
 
         s
@@ -844,6 +944,23 @@ impl RemoteMultimodalEngine {
 
         let b64 = general_purpose::STANDARD.encode(png);
         Ok(format!("data:image/png;base64,{}", b64))
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Take a final screenshot and return as base64 string.
+    async fn take_final_screenshot(&self, page: &Page) -> EngineResult<String> {
+        let params = ScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Png)
+            .full_page(true)
+            .omit_background(true)
+            .build();
+
+        let png = page
+            .screenshot(params)
+            .await
+            .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
+
+        Ok(general_purpose::STANDARD.encode(png))
     }
 
     #[cfg(feature = "chrome")]
@@ -983,6 +1100,9 @@ impl RemoteMultimodalEngine {
                             steps_executed: 0,
                             success: true,
                             error: None,
+                            usage: AutomationUsage::default(),
+                            extracted: None,
+                            screenshot: None,
                         });
                     }
                 }
@@ -1025,6 +1145,8 @@ impl RemoteMultimodalEngine {
         let mut total_steps_executed = 0usize;
         let mut last_label = String::from("automation");
         let mut last_sig: Option<StateSignature> = None;
+        let mut total_usage = AutomationUsage::default();
+        let mut last_extracted: Option<serde_json::Value> = None;
 
         let rounds = base_effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
@@ -1074,15 +1196,32 @@ impl RemoteMultimodalEngine {
                 )
                 .await?;
 
+            // Accumulate token usage from this round
+            total_usage.accumulate(&plan.usage);
             last_label = plan.label.clone();
+
+            // Save extracted data if present
+            if plan.extracted.is_some() {
+                last_extracted = plan.extracted.clone();
+            }
 
             // Done condition (model-driven)
             if plan.done || plan.steps.is_empty() {
+                // Take final screenshot if enabled
+                let final_screenshot = if base_effective_cfg.screenshot {
+                    self.take_final_screenshot(page).await.ok()
+                } else {
+                    None
+                };
+
                 return Ok(AutomationResult {
                     label: plan.label,
                     steps_executed: total_steps_executed,
                     success: true,
                     error: None,
+                    usage: total_usage,
+                    extracted: last_extracted,
+                    screenshot: final_screenshot,
                 });
             }
 
@@ -1115,11 +1254,21 @@ impl RemoteMultimodalEngine {
                     continue;
                 }
 
+                // Take screenshot on failure if enabled
+                let final_screenshot = if base_effective_cfg.screenshot {
+                    self.take_final_screenshot(page).await.ok()
+                } else {
+                    None
+                };
+
                 return Ok(AutomationResult {
                     label: last_label,
                     steps_executed: total_steps_executed,
                     success: false,
                     error: Some(err),
+                    usage: total_usage,
+                    extracted: last_extracted,
+                    screenshot: final_screenshot,
                 });
             }
 
@@ -1132,11 +1281,21 @@ impl RemoteMultimodalEngine {
             }
         }
 
+        // Take final screenshot if enabled
+        let final_screenshot = if base_effective_cfg.screenshot {
+            self.take_final_screenshot(page).await.ok()
+        } else {
+            None
+        };
+
         Ok(AutomationResult {
             label: last_label,
             steps_executed: total_steps_executed,
             success: false,
             error: Some("max_rounds reached without model declaring done".into()),
+            usage: total_usage,
+            extracted: last_extracted,
+            screenshot: final_screenshot,
         })
     }
 
@@ -1359,6 +1518,9 @@ impl RemoteMultimodalEngine {
         let content = extract_assistant_content(&root)
             .ok_or(EngineError::MissingField("choices[0].message.content"))?;
 
+        // Extract token usage from OpenAI-compatible response
+        let usage = extract_usage(&root);
+
         let plan_value = if effective_cfg.best_effort_json_extract {
             best_effort_parse_json_object(&content)?
         } else {
@@ -1393,7 +1555,16 @@ impl RemoteMultimodalEngine {
 
         let steps = map_to_web_automation(steps_arr)?;
 
-        Ok(ParsedPlan { label, done, steps })
+        // Extract structured data if present (used when extra_ai_data is enabled)
+        let extracted = plan_value.get("extracted").cloned();
+
+        Ok(ParsedPlan {
+            label,
+            done,
+            steps,
+            usage,
+            extracted,
+        })
     }
 }
 
@@ -1411,6 +1582,8 @@ impl RemoteMultimodalEngine {
 /// - `done`: Whether the model indicates no further automation is required.
 ///   When `done == true`, the engine treats the run as complete and stops looping.
 /// - `steps`: Concrete automation steps to execute on the page.
+/// - `usage`: Token usage from this inference call.
+/// - `extracted`: Optional structured data extracted from the page.
 ///
 /// Note: `ParsedPlan` is intentionally not public because its shape may change
 /// as the engine evolves its planning loop (e.g., adding confidence, reasons,
@@ -1424,6 +1597,43 @@ struct ParsedPlan {
     done: bool,
     /// Concrete automation steps to execute.
     steps: Vec<crate::features::chrome_common::WebAutomation>,
+    /// Token usage from this inference call.
+    usage: AutomationUsage,
+    /// Structured data extracted from the page (when extraction is enabled).
+    extracted: Option<serde_json::Value>,
+}
+
+/// Token usage returned from OpenAI-compatible endpoints.
+///
+/// This struct tracks the token consumption for remote multimodal automation,
+/// conforming to the OpenAI API response format.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AutomationUsage {
+    /// The number of tokens used in the prompt.
+    pub prompt_tokens: u32,
+    /// The number of tokens used in the completion.
+    pub completion_tokens: u32,
+    /// The total number of tokens used.
+    pub total_tokens: u32,
+}
+
+impl AutomationUsage {
+    /// Create a new usage instance.
+    pub fn new(prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        }
+    }
+
+    /// Accumulate usage from another instance.
+    pub fn accumulate(&mut self, other: &Self) {
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+    }
 }
 
 /// Result returned to the caller.
@@ -1446,7 +1656,11 @@ struct ParsedPlan {
 /// - `steps_executed`: Total number of automation steps executed across the run.
 /// - `success`: Whether the run completed successfully.
 /// - `error`: Present when `success == false`.
-#[derive(Debug, Clone)]
+/// - `usage`: Token usage accumulated across all inference rounds.
+/// - `extracted`: Structured data extracted from the page (when `extra_ai_data` is enabled).
+/// - `screenshot`: Base64-encoded screenshot (when `screenshot` is enabled).
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AutomationResult {
     /// Human-readable description of the last plan executed.
     pub label: String,
@@ -1456,9 +1670,56 @@ pub struct AutomationResult {
     pub success: bool,
     /// Error message if the run failed.
     pub error: Option<String>,
+    /// Token usage accumulated across all inference rounds.
+    pub usage: AutomationUsage,
+    /// Structured data extracted from the page (when `extra_ai_data` is enabled).
+    #[cfg(feature = "chrome")]
+    pub extracted: Option<serde_json::Value>,
+    /// Base64-encoded screenshot of the page after automation (when `screenshot` is enabled).
+    pub screenshot: Option<String>,
 }
 
-/// A cheap signature of page state used to detect “no progress”.
+#[cfg(feature = "chrome")]
+impl AutomationResult {
+    /// Convert to `AutomationResults` for storage in `Page.metadata.automation`.
+    ///
+    /// This allows the extraction results to be stored alongside other automation
+    /// data in the page metadata, similar to how WebAutomation scripts store their results.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = engine.run(&page, url).await?;
+    ///
+    /// // Store in page metadata
+    /// if let Some(metadata) = page.metadata.as_mut() {
+    ///     let automation_results = result.to_automation_results();
+    ///     match metadata.automation.as_mut() {
+    ///         Some(v) => v.push(automation_results),
+    ///         None => metadata.automation = Some(vec![automation_results]),
+    ///     }
+    /// }
+    /// ```
+    pub fn to_automation_results(&self) -> crate::page::AutomationResults {
+        crate::page::AutomationResults {
+            input: self.label.clone(),
+            content_output: self.extracted.clone().unwrap_or(serde_json::Value::Null),
+            screenshot_output: self.screenshot.clone(),
+            error: self.error.clone(),
+        }
+    }
+
+    /// Convert to `AutomationResults` with a custom input label.
+    pub fn to_automation_results_with_input(&self, input: &str) -> crate::page::AutomationResults {
+        crate::page::AutomationResults {
+            input: input.to_string(),
+            content_output: self.extracted.clone().unwrap_or(serde_json::Value::Null),
+            screenshot_output: self.screenshot.clone(),
+            error: self.error.clone(),
+        }
+    }
+}
+
+/// A cheap signature of page state used to detect "no progress".
 ///
 /// The engine captures a `StateSignature` after each round (plan → execute → re-capture)
 /// and compares it to the previous signature. If the signature does not change across
@@ -1552,6 +1813,45 @@ fn extract_assistant_content(root: &Value) -> Option<String> {
     root.get("output_text")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+/// Extract token usage from an OpenAI-compatible response.
+///
+/// The response format follows the OpenAI API structure:
+/// ```json
+/// {
+///   "usage": {
+///     "prompt_tokens": 123,
+///     "completion_tokens": 456,
+///     "total_tokens": 579
+///   }
+/// }
+/// ```
+///
+/// Returns a default `AutomationUsage` if the usage field is missing or malformed.
+#[cfg(feature = "chrome")]
+fn extract_usage(root: &Value) -> AutomationUsage {
+    let usage = match root.get("usage") {
+        Some(u) => u,
+        None => return AutomationUsage::default(),
+    };
+
+    let prompt_tokens = usage
+        .get("prompt_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let completion_tokens = usage
+        .get("completion_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| (prompt_tokens + completion_tokens) as u64) as u32;
+
+    AutomationUsage::new(prompt_tokens, completion_tokens, total_tokens)
 }
 
 /// Best effort parse the json object.
@@ -1709,6 +2009,11 @@ fn merged_config(
     if !override_cfg.capture_profiles.is_empty() {
         out.capture_profiles = override_cfg.capture_profiles.clone();
     }
+
+    // Extraction settings
+    out.extra_ai_data = override_cfg.extra_ai_data;
+    out.extraction_prompt = override_cfg.extraction_prompt.clone();
+    out.screenshot = override_cfg.screenshot;
 
     out
 }

@@ -277,6 +277,12 @@ pub struct PageResponse {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<crate::page::AIResults>>,
+    #[cfg(feature = "chrome")]
+    /// The usage from remote multimodal automation.
+    pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
+    #[cfg(feature = "chrome")]
+    /// The extra data from the remote multimodal automation.
+    pub extra_remote_multimodal_data: Option<Vec<crate::page::AutomationResults>>,
     /// A WAF was found on the page.
     pub waf_check: bool,
     /// The total bytes transferred for the page. Mainly used for chrome events. Inspect the content for bytes when using http instead.
@@ -2906,7 +2912,26 @@ pub async fn fetch_page_html_chrome_base(
 
                 let multimodal_success =
                     match tokio::time::timeout(base_timeout, multi_modal_request).await {
-                        Ok(Ok(Some(result))) => result.success,
+                        Ok(Ok(Some(result))) => {
+                            let success = result.success;
+
+                            // Store usage on page_response
+                            match page_response.remote_multimodal_usage.as_mut() {
+                                Some(v) => v.push(result.usage.clone()),
+                                None => page_response.remote_multimodal_usage = Some(vec![result.usage.clone()]),
+                            }
+
+                            // Store extracted data if available
+                            if result.extracted.is_some() || result.screenshot.is_some() {
+                                let automation_result = result.to_automation_results();
+                                match page_response.extra_remote_multimodal_data.as_mut() {
+                                    Some(v) => v.push(automation_result),
+                                    None => page_response.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                }
+                            }
+
+                            success
+                        }
                         Ok(Ok(None)) => false,
                         Ok(Err(_e)) => false,
                         Err(_elapsed) => false,

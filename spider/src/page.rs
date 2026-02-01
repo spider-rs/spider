@@ -517,6 +517,12 @@ pub struct Page {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<AIResults>>,
+    #[cfg(feature = "chrome")]
+    /// The usage from remote multimodal automation.
+    pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
+    #[cfg(feature = "chrome")]
+    /// The extra data from the remote multimodal automation.
+    pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
@@ -1142,6 +1148,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         gemini_credits_used: res.gemini_credits_used,
         #[cfg(feature = "gemini")]
         extra_gemini_data: res.extra_gemini_data,
+        #[cfg(feature = "chrome")]
+        remote_multimodal_usage: res.remote_multimodal_usage,
+        #[cfg(feature = "chrome")]
+        extra_remote_multimodal_data: res.extra_remote_multimodal_data,
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
