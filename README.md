@@ -11,46 +11,148 @@
 [API Docs](https://docs.rs/spider/latest/spider) |
 [Chat](https://discord.spider.cloud)
 
-A web crawler and scraper, building blocks for data curation workloads.
+The fastest web crawler written in Rust. Primitives for data curation workloads at scale.
 
-- Concurrent
-- Streaming
-- [Decentralization](./spider_worker/)
-- [CDP Automation](https://github.com/spider-rs/chromey)
-- [Anti-Bot mitigation](https://github.com/spider-rs/spider_fingerprint)
+## Why Spider?
+
+- **Fast by Design**: Concurrent crawling with streaming responses at scale
+- **Flexible Rendering**: HTTP, Chrome DevTools Protocol (CDP), or WebDriver (Selenium/remote browsers)
+- **Production Ready**: Battle-tested with anti-bot mitigation, caching, and distributed crawling
+
+## Features
+
+### Core
+- Concurrent & streaming crawls
+- [Decentralized crawling](./spider_worker/) for horizontal scaling
+- Caching (memory, disk, or hybrid)
+- Proxy support with rotation
+- Cron job scheduling
+
+### Browser Automation
+- [Chrome DevTools Protocol (CDP)](https://github.com/spider-rs/chromey) for local Chrome
+- **WebDriver** support for Selenium Grid, remote browsers, and cross-browser testing
+- AI-powered automation workflows
+- Web challenge solving (deterministic + [AI built-in](https://developer.chrome.com/docs/ai/prompt-api))
+
+### Data Processing
 - [HTML transformations](https://github.com/spider-rs/spider_transformations)
-- [Adblocker](https://github.com/spider-rs/spider_network_blocker)
+- CSS/XPath scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
+- Smart mode for JS-rendered content detection
+
+### Security & Control
+- [Anti-bot mitigation](https://github.com/spider-rs/spider_fingerprint)
+- [Ad blocking](https://github.com/spider-rs/spider_network_blocker)
 - [Firewall](https://github.com/spider-rs/spider_firewall)
-- Smart Mode
-- Web challenges (deterministic + [AI built in](https://developer.chrome.com/docs/ai/prompt-api))
-- Proxy Support
-- Subscriptions
-- Disk persistence
-- Caching memory, disk, or remote hybrid between HTTP and chrome
-- Blacklisting, Whitelisting, and Budgeting Depth
-- AI automated workflows
-- CSS/Xpath Scraping with [spider_utils](./spider_utils/README.md#CSS_Scraping)
-- Cron Jobs
+- Blacklisting, whitelisting, and depth budgeting
 
-- [Changelog](CHANGELOG.md)
+## Quick Start
 
-## Getting Started
+The fastest way to get started is with [Spider Cloud](https://spider.cloud) - no infrastructure to manage. Pay-per-use at $1/GB data transfer, designed to keep crawling costs low.
 
-The simplest way to get started is to use the [Spider Cloud](https://spider.cloud) hosted service. View the [spider](./spider/README.md) or [spider_cli](./spider_cli/README.md) directory for local installations. You can also use spider with Node.js using [spider-nodejs](https://github.com/spider-rs/spider-nodejs) and Python using [spider-py](https://github.com/spider-rs/spider-py).
+For local development:
 
-## Benchmarks
+```toml
+[dependencies]
+spider = "2"
+```
 
-See [BENCHMARKS](./benches/BENCHMARKS.md).
+### Streaming Pages
 
-## Examples
+Process pages as they're crawled with real-time subscriptions:
 
-See [EXAMPLES](./examples/).
+```rust
+use spider::tokio;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://spider.cloud");
+    let mut rx = website.subscribe(0).unwrap();
+
+    tokio::spawn(async move {
+        while let Ok(page) = rx.recv().await {
+            println!("- {}", page.get_url());
+        }
+    });
+
+    website.crawl().await;
+    website.unsubscribe();
+}
+```
+
+### Chrome (CDP)
+
+Render JavaScript-heavy pages with stealth mode and request interception:
+
+```toml
+[dependencies]
+spider = { version = "2", features = ["chrome"] }
+```
+
+```rust
+use spider::features::chrome_common::RequestInterceptConfiguration;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://spider.cloud")
+        .with_chrome_intercept(RequestInterceptConfiguration::new(true))
+        .with_stealth(true)
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+}
+```
+
+### WebDriver (Selenium Grid)
+
+Connect to remote browsers, Selenium Grid, or any W3C WebDriver-compatible service:
+
+```toml
+[dependencies]
+spider = { version = "2", features = ["webdriver"] }
+```
+
+```rust
+use spider::features::webdriver_common::{WebDriverConfig, WebDriverBrowser};
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://spider.cloud")
+        .with_webdriver(
+            WebDriverConfig::new()
+                .with_server_url("http://localhost:4444")
+                .with_browser(WebDriverBrowser::Chrome)
+                .with_headless(true)
+        )
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+}
+```
+
+## Get Spider
+
+| Method | Best For |
+|--------|----------|
+| [Spider Cloud](https://spider.cloud) | Production workloads, no setup required |
+| [spider](./spider/README.md) | Rust applications |
+| [spider_cli](./spider_cli/README.md) | Command-line usage |
+| [spider-nodejs](https://github.com/spider-rs/spider-nodejs) | Node.js projects |
+| [spider-py](https://github.com/spider-rs/spider-py) | Python projects |
+
+## Resources
+
+- [Examples](./examples/) - Code samples for common use cases
+- [Benchmarks](./benches/BENCHMARKS.md) - Performance comparisons
+- [Changelog](CHANGELOG.md) - Version history
 
 ## License
 
-This project is licensed under the [MIT license].
-
-[MIT license]: https://github.com/spider-rs/spider/blob/main/LICENSE
+[MIT](https://github.com/spider-rs/spider/blob/main/LICENSE)
 
 ## Contributing
 
