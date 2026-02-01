@@ -7,8 +7,14 @@ use thirtyfour::common::capabilities::desiredcapabilities::Capabilities;
 use thirtyfour::prelude::*;
 use tokio::task::JoinHandle;
 
-/// Stealth script to hide WebDriver detection.
+/// Stealth scripts from spider_fingerprint - cleans up automation markers.
 #[cfg(feature = "webdriver_stealth")]
+pub use spider_fingerprint::spoofs::{
+    spoof_device_memory, CLEANUP_CDP_MARKERS, HIDE_SELENIUM_MARKERS, HIDE_WEBDRIVER,
+};
+
+/// Legacy stealth script (fallback when spider_fingerprint not available).
+#[cfg(all(feature = "webdriver_stealth", not(feature = "serde")))]
 pub const STEALTH_SCRIPT: &str = r#"
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -354,11 +360,33 @@ async fn build_edge_capabilities(
 }
 
 /// Setup WebDriver events and stealth mode.
+/// Injects spider_fingerprint stealth scripts to:
+/// - Hide navigator.webdriver property
+/// - Spoof navigator.deviceMemory (WebDriver doesn't have CDP for this)
+/// - Clean up CDP markers (cdc_, $cdc_)
+/// - Clean up Selenium markers
 #[cfg(feature = "webdriver_stealth")]
 pub async fn setup_driver_events(driver: &WebDriver, _config: &Configuration) {
-    // Inject stealth script
-    if let Err(e) = driver.execute(STEALTH_SCRIPT, vec![]).await {
-        log::warn!("Failed to inject stealth script: {:?}", e);
+    // Inject webdriver hiding script
+    if let Err(e) = driver.execute(HIDE_WEBDRIVER, vec![]).await {
+        log::warn!("Failed to inject webdriver hiding script: {:?}", e);
+    }
+
+    // Spoof device memory (WebDriver doesn't have CDP emulation for this)
+    // Use realistic values: 4 or 8 GB for desktop
+    let device_memory_script = spoof_device_memory(8);
+    if let Err(e) = driver.execute(&device_memory_script, vec![]).await {
+        log::warn!("Failed to inject device memory script: {:?}", e);
+    }
+
+    // Clean up CDP markers (cdc_, $cdc_, etc.)
+    if let Err(e) = driver.execute(CLEANUP_CDP_MARKERS, vec![]).await {
+        log::warn!("Failed to inject CDP marker cleanup script: {:?}", e);
+    }
+
+    // Clean up Selenium-specific markers
+    if let Err(e) = driver.execute(HIDE_SELENIUM_MARKERS, vec![]).await {
+        log::warn!("Failed to inject Selenium marker cleanup script: {:?}", e);
     }
 }
 
