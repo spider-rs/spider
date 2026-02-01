@@ -8,7 +8,3 @@ members = [
     "examples",
     "benches"]
 resolver = "2"
-
-# Temporary patch until spider_fingerprint 2.38.0 is published to crates.io
-[patch.crates-io]
-spider_fingerprint = { path = "../spider_fingerprint" }
