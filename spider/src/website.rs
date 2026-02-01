@@ -3362,6 +3362,116 @@ impl Website {
         }
     }
 
+    /// Expand links for crawl using WebDriver.
+    #[cfg(all(feature = "webdriver", not(feature = "decentralized"), not(feature = "chrome")))]
+    pub async fn crawl_establish_webdriver_one(
+        &self,
+        client: &Client,
+        base: &mut RelativeSelectors,
+        url: &Option<&str>,
+        driver: &std::sync::Arc<thirtyfour::WebDriver>,
+    ) -> HashSet<CaseInsensitiveString> {
+        if self
+            .is_allowed_default(&self.get_base_link())
+            .eq(&ProcessLinkStatus::Allowed)
+        {
+            let timeout = self
+                .configuration
+                .webdriver_config
+                .as_ref()
+                .and_then(|c| c.timeout);
+
+            // Setup stealth events
+            crate::features::webdriver::setup_driver_events(driver, &self.configuration).await;
+
+            let mut page = Page::new_page_webdriver(
+                url.unwrap_or(&self.url.inner()),
+                driver,
+                timeout,
+            )
+            .await;
+
+            let mut retry_count = self.configuration.retry;
+
+            while page.should_retry && retry_count > 0 {
+                retry_count -= 1;
+                if let Some(timeout_duration) = page.get_timeout() {
+                    tokio::time::sleep(timeout_duration).await;
+                }
+                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                    if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        let next_page = Page::new_page_webdriver(
+                            &self.url.inner(),
+                            driver,
+                            timeout,
+                        )
+                        .await;
+                        page.clone_from(&next_page);
+                    })
+                    .await
+                    {
+                        log::warn!("backoff timeout {elapsed}");
+                    }
+                } else {
+                    let next_page = Page::new_page_webdriver(
+                        &self.url.inner(),
+                        driver,
+                        timeout,
+                    )
+                    .await;
+                    page.clone_from(&next_page);
+                }
+            }
+
+            if let Some(domain) = &page.final_redirect_destination {
+                let domain: Box<CaseInsensitiveString> = CaseInsensitiveString::new(&domain).into();
+                let s = self.setup_selectors();
+
+                base.0 = s.0;
+                base.1 = s.1;
+
+                if let Some(pdname) = parse_absolute_url(&domain) {
+                    if let Some(dname) = pdname.host_str() {
+                        base.2 = dname.into();
+                    }
+                }
+            }
+
+            emit_log(&self.url.inner());
+
+            if self.configuration.return_page_links && page.page_links.is_none() {
+                page.page_links = Some(Box::new(Default::default()));
+            }
+
+            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+
+            let mut links = if !page.is_empty() && !xml_file {
+                page.links_ssg(&base, &client, &self.domain_parsed).await
+            } else {
+                Default::default()
+            };
+
+            if xml_file {
+                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
+                    .await;
+            }
+
+            if let Some(ref cb) = self.on_should_crawl_callback {
+                if !cb.call(&page) {
+                    page.blocked_crawl = true;
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    return Default::default();
+                }
+            }
+
+            channel_send_page(&self.channel, page, &self.channel_guard);
+
+            links
+        } else {
+            HashSet::new()
+        }
+    }
+
     /// Expand links for crawl.
     #[cfg(all(not(feature = "glob"), feature = "decentralized"))]
     pub async fn crawl_establish(
@@ -5703,8 +5813,294 @@ impl Website {
         }
     }
 
+    /// Start to crawl website concurrently using WebDriver.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), feature = "webdriver"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn crawl_concurrent_webdriver(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        self.start();
+
+        match self.setup_webdriver().await {
+            Some(mut controller) => {
+                let driver = controller.driver();
+                let mut selectors = self.setup_selectors();
+                self.status = CrawlStatus::Active;
+
+                if self.single_page() {
+                    self.crawl_establish_webdriver_one(&client, &mut selectors, &None, driver)
+                        .await;
+                    self.subscription_guard().await;
+                    controller.dispose();
+                } else {
+                    let semaphore: Arc<Semaphore> = self.setup_semaphore();
+                    let (mut interval, throttle) = self.setup_crawl();
+
+                    let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+
+                    let base_links = self
+                        .crawl_establish_webdriver_one(&client, &mut selectors, &None, driver)
+                        .await;
+
+                    let mut links: HashSet<CaseInsensitiveString> =
+                        self.drain_extra_links().collect();
+
+                    links.extend(base_links);
+
+                    self.configuration.configure_allowlist();
+
+                    let timeout = self
+                        .configuration
+                        .webdriver_config
+                        .as_ref()
+                        .and_then(|c| c.timeout);
+
+                    let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> =
+                        JoinSet::new();
+
+                    let shared = Arc::new((
+                        client.to_owned(),
+                        selectors,
+                        self.channel.clone(),
+                        self.configuration.external_domains_caseless.clone(),
+                        self.channel_guard.clone(),
+                        driver.clone(),
+                        self.configuration.clone(),
+                        self.url.inner().to_string(),
+                        self.domain_parsed.clone(),
+                        self.on_link_find_callback.clone(),
+                        timeout,
+                    ));
+
+                    let add_external = shared.3.len() > 0;
+                    let on_should_crawl_callback = self.on_should_crawl_callback.clone();
+                    let full_resources = self.configuration.full_resources;
+                    let return_page_links = self.configuration.return_page_links;
+                    let mut exceeded_budget = false;
+                    let concurrency = throttle.is_zero();
+
+                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
+                    if !concurrency && !links.is_empty() {
+                        tokio::time::sleep(*throttle).await;
+                    }
+
+                    let crawl_breaker = if self.configuration.crawl_timeout.is_some() {
+                        Some(Instant::now())
+                    } else {
+                        None
+                    };
+
+                    'outer: loop {
+                        let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
+                            links.drain().collect(),
+                        );
+
+                        loop {
+                            if !concurrency {
+                                tokio::time::sleep(*throttle).await;
+                            }
+
+                            let semaphore =
+                                get_semaphore(&semaphore, !self.configuration.shared_queue)
+                                    .await;
+
+                            tokio::select! {
+                                biased;
+                                Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker) => {
+                                    if !self
+                                        .handle_process(
+                                            handle,
+                                            &mut interval,
+                                            async {
+                                                emit_log_shutdown(&link.inner());
+                                                let permits = set.len();
+                                                set.shutdown().await;
+                                                semaphore.add_permits(permits);
+                                            },
+                                        )
+                                        .await
+                                    {
+                                        break 'outer;
+                                    }
+
+                                    let allowed = self.is_allowed(&link);
+
+                                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                        exceeded_budget = true;
+                                        break;
+                                    }
+                                    if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                                        continue;
+                                    }
+
+                                    emit_log(&link.inner());
+
+                                    self.insert_link(link.clone()).await;
+
+                                    if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                                        let shared = shared.clone();
+                                        let on_should_crawl_callback = on_should_crawl_callback.clone();
+
+                                        spawn_set("page_fetch_webdriver", &mut set, async move {
+                                            let link_result = match &shared.9 {
+                                                Some(cb) => cb(link, None),
+                                                _ => (link, None),
+                                            };
+
+                                            let target_url = link_result.0.as_ref();
+
+                                            // Setup stealth events before navigation
+                                            crate::features::webdriver::setup_driver_events(&shared.5, &shared.6).await;
+
+                                            let mut page = Page::new_page_webdriver(
+                                                target_url,
+                                                &shared.5,
+                                                shared.10,
+                                            )
+                                            .await;
+
+                                            let mut retry_count = shared.6.retry;
+
+                                            while page.should_retry && retry_count > 0 {
+                                                retry_count -= 1;
+                                                if let Some(timeout_duration) = page.get_timeout() {
+                                                    tokio::time::sleep(timeout_duration).await;
+                                                }
+                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                    if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                        let p = Page::new_page_webdriver(
+                                                            target_url,
+                                                            &shared.5,
+                                                            shared.10,
+                                                        ).await;
+                                                        page.clone_from(&p);
+                                                    }).await {
+                                                        log::info!("{target_url} backoff gateway timeout exceeded {elapsed}");
+                                                    }
+                                                } else {
+                                                    page.clone_from(
+                                                        &Page::new_page_webdriver(
+                                                            target_url,
+                                                            &shared.5,
+                                                            shared.10,
+                                                        )
+                                                        .await,
+                                                    );
+                                                }
+                                            }
+
+                                            if add_external {
+                                                page.set_external(shared.3.clone());
+                                            }
+
+                                            let prev_domain = page.base;
+                                            page.base = shared.8.as_deref().cloned();
+
+                                            if return_page_links {
+                                                page.page_links = Some(Default::default());
+                                            }
+
+                                            let links = if full_resources {
+                                                page.links_full(&shared.1, &shared.8).await
+                                            } else {
+                                                page.links(&shared.1, &shared.8).await
+                                            };
+
+                                            page.base = prev_domain;
+
+                                            if shared.6.normalize {
+                                                page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                            }
+
+                                            if let Some(ref cb) = on_should_crawl_callback {
+                                                if !cb.call(&page) {
+                                                    page.blocked_crawl = true;
+                                                    channel_send_page(&shared.2, page, &shared.4);
+                                                    drop(permit);
+                                                    return Default::default();
+                                                }
+                                            }
+
+                                            let signature = page.signature;
+
+                                            channel_send_page(&shared.2, page, &shared.4);
+
+                                            drop(permit);
+
+                                            (links, signature)
+                                        });
+                                    }
+
+                                    self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+                                }
+                                Some(result) = set.join_next(), if !set.is_empty() => {
+                                    if let Ok(res) = result {
+                                        match res.1 {
+                                            Some(signature) => {
+                                                if self.is_signature_allowed(signature).await {
+                                                    self.insert_signature(signature).await;
+                                                    self.links_visited.extend_links(&mut links, res.0);
+                                                }
+                                            }
+                                            _ => {
+                                                self.links_visited.extend_links(&mut links, res.0);
+                                            }
+                                        }
+                                    } else {
+                                        break
+                                    }
+
+                                    if links.is_empty() && set.is_empty() || exceeded_budget {
+                                        if exceeded_budget {
+                                            while set.join_next().await.is_some() {}
+                                        }
+                                        break 'outer;
+                                    }
+                                }
+                                else => break,
+                            };
+
+                            if links.is_empty() && set.is_empty() || exceeded_budget {
+                                if exceeded_budget {
+                                    while set.join_next().await.is_some() {}
+                                }
+                                break 'outer;
+                            }
+                        }
+
+                        self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+
+                        if links.is_empty() && set.is_empty() {
+                            break;
+                        }
+                    }
+
+                    self.subscription_guard().await;
+                    controller.dispose();
+
+                    if !links.is_empty() {
+                        self.extra_links.extend(links);
+                    }
+                }
+            }
+            None => {
+                log::error!("WebDriver initialization failed.");
+            }
+        }
+    }
+
     /// Start to crawl website concurrently.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), feature = "webdriver"))]
+    pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        // Use WebDriver if configured, otherwise fall back to raw HTTP
+        if self.configuration.webdriver_config.is_some() {
+            self.crawl_concurrent_webdriver(client, handle).await
+        } else {
+            self.crawl_concurrent_raw(client, handle).await
+        }
+    }
+
+    /// Start to crawl website concurrently.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), not(feature = "webdriver")))]
     pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.crawl_concurrent_raw(client, handle).await
     }
@@ -7149,6 +7545,46 @@ impl Website {
         .await
     }
 
+    /// Launch or connect to WebDriver with setup.
+    #[cfg(feature = "webdriver")]
+    pub async fn setup_webdriver(&self) -> Option<crate::features::webdriver::WebDriverController> {
+        crate::features::webdriver::launch_driver(&self.configuration).await
+    }
+
+    /// Render a page using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn render_webdriver_page(
+        &self,
+        url: &str,
+        driver: &std::sync::Arc<thirtyfour::WebDriver>,
+    ) -> Option<String> {
+        use crate::features::webdriver::{attempt_navigation, get_page_content, setup_driver_events};
+
+        let timeout = self
+            .configuration
+            .webdriver_config
+            .as_ref()
+            .and_then(|c| c.timeout);
+
+        // Navigate to the URL
+        if let Err(e) = attempt_navigation(url, driver, &timeout).await {
+            log::error!("WebDriver navigation failed: {:?}", e);
+            return None;
+        }
+
+        // Setup events (stealth injection)
+        setup_driver_events(driver, &self.configuration).await;
+
+        // Get page content
+        match get_page_content(driver).await {
+            Ok(content) => Some(content),
+            Err(e) => {
+                log::error!("Failed to get WebDriver page content: {:?}", e);
+                None
+            }
+        }
+    }
+
     /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.configuration
@@ -7165,6 +7601,24 @@ impl Website {
     /// Bypass CSP protection detection. This does nothing without the feat flag `chrome` enabled.
     pub fn with_csp_bypass(&mut self, enabled: bool) -> &mut Self {
         self.configuration.with_csp_bypass(enabled);
+        self
+    }
+
+    /// Configure WebDriver for browser automation. This does nothing without the `webdriver` feature flag enabled.
+    /// When configured, the `crawl()` function will automatically use WebDriver instead of raw HTTP.
+    #[cfg(feature = "webdriver")]
+    pub fn with_webdriver(
+        &mut self,
+        webdriver_config: crate::features::webdriver_common::WebDriverConfig,
+    ) -> &mut Self {
+        self.configuration
+            .with_webdriver_config(Some(webdriver_config));
+        self
+    }
+
+    /// Configure WebDriver for browser automation. This does nothing without the `webdriver` feature flag enabled.
+    #[cfg(not(feature = "webdriver"))]
+    pub fn with_webdriver(&mut self, _webdriver_config: ()) -> &mut Self {
         self
     }
 

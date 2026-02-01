@@ -1364,6 +1364,112 @@ impl Page {
         build(url, page_resource)
     }
 
+    /// Create a new page from WebDriver content.
+    #[cfg(feature = "webdriver")]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub fn new_webdriver(url: &str, html: String, status_code: StatusCode) -> Self {
+        let content = Some(Box::new(html.into_bytes()));
+
+        Page {
+            html: content,
+            url: url.into(),
+            status_code,
+            ..Default::default()
+        }
+    }
+
+    /// Create a new page from WebDriver with full response.
+    #[cfg(all(feature = "webdriver", not(feature = "page_error_status_details")))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_webdriver(
+        url: &str,
+        driver: &std::sync::Arc<thirtyfour::WebDriver>,
+        timeout: Option<std::time::Duration>,
+    ) -> Self {
+        use crate::features::webdriver::{attempt_navigation, get_page_content, get_current_url};
+
+        // Navigate to the URL
+        if let Err(e) = attempt_navigation(url, driver, &timeout).await {
+            log::error!("WebDriver navigation failed: {:?}", e);
+            return Page {
+                url: url.into(),
+                status_code: *UNKNOWN_STATUS_ERROR,
+                error_status: Some(format!("WebDriver navigation failed: {:?}", e)),
+                ..Default::default()
+            };
+        }
+
+        // Get current URL (may have redirected)
+        let final_url = get_current_url(driver).await.ok();
+
+        // Get page content
+        match get_page_content(driver).await {
+            Ok(content) => {
+                Page {
+                    html: Some(Box::new(content.into_bytes())),
+                    url: url.into(),
+                    status_code: StatusCode::OK,
+                    final_redirect_destination: final_url,
+                    ..Default::default()
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to get WebDriver page content: {:?}", e);
+                Page {
+                    url: url.into(),
+                    status_code: *UNKNOWN_STATUS_ERROR,
+                    error_status: Some(format!("Failed to get page content: {:?}", e)),
+                    ..Default::default()
+                }
+            }
+        }
+    }
+
+    /// Create a new page from WebDriver with full response.
+    #[cfg(all(feature = "webdriver", feature = "page_error_status_details"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_webdriver(
+        url: &str,
+        driver: &std::sync::Arc<thirtyfour::WebDriver>,
+        timeout: Option<std::time::Duration>,
+    ) -> Self {
+        use crate::features::webdriver::{attempt_navigation, get_page_content, get_current_url};
+
+        // Navigate to the URL
+        if let Err(e) = attempt_navigation(url, driver, &timeout).await {
+            log::error!("WebDriver navigation failed: {:?}", e);
+            return Page {
+                url: url.into(),
+                status_code: *UNKNOWN_STATUS_ERROR,
+                ..Default::default()
+            };
+        }
+
+        // Get current URL (may have redirected)
+        let final_url = get_current_url(driver).await.ok();
+
+        // Get page content
+        match get_page_content(driver).await {
+            Ok(content) => {
+                Page {
+                    html: Some(Box::new(content.into_bytes())),
+                    url: url.into(),
+                    status_code: StatusCode::OK,
+                    final_redirect_destination: final_url,
+                    ..Default::default()
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to get WebDriver page content: {:?}", e);
+                Page {
+                    url: url.into(),
+                    status_code: *UNKNOWN_STATUS_ERROR,
+                    ..Default::default()
+                }
+            }
+        }
+    }
+
     /// New page with rewriter
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_streaming<

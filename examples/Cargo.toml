@@ -263,3 +263,18 @@ required-features = ["spider/sync"]
 name = "css_scrape"
 path = "css_scrape.rs"
 required-features = ["spider/sync"]
+
+[[example]]
+name = "webdriver"
+path = "webdriver.rs"
+required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_stealth"]
+
+[[example]]
+name = "webdriver_remote"
+path = "webdriver_remote.rs"
+required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_stealth"]
+
+[[example]]
+name = "webdriver_screenshot"
+path = "webdriver_screenshot.rs"
+required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_screenshot"]

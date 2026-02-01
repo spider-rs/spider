@@ -471,7 +471,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.40.4",
+ "spider 2.40.5",
 ]
 
 [[package]]
@@ -4806,6 +4806,7 @@ version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
+ "indexmap 2.13.0",
  "itoa",
  "memchr",
  "serde",
@@ -4821,6 +4822,17 @@ checksum = "a8136f1a4ea815d7eac4101cfd0b16dc0cb5e1fe1b8609dfd728058656b7badf"
 dependencies = [
  "regex",
  "serde",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -5136,7 +5148,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.40.4"
+version = "2.40.5"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5193,6 +5205,7 @@ dependencies = [
  "string_concat",
  "strum 0.26.3",
  "sysinfo",
+ "thirtyfour",
  "tiktoken-rs",
  "tokio",
  "tokio-stream",
@@ -5247,7 +5260,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.40.4"
+version = "2.40.5"
 dependencies = [
  "clap",
  "env_logger",
@@ -5255,7 +5268,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.40.4",
+ "spider 2.40.5",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5270,7 +5283,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.40.4",
+ "spider 2.40.5",
  "spider_transformations",
  "spider_utils 2.39.7",
 ]
@@ -5384,7 +5397,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.40.4"
+version = "2.40.5"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5400,11 +5413,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.40.4"
+version = "2.40.5"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.40.4",
+ "spider 2.40.5",
  "warp",
 ]
 
@@ -5714,6 +5727,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c3ee6129eec20fed59acf2e9cfb3ffd20d0bbe39fe334c22af0edc56dfe752"
 
 [[package]]
+name = "stringmatch"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aadc0801d92f0cdc26127c67c4b8766284f52a5ba22894f285e3101fa57d05d"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "stringprep"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5917,6 +5939,45 @@ dependencies = [
  "futf",
  "mac",
  "utf-8",
+]
+
+[[package]]
+name = "thirtyfour"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48f1edfb88bbdf0365c6dc161e8694ce8414c0b79d0d3a3663b4baac62236be0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "cfg-if",
+ "const_format",
+ "futures-util",
+ "http 1.4.0",
+ "indexmap 2.13.0",
+ "paste",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "stringmatch",
+ "thirtyfour-macros",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "thirtyfour-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cf0ffc3ba4368e99597bd6afd83f4ff6febad66d9ae541ab46e697d32285fc0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
 ]
 
 [[package]]

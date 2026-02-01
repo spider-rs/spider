@@ -10,6 +10,15 @@ pub mod chrome_common;
 /// Viewport
 pub mod chrome_viewport;
 
+/// WebDriver utils
+#[cfg(feature = "webdriver")]
+pub mod webdriver;
+#[cfg(feature = "webdriver")]
+/// WebDriver launch args.
+pub(crate) mod webdriver_args;
+/// Common modules for WebDriver
+pub mod webdriver_common;
+
 /// Decentralized header handling
 #[cfg(feature = "decentralized_headers")]
 pub mod decentralized_headers;

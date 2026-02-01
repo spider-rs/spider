@@ -69,6 +69,7 @@ string-interner = { version = "0.19", default-features = false, features = [
 httpdate = { version = "1", optional = true }
 rand = { version = "0.9", optional = true }
 serde_regex = { version = "1", optional = true }
+thirtyfour = { version = "0.36", optional = true }
 statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1" }
 tracing = { version = "0.1", default-features = false, features = [
@@ -276,6 +277,13 @@ firewall = ["dep:spider_firewall", "chromey/firewall"]
 wreq = ["dep:wreq", "dep:wreq-util"]
 rquest_hickory_dns = ["wreq/hickory-dns"]
 extra_information = []
+webdriver = ["dep:thirtyfour", "serde", "dep:rand", "dep:fastrand"]
+webdriver_headed = ["webdriver"]
+webdriver_stealth = ["webdriver"]
+webdriver_chrome = ["webdriver"]
+webdriver_firefox = ["webdriver"]
+webdriver_edge = ["webdriver"]
+webdriver_screenshot = ["webdriver"]
 
 # Allows full concurrency.
 cowboy = []

@@ -8,6 +8,7 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::gemini_common::GeminiConfigs;
 pub use crate::features::openai_common::GPTConfigs;
+pub use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 use crate::utils::get_domain_from_url;
 use crate::utils::BasicCachePolicy;
 use crate::website::CronType;
@@ -319,6 +320,9 @@ pub struct Configuration {
     pub default_http_connect_timeout: Option<Duration>,
     /// The default http read timeout
     pub default_http_read_timeout: Option<Duration>,
+    #[cfg(feature = "webdriver")]
+    /// WebDriver configuration for browser automation. This does nothing without the `webdriver` flag enabled.
+    pub webdriver_config: Option<Box<WebDriverConfig>>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1561,6 +1565,25 @@ impl Configuration {
     /// Set the cache policy.
     pub fn with_cache_policy(&mut self, cache_policy: Option<BasicCachePolicy>) -> &mut Self {
         self.cache_policy = cache_policy;
+        self
+    }
+
+    #[cfg(feature = "webdriver")]
+    /// Set the WebDriver configuration. This does nothing without the `webdriver` flag enabled.
+    pub fn with_webdriver_config(
+        &mut self,
+        webdriver_config: Option<WebDriverConfig>,
+    ) -> &mut Self {
+        self.webdriver_config = webdriver_config.map(Box::new);
+        self
+    }
+
+    #[cfg(not(feature = "webdriver"))]
+    /// Set the WebDriver configuration. This does nothing without the `webdriver` flag enabled.
+    pub fn with_webdriver_config(
+        &mut self,
+        _webdriver_config: Option<WebDriverConfig>,
+    ) -> &mut Self {
         self
     }
 
