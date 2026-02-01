@@ -5115,3 +5115,300 @@ fn test_time_duration_field() {
         "Duration should be less than 1 second"
     );
 }
+
+/// Test openai feature - Page struct has openai_credits_used and extra_ai_data fields.
+#[test]
+#[cfg(all(feature = "openai", not(feature = "decentralized")))]
+fn test_openai_fields() {
+    use crate::features::openai_common::OpenAIUsage;
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // Test openai_credits_used field
+    assert!(
+        page.openai_credits_used.is_none(),
+        "openai_credits_used should be None initially"
+    );
+
+    // Set openai_credits_used
+    page.openai_credits_used = Some(vec![OpenAIUsage::default()]);
+    assert!(
+        page.openai_credits_used.is_some(),
+        "openai_credits_used should be set"
+    );
+
+    // Test extra_ai_data field
+    assert!(
+        page.extra_ai_data.is_none(),
+        "extra_ai_data should be None initially"
+    );
+
+    // Set extra_ai_data
+    page.extra_ai_data = Some(vec![AIResults::default()]);
+    assert!(page.extra_ai_data.is_some(), "extra_ai_data should be set");
+}
+
+/// Test gemini feature - Page struct has gemini_credits_used and extra_gemini_data fields.
+#[test]
+#[cfg(all(feature = "gemini", not(feature = "decentralized")))]
+fn test_gemini_fields() {
+    use crate::features::gemini_common::GeminiUsage;
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // Test gemini_credits_used field
+    assert!(
+        page.gemini_credits_used.is_none(),
+        "gemini_credits_used should be None initially"
+    );
+
+    // Set gemini_credits_used
+    page.gemini_credits_used = Some(vec![GeminiUsage::default()]);
+    assert!(
+        page.gemini_credits_used.is_some(),
+        "gemini_credits_used should be set"
+    );
+
+    // Test extra_gemini_data field
+    assert!(
+        page.extra_gemini_data.is_none(),
+        "extra_gemini_data should be None initially"
+    );
+
+    // Set extra_gemini_data
+    page.extra_gemini_data = Some(vec![AIResults::default()]);
+    assert!(
+        page.extra_gemini_data.is_some(),
+        "extra_gemini_data should be set"
+    );
+}
+
+/// Test serde feature - Metadata can be serialized and deserialized.
+#[test]
+#[cfg(feature = "serde")]
+fn test_metadata_serde() {
+    let metadata = Metadata {
+        title: Some("Test Title".into()),
+        description: Some("Test Description".into()),
+        image: Some("https://example.com/image.png".into()),
+        #[cfg(feature = "chrome")]
+        automation: None,
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&metadata).expect("Failed to serialize metadata");
+    assert!(json.contains("Test Title"), "JSON should contain title");
+
+    // Deserialize from JSON
+    let deserialized: Metadata =
+        serde_json::from_str(&json).expect("Failed to deserialize metadata");
+    assert_eq!(
+        metadata.title, deserialized.title,
+        "Title should match after deserialization"
+    );
+    assert_eq!(
+        metadata.description, deserialized.description,
+        "Description should match after deserialization"
+    );
+    assert_eq!(
+        metadata.image, deserialized.image,
+        "Image should match after deserialization"
+    );
+}
+
+/// Test serde feature - AIResults can be serialized and deserialized.
+#[test]
+#[cfg(feature = "serde")]
+fn test_airesults_serde() {
+    let ai_results = AIResults {
+        input: "Test prompt".to_string(),
+        js_output: "console.log('test');".to_string(),
+        content_output: vec!["Result 1".to_string(), "Result 2".to_string()],
+        screenshot_output: None,
+        error: None,
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&ai_results).expect("Failed to serialize AIResults");
+    assert!(json.contains("Test prompt"), "JSON should contain input");
+
+    // Deserialize from JSON
+    let deserialized: AIResults =
+        serde_json::from_str(&json).expect("Failed to deserialize AIResults");
+    assert_eq!(
+        ai_results.input, deserialized.input,
+        "Input should match after deserialization"
+    );
+    assert_eq!(
+        ai_results.js_output, deserialized.js_output,
+        "JS output should match after deserialization"
+    );
+    assert_eq!(
+        ai_results.content_output.len(),
+        deserialized.content_output.len(),
+        "Content output length should match"
+    );
+}
+
+/// Test decentralized feature - Page struct has links field.
+#[test]
+#[cfg(feature = "decentralized")]
+fn test_decentralized_page() {
+    // Decentralized Page struct has a links field for distributed crawling
+    let page = Page::default();
+
+    // Default Page should have empty links
+    assert!(page.links.is_empty(), "Default Page should have empty links");
+
+    // Decentralized Page has external_domains_caseless field
+    assert!(
+        page.external_domains_caseless.is_empty(),
+        "Default Page should have empty external_domains_caseless"
+    );
+}
+
+/// Test smart feature implies chrome and chrome_intercept.
+#[test]
+#[cfg(all(feature = "smart", not(feature = "decentralized")))]
+fn test_smart_feature() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    // Smart feature includes chrome, so screenshot_bytes should exist
+    assert!(
+        page.screenshot_bytes.is_none(),
+        "screenshot_bytes should be None initially"
+    );
+}
+
+/// Test page_links field exists and works correctly.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_page_links_field() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // page_links should be None initially
+    assert!(page.page_links.is_none(), "page_links should be None initially");
+
+    // Set page_links
+    let mut links = HashSet::new();
+    links.insert(CaseInsensitiveString::new("https://example.com/page1"));
+    page.page_links = Some(Box::new(links));
+
+    assert!(page.page_links.is_some(), "page_links should be set");
+    assert_eq!(
+        page.page_links.as_ref().unwrap().len(),
+        1,
+        "page_links should have 1 link"
+    );
+}
+
+/// Test bytes_transferred field exists and works correctly.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_bytes_transferred_field() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // bytes_transferred should be None initially
+    assert!(
+        page.bytes_transferred.is_none(),
+        "bytes_transferred should be None initially"
+    );
+
+    // Set bytes_transferred
+    page.bytes_transferred = Some(1024.0);
+    assert_eq!(
+        page.bytes_transferred,
+        Some(1024.0),
+        "bytes_transferred should be 1024.0"
+    );
+}
+
+/// Test waf_check and should_retry fields exist and work correctly.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_waf_and_retry_fields() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // waf_check and should_retry should be false initially
+    assert!(!page.waf_check, "waf_check should be false initially");
+    assert!(!page.should_retry, "should_retry should be false initially");
+
+    // Set waf_check
+    page.waf_check = true;
+    assert!(page.waf_check, "waf_check should be true");
+
+    // Set should_retry
+    page.should_retry = true;
+    assert!(page.should_retry, "should_retry should be true");
+}
+
+/// Test blocked_crawl field exists and works correctly.
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_blocked_crawl_field() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let mut page = build("https://example.com", page_response);
+
+    // blocked_crawl should be false initially
+    assert!(
+        !page.blocked_crawl,
+        "blocked_crawl should be false initially"
+    );
+
+    // Set blocked_crawl
+    page.blocked_crawl = true;
+    assert!(page.blocked_crawl, "blocked_crawl should be true");
+}
