@@ -4936,3 +4936,182 @@ async fn test_metadata_chrome_real_page() {
         "At least one page should have metadata when crawling with chrome"
     );
 }
+
+// ============================================================================
+// Feature-specific Tests
+// ============================================================================
+
+/// Test encoding feature - get_html_encoded function.
+#[test]
+#[cfg(feature = "encoding")]
+fn test_encoding_get_html_encoded() {
+    // Test with UTF-8 content
+    let html_bytes = "こんにちは世界".as_bytes().to_vec();
+    let encoded = encode_bytes(&html_bytes, "UTF-8");
+    assert!(
+        encoded.contains("こんにちは"),
+        "UTF-8 encoding should preserve Japanese characters"
+    );
+}
+
+/// Test encoding feature - get_html_encoded with Page.
+#[test]
+#[cfg(all(feature = "encoding", not(feature = "decentralized")))]
+fn test_encoding_page_get_html_encoded() {
+    use crate::utils::PageResponse;
+
+    let html_content = "Hello World - テスト";
+    let page_response = PageResponse {
+        content: Some(Box::new(html_content.as_bytes().to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+    let encoded = page.get_html_encoded("UTF-8");
+
+    assert!(
+        encoded.contains("Hello World"),
+        "Encoded content should contain ASCII text"
+    );
+    assert!(
+        encoded.contains("テスト"),
+        "Encoded content should contain Japanese text"
+    );
+}
+
+/// Test remote_addr feature - Page struct has remote_addr field.
+#[test]
+#[cfg(all(feature = "remote_addr", not(feature = "decentralized")))]
+fn test_remote_addr_field() {
+    use crate::utils::PageResponse;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        remote_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    assert!(
+        page.remote_addr.is_some(),
+        "Page should have remote_addr when feature is enabled"
+    );
+
+    let addr = page.remote_addr.unwrap();
+    assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    assert_eq!(addr.port(), 8080);
+}
+
+/// Test page_error_status_details feature - error_status is Arc<reqwest::Error>.
+#[test]
+#[cfg(all(feature = "page_error_status_details", not(feature = "decentralized")))]
+fn test_page_error_status_details() {
+    use crate::utils::PageResponse;
+
+    // When page_error_status_details is enabled, error_status should be Option<Arc<reqwest::Error>>
+    let page_response = PageResponse {
+        content: None,
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    // The error_status type should be Option<Arc<reqwest::Error>> with this feature
+    // We just verify it compiles and can be accessed
+    let _error: &Option<std::sync::Arc<reqwest::Error>> = &page.error_status;
+}
+
+/// Test page_error_status_details feature disabled - error_status is String.
+#[test]
+#[cfg(all(
+    not(feature = "page_error_status_details"),
+    not(feature = "decentralized")
+))]
+fn test_page_error_status_string() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: None,
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    // The error_status type should be Option<String> without the feature
+    let _error: &Option<String> = &page.error_status;
+}
+
+/// Test cookies feature - Page struct has cookies field.
+#[test]
+#[cfg(all(feature = "cookies", not(feature = "decentralized")))]
+fn test_cookies_field() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    // Verify cookies field exists and is accessible
+    let _cookies: &Option<reqwest::header::HeaderMap> = &page.cookies;
+}
+
+/// Test chrome feature - screenshot_bytes field exists.
+#[test]
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+fn test_chrome_screenshot_bytes_field() {
+    use crate::utils::PageResponse;
+
+    let screenshot_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header bytes
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        screenshot_bytes: Some(screenshot_data.clone()),
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+
+    assert!(
+        page.screenshot_bytes.is_some(),
+        "Page should have screenshot_bytes when chrome feature is enabled"
+    );
+    assert_eq!(
+        page.screenshot_bytes.as_ref().unwrap(),
+        &screenshot_data,
+        "Screenshot bytes should match"
+    );
+}
+
+/// Test time feature - duration field and get_duration_elapsed.
+#[test]
+#[cfg(all(feature = "time", not(feature = "decentralized")))]
+fn test_time_duration_field() {
+    use crate::utils::PageResponse;
+
+    let page_response = PageResponse {
+        content: Some(Box::new(b"<html></html>".to_vec())),
+        status_code: StatusCode::OK,
+        duration: Some(tokio::time::Instant::now()),
+        ..Default::default()
+    };
+
+    let page = build("https://example.com", page_response);
+    let duration = page.get_duration_elapsed();
+
+    // Duration should be very small since we just created the page
+    assert!(
+        duration.as_millis() < 1000,
+        "Duration should be less than 1 second"
+    );
+}

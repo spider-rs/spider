@@ -2420,12 +2420,18 @@ impl Website {
             let mut domain_parsed = self.domain_parsed.take();
 
             let mut page = if let Some(mut seeded_page) = self.build_seed_page() {
-                // Extract links and metadata from seeded HTML content
-                let html = seeded_page.get_html();
-                let extracted_links: HashSet<CaseInsensitiveString> = seeded_page
-                    .links_stream_base_ssg(base, &html, client, &self.domain_parsed)
-                    .await;
-                links.extend(extracted_links);
+                // Extract links and metadata from seeded HTML content if not binary
+                #[cfg(not(feature = "decentralized"))]
+                {
+                    let html_bytes = seeded_page.get_html_bytes_u8();
+                    if !html_bytes.is_empty() && !auto_encoder::is_binary_file(html_bytes) {
+                        let html = seeded_page.get_html();
+                        let extracted_links: HashSet<CaseInsensitiveString> = seeded_page
+                            .links_stream_base_ssg(base, &html, client, &self.domain_parsed)
+                            .await;
+                        links.extend(extracted_links);
+                    }
+                }
                 seeded_page
             } else {
                 Page::new_page_streaming(
