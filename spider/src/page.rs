@@ -583,6 +583,12 @@ pub struct Page {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<AIResults>>,
+    #[cfg(feature = "chrome")]
+    /// The usage from remote multimodal automation.
+    pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
+    #[cfg(feature = "chrome")]
+    /// The extra data from the remote multimodal automation.
+    pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
