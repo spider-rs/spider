@@ -1379,7 +1379,7 @@ impl Page {
     }
 
     /// Create a new page from WebDriver with full response.
-    #[cfg(all(feature = "webdriver", not(feature = "page_error_status_details")))]
+    #[cfg(feature = "webdriver")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_webdriver(
         url: &str,
@@ -1394,6 +1394,7 @@ impl Page {
             return Page {
                 url: url.into(),
                 status_code: *UNKNOWN_STATUS_ERROR,
+                #[cfg(not(feature = "page_error_status_details"))]
                 error_status: Some(format!("WebDriver navigation failed: {:?}", e)),
                 ..Default::default()
             };
@@ -1418,6 +1419,7 @@ impl Page {
                 Page {
                     url: url.into(),
                     status_code: *UNKNOWN_STATUS_ERROR,
+                    #[cfg(not(feature = "page_error_status_details"))]
                     error_status: Some(format!("Failed to get page content: {:?}", e)),
                     ..Default::default()
                 }
@@ -1425,15 +1427,21 @@ impl Page {
         }
     }
 
-    /// Create a new page from WebDriver with full response.
-    #[cfg(all(feature = "webdriver", feature = "page_error_status_details"))]
+    /// Create a new page from WebDriver with full response and automation support.
+    #[cfg(all(feature = "webdriver", feature = "chrome"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    pub async fn new_page_webdriver(
+    pub async fn new_page_webdriver_full(
         url: &str,
         driver: &std::sync::Arc<thirtyfour::WebDriver>,
         timeout: Option<std::time::Duration>,
+        wait_for: &Option<crate::configuration::WaitFor>,
+        execution_scripts: &Option<crate::features::chrome_common::ExecutionScripts>,
+        automation_scripts: &Option<crate::features::chrome_common::AutomationScripts>,
     ) -> Self {
-        use crate::features::webdriver::{attempt_navigation, get_page_content, get_current_url};
+        use crate::features::webdriver::{
+            attempt_navigation, get_page_content, get_current_url,
+            run_execution_scripts, run_url_automation_scripts,
+        };
 
         // Navigate to the URL
         if let Err(e) = attempt_navigation(url, driver, &timeout).await {
@@ -1441,8 +1449,43 @@ impl Page {
             return Page {
                 url: url.into(),
                 status_code: *UNKNOWN_STATUS_ERROR,
+                #[cfg(not(feature = "page_error_status_details"))]
+                error_status: Some(format!("WebDriver navigation failed: {:?}", e)),
                 ..Default::default()
             };
+        }
+
+        // Run execution scripts for this URL
+        run_execution_scripts(driver, url, execution_scripts).await;
+
+        // Run automation scripts for this URL
+        run_url_automation_scripts(driver, url, automation_scripts).await;
+
+        // Handle wait_for configuration
+        if let Some(wait_config) = wait_for {
+            // Handle delay wait
+            if let Some(ref delay) = wait_config.delay {
+                if let Some(timeout_duration) = delay.timeout {
+                    tokio::time::sleep(timeout_duration).await;
+                }
+            }
+            // Handle selector wait
+            if let Some(ref selector_wait) = wait_config.selector {
+                let wait_timeout = selector_wait
+                    .timeout
+                    .unwrap_or(std::time::Duration::from_secs(30));
+                let _ = crate::features::webdriver::wait_for_element(
+                    driver,
+                    &selector_wait.selector,
+                    wait_timeout,
+                )
+                .await;
+            }
+            // Handle idle network wait (approximate with delay)
+            if let Some(ref idle) = wait_config.idle_network {
+                let wait_time = idle.timeout.unwrap_or(std::time::Duration::from_secs(5));
+                tokio::time::sleep(wait_time).await;
+            }
         }
 
         // Get current URL (may have redirected)
@@ -1464,11 +1507,14 @@ impl Page {
                 Page {
                     url: url.into(),
                     status_code: *UNKNOWN_STATUS_ERROR,
+                    #[cfg(not(feature = "page_error_status_details"))]
+                    error_status: Some(format!("Failed to get page content: {:?}", e)),
                     ..Default::default()
                 }
             }
         }
     }
+
 
     /// New page with rewriter
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
