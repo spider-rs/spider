@@ -995,6 +995,21 @@ pub struct ContentAnalysis {
     pub text_ratio: f32,
     /// Indicators found (for debugging).
     pub indicators: Vec<String>,
+
+    // === BYTE SIZE TRACKING (more accurate than counts) ===
+
+    /// Total bytes of all SVG elements (inline SVGs can be massive).
+    pub svg_bytes: usize,
+    /// Total bytes of all script elements.
+    pub script_bytes: usize,
+    /// Total bytes of all style elements.
+    pub style_bytes: usize,
+    /// Total bytes of base64-encoded data URIs (images, fonts, etc.).
+    pub base64_bytes: usize,
+    /// Total bytes that should be cleaned (scripts + styles + heavy elements).
+    pub cleanable_bytes: usize,
+    /// Ratio of cleanable bytes to total HTML (higher = more benefit from cleaning).
+    pub cleanable_ratio: f32,
 }
 
 lazy_static::lazy_static! {
@@ -1041,7 +1056,19 @@ impl ContentAnalysis {
     ///     // HTML-only extraction is sufficient
     /// }
     /// ```
+    /// Fast analysis - single pass, no detailed byte size calculation.
+    /// Use this for quick decisions. Use `analyze_full()` for smart cleaning.
     pub fn analyze(html: &str) -> Self {
+        Self::analyze_internal(html, false)
+    }
+
+    /// Full analysis with byte size calculation for smart cleaning decisions.
+    /// More expensive but enables byte-size-based cleaning profile selection.
+    pub fn analyze_full(html: &str) -> Self {
+        Self::analyze_internal(html, true)
+    }
+
+    fn analyze_internal(html: &str, calculate_sizes: bool) -> Self {
         let html_bytes = html.as_bytes();
         let html_length = html.len();
 
@@ -1061,15 +1088,51 @@ impl ContentAnalysis {
             }
         }
 
+        // Count SVGs (fast - just count occurrences)
+        analysis.svg_count = html_bytes
+            .windows(4)
+            .filter(|w| w.eq_ignore_ascii_case(b"<svg"))
+            .count();
+
         // Check for SPA indicators
         analysis.has_dynamic_content = SPA_INDICATOR_MATCHER.find(html_bytes).is_some();
 
         // Use lol_html for efficient text extraction
         analysis.text_length = extract_text_length_fast(html);
 
-        // Calculate text ratio
+        // Only calculate detailed byte sizes when requested (more expensive)
+        if calculate_sizes {
+            let heavy_sizes = calculate_heavy_element_sizes(html);
+            analysis.svg_bytes = heavy_sizes.svg_bytes;
+            analysis.script_bytes = heavy_sizes.script_bytes;
+            analysis.style_bytes = heavy_sizes.style_bytes;
+            analysis.base64_bytes = heavy_sizes.base64_bytes;
+            analysis.cleanable_bytes = heavy_sizes.svg_bytes
+                + heavy_sizes.script_bytes
+                + heavy_sizes.style_bytes
+                + heavy_sizes.base64_bytes;
+        } else {
+            // Fast estimation: use counts and heuristics
+            // Average SVG ~5KB, script ~10KB, style ~2KB
+            analysis.svg_bytes = analysis.svg_count * 5_000;
+            analysis.script_bytes = estimate_script_bytes_fast(html_bytes);
+            analysis.style_bytes = estimate_style_bytes_fast(html_bytes);
+            analysis.base64_bytes = estimate_base64_bytes_fast(html_bytes);
+            analysis.cleanable_bytes = analysis.svg_bytes
+                + analysis.script_bytes
+                + analysis.style_bytes
+                + analysis.base64_bytes;
+        }
+
+        // Calculate ratios
         analysis.text_ratio = if html_length > 0 {
             analysis.text_length as f32 / html_length as f32
+        } else {
+            0.0
+        };
+
+        analysis.cleanable_ratio = if html_length > 0 {
+            analysis.cleanable_bytes as f32 / html_length as f32
         } else {
             0.0
         };
@@ -1096,6 +1159,20 @@ impl ContentAnalysis {
         }
         if analysis.embed_count > 0 {
             analysis.indicators.push(format!("{} embed/object", analysis.embed_count));
+        }
+        // Highlight large SVGs (more useful than count)
+        if analysis.svg_bytes > 10_000 {
+            analysis.indicators.push(format!(
+                "SVG {}KB",
+                analysis.svg_bytes / 1024
+            ));
+        }
+        // Highlight high cleanable ratio
+        if analysis.cleanable_ratio > 0.3 {
+            analysis.indicators.push(format!(
+                "cleanable {:.0}%",
+                analysis.cleanable_ratio * 100.0
+            ));
         }
         if analysis.is_thin_content {
             analysis.indicators.push(format!(
@@ -1224,6 +1301,173 @@ fn extract_text_length_fast(html: &str) -> usize {
     text_len.load(Ordering::Relaxed)
 }
 
+/// Heavy element byte sizes extracted from HTML.
+#[derive(Debug, Default)]
+struct HeavyElementSizes {
+    svg_bytes: usize,
+    script_bytes: usize,
+    style_bytes: usize,
+    base64_bytes: usize,
+}
+
+/// Calculate byte sizes of heavy elements (SVG, script, style, base64) using lol_html.
+/// This is more accurate than counting elements - a single large SVG can be 500KB+.
+fn calculate_heavy_element_sizes(html: &str) -> HeavyElementSizes {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let svg_bytes = Arc::new(AtomicUsize::new(0));
+    let script_bytes = Arc::new(AtomicUsize::new(0));
+    let style_bytes = Arc::new(AtomicUsize::new(0));
+
+    let svg_clone = Arc::clone(&svg_bytes);
+    let script_clone = Arc::clone(&script_bytes);
+    let style_clone = Arc::clone(&style_bytes);
+
+    // Track current element being processed for size calculation
+    let _current_element_size = Arc::new(AtomicUsize::new(0));
+    let in_svg = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let in_script = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let in_style = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let in_svg_clone = Arc::clone(&in_svg);
+    let in_script_clone = Arc::clone(&in_script);
+    let in_style_clone = Arc::clone(&in_style);
+    let svg_size = Arc::clone(&svg_bytes);
+    let script_size = Arc::clone(&script_bytes);
+    let style_size = Arc::clone(&style_bytes);
+
+    let mut rewriter = lol_html::HtmlRewriter::new(
+        lol_html::Settings {
+            element_content_handlers: vec![
+                lol_html::element!("svg", move |el| {
+                    in_svg_clone.store(true, Ordering::Relaxed);
+                    // Estimate opening tag size
+                    svg_clone.fetch_add(el.tag_name().len() + 2, Ordering::Relaxed);
+                    Ok(())
+                }),
+                lol_html::element!("script", move |el| {
+                    in_script_clone.store(true, Ordering::Relaxed);
+                    script_clone.fetch_add(el.tag_name().len() + 2, Ordering::Relaxed);
+                    Ok(())
+                }),
+                lol_html::element!("style", move |el| {
+                    in_style_clone.store(true, Ordering::Relaxed);
+                    style_clone.fetch_add(el.tag_name().len() + 2, Ordering::Relaxed);
+                    Ok(())
+                }),
+                lol_html::text!("svg", move |chunk| {
+                    svg_size.fetch_add(chunk.as_str().len(), Ordering::Relaxed);
+                    Ok(())
+                }),
+                lol_html::text!("script", move |chunk| {
+                    script_size.fetch_add(chunk.as_str().len(), Ordering::Relaxed);
+                    Ok(())
+                }),
+                lol_html::text!("style", move |chunk| {
+                    style_size.fetch_add(chunk.as_str().len(), Ordering::Relaxed);
+                    Ok(())
+                }),
+            ],
+            ..lol_html::Settings::new()
+        },
+        |_: &[u8]| {},
+    );
+
+    let _ = rewriter.write(html.as_bytes());
+    let _ = rewriter.end();
+
+    // Count base64 data URIs (common in SVGs and inline images)
+    let base64_bytes = count_base64_bytes(html);
+
+    HeavyElementSizes {
+        svg_bytes: svg_bytes.load(Ordering::Relaxed),
+        script_bytes: script_bytes.load(Ordering::Relaxed),
+        style_bytes: style_bytes.load(Ordering::Relaxed),
+        base64_bytes,
+    }
+}
+
+/// Count bytes in base64 data URIs (data:image/..., data:font/..., etc.)
+fn count_base64_bytes(html: &str) -> usize {
+    let mut total = 0;
+    let bytes = html.as_bytes();
+    let pattern = b"data:";
+
+    let mut i = 0;
+    while i < bytes.len().saturating_sub(5) {
+        if &bytes[i..i + 5] == pattern {
+            // Find the end of the data URI (quote, space, or >)
+            let start = i;
+            while i < bytes.len() && !matches!(bytes[i], b'"' | b'\'' | b' ' | b'>' | b')') {
+                i += 1;
+            }
+            total += i - start;
+        }
+        i += 1;
+    }
+    total
+}
+
+// === FAST ESTIMATION FUNCTIONS (no lol_html overhead) ===
+
+/// Fast estimate of script bytes by counting <script> tags and content between them.
+/// Average inline script is ~10KB, external script tag is ~100 bytes.
+#[inline]
+fn estimate_script_bytes_fast(html: &[u8]) -> usize {
+    let mut count = 0;
+    let mut i = 0;
+    while i < html.len().saturating_sub(7) {
+        if html[i..].starts_with(b"<script") || html[i..].starts_with(b"<SCRIPT") {
+            count += 1;
+            // Skip to end of script
+            while i < html.len().saturating_sub(9) {
+                if html[i..].starts_with(b"</script") || html[i..].starts_with(b"</SCRIPT") {
+                    break;
+                }
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    // Estimate: average script is 10KB
+    count * 10_000
+}
+
+/// Fast estimate of style bytes by counting <style> tags.
+#[inline]
+fn estimate_style_bytes_fast(html: &[u8]) -> usize {
+    let mut count = 0;
+    let mut i = 0;
+    while i < html.len().saturating_sub(6) {
+        if html[i..].starts_with(b"<style") || html[i..].starts_with(b"<STYLE") {
+            count += 1;
+        }
+        i += 1;
+    }
+    // Estimate: average style block is 2KB
+    count * 2_000
+}
+
+/// Fast estimate of base64 data URI bytes.
+#[inline]
+fn estimate_base64_bytes_fast(html: &[u8]) -> usize {
+    let mut total = 0;
+    let mut i = 0;
+    while i < html.len().saturating_sub(5) {
+        if &html[i..i + 5] == b"data:" {
+            let start = i;
+            // Skip to end of data URI
+            while i < html.len() && !matches!(html[i], b'"' | b'\'' | b' ' | b'>' | b')') {
+                i += 1;
+            }
+            total += i - start;
+        }
+        i += 1;
+    }
+    total
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -1347,64 +1591,146 @@ impl HtmlCleaningProfile {
     /// - `Extraction` intent allows more aggressive cleaning (remove nav, footer, etc.)
     /// - `Action` intent preserves interactive elements (buttons, forms, links)
     /// - `General` intent uses balanced heuristics
+    /// Size thresholds for smart cleaning decisions (in bytes).
+    const SVG_HEAVY_THRESHOLD: usize = 50_000; // 50KB of SVG is heavy
+    const SVG_VERY_HEAVY_THRESHOLD: usize = 100_000; // 100KB of SVG is very heavy
+    const BASE64_HEAVY_THRESHOLD: usize = 100_000; // 100KB of base64 data
+    const SCRIPT_HEAVY_THRESHOLD: usize = 200_000; // 200KB of scripts
+    const CLEANABLE_RATIO_HIGH: f32 = 0.4; // 40% of HTML is cleanable
+    const CLEANABLE_RATIO_MEDIUM: f32 = 0.25; // 25% of HTML is cleanable
+
+    /// Determine the best cleaning profile based on content analysis and intended use.
+    ///
+    /// Uses **byte sizes** (not just counts) for accurate decisions:
+    /// - SVG > 100KB → always Slim
+    /// - base64 > 100KB → always Slim
+    /// - cleanable_ratio > 40% → Slim
+    ///
+    /// Intent modifies behavior:
+    /// - `Extraction` → more aggressive, removes nav/footer/heavy elements
+    /// - `Action` → preserves interactive elements (buttons, forms, links)
+    /// - `General` → balanced heuristics
     pub fn from_content_analysis_with_intent(
         analysis: &ContentAnalysis,
         intent: CleaningIntent,
     ) -> Self {
+        // === BYTE-SIZE BASED DECISIONS (more accurate than counts!) ===
+
+        // Very heavy SVGs - always slim regardless of intent
+        if analysis.svg_bytes > Self::SVG_VERY_HEAVY_THRESHOLD {
+            return HtmlCleaningProfile::Slim;
+        }
+
+        // Very heavy base64 data (inline images, fonts) - always slim
+        if analysis.base64_bytes > Self::BASE64_HEAVY_THRESHOLD {
+            return HtmlCleaningProfile::Slim;
+        }
+
+        // High cleanable ratio means lots of bloat - slim is worthwhile
+        if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_HIGH {
+            return HtmlCleaningProfile::Slim;
+        }
+
         match intent {
             CleaningIntent::Extraction => {
                 // For extraction, we can be aggressive - we only need text content
+
+                // Heavy SVGs (50KB+) - slim them out
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Large HTML with lots of scripts - aggressive
+                if analysis.script_bytes > Self::SCRIPT_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                // Large HTML overall
                 if analysis.html_length > 100_000 {
                     return HtmlCleaningProfile::Aggressive;
                 }
-                if analysis.svg_count > 3
-                    || analysis.canvas_count > 0
+
+                // Medium cleanable ratio - slim is beneficial
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Canvas/video/embeds present - slim
+                if analysis.canvas_count > 0
                     || analysis.video_count > 1
                     || analysis.embed_count > 0
                 {
                     return HtmlCleaningProfile::Slim;
                 }
+
+                // Low text ratio with medium+ HTML - aggressive
                 if analysis.text_ratio < 0.1 && analysis.html_length > 30_000 {
                     return HtmlCleaningProfile::Aggressive;
                 }
+
+                // Default to slim for extraction (safe choice)
                 HtmlCleaningProfile::Slim
             }
             CleaningIntent::Action => {
-                // For actions, preserve structure but remove heavy non-interactive elements
-                if analysis.svg_count > 10 || analysis.canvas_count > 2 {
+                // For actions, preserve interactive elements but remove heavy visual bloat
+
+                // Heavy SVGs - slim (they're not interactive)
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
                     return HtmlCleaningProfile::Slim;
                 }
+
+                // Medium cleanable ratio - default cleaning preserves interactivity
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                // Very large HTML - need some cleaning
                 if analysis.html_length > 150_000 {
                     return HtmlCleaningProfile::Default;
                 }
+
                 // Keep minimal to preserve interactive elements
                 HtmlCleaningProfile::Minimal
             }
             CleaningIntent::General => {
                 // Balanced approach based on content characteristics
-                if analysis.svg_count > 5
-                    || analysis.canvas_count > 0
-                    || analysis.video_count > 2
-                {
+
+                // Heavy SVGs - slim
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
                     return HtmlCleaningProfile::Slim;
                 }
 
+                // Medium cleanable ratio - slim is beneficial
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Canvas/video present - slim
+                if analysis.canvas_count > 0 || analysis.video_count > 2 {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Low text ratio with large HTML - aggressive
                 if analysis.text_ratio < 0.05 && analysis.html_length > 50_000 {
                     return HtmlCleaningProfile::Aggressive;
                 }
 
+                // Embeds present - slim
                 if analysis.embed_count > 0 {
                     return HtmlCleaningProfile::Slim;
                 }
 
+                // Large HTML with moderate text - default
                 if analysis.html_length > 100_000 && analysis.text_ratio < 0.15 {
-                    return HtmlCleaningProfile::Slim;
+                    return HtmlCleaningProfile::Default;
                 }
 
+                // Medium HTML - default
                 if analysis.html_length > 30_000 {
                     return HtmlCleaningProfile::Default;
                 }
 
+                // Small HTML - minimal cleaning
                 HtmlCleaningProfile::Minimal
             }
         }
@@ -1418,6 +1744,23 @@ impl HtmlCleaningProfile {
     /// Quick check if this profile removes video/canvas elements.
     pub fn removes_media(&self) -> bool {
         matches!(self, HtmlCleaningProfile::Slim)
+    }
+
+    /// Estimate bytes that will be removed by this cleaning profile.
+    pub fn estimate_savings(&self, analysis: &ContentAnalysis) -> usize {
+        match self {
+            HtmlCleaningProfile::Raw => 0,
+            HtmlCleaningProfile::Minimal => analysis.script_bytes + analysis.style_bytes,
+            HtmlCleaningProfile::Default => {
+                analysis.script_bytes + analysis.style_bytes + (analysis.base64_bytes / 2)
+            }
+            HtmlCleaningProfile::Slim => analysis.cleanable_bytes,
+            HtmlCleaningProfile::Aggressive => {
+                // Aggressive also removes nav/footer, estimate ~10% more
+                analysis.cleanable_bytes + (analysis.html_length / 10)
+            }
+            HtmlCleaningProfile::Auto => 0, // Can't estimate without analyzing
+        }
     }
 }
 
