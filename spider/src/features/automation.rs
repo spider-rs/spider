@@ -5,9 +5,9 @@ use chromiumoxide::{
     cdp::browser_protocol::page::CaptureScreenshotFormat, page::ScreenshotParams, Page,
 };
 use reqwest::Client;
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 use serde::Serialize;
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 use serde_json::Value;
 use std::{error::Error as StdError, fmt};
 
@@ -34,7 +34,7 @@ pub type EngineResult<T> = Result<T, EngineError>;
 pub enum EngineError {
     /// HTTP-layer failure (request could not be sent, connection error, timeout, etc.).
     Http(reqwest::Error),
-    #[cfg(feature = "chrome")]
+    #[cfg(feature = "serde")]
     /// JSON serialization/deserialization failure when building or parsing payloads.
     Json(serde_json::Error),
     /// A required field was missing in a parsed JSON payload.
@@ -60,7 +60,7 @@ impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EngineError::Http(e) => write!(f, "http error: {e}"),
-            #[cfg(feature = "chrome")]
+            #[cfg(feature = "serde")]
             EngineError::Json(e) => write!(f, "json error: {e}"),
             EngineError::MissingField(s) => write!(f, "missing field: {s}"),
             EngineError::InvalidField(s) => write!(f, "invalid field: {s}"),
@@ -77,7 +77,7 @@ impl From<reqwest::Error> for EngineError {
     }
 }
 
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 impl From<serde_json::Error> for EngineError {
     fn from(e: serde_json::Error) -> Self {
         EngineError::Json(e)
@@ -985,6 +985,180 @@ impl RemoteMultimodalEngine {
         }
     }
 
+    /// Extract structured data from raw HTML content (no browser required).
+    ///
+    /// This method enables extraction from HTTP responses without Chrome.
+    /// It sends the HTML to the multimodal model and returns extracted data.
+    ///
+    /// # Arguments
+    /// * `html` - The raw HTML content to extract from
+    /// * `url` - The URL of the page (for context)
+    /// * `title` - Optional page title
+    ///
+    /// # Returns
+    /// An `AutomationResult` containing the extracted data in the `extracted` field.
+    #[cfg(feature = "serde")]
+    pub async fn extract_from_html(
+        &self,
+        html: &str,
+        url: &str,
+        title: Option<&str>,
+    ) -> EngineResult<AutomationResult> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            #[serde(rename = "response_format")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        let effective_cfg = &self.cfg;
+
+        // Build user prompt with HTML context
+        let mut user_text = String::with_capacity(256 + html.len().min(effective_cfg.html_max_bytes));
+        user_text.push_str("EXTRACTION CONTEXT:\n");
+        user_text.push_str("- url: ");
+        user_text.push_str(url);
+        user_text.push('\n');
+        if let Some(t) = title {
+            user_text.push_str("- title: ");
+            user_text.push_str(t);
+            user_text.push('\n');
+        }
+        user_text.push_str("\nHTML CONTENT:\n");
+
+        // Truncate HTML if needed
+        let html_truncated = truncate_utf8_tail(html, effective_cfg.html_max_bytes);
+        user_text.push_str(&html_truncated);
+
+        user_text.push_str("\n\nTASK:\nExtract structured data from the HTML above. Return a JSON object with:\n");
+        user_text.push_str("- \"label\": short description of what was extracted\n");
+        user_text.push_str("- \"done\": true\n");
+        user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
+        user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
+
+        if let Some(extra) = &self.user_message_extra {
+            if !extra.trim().is_empty() {
+                user_text.push_str("\n---\nUSER INSTRUCTIONS:\n");
+                user_text.push_str(extra.trim());
+                user_text.push('\n');
+            }
+        }
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(self.system_prompt_compiled(effective_cfg)),
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(user_text),
+                    }],
+                },
+            ],
+            temperature: effective_cfg.temperature,
+            max_tokens: effective_cfg.max_tokens,
+            response_format: if effective_cfg.request_json_object {
+                Some(ResponseFormat {
+                    format_type: "json_object".into(),
+                })
+            } else {
+                None
+            },
+        };
+
+        // Acquire permit before sending
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let start = std::time::Instant::now();
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        log::debug!(
+            "remote_multimodal extract_from_html: status={} latency={:?} body_len={}",
+            status,
+            start.elapsed(),
+            raw_body.len()
+        );
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "non-success status {status}: {raw_body}"
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)
+            .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
+
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        let usage = extract_usage(&root);
+
+        let plan_value = if effective_cfg.best_effort_json_extract {
+            best_effort_parse_json_object(&content)?
+        } else {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?
+        };
+
+        let label = plan_value
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("extraction")
+            .to_string();
+
+        let extracted = plan_value.get("extracted").cloned();
+
+        Ok(AutomationResult {
+            label,
+            steps_executed: 0,
+            success: true,
+            error: None,
+            usage,
+            extracted,
+            screenshot: None,
+        })
+    }
+
     /// System prompt compiled.
     pub fn system_prompt_compiled(&self, effective_cfg: &RemoteMultimodalConfig) -> String {
         let mut s = self
@@ -1806,7 +1980,7 @@ pub struct AutomationResult {
     /// Token usage accumulated across all inference rounds.
     pub usage: AutomationUsage,
     /// Structured data extracted from the page (when `extra_ai_data` is enabled).
-    #[cfg(feature = "chrome")]
+    #[cfg(feature = "serde")]
     pub extracted: Option<serde_json::Value>,
     /// Base64-encoded screenshot of the page after automation (when `screenshot` is enabled).
     pub screenshot: Option<String>,
@@ -1919,7 +2093,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 // ---------------------------------------------------------------------
 // Response parsing helpers (handles local OpenAI-like variants)
 // ---------------------------------------------------------------------
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 fn extract_assistant_content(root: &Value) -> Option<String> {
     let choice0 = root.get("choices")?.as_array()?.get(0)?;
     let msg = choice0.get("message").or_else(|| choice0.get("delta"))?;
@@ -1962,7 +2136,7 @@ fn extract_assistant_content(root: &Value) -> Option<String> {
 /// ```
 ///
 /// Returns a default `AutomationUsage` if the usage field is missing or malformed.
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 fn extract_usage(root: &Value) -> AutomationUsage {
     let usage = match root.get("usage") {
         Some(u) => u,
@@ -1988,7 +2162,7 @@ fn extract_usage(root: &Value) -> AutomationUsage {
 }
 
 /// Best effort parse the json object.
-#[cfg(feature = "chrome")]
+#[cfg(feature = "serde")]
 fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
     // Try direct parse first
     if let Ok(v) = serde_json::from_str::<Value>(s) {
@@ -2243,7 +2417,7 @@ pub fn effective_multimodal_config_for_url(
 }
 
 #[cfg(feature = "chrome")]
-/// Run the remove multi-modal configuration.
+/// Run the remote multi-modal configuration with a browser page.
 pub async fn run_remote_multimodal_if_enabled(
     cfgs: &Option<Box<crate::features::automation::RemoteMultimodalConfigs>>,
     page: &chromiumoxide::Page,
@@ -2272,6 +2446,63 @@ pub async fn run_remote_multimodal_if_enabled(
     .run(page, url)
     .await?;
 
+    Ok(Some(result))
+}
+
+/// Run remote multi-modal extraction on raw HTML content (no browser required).
+///
+/// This function enables extraction from HTTP responses without requiring Chrome.
+/// It sends the HTML content to the multimodal model for structured data extraction.
+///
+/// Note: This only supports extraction (`extra_ai_data`), not browser automation.
+#[cfg(feature = "serde")]
+pub async fn run_remote_multimodal_extraction(
+    cfgs: &Option<Box<crate::features::automation::RemoteMultimodalConfigs>>,
+    html: &str,
+    url: &str,
+    title: Option<&str>,
+) -> Result<Option<crate::features::automation::AutomationResult>, crate::features::automation::EngineError>
+{
+    let cfgs = match cfgs.as_deref() {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // Only run if extraction is enabled
+    if !cfgs.cfg.extra_ai_data {
+        return Ok(None);
+    }
+
+    // Check URL gating
+    if let Some(gate) = &cfgs.prompt_url_gate {
+        if gate.match_url(url).is_none() {
+            return Ok(Some(AutomationResult {
+                label: "url_not_allowed".into(),
+                steps_executed: 0,
+                success: true,
+                error: None,
+                usage: AutomationUsage::default(),
+                extracted: None,
+                screenshot: None,
+            }));
+        }
+    }
+
+    let sem = cfgs.get_or_init_semaphore();
+    let mut engine = crate::features::automation::RemoteMultimodalEngine::new(
+        cfgs.api_url.clone(),
+        cfgs.model_name.clone(),
+        cfgs.system_prompt.clone(),
+    )
+    .with_api_key(cfgs.api_key.as_deref());
+
+    engine.with_system_prompt_extra(cfgs.system_prompt_extra.as_deref());
+    engine.with_user_message_extra(cfgs.user_message_extra.as_deref());
+    engine.with_remote_multimodal_config(cfgs.cfg.clone());
+    engine.with_prompt_url_gate(cfgs.prompt_url_gate.clone());
+    engine.with_semaphore(sem);
+
+    let result = engine.extract_from_html(html, url, title).await?;
     Ok(Some(result))
 }
 

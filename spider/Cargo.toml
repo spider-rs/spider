@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.43.3"
+version = "2.43.4"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -193,6 +193,7 @@ serde = [
     "string-interner/serde",
     "dep:serde_regex",
     "smallvec/serde",
+    "reqwest_json",
 ]
 fs = ["tokio/fs"]
 full_resources = []
