@@ -954,6 +954,276 @@ pub struct ChainStepResult {
     pub extracted: Option<serde_json::Value>,
 }
 
+// ============================================================================
+// CONTENT ANALYSIS FOR INTELLIGENT SCREENSHOT DETECTION
+// ============================================================================
+
+/// Result of analyzing HTML content to determine if visual capture is needed.
+///
+/// This analysis helps decide whether to rely on HTML text alone or require
+/// a screenshot for accurate extraction, especially for pages with:
+/// - iframes, videos, canvas elements
+/// - Dynamically rendered content (heavy JavaScript)
+/// - Minimal text but rich visual elements
+/// - SVGs, images with embedded text
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ContentAnalysis {
+    /// Whether the content is considered "thin" (low text content).
+    pub is_thin_content: bool,
+    /// Whether visual elements that need screenshot were detected.
+    pub has_visual_elements: bool,
+    /// Whether dynamic content indicators were found.
+    pub has_dynamic_content: bool,
+    /// Recommendation: true if screenshot is recommended for extraction.
+    pub needs_screenshot: bool,
+    /// Count of iframe elements.
+    pub iframe_count: usize,
+    /// Count of video elements.
+    pub video_count: usize,
+    /// Count of canvas elements.
+    pub canvas_count: usize,
+    /// Count of embed/object elements.
+    pub embed_count: usize,
+    /// Count of SVG elements.
+    pub svg_count: usize,
+    /// Approximate text content length (visible text).
+    pub text_length: usize,
+    /// Total HTML length.
+    pub html_length: usize,
+    /// Ratio of text to HTML (lower = more markup, less content).
+    pub text_ratio: f32,
+    /// Indicators found (for debugging).
+    pub indicators: Vec<String>,
+}
+
+lazy_static::lazy_static! {
+    /// Aho-Corasick pattern matcher for visual element tags (case-insensitive).
+    static ref VISUAL_ELEMENT_MATCHER: aho_corasick::AhoCorasick = {
+        aho_corasick::AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(&["<iframe", "<video", "<canvas", "<embed", "<object"])
+            .expect("valid patterns")
+    };
+
+    /// Aho-Corasick pattern matcher for SPA framework indicators.
+    static ref SPA_INDICATOR_MATCHER: aho_corasick::AhoCorasick = {
+        aho_corasick::AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(&[
+                "data-reactroot",
+                "__next",
+                "id=\"app\"",
+                "id=\"root\"",
+                "ng-app",
+                "v-app",
+            ])
+            .expect("valid patterns")
+    };
+}
+
+impl ContentAnalysis {
+    /// Minimum text length to consider content "substantial".
+    const MIN_TEXT_LENGTH: usize = 200;
+    /// Text-to-HTML ratio below which content is considered "thin".
+    const MIN_TEXT_RATIO: f32 = 0.05;
+
+    /// Analyze HTML content to determine if screenshot is needed.
+    ///
+    /// Uses efficient Aho-Corasick multi-pattern matching for performance.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let analysis = ContentAnalysis::analyze(html);
+    /// if analysis.needs_screenshot {
+    ///     // Use screenshot-based extraction
+    /// } else {
+    ///     // HTML-only extraction is sufficient
+    /// }
+    /// ```
+    pub fn analyze(html: &str) -> Self {
+        let html_bytes = html.as_bytes();
+        let html_length = html.len();
+
+        let mut analysis = Self {
+            html_length,
+            ..Default::default()
+        };
+
+        // Count visual elements using Aho-Corasick (single pass, case-insensitive)
+        for mat in VISUAL_ELEMENT_MATCHER.find_iter(html_bytes) {
+            match mat.pattern().as_usize() {
+                0 => analysis.iframe_count += 1,  // <iframe
+                1 => analysis.video_count += 1,   // <video
+                2 => analysis.canvas_count += 1,  // <canvas
+                3 | 4 => analysis.embed_count += 1, // <embed, <object
+                _ => {}
+            }
+        }
+
+        // Check for SPA indicators
+        analysis.has_dynamic_content = SPA_INDICATOR_MATCHER.find(html_bytes).is_some();
+
+        // Use lol_html for efficient text extraction
+        analysis.text_length = extract_text_length_fast(html);
+
+        // Calculate text ratio
+        analysis.text_ratio = if html_length > 0 {
+            analysis.text_length as f32 / html_length as f32
+        } else {
+            0.0
+        };
+
+        // Determine if content is "thin"
+        analysis.is_thin_content = analysis.text_length < Self::MIN_TEXT_LENGTH
+            || analysis.text_ratio < Self::MIN_TEXT_RATIO;
+
+        // Check for visual elements
+        analysis.has_visual_elements = analysis.iframe_count > 0
+            || analysis.video_count > 0
+            || analysis.canvas_count > 0
+            || analysis.embed_count > 0;
+
+        // Build indicators list (only if needed for debugging)
+        if analysis.iframe_count > 0 {
+            analysis.indicators.push(format!("{} iframe(s)", analysis.iframe_count));
+        }
+        if analysis.video_count > 0 {
+            analysis.indicators.push(format!("{} video(s)", analysis.video_count));
+        }
+        if analysis.canvas_count > 0 {
+            analysis.indicators.push(format!("{} canvas", analysis.canvas_count));
+        }
+        if analysis.embed_count > 0 {
+            analysis.indicators.push(format!("{} embed/object", analysis.embed_count));
+        }
+        if analysis.is_thin_content {
+            analysis.indicators.push(format!(
+                "thin ({}b, {:.0}%)",
+                analysis.text_length,
+                analysis.text_ratio * 100.0
+            ));
+        }
+        if analysis.has_dynamic_content {
+            analysis.indicators.push("SPA".to_string());
+        }
+
+        // Final recommendation
+        analysis.needs_screenshot = analysis.has_visual_elements
+            || analysis.is_thin_content
+            || (analysis.has_dynamic_content && analysis.text_length < 500);
+
+        analysis
+    }
+
+    /// Quick check if screenshot is likely needed (very fast, single pass).
+    ///
+    /// Uses Aho-Corasick for efficient multi-pattern matching without
+    /// allocating memory for lowercase conversion.
+    #[inline]
+    pub fn quick_needs_screenshot(html: &str) -> bool {
+        let bytes = html.as_bytes();
+
+        // Quick check for visual elements (iframe, video, canvas, embed, object)
+        if VISUAL_ELEMENT_MATCHER.find(bytes).is_some() {
+            return true;
+        }
+
+        // Estimate text content length (fast approximation)
+        let text_len = estimate_text_length_fast(bytes);
+
+        // Thin content needs screenshot
+        if text_len < 200 {
+            return true;
+        }
+
+        // SPA with minimal content needs screenshot
+        if text_len < 500 && SPA_INDICATOR_MATCHER.find(bytes).is_some() {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if HTML has any visual elements (iframe, video, canvas, embed, object).
+    #[inline]
+    pub fn has_visual_elements(html: &str) -> bool {
+        VISUAL_ELEMENT_MATCHER.find(html.as_bytes()).is_some()
+    }
+}
+
+/// Fast text length estimation by counting non-tag characters.
+/// Doesn't allocate - just estimates the visible text length.
+#[inline]
+fn estimate_text_length_fast(html: &[u8]) -> usize {
+    let mut text_len = 0;
+    let mut in_tag = false;
+    let mut in_script = 0u8; // 0=no, 1=in <script, 2=saw <, looking for /script
+
+    for &byte in html {
+        match byte {
+            b'<' => {
+                in_tag = true;
+                if in_script == 0 {
+                    in_script = 2; // might be starting </script>
+                }
+            }
+            b'>' => {
+                in_tag = false;
+            }
+            b's' | b'S' if in_tag => {
+                // Could be <script or </script - simplified heuristic
+            }
+            _ if !in_tag && in_script == 0 => {
+                if !byte.is_ascii_whitespace() || text_len > 0 {
+                    text_len += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    text_len
+}
+
+/// Extract text length using lol_html streaming parser (more accurate than estimation).
+fn extract_text_length_fast(html: &str) -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let text_len = Arc::new(AtomicUsize::new(0));
+    let text_len_clone = Arc::clone(&text_len);
+
+    // Use lol_html for efficient streaming text extraction
+    let mut rewriter = lol_html::HtmlRewriter::new(
+        lol_html::Settings {
+            element_content_handlers: vec![
+                // Skip script and style content
+                lol_html::text!("script", |_| Ok(())),
+                lol_html::text!("style", |_| Ok(())),
+            ],
+            document_content_handlers: vec![
+                lol_html::doc_text!(move |chunk| {
+                    let text = chunk.as_str();
+                    let non_ws_len = text.chars().filter(|c| !c.is_whitespace()).count();
+                    text_len_clone.fetch_add(non_ws_len, Ordering::Relaxed);
+                    Ok(())
+                }),
+            ],
+            ..lol_html::Settings::new()
+        },
+        |_: &[u8]| {},
+    );
+
+    if rewriter.write(html.as_bytes()).is_err() {
+        return estimate_text_length_fast(html.as_bytes());
+    }
+
+    let _ = rewriter.end();
+
+    text_len.load(Ordering::Relaxed)
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -1965,6 +2235,247 @@ impl RemoteMultimodalEngine {
             extracted,
             screenshot: None,
         })
+    }
+
+    /// Extract structured data from HTML with an optional screenshot.
+    ///
+    /// This method combines HTML text with a screenshot for more accurate extraction,
+    /// especially useful for pages with visual content that isn't in the HTML
+    /// (iframes, videos, canvas, dynamically rendered content).
+    ///
+    /// # Arguments
+    /// * `html` - The raw HTML content
+    /// * `url` - The URL of the page (for context)
+    /// * `title` - Optional page title
+    /// * `screenshot_base64` - Optional base64-encoded screenshot (PNG/JPEG)
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Use with pre-captured screenshot
+    /// let result = engine.extract_with_screenshot(
+    ///     &html,
+    ///     "https://example.com",
+    ///     Some("Page Title"),
+    ///     Some(&screenshot_base64),
+    /// ).await?;
+    /// ```
+    #[cfg(feature = "serde")]
+    pub async fn extract_with_screenshot(
+        &self,
+        html: &str,
+        url: &str,
+        title: Option<&str>,
+        screenshot_base64: Option<&str>,
+    ) -> EngineResult<AutomationResult> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrlBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrlBlock {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        let effective_cfg = &self.cfg;
+
+        // Build user prompt with HTML context
+        let mut user_text = String::with_capacity(256 + html.len().min(effective_cfg.html_max_bytes));
+        user_text.push_str("EXTRACTION CONTEXT:\n");
+        user_text.push_str("- url: ");
+        user_text.push_str(url);
+        user_text.push('\n');
+        if let Some(t) = title {
+            user_text.push_str("- title: ");
+            user_text.push_str(t);
+            user_text.push('\n');
+        }
+
+        // Analyze content and note if screenshot is being used
+        if screenshot_base64.is_some() {
+            user_text.push_str("- screenshot: provided (use for visual content not in HTML)\n");
+        }
+
+        user_text.push_str("\nHTML CONTENT:\n");
+        let html_truncated = truncate_utf8_tail(html, effective_cfg.html_max_bytes);
+        user_text.push_str(&html_truncated);
+
+        user_text.push_str("\n\nTASK:\nExtract structured data from the page. Use both the HTML and screenshot (if provided) to extract information. Return a JSON object with:\n");
+        user_text.push_str("- \"label\": short description of what was extracted\n");
+        user_text.push_str("- \"done\": true\n");
+        user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
+        user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
+
+        if screenshot_base64.is_some() {
+            user_text.push_str("\nIMPORTANT: The screenshot may contain visual information not present in the HTML (iframe content, videos, canvas drawings, dynamically rendered content). Examine the screenshot carefully.\n");
+        }
+
+        if let Some(extra) = &self.user_message_extra {
+            if !extra.trim().is_empty() {
+                user_text.push_str("\n---\nUSER INSTRUCTIONS:\n");
+                user_text.push_str(extra.trim());
+                user_text.push('\n');
+            }
+        }
+
+        // Build message content
+        let mut user_content = vec![ContentBlock {
+            content_type: "text".into(),
+            text: Some(user_text),
+            image_url: None,
+        }];
+
+        // Add screenshot if provided
+        if let Some(screenshot) = screenshot_base64 {
+            let image_url = if screenshot.starts_with("data:") {
+                screenshot.to_string()
+            } else {
+                format!("data:image/png;base64,{}", screenshot)
+            };
+            user_content.push(ContentBlock {
+                content_type: "image_url".into(),
+                text: None,
+                image_url: Some(ImageUrlBlock { url: image_url }),
+            });
+        }
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(self.system_prompt_compiled(effective_cfg)),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: user_content,
+                },
+            ],
+            temperature: effective_cfg.temperature,
+            max_tokens: effective_cfg.max_tokens,
+            response_format: if effective_cfg.request_json_object {
+                Some(ResponseFormat {
+                    format_type: "json_object".into(),
+                })
+            } else {
+                None
+            },
+        };
+
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let start = std::time::Instant::now();
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        log::debug!(
+            "remote_multimodal extract_with_screenshot: status={} latency={:?} body_len={}",
+            status,
+            start.elapsed(),
+            raw_body.len()
+        );
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "non-success status {status}: {raw_body}"
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)
+            .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
+
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        let usage = extract_usage(&root);
+
+        let plan_value = if effective_cfg.best_effort_json_extract {
+            best_effort_parse_json_object(&content)?
+        } else {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?
+        };
+
+        let label = plan_value
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("extraction")
+            .to_string();
+
+        let extracted = plan_value.get("extracted").cloned();
+
+        Ok(AutomationResult {
+            label,
+            steps_executed: 0,
+            success: true,
+            error: None,
+            usage,
+            extracted,
+            screenshot: screenshot_base64.map(|s| s.to_string()),
+        })
+    }
+
+    /// Analyze HTML content to determine if visual capture (screenshot) is needed.
+    ///
+    /// This is useful before calling extraction methods to decide whether to
+    /// capture a screenshot for better results.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let analysis = engine.analyze_content(&html);
+    /// if analysis.needs_screenshot {
+    ///     log::info!("Screenshot recommended: {:?}", analysis.indicators);
+    ///     // Capture screenshot and use extract_with_screenshot
+    /// }
+    /// ```
+    pub fn analyze_content(&self, html: &str) -> ContentAnalysis {
+        ContentAnalysis::analyze(html)
+    }
+
+    /// Quick check if screenshot is likely needed for extraction.
+    ///
+    /// Faster than `analyze_content()` but less detailed.
+    pub fn needs_screenshot(&self, html: &str) -> bool {
+        ContentAnalysis::quick_needs_screenshot(html)
     }
 
     /// System prompt compiled.
