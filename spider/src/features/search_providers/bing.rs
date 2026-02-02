@@ -51,7 +51,7 @@ impl SearchProvider for BingProvider {
         &self,
         query: &str,
         options: &SearchOptions,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> Result<SearchResults, SearchError> {
         // Build query parameters
         let mut params = vec![("q", query.to_string())];
@@ -76,7 +76,7 @@ impl SearchProvider for BingProvider {
                 .send()
                 .await
         } else {
-            let c = crate::ClientBuilder::new()
+            let c = reqwest::ClientBuilder::new()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .map_err(|e| SearchError::RequestFailed(e.to_string()))?;

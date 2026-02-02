@@ -10,13 +10,14 @@ use std::fmt;
 pub trait SearchProvider: Send + Sync {
     /// Execute a search query and return results.
     ///
-    /// The client parameter allows reusing an existing HTTP client from the crawl,
+    /// The client parameter allows reusing an existing HTTP client,
     /// or passing `None` to use the provider's default client.
+    /// Note: Uses `reqwest::Client` directly since search APIs don't need caching middleware.
     fn search(
         &self,
         query: &str,
         options: &SearchOptions,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> impl std::future::Future<Output = Result<SearchResults, SearchError>> + Send;
 
     /// Provider name for logging/debugging.

@@ -7037,7 +7037,7 @@ Rules:
         &self,
         query: &str,
         options: Option<crate::features::search::SearchOptions>,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> EngineResult<crate::features::search::SearchResults> {
         use crate::configuration::SearchProviderType;
         use crate::features::search::SearchProvider;
@@ -7147,7 +7147,7 @@ Rules:
         query: &str,
         extraction_prompt: &str,
         options: Option<crate::features::search::SearchOptions>,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> EngineResult<Vec<(String, serde_json::Value)>> {
         // Search first
         let search_results = self.search(query, options, client).await?;
@@ -7161,7 +7161,7 @@ Rules:
         let http_client = match client {
             Some(c) => c,
             None => {
-                owned_client = crate::ClientBuilder::new()
+                owned_client = reqwest::ClientBuilder::new()
                     .timeout(std::time::Duration::from_secs(30))
                     .build()
                     .map_err(|e| EngineError::Remote(e.to_string()))?;
@@ -7244,7 +7244,7 @@ Rules:
         &self,
         topic: &str,
         options: ResearchOptions,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> EngineResult<ResearchResult> {
         use crate::features::search::SearchOptions;
 
@@ -7261,7 +7261,7 @@ Rules:
         let http_client = match client {
             Some(c) => c,
             None => {
-                owned_client = crate::ClientBuilder::new()
+                owned_client = reqwest::ClientBuilder::new()
                     .timeout(std::time::Duration::from_secs(30))
                     .build()
                     .map_err(|e| EngineError::Remote(e.to_string()))?;

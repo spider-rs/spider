@@ -60,7 +60,7 @@ impl SearchProvider for TavilyProvider {
         &self,
         query: &str,
         options: &SearchOptions,
-        client: Option<&crate::Client>,
+        client: Option<&reqwest::Client>,
     ) -> Result<SearchResults, SearchError> {
         // Build request body
         let mut body = serde_json::json!({
@@ -90,7 +90,7 @@ impl SearchProvider for TavilyProvider {
                 .send()
                 .await
         } else {
-            let c = crate::ClientBuilder::new()
+            let c = reqwest::ClientBuilder::new()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .map_err(|e| SearchError::RequestFailed(e.to_string()))?;
