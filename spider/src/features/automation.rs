@@ -1990,30 +1990,63 @@ fn extract_usage(root: &Value) -> AutomationUsage {
 /// Best effort parse the json object.
 #[cfg(feature = "chrome")]
 fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
+    // Try direct parse first
     if let Ok(v) = serde_json::from_str::<Value>(s) {
         return Ok(v);
     }
 
     let trimmed = s.trim();
-    let unfenced = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .map(|x| x.trim())
-        .unwrap_or(trimmed);
-    let unfenced = unfenced
-        .strip_suffix("```")
-        .map(|x| x.trim())
-        .unwrap_or(unfenced);
+
+    // Try to find ```json block anywhere in the text (handles reasoning before JSON)
+    let unfenced = if let Some(start) = trimmed.find("```json") {
+        let after_marker = &trimmed[start + 7..];
+        if let Some(end) = after_marker.find("```") {
+            after_marker[..end].trim()
+        } else {
+            after_marker.trim()
+        }
+    } else if let Some(start) = trimmed.find("```") {
+        // Try generic code block
+        let after_marker = &trimmed[start + 3..];
+        if let Some(end) = after_marker.find("```") {
+            after_marker[..end].trim()
+        } else {
+            after_marker.trim()
+        }
+    } else {
+        // Fallback: strip prefix/suffix if at boundaries
+        let unfenced = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```"))
+            .map(|x| x.trim())
+            .unwrap_or(trimmed);
+        unfenced
+            .strip_suffix("```")
+            .map(|x| x.trim())
+            .unwrap_or(unfenced)
+    };
 
     if let Ok(v) = serde_json::from_str::<Value>(unfenced) {
         return Ok(v);
     }
 
+    // Try to find JSON object/array directly in the text
     if let (Some(a), Some(b)) = (unfenced.find('{'), unfenced.rfind('}')) {
         if b > a {
             let slice = &unfenced[a..=b];
-            let v = serde_json::from_str::<Value>(slice)?;
-            return Ok(v);
+            if let Ok(v) = serde_json::from_str::<Value>(slice) {
+                return Ok(v);
+            }
+        }
+    }
+
+    // Try array as well
+    if let (Some(a), Some(b)) = (unfenced.find('['), unfenced.rfind(']')) {
+        if b > a {
+            let slice = &unfenced[a..=b];
+            if let Ok(v) = serde_json::from_str::<Value>(slice) {
+                return Ok(v);
+            }
         }
     }
 
