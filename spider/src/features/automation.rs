@@ -2728,3 +2728,186 @@ impl RemoteMultimodalEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test extraction from thinking model output with multiple JSON blocks.
+    /// The model refines its answer through multiple ```json``` blocks,
+    /// and we should extract the LAST one.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_extract_last_json_from_thinking_output() {
+        let thinking_output = r#"1. **Analyze the Request:**
+
+* **Goal:** Extract book details from the provided HTML content.
+
+* **Output Format:** Valid JSON.
+
+* **Input:** A snippet of HTML representing a product page for a book named "A Light in the Attic".
+
+2. **Scan the HTML for Key Data Points:**
+
+* *Title:* Found in `<h1>A Light in the Attic</h1>`.
+
+* *Price:* Found in `<p class="price_color">£51.77</p>`.
+
+* *Availability:* Found in `<p class="instock availability">... In stock (22 available) ...</p>`.
+
+* *Rating:* Found in `<p class="star-rating Three">... 5 stars ...</p>`.
+
+* *UPC:* Found in `<tr><th>UPC</th><td>a897fe39b1053632</td></tr>`.
+
+* *Product Type:* Found in `<tr><th>Product Type</th><td>Books</td></tr>`.
+
+* *Number of Reviews:* Found in `<tr><th>Number of reviews</th><td>0</td></tr>`.
+
+3. **Structure the JSON:**
+
+* I need a root object. Let's call it `book`.
+
+* Inside `book`, I'll list the extracted fields.
+
+* *Drafting the JSON structure:*
+
+```json
+{
+"title": "A Light in the Attic",
+"price": "£51.77",
+"availability": "In stock (22 available)",
+"rating": "5",
+"upc": "a897fe39b1053632",
+"product_type": "Books",
+"number_of_reviews": "0"
+}
+```
+
+4. **Refining the Data:**
+
+* *Title:* "A Light in the Attic"
+
+* *Price:* "£51.77"
+
+* *Availability:* "In stock (22 available)" (or just "In stock"). The HTML says "In stock (22 available)". I'll keep the full string or just "In stock". Let's stick to the text in the HTML for accuracy.
+
+* *Rating:* The class is `star-rating Three`. The text says "Five stars" (implied by the 5 icons). I'll extract the number of stars or the class name. "5" is a safe integer.
+
+* *UPC:* "a897fe39b1053632"
+
+* *Product Type:* "Books"
+
+* *Number of Reviews:* "0"
+
+5. **Final JSON Construction:**
+
+```json
+{
+"title": "A Light in the Attic",
+"price": "£51.77",
+"availability": "In stock (22 available)",
+"rating": "5",
+"upc": "a897fe39b1053632",
+"product_type": "Books",
+"number_of_reviews": "0"
+}
+```
+
+6. **Verification:**
+
+* Does the JSON contain all the relevant book info? Yes.
+
+* Is the JSON valid? Yes.
+
+* Are the values extracted correctly from the HTML tags? Yes.
+
+7. **Final Output Generation:** (Produce the JSON block).</think>```json
+{
+"title": "A Light in the Attic",
+"price": "£51.77",
+"availability": "In stock (22 available)",
+"rating": "5",
+"upc": "a897fe39b1053632",
+"product_type": "Books",
+"number_of_reviews": "0"
+}
+```"#;
+
+        let result = best_effort_parse_json_object(thinking_output);
+        assert!(result.is_ok(), "Should successfully parse thinking output");
+
+        let json = result.unwrap();
+        assert_eq!(json["title"], "A Light in the Attic");
+        assert_eq!(json["price"], "£51.77");
+        assert_eq!(json["upc"], "a897fe39b1053632");
+        assert_eq!(json["product_type"], "Books");
+    }
+
+    /// Test extraction of code blocks - should get the LAST one.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_extract_last_code_block() {
+        let input = r#"Here's my first attempt:
+```json
+{"version": 1}
+```
+Actually, let me fix that:
+```json
+{"version": 2, "fixed": true}
+```
+"#;
+
+        let block = extract_last_code_block(input);
+        assert!(block.is_some());
+        let block = block.unwrap();
+        assert!(block.contains("version"));
+        assert!(block.contains("fixed"));
+
+        // Parse it and verify it's version 2
+        let json: serde_json::Value = serde_json::from_str(block).unwrap();
+        assert_eq!(json["version"], 2);
+        assert_eq!(json["fixed"], true);
+    }
+
+    /// Test proper brace matching for nested JSON.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_extract_nested_json() {
+        let input = r#"Some text before {"outer": {"inner": {"deep": 1}}} more text"#;
+
+        let extracted = extract_last_json_object(input);
+        assert!(extracted.is_some());
+
+        let json: serde_json::Value = serde_json::from_str(extracted.unwrap()).unwrap();
+        assert_eq!(json["outer"]["inner"]["deep"], 1);
+    }
+
+    /// Test that we don't get tripped up by braces in strings.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_braces_in_strings() {
+        let input = r#"{"message": "Use {curly} braces", "count": 1}"#;
+
+        let extracted = extract_last_json_object(input);
+        assert!(extracted.is_some());
+
+        let json: serde_json::Value = serde_json::from_str(extracted.unwrap()).unwrap();
+        assert_eq!(json["message"], "Use {curly} braces");
+        assert_eq!(json["count"], 1);
+    }
+
+    /// Test array extraction.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_extract_array() {
+        let input = r#"The items are: [{"id": 1}, {"id": 2}] end"#;
+
+        let extracted = extract_last_json_array(input);
+        assert!(extracted.is_some());
+
+        let json: serde_json::Value = serde_json::from_str(extracted.unwrap()).unwrap();
+        assert!(json.is_array());
+        assert_eq!(json[0]["id"], 1);
+        assert_eq!(json[1]["id"], 2);
+    }
+}
