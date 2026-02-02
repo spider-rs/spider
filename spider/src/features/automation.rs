@@ -581,6 +581,379 @@ impl StructuredOutputConfig {
     }
 }
 
+// ============================================================================
+// PHASE 3: ADVANCED AGENTIC FEATURES
+// ============================================================================
+
+/// Error recovery strategy for agent execution.
+///
+/// Defines how the agent should handle failures during multi-step execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RecoveryStrategy {
+    /// Retry the same action up to N times.
+    #[default]
+    Retry,
+    /// Try an alternative approach (re-query LLM for different solution).
+    Alternative,
+    /// Skip the failed step and continue with the next action.
+    Skip,
+    /// Abort the entire execution on failure.
+    Abort,
+}
+
+/// Configuration for the autonomous agent executor.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone)]
+pub struct AgentConfig {
+    /// The high-level goal to achieve.
+    pub goal: String,
+    /// Maximum number of actions before stopping.
+    pub max_steps: usize,
+    /// Maximum time in milliseconds before timeout.
+    pub timeout_ms: u64,
+    /// Strategy for handling action failures.
+    pub recovery_strategy: RecoveryStrategy,
+    /// Number of retries for the Retry strategy.
+    pub max_retries: usize,
+    /// Whether to use the selector cache for actions.
+    pub use_cache: bool,
+    /// Whether to take screenshots after each step.
+    pub capture_screenshots: bool,
+    /// URLs that indicate goal completion (optional).
+    pub success_urls: Vec<String>,
+    /// Text patterns that indicate goal completion (optional).
+    pub success_patterns: Vec<String>,
+    /// Whether to extract data when goal is reached.
+    pub extract_on_success: bool,
+    /// Optional extraction prompt for final data extraction.
+    pub extraction_prompt: Option<String>,
+}
+
+#[cfg(feature = "serde")]
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            goal: String::new(),
+            max_steps: 20,
+            timeout_ms: 120_000, // 2 minutes
+            recovery_strategy: RecoveryStrategy::Retry,
+            max_retries: 3,
+            use_cache: true,
+            capture_screenshots: true,
+            success_urls: Vec::new(),
+            success_patterns: Vec::new(),
+            extract_on_success: false,
+            extraction_prompt: None,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl AgentConfig {
+    /// Create a new agent config with a goal.
+    pub fn new(goal: &str) -> Self {
+        Self {
+            goal: goal.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Set maximum steps.
+    pub fn with_max_steps(mut self, max_steps: usize) -> Self {
+        self.max_steps = max_steps;
+        self
+    }
+
+    /// Set timeout in milliseconds.
+    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Set recovery strategy.
+    pub fn with_recovery(mut self, strategy: RecoveryStrategy) -> Self {
+        self.recovery_strategy = strategy;
+        self
+    }
+
+    /// Set max retries for Retry strategy.
+    pub fn with_retries(mut self, max_retries: usize) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// Enable/disable selector cache.
+    pub fn with_cache(mut self, use_cache: bool) -> Self {
+        self.use_cache = use_cache;
+        self
+    }
+
+    /// Add a URL pattern that indicates success.
+    pub fn with_success_url(mut self, url: &str) -> Self {
+        self.success_urls.push(url.to_string());
+        self
+    }
+
+    /// Add a text pattern that indicates success.
+    pub fn with_success_pattern(mut self, pattern: &str) -> Self {
+        self.success_patterns.push(pattern.to_string());
+        self
+    }
+
+    /// Enable extraction on success with a prompt.
+    pub fn with_extraction(mut self, prompt: &str) -> Self {
+        self.extract_on_success = true;
+        self.extraction_prompt = Some(prompt.to_string());
+        self
+    }
+}
+
+/// Events emitted during agent execution for progress tracking.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(missing_docs)]
+pub enum AgentEvent {
+    /// Agent started execution.
+    Started {
+        goal: String,
+        timestamp_ms: u64,
+    },
+    /// Agent is planning the next action.
+    Planning {
+        step: usize,
+        current_url: String,
+    },
+    /// Agent is executing an action.
+    Executing {
+        step: usize,
+        action: String,
+    },
+    /// Action completed successfully.
+    ActionSuccess {
+        step: usize,
+        action: String,
+        duration_ms: u64,
+    },
+    /// Action failed.
+    ActionFailed {
+        step: usize,
+        action: String,
+        error: String,
+        will_retry: bool,
+    },
+    /// Agent is recovering from failure.
+    Recovering {
+        step: usize,
+        strategy: RecoveryStrategy,
+        attempt: usize,
+    },
+    /// Goal completion detected.
+    GoalDetected {
+        step: usize,
+        reason: String,
+    },
+    /// Agent completed successfully.
+    Completed {
+        steps_taken: usize,
+        duration_ms: u64,
+        success: bool,
+    },
+    /// Agent was aborted or timed out.
+    Aborted {
+        step: usize,
+        reason: String,
+    },
+    /// Screenshot captured.
+    Screenshot {
+        step: usize,
+        data: String,
+    },
+    /// Data extracted.
+    Extracted {
+        step: usize,
+        data: serde_json::Value,
+    },
+}
+
+/// Result of autonomous agent execution.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AgentResult {
+    /// Whether the goal was achieved.
+    pub success: bool,
+    /// The goal that was attempted.
+    pub goal: String,
+    /// Number of steps taken.
+    pub steps_taken: usize,
+    /// Total duration in milliseconds.
+    pub duration_ms: u64,
+    /// Final URL after execution.
+    pub final_url: String,
+    /// History of actions taken.
+    pub action_history: Vec<AgentActionRecord>,
+    /// Extracted data (if extraction was enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extracted: Option<serde_json::Value>,
+    /// Final screenshot (if screenshots were enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_screenshot: Option<String>,
+    /// Error message if the agent failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Total token usage across all LLM calls.
+    pub total_usage: AutomationUsage,
+    /// Events that occurred during execution.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub events: Vec<AgentEvent>,
+}
+
+/// Record of a single action in the agent's history.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AgentActionRecord {
+    /// Step number (1-indexed).
+    pub step: usize,
+    /// The action that was taken.
+    pub action: String,
+    /// Whether the action succeeded.
+    pub success: bool,
+    /// Duration of the action in milliseconds.
+    pub duration_ms: u64,
+    /// URL before the action.
+    pub url_before: String,
+    /// URL after the action (if changed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url_after: Option<String>,
+    /// Error message if the action failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Number of retries needed.
+    pub retries: usize,
+}
+
+/// A single step in an action chain.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone)]
+pub struct ChainStep {
+    /// The instruction to execute.
+    pub instruction: String,
+    /// Optional condition that must be true to execute this step.
+    pub condition: Option<ChainCondition>,
+    /// Whether to continue on failure.
+    pub continue_on_failure: bool,
+    /// Optional extraction after this step.
+    pub extract: Option<String>,
+}
+
+#[cfg(feature = "serde")]
+impl ChainStep {
+    /// Create a new chain step.
+    pub fn new(instruction: &str) -> Self {
+        Self {
+            instruction: instruction.to_string(),
+            condition: None,
+            continue_on_failure: false,
+            extract: None,
+        }
+    }
+
+    /// Add a condition for this step.
+    pub fn when(mut self, condition: ChainCondition) -> Self {
+        self.condition = Some(condition);
+        self
+    }
+
+    /// Continue chain even if this step fails.
+    pub fn allow_failure(mut self) -> Self {
+        self.continue_on_failure = true;
+        self
+    }
+
+    /// Extract data after this step.
+    pub fn then_extract(mut self, prompt: &str) -> Self {
+        self.extract = Some(prompt.to_string());
+        self
+    }
+}
+
+/// Condition for conditional execution in action chains.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ChainCondition {
+    /// Execute if URL contains this string.
+    UrlContains(String),
+    /// Execute if URL matches this pattern.
+    UrlMatches(String),
+    /// Execute if page contains this text.
+    PageContains(String),
+    /// Execute if an element matching this selector exists.
+    ElementExists(String),
+    /// Execute if previous step succeeded.
+    PreviousSucceeded,
+    /// Execute if previous step failed.
+    PreviousFailed,
+    /// Always execute (default).
+    Always,
+}
+
+#[cfg(feature = "serde")]
+impl Default for ChainCondition {
+    fn default() -> Self {
+        Self::Always
+    }
+}
+
+/// Result of an action chain execution.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChainResult {
+    /// Whether all required steps completed successfully.
+    pub success: bool,
+    /// Number of steps executed.
+    pub steps_executed: usize,
+    /// Number of steps that succeeded.
+    pub steps_succeeded: usize,
+    /// Number of steps that failed.
+    pub steps_failed: usize,
+    /// Number of steps skipped (due to conditions).
+    pub steps_skipped: usize,
+    /// Results from each step.
+    pub step_results: Vec<ChainStepResult>,
+    /// Extracted data from steps with extraction.
+    #[serde(default)]
+    pub extractions: Vec<serde_json::Value>,
+    /// Total duration in milliseconds.
+    pub duration_ms: u64,
+    /// Total token usage.
+    pub total_usage: AutomationUsage,
+}
+
+/// Result of a single step in an action chain.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChainStepResult {
+    /// Step index (0-based).
+    pub index: usize,
+    /// The instruction that was executed.
+    pub instruction: String,
+    /// Whether the step was executed (false if condition not met).
+    pub executed: bool,
+    /// Whether the step succeeded (if executed).
+    pub success: bool,
+    /// Action taken (if executed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_taken: Option<String>,
+    /// Error message (if failed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Duration in milliseconds.
+    pub duration_ms: u64,
+    /// Extracted data (if extraction was requested).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extracted: Option<serde_json::Value>,
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -4888,6 +5261,735 @@ Rules:
             .cloned()
             .unwrap_or(result_value))
     }
+
+    // ========================================================================
+    // PHASE 3: ADVANCED AGENTIC METHODS
+    // ========================================================================
+
+    /// Execute an autonomous agent to achieve a goal.
+    ///
+    /// This is the main entry point for goal-oriented automation. The agent will
+    /// autonomously plan and execute actions to achieve the specified goal,
+    /// handling navigation, interactions, and error recovery.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to operate on
+    /// * `config` - Agent configuration including goal, limits, and recovery strategy
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    ///
+    /// let config = AgentConfig::new("Find and add the cheapest laptop to cart")
+    ///     .with_max_steps(30)
+    ///     .with_success_url("/cart")
+    ///     .with_extraction("Extract cart total and items");
+    ///
+    /// let result = engine.execute(&page, config).await?;
+    /// if result.success {
+    ///     println!("Goal achieved in {} steps", result.steps_taken);
+    /// }
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn execute(
+        &self,
+        page: &chromiumoxide::Page,
+        config: AgentConfig,
+    ) -> EngineResult<AgentResult> {
+        let start_time = std::time::Instant::now();
+        let start_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let mut result = AgentResult {
+            goal: config.goal.clone(),
+            ..Default::default()
+        };
+
+        let mut events = Vec::new();
+        events.push(AgentEvent::Started {
+            goal: config.goal.clone(),
+            timestamp_ms: start_ms,
+        });
+
+        let mut cache = if config.use_cache {
+            SelectorCache::new()
+        } else {
+            SelectorCache::with_capacity(0)
+        };
+
+        let mut total_usage = AutomationUsage::default();
+        let mut action_history = Vec::new();
+        let timeout = std::time::Duration::from_millis(config.timeout_ms);
+
+        // Main agent loop
+        for step in 1..=config.max_steps {
+            // Check timeout
+            if start_time.elapsed() > timeout {
+                events.push(AgentEvent::Aborted {
+                    step,
+                    reason: "Timeout exceeded".to_string(),
+                });
+                result.error = Some("Agent timed out".to_string());
+                break;
+            }
+
+            let current_url = page.url().await.ok().flatten().unwrap_or_default();
+
+            // Check for goal completion
+            if let Some(reason) = self.check_goal_completion(page, &config).await {
+                events.push(AgentEvent::GoalDetected {
+                    step,
+                    reason: reason.clone(),
+                });
+                result.success = true;
+
+                // Extract data if requested
+                if config.extract_on_success {
+                    if let Some(prompt) = &config.extraction_prompt {
+                        if let Ok(data) = self.extract_page(page, prompt, None).await {
+                            result.extracted = Some(data.clone());
+                            events.push(AgentEvent::Extracted { step, data });
+                        }
+                    }
+                }
+                break;
+            }
+
+            events.push(AgentEvent::Planning {
+                step,
+                current_url: current_url.clone(),
+            });
+
+            // Ask the LLM what to do next
+            let plan_result = self.plan_next_action(page, &config.goal, &action_history).await;
+
+            let (action_instruction, is_done) = match plan_result {
+                Ok((instruction, done)) => (instruction, done),
+                Err(e) => {
+                    events.push(AgentEvent::ActionFailed {
+                        step,
+                        action: "planning".to_string(),
+                        error: e.to_string(),
+                        will_retry: false,
+                    });
+                    result.error = Some(format!("Planning failed: {}", e));
+                    break;
+                }
+            };
+
+            // Check if LLM thinks we're done
+            if is_done {
+                events.push(AgentEvent::GoalDetected {
+                    step,
+                    reason: "LLM indicated goal completion".to_string(),
+                });
+                result.success = true;
+
+                if config.extract_on_success {
+                    if let Some(prompt) = &config.extraction_prompt {
+                        if let Ok(data) = self.extract_page(page, prompt, None).await {
+                            result.extracted = Some(data.clone());
+                            events.push(AgentEvent::Extracted { step, data });
+                        }
+                    }
+                }
+                break;
+            }
+
+            events.push(AgentEvent::Executing {
+                step,
+                action: action_instruction.clone(),
+            });
+
+            // Execute the action with retry logic
+            let action_start = std::time::Instant::now();
+            let mut retries = 0;
+            #[allow(unused_assignments)]
+            let mut action_result = None;
+
+            loop {
+                let act_result = if config.use_cache {
+                    self.act_cached(page, &action_instruction, &mut cache).await
+                } else {
+                    self.act(page, &action_instruction).await
+                };
+
+                match act_result {
+                    Ok(r) => {
+                        total_usage.prompt_tokens += r.usage.prompt_tokens;
+                        total_usage.completion_tokens += r.usage.completion_tokens;
+                        total_usage.total_tokens += r.usage.total_tokens;
+
+                        if r.success {
+                            action_result = Some(Ok(r));
+                            break;
+                        } else {
+                            // Action failed
+                            match config.recovery_strategy {
+                                RecoveryStrategy::Retry if retries < config.max_retries => {
+                                    retries += 1;
+                                    events.push(AgentEvent::Recovering {
+                                        step,
+                                        strategy: RecoveryStrategy::Retry,
+                                        attempt: retries,
+                                    });
+                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                    continue;
+                                }
+                                RecoveryStrategy::Skip => {
+                                    action_result = Some(Ok(r));
+                                    break;
+                                }
+                                RecoveryStrategy::Abort => {
+                                    action_result = Some(Ok(r));
+                                    break;
+                                }
+                                _ => {
+                                    action_result = Some(Ok(r));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if retries < config.max_retries && config.recovery_strategy == RecoveryStrategy::Retry {
+                            retries += 1;
+                            events.push(AgentEvent::Recovering {
+                                step,
+                                strategy: RecoveryStrategy::Retry,
+                                attempt: retries,
+                            });
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            continue;
+                        }
+                        action_result = Some(Err(e));
+                        break;
+                    }
+                }
+            }
+
+            let action_duration = action_start.elapsed().as_millis() as u64;
+            let url_after = page.url().await.ok().flatten();
+
+            match action_result {
+                Some(Ok(r)) => {
+                    let record = AgentActionRecord {
+                        step,
+                        action: action_instruction.clone(),
+                        success: r.success,
+                        duration_ms: action_duration,
+                        url_before: current_url,
+                        url_after: url_after.clone(),
+                        error: r.error.clone(),
+                        retries,
+                    };
+                    action_history.push(record.clone());
+
+                    if r.success {
+                        events.push(AgentEvent::ActionSuccess {
+                            step,
+                            action: r.action_taken.clone(),
+                            duration_ms: action_duration,
+                        });
+
+                        if config.capture_screenshots {
+                            if let Some(screenshot) = r.screenshot {
+                                events.push(AgentEvent::Screenshot {
+                                    step,
+                                    data: screenshot,
+                                });
+                            }
+                        }
+                    } else {
+                        events.push(AgentEvent::ActionFailed {
+                            step,
+                            action: action_instruction.clone(),
+                            error: r.error.unwrap_or_default(),
+                            will_retry: false,
+                        });
+
+                        if config.recovery_strategy == RecoveryStrategy::Abort {
+                            result.error = Some("Action failed and abort strategy triggered".to_string());
+                            break;
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    events.push(AgentEvent::ActionFailed {
+                        step,
+                        action: action_instruction.clone(),
+                        error: e.to_string(),
+                        will_retry: false,
+                    });
+
+                    let record = AgentActionRecord {
+                        step,
+                        action: action_instruction.clone(),
+                        success: false,
+                        duration_ms: action_duration,
+                        url_before: current_url,
+                        url_after,
+                        error: Some(e.to_string()),
+                        retries,
+                    };
+                    action_history.push(record);
+
+                    if config.recovery_strategy == RecoveryStrategy::Abort {
+                        result.error = Some(format!("Action error: {}", e));
+                        break;
+                    }
+                }
+                None => {}
+            }
+
+            // Small delay between actions
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        events.push(AgentEvent::Completed {
+            steps_taken: action_history.len(),
+            duration_ms,
+            success: result.success,
+        });
+
+        // Capture final screenshot
+        if config.capture_screenshots {
+            result.final_screenshot = self.take_final_screenshot(page).await.ok();
+        }
+
+        result.steps_taken = action_history.len();
+        result.duration_ms = duration_ms;
+        result.final_url = page.url().await.ok().flatten().unwrap_or_default();
+        result.action_history = action_history;
+        result.total_usage = total_usage;
+        result.events = events;
+
+        Ok(result)
+    }
+
+    /// Plan the next action based on current state and goal.
+    #[cfg(feature = "chrome")]
+    async fn plan_next_action(
+        &self,
+        page: &chromiumoxide::Page,
+        goal: &str,
+        history: &[AgentActionRecord],
+    ) -> EngineResult<(String, bool)> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Build history summary
+        let history_summary = if history.is_empty() {
+            "No actions taken yet.".to_string()
+        } else {
+            history
+                .iter()
+                .map(|r| {
+                    format!(
+                        "Step {}: {} - {}",
+                        r.step,
+                        r.action,
+                        if r.success { "success" } else { "failed" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let system_prompt = r##"You are an autonomous web agent working to achieve a goal.
+Analyze the current page state and decide the next action.
+
+You MUST respond with a JSON object:
+{
+  "thinking": "Brief analysis of current state and what to do next",
+  "done": true/false (true if the goal has been achieved),
+  "next_action": "Natural language instruction for the next action (e.g., 'click the Add to Cart button')"
+}
+
+Rules:
+1. Be specific about elements (use visible text, position, or purpose)
+2. One action at a time
+3. Set done=true only when the goal is clearly achieved
+4. If stuck, try a different approach
+5. Consider the action history to avoid loops
+"##;
+
+        let user_text = format!(
+            "GOAL: {}\n\nCURRENT PAGE:\n- URL: {}\n- Title: {}\n\nACTION HISTORY:\n{}\n\nWhat should I do next?",
+            goal, url, title, history_summary
+        );
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(system_prompt.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.2,
+            max_tokens: 1024,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "plan_next_action() failed: {} - {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        let plan = best_effort_parse_json_object(&content)?;
+
+        let done = plan.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+        let next_action = plan
+            .get("next_action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("observe the page")
+            .to_string();
+
+        Ok((next_action, done))
+    }
+
+    /// Check if the goal has been completed based on config criteria.
+    #[cfg(feature = "chrome")]
+    async fn check_goal_completion(
+        &self,
+        page: &chromiumoxide::Page,
+        config: &AgentConfig,
+    ) -> Option<String> {
+        let current_url = page.url().await.ok().flatten().unwrap_or_default();
+
+        // Check success URLs
+        for success_url in &config.success_urls {
+            if current_url.contains(success_url) {
+                return Some(format!("URL contains '{}'", success_url));
+            }
+        }
+
+        // Check success patterns in page content
+        if !config.success_patterns.is_empty() {
+            if let Ok(content) = page.content().await {
+                for pattern in &config.success_patterns {
+                    if content.contains(pattern) {
+                        return Some(format!("Page contains '{}'", pattern));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Execute a chain of actions in sequence.
+    ///
+    /// This method executes multiple actions in order with support for
+    /// conditional execution, error handling, and data extraction between steps.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to operate on
+    /// * `steps` - Vector of chain steps to execute
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    ///
+    /// let steps = vec![
+    ///     ChainStep::new("click the Login button"),
+    ///     ChainStep::new("type 'user@example.com' in the email field"),
+    ///     ChainStep::new("type 'password123' in the password field"),
+    ///     ChainStep::new("click Submit")
+    ///         .then_extract("Extract any error messages"),
+    /// ];
+    ///
+    /// let result = engine.chain(&page, steps).await?;
+    /// println!("Completed {} of {} steps", result.steps_succeeded, result.steps_executed);
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn chain(
+        &self,
+        page: &chromiumoxide::Page,
+        steps: Vec<ChainStep>,
+    ) -> EngineResult<ChainResult> {
+        let start_time = std::time::Instant::now();
+        let mut result = ChainResult::default();
+        let mut total_usage = AutomationUsage::default();
+        let mut extractions = Vec::new();
+        let mut previous_success = true;
+
+        for (index, step) in steps.iter().enumerate() {
+            let step_start = std::time::Instant::now();
+
+            // Check condition
+            let should_execute = self.evaluate_condition(page, &step.condition, previous_success).await;
+
+            if !should_execute {
+                result.step_results.push(ChainStepResult {
+                    index,
+                    instruction: step.instruction.clone(),
+                    executed: false,
+                    success: false,
+                    action_taken: None,
+                    error: None,
+                    duration_ms: 0,
+                    extracted: None,
+                });
+                result.steps_skipped += 1;
+                continue;
+            }
+
+            result.steps_executed += 1;
+
+            // Execute the action
+            let act_result = self.act(page, &step.instruction).await;
+
+            let step_duration = step_start.elapsed().as_millis() as u64;
+
+            match act_result {
+                Ok(r) => {
+                    total_usage.prompt_tokens += r.usage.prompt_tokens;
+                    total_usage.completion_tokens += r.usage.completion_tokens;
+                    total_usage.total_tokens += r.usage.total_tokens;
+
+                    previous_success = r.success;
+
+                    // Handle extraction if requested
+                    let extracted = if r.success {
+                        if let Some(extract_prompt) = &step.extract {
+                            self.extract_page(page, extract_prompt, None).await.ok()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(ref data) = extracted {
+                        extractions.push(data.clone());
+                    }
+
+                    result.step_results.push(ChainStepResult {
+                        index,
+                        instruction: step.instruction.clone(),
+                        executed: true,
+                        success: r.success,
+                        action_taken: Some(r.action_taken),
+                        error: r.error.clone(),
+                        duration_ms: step_duration,
+                        extracted,
+                    });
+
+                    if r.success {
+                        result.steps_succeeded += 1;
+                    } else {
+                        result.steps_failed += 1;
+                        if !step.continue_on_failure {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    previous_success = false;
+                    result.steps_failed += 1;
+
+                    result.step_results.push(ChainStepResult {
+                        index,
+                        instruction: step.instruction.clone(),
+                        executed: true,
+                        success: false,
+                        action_taken: None,
+                        error: Some(e.to_string()),
+                        duration_ms: step_duration,
+                        extracted: None,
+                    });
+
+                    if !step.continue_on_failure {
+                        break;
+                    }
+                }
+            }
+
+            // Small delay between steps
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        result.success = result.steps_failed == 0 && result.steps_executed > 0;
+        result.duration_ms = start_time.elapsed().as_millis() as u64;
+        result.total_usage = total_usage;
+        result.extractions = extractions;
+
+        Ok(result)
+    }
+
+    /// Evaluate a chain condition.
+    #[cfg(feature = "chrome")]
+    async fn evaluate_condition(
+        &self,
+        page: &chromiumoxide::Page,
+        condition: &Option<ChainCondition>,
+        previous_success: bool,
+    ) -> bool {
+        let cond = match condition {
+            Some(c) => c,
+            None => return true, // No condition = always execute
+        };
+
+        match cond {
+            ChainCondition::Always => true,
+            ChainCondition::PreviousSucceeded => previous_success,
+            ChainCondition::PreviousFailed => !previous_success,
+            ChainCondition::UrlContains(s) => {
+                page.url()
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|u| u.contains(s))
+                    .unwrap_or(false)
+            }
+            ChainCondition::UrlMatches(pattern) => {
+                if let Ok(re) = regex::Regex::new(pattern) {
+                    page.url()
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|u| re.is_match(&u))
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            ChainCondition::PageContains(text) => {
+                page.content()
+                    .await
+                    .map(|c| c.contains(text))
+                    .unwrap_or(false)
+            }
+            ChainCondition::ElementExists(selector) => {
+                page.find_element(selector).await.is_ok()
+            }
+        }
+    }
+
+    /// Execute a simple goal with minimal configuration.
+    ///
+    /// This is a convenience method that wraps `execute()` with sensible defaults.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = engine.agent(&page, "Sign up for the newsletter").await?;
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn agent(
+        &self,
+        page: &chromiumoxide::Page,
+        goal: &str,
+    ) -> EngineResult<AgentResult> {
+        let config = AgentConfig::new(goal);
+        self.execute(page, config).await
+    }
+
+    /// Execute a goal with extraction on completion.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = engine.agent_extract(
+    ///     &page,
+    ///     "Navigate to the pricing page",
+    ///     "Extract all pricing tiers with names and prices"
+    /// ).await?;
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn agent_extract(
+        &self,
+        page: &chromiumoxide::Page,
+        goal: &str,
+        extraction_prompt: &str,
+    ) -> EngineResult<AgentResult> {
+        let config = AgentConfig::new(goal).with_extraction(extraction_prompt);
+        self.execute(page, config).await
+    }
 }
 
 /// Extract structured data from HTML content using an LLM.
@@ -5330,5 +6432,212 @@ Actually, let me fix that:
         assert!(context.contains("key1"));
         assert!(context.contains("example.com"));
         assert!(context.contains("Clicked button"));
+    }
+
+    // ==========================================================================
+    // Phase 3 Tests: Agent Executor, Action Chaining, Recovery Strategies
+    // ==========================================================================
+
+    /// Test AgentConfig creation and builder pattern.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_agent_config_builder() {
+        let config = AgentConfig::new("Buy the cheapest item")
+            .with_max_steps(50)
+            .with_timeout(60_000)
+            .with_recovery(RecoveryStrategy::Alternative)
+            .with_retries(5)
+            .with_cache(false)
+            .with_success_url("/checkout")
+            .with_success_pattern("Order confirmed")
+            .with_extraction("Extract order details");
+
+        assert_eq!(config.goal, "Buy the cheapest item");
+        assert_eq!(config.max_steps, 50);
+        assert_eq!(config.timeout_ms, 60_000);
+        assert_eq!(config.recovery_strategy, RecoveryStrategy::Alternative);
+        assert_eq!(config.max_retries, 5);
+        assert!(!config.use_cache);
+        assert!(config.success_urls.contains(&"/checkout".to_string()));
+        assert!(config.success_patterns.contains(&"Order confirmed".to_string()));
+        assert!(config.extract_on_success);
+        assert_eq!(config.extraction_prompt, Some("Extract order details".to_string()));
+    }
+
+    /// Test AgentConfig defaults.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_agent_config_defaults() {
+        let config = AgentConfig::new("Test goal");
+
+        assert_eq!(config.max_steps, 20);
+        assert_eq!(config.timeout_ms, 120_000);
+        assert_eq!(config.recovery_strategy, RecoveryStrategy::Retry);
+        assert_eq!(config.max_retries, 3);
+        assert!(config.use_cache);
+        assert!(config.capture_screenshots);
+        assert!(!config.extract_on_success);
+    }
+
+    /// Test RecoveryStrategy variants.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_recovery_strategy() {
+        assert_eq!(RecoveryStrategy::default(), RecoveryStrategy::Retry);
+
+        // Test serialization
+        let json = serde_json::to_string(&RecoveryStrategy::Alternative).unwrap();
+        assert!(json.contains("Alternative"));
+
+        let parsed: RecoveryStrategy = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, RecoveryStrategy::Alternative);
+    }
+
+    /// Test ChainStep creation and builder pattern.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_chain_step_builder() {
+        let step = ChainStep::new("click the submit button")
+            .when(ChainCondition::UrlContains("/form".to_string()))
+            .allow_failure()
+            .then_extract("Extract form response");
+
+        assert_eq!(step.instruction, "click the submit button");
+        assert!(step.condition.is_some());
+        assert!(step.continue_on_failure);
+        assert_eq!(step.extract, Some("Extract form response".to_string()));
+    }
+
+    /// Test ChainCondition variants.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_chain_condition() {
+        assert!(matches!(ChainCondition::default(), ChainCondition::Always));
+
+        // Test various conditions
+        let url_contains = ChainCondition::UrlContains("/login".to_string());
+        let json = serde_json::to_string(&url_contains).unwrap();
+        assert!(json.contains("/login"));
+
+        let element_exists = ChainCondition::ElementExists("#submit-btn".to_string());
+        let json2 = serde_json::to_string(&element_exists).unwrap();
+        assert!(json2.contains("#submit-btn"));
+    }
+
+    /// Test AgentResult serialization.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_agent_result_serde() {
+        let result = AgentResult {
+            success: true,
+            goal: "Complete checkout".to_string(),
+            steps_taken: 5,
+            duration_ms: 10_000,
+            final_url: "https://example.com/success".to_string(),
+            action_history: vec![
+                AgentActionRecord {
+                    step: 1,
+                    action: "click add to cart".to_string(),
+                    success: true,
+                    duration_ms: 500,
+                    url_before: "https://example.com/product".to_string(),
+                    url_after: None,
+                    error: None,
+                    retries: 0,
+                },
+            ],
+            extracted: Some(serde_json::json!({"order_id": "12345"})),
+            final_screenshot: None,
+            error: None,
+            total_usage: AutomationUsage::default(),
+            events: vec![],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("Complete checkout"));
+        assert!(json.contains("12345"));
+
+        let parsed: AgentResult = serde_json::from_str(&json).unwrap();
+        assert!(parsed.success);
+        assert_eq!(parsed.steps_taken, 5);
+        assert_eq!(parsed.action_history.len(), 1);
+    }
+
+    /// Test ChainResult serialization.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_chain_result_serde() {
+        let result = ChainResult {
+            success: true,
+            steps_executed: 3,
+            steps_succeeded: 3,
+            steps_failed: 0,
+            steps_skipped: 1,
+            step_results: vec![
+                ChainStepResult {
+                    index: 0,
+                    instruction: "click button".to_string(),
+                    executed: true,
+                    success: true,
+                    action_taken: Some("clicked".to_string()),
+                    error: None,
+                    duration_ms: 200,
+                    extracted: None,
+                },
+            ],
+            extractions: vec![serde_json::json!({"data": "test"})],
+            duration_ms: 5000,
+            total_usage: AutomationUsage::default(),
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("click button"));
+
+        let parsed: ChainResult = serde_json::from_str(&json).unwrap();
+        assert!(parsed.success);
+        assert_eq!(parsed.steps_executed, 3);
+        assert_eq!(parsed.extractions.len(), 1);
+    }
+
+    /// Test AgentEvent serialization.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_agent_event_serde() {
+        let events = vec![
+            AgentEvent::Started {
+                goal: "Test".to_string(),
+                timestamp_ms: 1000,
+            },
+            AgentEvent::Planning {
+                step: 1,
+                current_url: "https://example.com".to_string(),
+            },
+            AgentEvent::ActionSuccess {
+                step: 1,
+                action: "clicked".to_string(),
+                duration_ms: 100,
+            },
+            AgentEvent::Completed {
+                steps_taken: 1,
+                duration_ms: 500,
+                success: true,
+            },
+        ];
+
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            let _parsed: AgentEvent = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    /// Test AgentActionRecord defaults.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_agent_action_record_defaults() {
+        let record = AgentActionRecord::default();
+        assert_eq!(record.step, 0);
+        assert!(record.action.is_empty());
+        assert!(!record.success);
+        assert_eq!(record.retries, 0);
     }
 }
