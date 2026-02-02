@@ -3330,6 +3330,829 @@ pub async fn configure_crawler_from_prompt(
     engine.configure_from_prompt(prompt).await
 }
 
+// ============================================================================
+// PHASE 1: SIMPLIFIED AGENTIC APIs
+// ============================================================================
+
+/// Result of a single action execution via `act()`.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ActResult {
+    /// Whether the action was executed successfully.
+    pub success: bool,
+    /// Description of the action that was taken.
+    pub action_taken: String,
+    /// The specific action executed (if any).
+    pub action_type: Option<String>,
+    /// Base64-encoded screenshot after the action.
+    pub screenshot: Option<String>,
+    /// Error message if the action failed.
+    pub error: Option<String>,
+    /// Token usage for this action.
+    pub usage: AutomationUsage,
+}
+
+/// An interactive element found on the page.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct InteractiveElement {
+    /// CSS selector to target this element.
+    pub selector: String,
+    /// Type of element (button, link, input, select, etc.).
+    pub element_type: String,
+    /// Visible text content of the element.
+    pub text: String,
+    /// Brief description of what this element does.
+    pub description: String,
+    /// Whether the element is currently visible.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub visible: bool,
+    /// Whether the element is enabled/clickable.
+    #[cfg_attr(feature = "serde", serde(default = "default_true"))]
+    pub enabled: bool,
+}
+
+#[cfg(feature = "serde")]
+fn default_true() -> bool {
+    true
+}
+
+/// Information about a form on the page.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FormInfo {
+    /// CSS selector for the form.
+    pub selector: String,
+    /// Form name or ID if available.
+    pub name: Option<String>,
+    /// Action URL of the form.
+    pub action: Option<String>,
+    /// HTTP method (GET, POST).
+    pub method: Option<String>,
+    /// Input fields in the form.
+    pub fields: Vec<FormField>,
+}
+
+/// A field within a form.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FormField {
+    /// Field name attribute.
+    pub name: String,
+    /// Field type (text, email, password, submit, etc.).
+    pub field_type: String,
+    /// Placeholder or label text.
+    pub label: Option<String>,
+    /// Whether the field is required.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub required: bool,
+    /// Current value if any.
+    pub value: Option<String>,
+}
+
+/// A navigation option on the page.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NavigationOption {
+    /// Text of the navigation link.
+    pub text: String,
+    /// URL the link points to.
+    pub url: Option<String>,
+    /// CSS selector for the element.
+    pub selector: String,
+    /// Whether this is the current/active page.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub is_current: bool,
+}
+
+/// Result of observing the current page state via `observe()`.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PageObservation {
+    /// Current page URL.
+    pub url: String,
+    /// Page title.
+    pub title: String,
+    /// AI-generated description of what the page is about.
+    pub description: String,
+    /// Main purpose or type of the page (e.g., "login form", "product listing", "article").
+    pub page_type: String,
+    /// Interactive elements found on the page (buttons, links, inputs).
+    pub interactive_elements: Vec<InteractiveElement>,
+    /// Forms found on the page.
+    pub forms: Vec<FormInfo>,
+    /// Navigation options (menu items, breadcrumbs, pagination).
+    pub navigation: Vec<NavigationOption>,
+    /// Suggested next actions based on page content.
+    pub suggested_actions: Vec<String>,
+    /// Base64-encoded screenshot of the page.
+    pub screenshot: Option<String>,
+    /// Token usage for this observation.
+    pub usage: AutomationUsage,
+}
+
+/// System prompt for the `act()` single-action API.
+#[cfg(feature = "chrome")]
+const ACT_SYSTEM_PROMPT: &str = r##"
+You are a browser automation assistant that executes single actions based on natural language instructions.
+
+Given a screenshot and page context, determine the SINGLE best action to fulfill the user's instruction.
+
+You MUST output a JSON object with this exact shape:
+{
+  "action_taken": "description of what you're doing",
+  "action_type": "Click|Fill|Type|Scroll|Wait|Evaluate",
+  "success": true,
+  "steps": [<single WebAutomation action>]
+}
+
+Rules:
+1. Execute ONLY ONE action per request
+2. Choose the most specific selector possible
+3. If the instruction cannot be fulfilled, set success: false and explain in action_taken
+4. Prefer CSS selectors over coordinates
+
+Available WebAutomation actions:
+- { "Click": "css_selector" }
+- { "Fill": { "selector": "css_selector", "value": "text" } }
+- { "Type": { "value": "text", "modifier": null } }
+- { "ScrollY": pixels }
+- { "ScrollX": pixels }
+- { "Wait": milliseconds }
+- { "WaitFor": "css_selector" }
+- { "WaitForAndClick": "css_selector" }
+- { "Evaluate": "javascript_code" }
+
+Examples:
+- "click the login button" → { "Click": "button[type='submit']" } or { "Click": ".login-btn" }
+- "type hello in the search box" → { "Fill": { "selector": "input[name='search']", "value": "hello" } }
+- "scroll down" → { "ScrollY": 500 }
+"##;
+
+/// System prompt for the `observe()` page understanding API.
+#[cfg(feature = "chrome")]
+const OBSERVE_SYSTEM_PROMPT: &str = r##"
+You are a page analysis assistant that provides detailed observations about web pages.
+
+Given a screenshot and optional HTML context, analyze the page and provide structured information.
+
+You MUST output a JSON object with this exact shape:
+{
+  "description": "Brief description of what this page is about",
+  "page_type": "login_form|product_listing|article|search_results|checkout|dashboard|homepage|error|other",
+  "interactive_elements": [
+    {
+      "selector": "css_selector",
+      "element_type": "button|link|input|select|checkbox|radio|textarea",
+      "text": "visible text",
+      "description": "what this element does",
+      "visible": true,
+      "enabled": true
+    }
+  ],
+  "forms": [
+    {
+      "selector": "form_selector",
+      "name": "form name or null",
+      "action": "form action URL or null",
+      "method": "GET|POST",
+      "fields": [
+        {
+          "name": "field_name",
+          "field_type": "text|email|password|submit|hidden|checkbox|radio|select",
+          "label": "field label or placeholder",
+          "required": true,
+          "value": "current value or null"
+        }
+      ]
+    }
+  ],
+  "navigation": [
+    {
+      "text": "link text",
+      "url": "href or null",
+      "selector": "css_selector",
+      "is_current": false
+    }
+  ],
+  "suggested_actions": [
+    "Natural language suggestion of what can be done",
+    "Another possible action"
+  ]
+}
+
+Focus on:
+1. Elements the user can interact with
+2. The main purpose of the page
+3. Available navigation paths
+4. Any forms and their fields
+5. Actionable suggestions based on page content
+"##;
+
+/// System prompt for the `extract()` simple extraction API.
+const EXTRACT_SYSTEM_PROMPT: &str = r##"
+You are a data extraction assistant that extracts structured data from web pages.
+
+Given page content (HTML and/or screenshot), extract the requested data.
+
+You MUST output a JSON object with this exact shape:
+{
+  "success": true,
+  "data": <extracted_data_matching_requested_format>
+}
+
+Rules:
+1. Extract ONLY the data requested by the user
+2. If a schema is provided, the "data" field MUST conform to it
+3. If data cannot be found, set success: false and data: null
+4. Be precise - extract actual values from the page, don't infer or guess
+5. Handle missing data gracefully with null values
+"##;
+
+#[cfg(feature = "serde")]
+impl RemoteMultimodalEngine {
+    /// Execute a single action on the page using natural language.
+    ///
+    /// This is a simplified API that translates a natural language instruction
+    /// into a single browser action and executes it.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to act on
+    /// * `instruction` - Natural language instruction (e.g., "click the login button")
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    /// let result = engine.act(&page, "click the submit button").await?;
+    /// if result.success {
+    ///     println!("Action taken: {}", result.action_taken);
+    /// }
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn act(
+        &self,
+        page: &chromiumoxide::Page,
+        instruction: &str,
+    ) -> EngineResult<ActResult> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        // Capture screenshot
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        // Get page context
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Build user prompt
+        let user_text = format!(
+            "PAGE CONTEXT:\n- URL: {}\n- Title: {}\n\nINSTRUCTION:\n{}\n\nExecute this single action.",
+            url, title, instruction
+        );
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(ACT_SYSTEM_PROMPT.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.1,
+            max_tokens: 1024,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        // Acquire permit and send request
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "act() failed with status {}: {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+        let usage = extract_usage(&root);
+
+        let plan_value = best_effort_parse_json_object(&content)?;
+
+        let action_taken = plan_value
+            .get("action_taken")
+            .and_then(|v| v.as_str())
+            .unwrap_or("action executed")
+            .to_string();
+
+        let action_type = plan_value
+            .get("action_type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let success = plan_value
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        // Execute the action if provided
+        let mut action_success = success;
+        let mut error = None;
+
+        if let Some(steps_arr) = plan_value.get("steps").and_then(|v| v.as_array()) {
+            if let Ok(steps) = map_to_web_automation(steps_arr.clone()) {
+                for step in steps {
+                    if !step.run(page).await {
+                        action_success = false;
+                        error = Some(format!("Failed to execute: {:?}", step));
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Take screenshot after action
+        let final_screenshot = self.take_final_screenshot(page).await.ok();
+
+        Ok(ActResult {
+            success: action_success,
+            action_taken,
+            action_type,
+            screenshot: final_screenshot,
+            error,
+            usage,
+        })
+    }
+
+    /// Observe the current page state and return structured information.
+    ///
+    /// This method analyzes the page without taking any actions, providing
+    /// information about interactive elements, forms, navigation options,
+    /// and suggested next actions.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to observe
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    /// let observation = engine.observe(&page).await?;
+    /// println!("Page type: {}", observation.page_type);
+    /// for elem in &observation.interactive_elements {
+    ///     println!("- {} ({}): {}", elem.text, elem.element_type, elem.selector);
+    /// }
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn observe(
+        &self,
+        page: &chromiumoxide::Page,
+    ) -> EngineResult<PageObservation> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        // Capture screenshot
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        // Get page context
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Get HTML for additional context (truncated)
+        let html = page.content().await.unwrap_or_default();
+        let html_truncated = truncate_utf8_tail(&html, 16000);
+
+        // Build user prompt
+        let user_text = format!(
+            "PAGE CONTEXT:\n- URL: {}\n- Title: {}\n\nHTML (truncated):\n{}\n\nAnalyze this page and provide structured observations.",
+            url, title, html_truncated
+        );
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(OBSERVE_SYSTEM_PROMPT.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        // Acquire permit and send request
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "observe() failed with status {}: {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+        let usage = extract_usage(&root);
+
+        let obs_value = best_effort_parse_json_object(&content)?;
+
+        // Parse the observation
+        let description = obs_value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let page_type = obs_value
+            .get("page_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("other")
+            .to_string();
+
+        let interactive_elements = obs_value
+            .get("interactive_elements")
+            .and_then(|v| serde_json::from_value::<Vec<InteractiveElement>>(v.clone()).ok())
+            .unwrap_or_default();
+
+        let forms = obs_value
+            .get("forms")
+            .and_then(|v| serde_json::from_value::<Vec<FormInfo>>(v.clone()).ok())
+            .unwrap_or_default();
+
+        let navigation = obs_value
+            .get("navigation")
+            .and_then(|v| serde_json::from_value::<Vec<NavigationOption>>(v.clone()).ok())
+            .unwrap_or_default();
+
+        let suggested_actions = obs_value
+            .get("suggested_actions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(PageObservation {
+            url,
+            title,
+            description,
+            page_type,
+            interactive_elements,
+            forms,
+            navigation,
+            suggested_actions,
+            screenshot: Some(screenshot),
+            usage,
+        })
+    }
+
+    /// Extract structured data from a page using natural language.
+    ///
+    /// This is a simplified extraction API that takes a prompt describing
+    /// what data to extract and optionally a JSON schema for the output.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to extract from
+    /// * `prompt` - Natural language description of what to extract
+    /// * `schema` - Optional JSON schema string for the output format
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    ///
+    /// // Simple extraction
+    /// let data = engine.extract(&page, "get all product names and prices", None).await?;
+    ///
+    /// // With schema
+    /// let schema = r#"{"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "price": {"type": "number"}}}}"#;
+    /// let data = engine.extract(&page, "extract product information", Some(schema)).await?;
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn extract_page(
+        &self,
+        page: &chromiumoxide::Page,
+        prompt: &str,
+        schema: Option<&str>,
+    ) -> EngineResult<serde_json::Value> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        // Capture screenshot
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        // Get page context
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Get HTML for additional context
+        let html = page.content().await.unwrap_or_default();
+        let html_truncated = truncate_utf8_tail(&html, self.cfg.html_max_bytes);
+
+        // Build user prompt
+        let mut user_text = format!(
+            "PAGE CONTEXT:\n- URL: {}\n- Title: {}\n\nHTML:\n{}\n\nEXTRACTION REQUEST:\n{}",
+            url, title, html_truncated, prompt
+        );
+
+        if let Some(s) = schema {
+            user_text.push_str("\n\nOUTPUT SCHEMA (the 'data' field MUST conform to this):\n");
+            user_text.push_str(s);
+        }
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(EXTRACT_SYSTEM_PROMPT.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.0,
+            max_tokens: 4096,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        // Acquire permit and send request
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "extract() failed with status {}: {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        let result_value = best_effort_parse_json_object(&content)?;
+
+        // Return the data field, or the whole response if no data field
+        Ok(result_value
+            .get("data")
+            .cloned()
+            .unwrap_or(result_value))
+    }
+}
+
+/// Extract structured data from HTML content using an LLM.
+///
+/// This is a standalone convenience function that doesn't require setting up
+/// a full `RemoteMultimodalEngine`. It's ideal for simple extraction tasks.
+///
+/// # Arguments
+/// * `api_url` - OpenAI-compatible chat completions endpoint
+/// * `model` - Model identifier (e.g., "gpt-4o", "claude-3-sonnet")
+/// * `api_key` - Optional API key for authenticated endpoints
+/// * `html` - The HTML content to extract from
+/// * `url` - The URL of the page (for context)
+/// * `prompt` - What data to extract
+/// * `schema` - Optional JSON schema for the output
+///
+/// # Example
+/// ```ignore
+/// let products = extract(
+///     "https://api.openai.com/v1/chat/completions",
+///     "gpt-4o",
+///     Some("sk-..."),
+///     &html,
+///     "https://example.com/products",
+///     "Extract all product names and prices",
+///     Some(r#"{"type": "array", "items": {"properties": {"name": {"type": "string"}, "price": {"type": "number"}}}}"#),
+/// ).await?;
+/// ```
+#[cfg(feature = "serde")]
+pub async fn extract(
+    api_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    html: &str,
+    url: &str,
+    prompt: &str,
+    schema: Option<&str>,
+) -> EngineResult<serde_json::Value> {
+    let mut engine = RemoteMultimodalEngine::new(api_url, model, Some(EXTRACT_SYSTEM_PROMPT.to_string()));
+    if let Some(key) = api_key {
+        engine = engine.with_api_key(Some(key));
+    }
+
+    // Configure for extraction
+    engine.cfg.extra_ai_data = true;
+    engine.cfg.extraction_prompt = Some(prompt.to_string());
+    if let Some(s) = schema {
+        engine.cfg.extraction_schema = Some(ExtractionSchema::new("extraction", s));
+    }
+
+    let result = engine.extract_from_html(html, url, None).await?;
+    Ok(result.extracted.unwrap_or(serde_json::Value::Null))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
