@@ -2098,7 +2098,7 @@ impl Website {
             self.configuration.chrome_intercept.enabled,
             &self.configuration.auth_challenge_response,
             self.configuration.chrome_intercept.block_visuals,
-            &self.url.inner().to_string(),
+            self.url.inner(),
         )
         .await
     }
@@ -2232,9 +2232,9 @@ impl Website {
         let url = self.url.inner();
 
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let mut links_ssg = links.clone();
+        let mut links_ssg = HashSet::new();
         let mut links_pages = if self.configuration.return_page_links {
-            Some(links.clone())
+            Some(HashSet::new())
         } else {
             None
         };
@@ -2404,9 +2404,9 @@ impl Website {
             let url = self.url.inner();
 
             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-            let mut links_ssg = links.clone();
+            let mut links_ssg = HashSet::new();
             let mut links_pages = if self.configuration.return_page_links {
-                Some(links.clone())
+                Some(HashSet::new())
             } else {
                 None
             };
@@ -2791,7 +2791,7 @@ impl Website {
                                 };
 
                                 let mut out_links: HashSet<CaseInsensitiveString> = HashSet::new();
-                                let mut links_pages = if shared.7 { Some(out_links.clone()) } else { None };
+                                let mut links_pages = if shared.7 { Some(HashSet::new()) } else { None };
 
                                 let mut relative_selectors = shared.2.clone();
                                 let mut r_settings = shared.8;
@@ -3693,9 +3693,9 @@ impl Website {
                 .is_allowed_default(url.inner())
                 .eq(&ProcessLinkStatus::Allowed)
             {
-                let mut links_ssg = links.clone();
+                let mut links_ssg = HashSet::new();
                 let mut links_pages = if self.configuration.return_page_links {
-                    Some(links.clone())
+                    Some(HashSet::new())
                 } else {
                     None
                 };
