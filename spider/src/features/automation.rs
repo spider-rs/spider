@@ -84,6 +84,68 @@ impl From<serde_json::Error> for EngineError {
     }
 }
 
+/// JSON schema configuration for structured extraction output.
+///
+/// This allows you to define a schema that the model should follow when
+/// extracting data from pages. Similar to OpenAI's structured outputs.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExtractionSchema {
+    /// A name for this extraction schema (e.g., "product_listing", "contact_info").
+    pub name: String,
+    /// Optional description of what data should be extracted.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub description: Option<String>,
+    /// The JSON Schema definition as a string.
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "type": "object",
+    ///   "properties": {
+    ///     "title": { "type": "string" },
+    ///     "price": { "type": "number" }
+    ///   },
+    ///   "required": ["title"]
+    /// }
+    /// ```
+    pub schema: String,
+    /// Whether to enforce strict schema adherence.
+    ///
+    /// When true, instructs the model to strictly follow the schema.
+    /// Note: Not all models support strict mode.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub strict: bool,
+}
+
+impl ExtractionSchema {
+    /// Create a new extraction schema.
+    pub fn new(name: &str, schema: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            description: None,
+            schema: schema.to_string(),
+            strict: false,
+        }
+    }
+
+    /// Create a new extraction schema with description.
+    pub fn new_with_description(name: &str, description: &str, schema: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            schema: schema.to_string(),
+            strict: false,
+        }
+    }
+
+    /// Set strict mode.
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
+    }
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -347,6 +409,31 @@ pub struct RemoteMultimodalConfig {
     ///
     /// Example: "Extract all product names and prices as a JSON array."
     pub extraction_prompt: Option<String>,
+    /// Optional JSON schema for structured extraction output.
+    ///
+    /// When provided, the model is instructed to return the `extracted` field
+    /// conforming to this schema. This enables type-safe extraction.
+    ///
+    /// Example schema:
+    /// ```json
+    /// {
+    ///   "type": "object",
+    ///   "properties": {
+    ///     "products": {
+    ///       "type": "array",
+    ///       "items": {
+    ///         "type": "object",
+    ///         "properties": {
+    ///           "name": { "type": "string" },
+    ///           "price": { "type": "number" }
+    ///         },
+    ///         "required": ["name", "price"]
+    ///       }
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    pub extraction_schema: Option<ExtractionSchema>,
     /// Take a screenshot after automation completes and include it in results.
     pub screenshot: bool,
 }
@@ -370,6 +457,7 @@ impl Default for RemoteMultimodalConfig {
             max_inflight_requests: None,
             extra_ai_data: false,
             extraction_prompt: None,
+            extraction_schema: None,
             screenshot: false,
         }
     }
@@ -686,6 +774,24 @@ impl RemoteMultimodalConfigs {
         self.cfg.screenshot = enabled;
         self
     }
+
+    /// Set a JSON schema for structured extraction output.
+    ///
+    /// When provided, the model is instructed to return the `extracted` field
+    /// conforming to this schema. This enables type-safe extraction.
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider::features::automation::{RemoteMultimodalConfigs, ExtractionSchema};
+    /// let schema = ExtractionSchema::new("products", r#"{"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "price": {"type": "number"}}}}"#);
+    /// let mm = RemoteMultimodalConfigs::new("http://localhost:11434/v1/chat/completions", "model")
+    ///     .with_extra_ai_data(true)
+    ///     .with_extraction_schema(Some(schema));
+    /// ```
+    pub fn with_extraction_schema(mut self, schema: Option<ExtractionSchema>) -> Self {
+        self.cfg.extraction_schema = schema;
+        self
+    }
 }
 
 impl PromptUrlGate {
@@ -865,6 +971,12 @@ impl RemoteMultimodalEngine {
         self
     }
 
+    /// Set a JSON schema for structured extraction output.
+    pub fn with_extraction_schema(&mut self, schema: Option<ExtractionSchema>) -> &mut Self {
+        self.cfg.extraction_schema = schema;
+        self
+    }
+
     /// Acquire the permit.
     pub async fn acquire_llm_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         match &self.semaphore {
@@ -892,12 +1004,33 @@ impl RemoteMultimodalEngine {
         if effective_cfg.extra_ai_data {
             s.push_str("\n\n---\nEXTRACTION MODE ENABLED:\n");
             s.push_str("Include an \"extracted\" field in your JSON response containing structured data extracted from the page.\n");
-            s.push_str("The \"extracted\" field should be a JSON object or array with the relevant data.\n");
+
+            // Add schema instructions if provided
+            if let Some(schema) = &effective_cfg.extraction_schema {
+                s.push_str("\nExtraction Schema: ");
+                s.push_str(&schema.name);
+                s.push('\n');
+                if let Some(desc) = &schema.description {
+                    s.push_str("Description: ");
+                    s.push_str(desc.trim());
+                    s.push('\n');
+                }
+                s.push_str("\nThe \"extracted\" field MUST conform to this JSON Schema:\n");
+                s.push_str(&schema.schema);
+                s.push('\n');
+                if schema.strict {
+                    s.push_str("\nSTRICT MODE: You MUST follow the schema exactly. Do not add extra fields or omit required fields.\n");
+                }
+            } else {
+                s.push_str("The \"extracted\" field should be a JSON object or array with the relevant data.\n");
+            }
+
             if let Some(extraction_prompt) = &effective_cfg.extraction_prompt {
                 s.push_str("\nExtraction instructions: ");
                 s.push_str(extraction_prompt.trim());
                 s.push('\n');
             }
+
             s.push_str("\nExample response with extraction:\n");
             s.push_str("{\n  \"label\": \"extract_products\",\n  \"done\": true,\n  \"steps\": [],\n  \"extracted\": {\"products\": [{\"name\": \"Product A\", \"price\": 19.99}]}\n}\n");
         }
@@ -2013,6 +2146,7 @@ fn merged_config(
     // Extraction settings
     out.extra_ai_data = override_cfg.extra_ai_data;
     out.extraction_prompt = override_cfg.extraction_prompt.clone();
+    out.extraction_schema = override_cfg.extraction_schema.clone();
     out.screenshot = override_cfg.screenshot;
 
     out
