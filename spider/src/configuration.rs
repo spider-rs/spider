@@ -255,6 +255,14 @@ pub struct Configuration {
         feature = "chrome_remote_cache"
     ))]
     pub cache: bool,
+    /// Skip browser rendering entirely if cached response exists.
+    /// When enabled, returns cached HTML directly without launching Chrome.
+    #[cfg(any(
+        feature = "cache_request",
+        feature = "chrome",
+        feature = "chrome_remote_cache"
+    ))]
+    pub cache_skip_browser: bool,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
     pub service_worker_enabled: bool,
@@ -1081,6 +1089,22 @@ impl Configuration {
         self
     }
 
+    #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
+    /// Skip browser rendering entirely if cached response exists.
+    /// When enabled with caching, returns cached HTML directly without launching Chrome.
+    /// This is useful for performance when you only need the cached content.
+    pub fn with_cache_skip_browser(&mut self, skip: bool) -> &mut Self {
+        self.cache_skip_browser = skip;
+        self
+    }
+
+    #[cfg(not(any(feature = "cache_request", feature = "chrome_remote_cache")))]
+    /// Skip browser rendering entirely if cached response exists.
+    /// This method does nothing if the cache features are not enabled.
+    pub fn with_cache_skip_browser(&mut self, _skip: bool) -> &mut Self {
+        self
+    }
+
     #[cfg(feature = "chrome")]
     /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_service_worker_enabled(&mut self, enabled: bool) -> &mut Self {
@@ -1605,15 +1629,29 @@ impl Configuration {
             })
             .map(|s| s.to_owned());
 
+        let skip_browser = self.cache_skip_browser;
+
         match auth_token {
             Some(token) if !token.is_empty() => {
                 if let Ok(token_str) = token.to_str() {
-                    Some(CacheOptions::Authorized(token_str.into()))
+                    if skip_browser {
+                        Some(CacheOptions::SkipBrowserAuthorized(token_str.into()))
+                    } else {
+                        Some(CacheOptions::Authorized(token_str.into()))
+                    }
+                } else if skip_browser {
+                    Some(CacheOptions::SkipBrowser)
                 } else {
                     Some(CacheOptions::Yes)
                 }
             }
-            _ => Some(CacheOptions::Yes),
+            _ => {
+                if skip_browser {
+                    Some(CacheOptions::SkipBrowser)
+                } else {
+                    Some(CacheOptions::Yes)
+                }
+            }
         }
     }
 

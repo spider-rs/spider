@@ -1307,10 +1307,118 @@ pub enum HtmlCleaningProfile {
     Default,
     /// More aggressive: try `clean_html_full` if available, otherwise fall back to `clean_html`.
     Aggressive,
+    /// Slim fit: removes SVGs, canvas, video, base64 images, and other heavy nodes.
+    Slim,
     /// Less aggressive: try `clean_html_base` if available, otherwise fall back to `clean_html`.
     Minimal,
     /// No cleaning (raw HTML).
     Raw,
+    /// Auto-detect based on content analysis. Uses ContentAnalysis to decide:
+    /// - Heavy visual elements (SVGs, canvas) → Slim
+    /// - Large HTML with low text ratio → Aggressive
+    /// - Normal content → Default
+    Auto,
+}
+
+/// The intended use case for HTML cleaning - affects how aggressive we can be.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CleaningIntent {
+    #[default]
+    /// General purpose - balanced cleaning.
+    General,
+    /// Extraction only - can be more aggressive, don't need interactive elements.
+    Extraction,
+    /// Action/navigation - preserve buttons, forms, links, interactive elements.
+    Action,
+}
+
+impl HtmlCleaningProfile {
+    /// Determine the best cleaning profile based on content analysis.
+    ///
+    /// This is used when `Auto` is selected to intelligently choose
+    /// the appropriate cleaning level based on the HTML content.
+    pub fn from_content_analysis(analysis: &ContentAnalysis) -> Self {
+        Self::from_content_analysis_with_intent(analysis, CleaningIntent::General)
+    }
+
+    /// Determine the best cleaning profile based on content analysis and intended use.
+    ///
+    /// - `Extraction` intent allows more aggressive cleaning (remove nav, footer, etc.)
+    /// - `Action` intent preserves interactive elements (buttons, forms, links)
+    /// - `General` intent uses balanced heuristics
+    pub fn from_content_analysis_with_intent(
+        analysis: &ContentAnalysis,
+        intent: CleaningIntent,
+    ) -> Self {
+        match intent {
+            CleaningIntent::Extraction => {
+                // For extraction, we can be aggressive - we only need text content
+                if analysis.html_length > 100_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+                if analysis.svg_count > 3
+                    || analysis.canvas_count > 0
+                    || analysis.video_count > 1
+                    || analysis.embed_count > 0
+                {
+                    return HtmlCleaningProfile::Slim;
+                }
+                if analysis.text_ratio < 0.1 && analysis.html_length > 30_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+                HtmlCleaningProfile::Slim
+            }
+            CleaningIntent::Action => {
+                // For actions, preserve structure but remove heavy non-interactive elements
+                if analysis.svg_count > 10 || analysis.canvas_count > 2 {
+                    return HtmlCleaningProfile::Slim;
+                }
+                if analysis.html_length > 150_000 {
+                    return HtmlCleaningProfile::Default;
+                }
+                // Keep minimal to preserve interactive elements
+                HtmlCleaningProfile::Minimal
+            }
+            CleaningIntent::General => {
+                // Balanced approach based on content characteristics
+                if analysis.svg_count > 5
+                    || analysis.canvas_count > 0
+                    || analysis.video_count > 2
+                {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                if analysis.text_ratio < 0.05 && analysis.html_length > 50_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                if analysis.embed_count > 0 {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                if analysis.html_length > 100_000 && analysis.text_ratio < 0.15 {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                if analysis.html_length > 30_000 {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                HtmlCleaningProfile::Minimal
+            }
+        }
+    }
+
+    /// Quick check if this profile removes SVGs.
+    pub fn removes_svgs(&self) -> bool {
+        matches!(self, HtmlCleaningProfile::Slim | HtmlCleaningProfile::Aggressive)
+    }
+
+    /// Quick check if this profile removes video/canvas elements.
+    pub fn removes_media(&self) -> bool {
+        matches!(self, HtmlCleaningProfile::Slim)
+    }
 }
 
 /// How to capture the page for a single LLM attempt.
@@ -4014,12 +4122,49 @@ fn merged_config(
 /// Clean HTML using your existing utils + optional additional variants.
 #[cfg(feature = "chrome")]
 fn clean_html_with_profile(html: &str, profile: HtmlCleaningProfile) -> String {
+    clean_html_with_profile_and_intent(html, profile, CleaningIntent::General)
+}
+
+/// Clean HTML with a specific profile and intent.
+///
+/// The intent helps Auto mode choose the right cleaning level:
+/// - `Extraction` - can be more aggressive, removes nav/footer
+/// - `Action` - preserves interactive elements
+/// - `General` - balanced approach
+#[cfg(feature = "chrome")]
+fn clean_html_with_profile_and_intent(
+    html: &str,
+    profile: HtmlCleaningProfile,
+    intent: CleaningIntent,
+) -> String {
     match profile {
         HtmlCleaningProfile::Raw => crate::utils::clean_html_raw(html),
         HtmlCleaningProfile::Default => crate::utils::clean_html(html),
         HtmlCleaningProfile::Aggressive => crate::utils::clean_html_full(html),
+        HtmlCleaningProfile::Slim => crate::utils::clean_html_slim(html),
         HtmlCleaningProfile::Minimal => crate::utils::clean_html_base(html),
+        HtmlCleaningProfile::Auto => {
+            // Analyze content and choose the best profile based on intent
+            let analysis = ContentAnalysis::analyze(html);
+            let auto_profile =
+                HtmlCleaningProfile::from_content_analysis_with_intent(&analysis, intent);
+            // Recursively call with determined profile (won't be Auto again)
+            clean_html_with_profile_and_intent(html, auto_profile, intent)
+        }
     }
+}
+
+/// Smart HTML cleaner that automatically determines the best cleaning level.
+///
+/// This is the recommended function for cleaning HTML when you don't have
+/// a specific profile preference. It analyzes the content and chooses
+/// the optimal cleaning level based on:
+/// - Content size and text ratio
+/// - Presence of heavy elements (SVGs, canvas, video)
+/// - The intended use case (extraction vs action)
+#[cfg(feature = "chrome")]
+pub fn smart_clean_html(html: &str, intent: CleaningIntent) -> String {
+    clean_html_with_profile_and_intent(html, HtmlCleaningProfile::Auto, intent)
 }
 
 /// Take the last `max_bytes` of a UTF-8 string without splitting code points.

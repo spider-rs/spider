@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.43.14"
+version = "2.43.15"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Utilities to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider"

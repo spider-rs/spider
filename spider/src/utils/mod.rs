@@ -1500,8 +1500,9 @@ pub async fn cache_chrome_response(
             headers: chrome_http_req_res.response_headers,
         };
         let auth_opt = match cache_options {
-            Some(CacheOptions::Yes) => None,
-            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+            Some(CacheOptions::Authorized(token))
+            | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
             Some(CacheOptions::No) | None => None,
         };
         let cache_key = create_cache_key_raw(
@@ -1552,8 +1553,9 @@ pub async fn cache_chrome_response(
         };
 
         let auth_opt = match cache_options {
-            Some(CacheOptions::Yes) => None,
-            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+            Some(CacheOptions::Authorized(token))
+            | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
             Some(CacheOptions::No) | None => None,
         };
         let cache_key = create_cache_key_raw(
@@ -1646,8 +1648,9 @@ async fn cache_chrome_response_from_cdp_body(
         };
 
         let auth_opt = match cache_options {
-            Some(CacheOptions::Yes) => None,
-            Some(CacheOptions::Authorized(token)) => Some(token),
+            Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+            Some(CacheOptions::Authorized(token))
+            | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
             Some(CacheOptions::No) | None => None,
         };
         let cache_key = create_cache_key_raw(
@@ -4121,22 +4124,34 @@ pub async fn fetch_page_html(
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
-    let duration = if cfg!(feature = "time") {
-        Some(tokio::time::Instant::now())
-    } else {
-        None
-    };
+    #[cfg(feature = "time")]
+    let duration = Some(tokio::time::Instant::now());
 
+    let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
-    let cached = !cached_html.is_none();
+    let cached = cached_html.is_some();
+
+    // Skip browser entirely if cached and skip_browser mode is enabled
+    if skip_browser {
+        if let Some(html) = cached_html {
+            return PageResponse {
+                content: Some(Box::new(html.into_bytes())),
+                status_code: StatusCode::OK,
+                final_url: Some(target_url.to_string()),
+                #[cfg(feature = "time")]
+                duration,
+                ..Default::default()
+            };
+        }
+    }
 
     let mut page_response = match &page {
         page => {
             match fetch_page_html_chrome_base(
                 if let Some(cached) = &cached_html {
-                    &cached
+                    cached
                 } else {
-                    &target_url
+                    target_url
                 },
                 &page,
                 cached,
@@ -4333,15 +4348,30 @@ pub enum CacheOptions {
     #[default]
     /// Do not use the memory cache.
     No,
+    /// Skip browser entirely if cached response exists, return cached HTML directly.
+    SkipBrowser,
+    /// Skip browser with authentication token if cached response exists.
+    SkipBrowserAuthorized(String),
 }
 
 #[inline]
 /// Cache auth token.
 pub fn cache_auth_token(cache_options: &std::option::Option<CacheOptions>) -> Option<&str> {
     cache_options.as_ref().and_then(|opt| match opt {
-        CacheOptions::Authorized(token) => Some(token.as_str()),
+        CacheOptions::Authorized(token) | CacheOptions::SkipBrowserAuthorized(token) => {
+            Some(token.as_str())
+        }
         _ => None,
     })
+}
+
+#[inline]
+/// Check if cache options indicate browser should be skipped when cached.
+pub fn cache_skip_browser(cache_options: &std::option::Option<CacheOptions>) -> bool {
+    matches!(
+        cache_options,
+        Some(CacheOptions::SkipBrowser) | Some(CacheOptions::SkipBrowserAuthorized(_))
+    )
 }
 
 /// Basic cache policy.
@@ -4379,8 +4409,9 @@ pub async fn get_cached_url_base(
     use crate::http_cache_reqwest::CacheManager;
 
     let auth_opt = match cache_options {
-        Some(CacheOptions::Yes) => None,
-        Some(CacheOptions::Authorized(token)) => Some(token),
+        Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+        Some(CacheOptions::Authorized(token))
+        | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
         Some(CacheOptions::No) | None => return None,
     };
 
@@ -4493,18 +4524,31 @@ pub async fn fetch_page_html_base(
     jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
+    let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = if seeded_resource.is_some() {
         seeded_resource
     } else {
         get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
     };
-    let cached = !cached_html.is_none();
+    let cached = cached_html.is_some();
+
+    // Skip browser entirely if cached and skip_browser mode is enabled
+    if skip_browser {
+        if let Some(html) = cached_html {
+            return PageResponse {
+                content: Some(Box::new(html.into_bytes())),
+                status_code: StatusCode::OK,
+                final_url: Some(target_url.to_string()),
+                ..Default::default()
+            };
+        }
+    }
 
     match fetch_page_html_chrome_base(
         if let Some(cached) = &cached_html {
-            &cached
+            cached
         } else {
-            &target_url
+            target_url
         },
         &page,
         cached,
