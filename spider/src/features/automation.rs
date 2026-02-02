@@ -2729,6 +2729,288 @@ impl RemoteMultimodalEngine {
     }
 }
 
+/// System prompt for configuring a web crawler from natural language.
+pub const CONFIGURATION_SYSTEM_PROMPT: &str = r##"
+You are a web crawler configuration assistant. Given a natural language description of crawling requirements, output a JSON configuration object.
+
+## Available Configuration Options
+
+### Core Crawling
+- "respect_robots_txt": bool - Respect robots.txt rules (may slow crawl if delays specified)
+- "subdomains": bool - Include subdomains in the crawl
+- "tld": bool - Allow all TLDs for the domain
+- "depth": number - Max crawl depth (default: 25, prevents infinite recursion)
+- "delay": number - Polite delay between requests in milliseconds
+- "request_timeout_ms": number - Request timeout in milliseconds (default: 15000, null to disable)
+- "crawl_timeout_ms": number - Total crawl timeout in milliseconds (null for no limit)
+
+### URL Filtering
+- "blacklist_url": string[] - URLs/patterns to exclude (supports regex)
+- "whitelist_url": string[] - Only crawl these URLs/patterns (supports regex)
+- "external_domains": string[] - External domains to include in crawl
+
+### Request Settings
+- "user_agent": string - Custom User-Agent string
+- "headers": object - Custom HTTP headers {"Header-Name": "value"}
+- "http2_prior_knowledge": bool - Use HTTP/2 (enable if site supports it)
+- "accept_invalid_certs": bool - Accept invalid SSL certificates (use carefully)
+
+### Proxy Configuration
+- "proxies": string[] - List of proxy URLs to rotate through
+
+### Limits & Budget
+- "redirect_limit": number - Max redirects per request
+- "budget": object - Crawl budget per path {"path": max_pages}
+- "max_page_bytes": number - Max bytes per page (null for no limit)
+
+### Content Options
+- "full_resources": bool - Collect all resources (images, scripts, etc.)
+- "only_html": bool - Only fetch HTML pages (saves resources)
+- "return_page_links": bool - Include links in page results
+
+### Chrome/Browser Options (requires chrome feature)
+- "use_chrome": bool - Use headless Chrome for JavaScript rendering
+- "stealth_mode": string - Stealth level: "none", "basic", "low", "mid", "full"
+- "viewport_width": number - Browser viewport width
+- "viewport_height": number - Browser viewport height
+- "wait_for_idle_network": bool - Wait for network to be idle
+- "wait_for_delay_ms": number - Fixed delay after page load
+- "wait_for_selector": string - CSS selector to wait for
+- "evaluate_on_new_document": string - JavaScript to inject on each page
+
+### Performance
+- "shared_queue": bool - Use shared queue (even distribution, no priority)
+- "retry": number - Retry attempts for failed requests
+
+## Output Format
+
+Return ONLY a valid JSON object with the configuration. Example:
+
+```json
+{
+  "respect_robots_txt": true,
+  "delay": 100,
+  "depth": 10,
+  "subdomains": false,
+  "user_agent": "MyBot/1.0",
+  "blacklist_url": ["/admin", "/private"],
+  "use_chrome": false
+}
+```
+
+Only include fields that need to be changed from defaults. Omit fields to use defaults.
+Do not include explanations - output ONLY the JSON object.
+"##;
+
+/// Configuration response from the LLM for prompt-based crawler setup.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct PromptConfiguration {
+    /// Respect robots.txt rules.
+    pub respect_robots_txt: Option<bool>,
+    /// Crawl subdomains.
+    pub subdomains: Option<bool>,
+    /// Crawl top-level domain variants.
+    pub tld: Option<bool>,
+    /// Maximum crawl depth.
+    pub depth: Option<usize>,
+    /// Delay between requests in milliseconds.
+    pub delay: Option<u64>,
+    /// Request timeout in milliseconds.
+    pub request_timeout_ms: Option<u64>,
+    /// Total crawl timeout in milliseconds.
+    pub crawl_timeout_ms: Option<u64>,
+    /// URL patterns to exclude.
+    pub blacklist_url: Option<Vec<String>>,
+    /// URL patterns to include exclusively.
+    pub whitelist_url: Option<Vec<String>>,
+    /// External domains to allow crawling.
+    pub external_domains: Option<Vec<String>>,
+    /// User agent string.
+    pub user_agent: Option<String>,
+    /// Custom HTTP headers.
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    /// Use HTTP/2 prior knowledge.
+    pub http2_prior_knowledge: Option<bool>,
+    /// Accept invalid SSL certificates.
+    pub accept_invalid_certs: Option<bool>,
+    /// Proxy URLs for requests.
+    pub proxies: Option<Vec<String>>,
+    /// Maximum redirect limit.
+    pub redirect_limit: Option<usize>,
+    /// Budget limits per path or domain.
+    pub budget: Option<std::collections::HashMap<String, u32>>,
+    /// Maximum bytes per page.
+    pub max_page_bytes: Option<f64>,
+    /// Crawl all resources including assets.
+    pub full_resources: Option<bool>,
+    /// Only crawl HTML pages.
+    pub only_html: Option<bool>,
+    /// Return discovered links with pages.
+    pub return_page_links: Option<bool>,
+    /// Use headless Chrome for rendering.
+    pub use_chrome: Option<bool>,
+    /// Stealth mode level: "none", "basic", "low", "mid", "full".
+    pub stealth_mode: Option<String>,
+    /// Browser viewport width.
+    pub viewport_width: Option<u32>,
+    /// Browser viewport height.
+    pub viewport_height: Option<u32>,
+    /// Wait for network to be idle.
+    pub wait_for_idle_network: Option<bool>,
+    /// Delay after page load in milliseconds.
+    pub wait_for_delay_ms: Option<u64>,
+    /// CSS selector to wait for.
+    pub wait_for_selector: Option<String>,
+    /// JavaScript to inject on each page.
+    pub evaluate_on_new_document: Option<String>,
+    /// Use shared queue for even distribution.
+    pub shared_queue: Option<bool>,
+    /// Retry attempts for failed requests.
+    pub retry: Option<u8>,
+}
+
+impl RemoteMultimodalEngine {
+    /// Generate crawler configuration from a natural language prompt.
+    ///
+    /// This method sends the prompt to the configured LLM endpoint and parses
+    /// the response into a `PromptConfiguration` that can be applied to a Website.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(
+    ///     "http://localhost:11434/v1/chat/completions",
+    ///     "llama3",
+    ///     None,
+    /// );
+    ///
+    /// let config = engine.configure_from_prompt(
+    ///     "Crawl product pages only, respect robots.txt, use 100ms delay, max depth 5"
+    /// ).await?;
+    /// ```
+    #[cfg(feature = "serde")]
+    pub async fn configure_from_prompt(
+        &self,
+        prompt: &str,
+    ) -> EngineResult<PromptConfiguration> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: String,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: CONFIGURATION_SYSTEM_PROMPT.to_string(),
+                },
+                Message {
+                    role: "user".into(),
+                    content: format!("Configure a web crawler for the following requirements:\n\n{}", prompt),
+                },
+            ],
+            temperature: 0.1,
+            max_tokens: 2048,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let start = std::time::Instant::now();
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        log::debug!(
+            "configure_from_prompt: status={} latency={:?} body_len={}",
+            status,
+            start.elapsed(),
+            raw_body.len()
+        );
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "non-success status {status}: {raw_body}"
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)
+            .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
+
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        let config_value = best_effort_parse_json_object(&content)?;
+
+        let config: PromptConfiguration = serde_json::from_value(config_value)
+            .map_err(|e| EngineError::Remote(format!("Failed to parse configuration: {e}")))?;
+
+        Ok(config)
+    }
+}
+
+/// Generate crawler configuration from a natural language prompt.
+///
+/// Standalone function that creates an engine and generates configuration.
+///
+/// # Arguments
+/// * `api_url` - OpenAI-compatible chat completions endpoint
+/// * `model_name` - Model identifier (e.g., "gpt-4", "llama3", "qwen2.5")
+/// * `api_key` - Optional API key for authenticated endpoints
+/// * `prompt` - Natural language description of crawling requirements
+///
+/// # Example
+/// ```ignore
+/// let config = configure_crawler_from_prompt(
+///     "http://localhost:11434/v1/chat/completions",
+///     "llama3",
+///     None,
+///     "Crawl only blog posts, max 50 pages, respect robots.txt"
+/// ).await?;
+///
+/// // Apply to website
+/// website.apply_prompt_configuration(&config);
+/// ```
+#[cfg(feature = "serde")]
+pub async fn configure_crawler_from_prompt(
+    api_url: &str,
+    model_name: &str,
+    api_key: Option<&str>,
+    prompt: &str,
+) -> EngineResult<PromptConfiguration> {
+    let engine = RemoteMultimodalEngine::new(api_url, model_name, None)
+        .with_api_key(api_key);
+    engine.configure_from_prompt(prompt).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
