@@ -2165,7 +2165,7 @@ fn extract_usage(root: &Value) -> AutomationUsage {
 /// Thinking/reasoning models often output multiple blocks, refining their answer.
 /// The last block is typically the final, valid JSON.
 #[cfg(feature = "serde")]
-fn extract_last_json_block(s: &str) -> Option<&str> {
+fn extract_last_code_block(s: &str) -> Option<&str> {
     let mut last_block: Option<&str> = None;
     let mut search_start = 0;
 
@@ -2230,11 +2230,105 @@ fn extract_last_json_block(s: &str) -> Option<&str> {
     last_block
 }
 
+/// Extract the last balanced JSON object or array from text.
+/// Uses proper brace matching to handle nested structures.
+/// Returns the byte range (start, end) of the extracted JSON.
+#[cfg(feature = "serde")]
+fn extract_last_json_boundaries(s: &str, open: char, close: char) -> Option<(usize, usize)> {
+    let bytes = s.as_bytes();
+    let open_byte = open as u8;
+    let close_byte = close as u8;
+
+    // Find the last closing brace/bracket
+    let mut end_pos = None;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        if bytes[i] == close_byte {
+            end_pos = Some(i);
+            break;
+        }
+    }
+
+    let end_pos = end_pos?;
+
+    // Walk backwards from end_pos, counting braces to find the matching opener
+    // We need to handle:
+    // 1. Nested braces of the same type
+    // 2. Strings (don't count braces inside strings)
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape_next = false;
+    let mut pos = end_pos + 1;
+
+    while pos > 0 {
+        pos -= 1;
+        let ch = bytes[pos];
+
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        // Check for escape (but we're going backwards, so check if previous char is backslash)
+        // This is tricky going backwards - simplified: just track string state
+        if ch == b'"' && !escape_next {
+            in_string = !in_string;
+            continue;
+        }
+
+        if in_string {
+            // Check if this quote was escaped (look ahead since we're going backwards)
+            if pos > 0 && bytes[pos - 1] == b'\\' {
+                // Count consecutive backslashes
+                let mut backslash_count = 0;
+                let mut check_pos = pos - 1;
+                while check_pos > 0 && bytes[check_pos] == b'\\' {
+                    backslash_count += 1;
+                    if check_pos == 0 {
+                        break;
+                    }
+                    check_pos -= 1;
+                }
+                // If odd number of backslashes, this quote is escaped
+                if backslash_count % 2 == 1 {
+                    in_string = !in_string; // undo the toggle
+                }
+            }
+            continue;
+        }
+
+        if ch == close_byte {
+            depth += 1;
+        } else if ch == open_byte {
+            depth -= 1;
+            if depth == 0 {
+                return Some((pos, end_pos + 1));
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract the last JSON object from text with proper brace matching.
+#[cfg(feature = "serde")]
+fn extract_last_json_object(s: &str) -> Option<&str> {
+    extract_last_json_boundaries(s, '{', '}').map(|(start, end)| &s[start..end])
+}
+
+/// Extract the last JSON array from text with proper brace matching.
+#[cfg(feature = "serde")]
+fn extract_last_json_array(s: &str) -> Option<&str> {
+    extract_last_json_boundaries(s, '[', ']').map(|(start, end)| &s[start..end])
+}
+
 /// Best effort parse the json object.
 ///
 /// Handles common LLM output quirks:
 /// - Multiple ```json``` blocks (uses the LAST one, as thinking models refine answers)
 /// - Reasoning/thinking text before JSON
+/// - Nested JSON structures (proper brace matching)
 /// - Malformed JSON (when `llm_json` feature is enabled)
 #[cfg(feature = "serde")]
 fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
@@ -2245,8 +2339,8 @@ fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
 
     let trimmed = s.trim();
 
-    // Try to extract the LAST json block (thinking models refine their answer)
-    if let Some(block) = extract_last_json_block(trimmed) {
+    // 1. Try to extract the LAST code block (thinking models refine their answer)
+    if let Some(block) = extract_last_code_block(trimmed) {
         if let Ok(v) = serde_json::from_str::<Value>(block) {
             return Ok(v);
         }
@@ -2256,9 +2350,20 @@ fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         if let Ok(v) = llm_json::loads(block, &Default::default()) {
             return Ok(v);
         }
+
+        // The code block might have prose - try extracting JSON from within it
+        if let Some(obj) = extract_last_json_object(block) {
+            if let Ok(v) = serde_json::from_str::<Value>(obj) {
+                return Ok(v);
+            }
+            #[cfg(feature = "llm_json")]
+            if let Ok(v) = llm_json::loads(obj, &Default::default()) {
+                return Ok(v);
+            }
+        }
     }
 
-    // Fallback: strip prefix/suffix if at boundaries
+    // 2. Strip markdown fences if at boundaries
     let unfenced = trimmed
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```"))
@@ -2273,44 +2378,37 @@ fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         return Ok(v);
     }
 
-    // Try llm_json repair on unfenced content
+    // 3. Extract last JSON object with proper brace matching
+    if let Some(obj) = extract_last_json_object(unfenced) {
+        if let Ok(v) = serde_json::from_str::<Value>(obj) {
+            return Ok(v);
+        }
+
+        #[cfg(feature = "llm_json")]
+        if let Ok(v) = llm_json::loads(obj, &Default::default()) {
+            return Ok(v);
+        }
+    }
+
+    // 4. Extract last JSON array with proper bracket matching
+    if let Some(arr) = extract_last_json_array(unfenced) {
+        if let Ok(v) = serde_json::from_str::<Value>(arr) {
+            return Ok(v);
+        }
+
+        #[cfg(feature = "llm_json")]
+        if let Ok(v) = llm_json::loads(arr, &Default::default()) {
+            return Ok(v);
+        }
+    }
+
+    // 5. Try llm_json repair on unfenced content as last resort
     #[cfg(feature = "llm_json")]
     if let Ok(v) = llm_json::loads(unfenced, &Default::default()) {
         return Ok(v);
     }
 
-    // Try to find JSON object/array directly in the text (last occurrence)
-    if let (Some(a), Some(b)) = (unfenced.rfind('{'), unfenced.rfind('}')) {
-        if b > a {
-            // Find the matching opening brace for the last closing brace
-            let slice = &unfenced[a..=b];
-            if let Ok(v) = serde_json::from_str::<Value>(slice) {
-                return Ok(v);
-            }
-
-            #[cfg(feature = "llm_json")]
-            if let Ok(v) = llm_json::loads(slice, &Default::default()) {
-                return Ok(v);
-            }
-        }
-    }
-
-    // Try array as well (last occurrence)
-    if let (Some(a), Some(b)) = (unfenced.rfind('['), unfenced.rfind(']')) {
-        if b > a {
-            let slice = &unfenced[a..=b];
-            if let Ok(v) = serde_json::from_str::<Value>(slice) {
-                return Ok(v);
-            }
-
-            #[cfg(feature = "llm_json")]
-            if let Ok(v) = llm_json::loads(slice, &Default::default()) {
-                return Ok(v);
-            }
-        }
-    }
-
-    // Final attempt: try llm_json on the entire input
+    // 6. Final attempt: try llm_json on the entire input
     #[cfg(feature = "llm_json")]
     if let Ok(v) = llm_json::loads(trimmed, &Default::default()) {
         return Ok(v);
