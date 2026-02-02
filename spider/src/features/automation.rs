@@ -146,6 +146,182 @@ impl ExtractionSchema {
     }
 }
 
+/// In-memory storage for agentic automation sessions.
+///
+/// This provides a key-value store and history tracking that persists across
+/// automation rounds, enabling the LLM to maintain context and state without
+/// relying on external storage.
+///
+/// # Features
+/// - **Key-Value Store**: Store and retrieve arbitrary JSON values by key
+/// - **Extraction History**: Accumulate extracted data across pages
+/// - **URL History**: Track visited URLs for navigation context
+/// - **Action Summary**: Brief history of executed actions
+///
+/// # Example
+/// ```ignore
+/// use spider::features::automation::AutomationMemory;
+///
+/// let mut memory = AutomationMemory::default();
+/// memory.set("user_logged_in", serde_json::json!(true));
+/// memory.set("cart_items", serde_json::json!(["item1", "item2"]));
+///
+/// // Memory is serialized and included in LLM context each round
+/// let context = memory.to_context_string();
+/// ```
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AutomationMemory {
+    /// Key-value store for persistent data across rounds.
+    #[serde(default)]
+    pub store: std::collections::HashMap<String, serde_json::Value>,
+    /// History of extracted data from pages (most recent last).
+    #[serde(default)]
+    pub extractions: Vec<serde_json::Value>,
+    /// History of visited URLs (most recent last).
+    #[serde(default)]
+    pub visited_urls: Vec<String>,
+    /// Brief summary of recent actions (most recent last, max 50).
+    #[serde(default)]
+    pub action_history: Vec<String>,
+}
+
+#[cfg(feature = "serde")]
+impl AutomationMemory {
+    /// Create a new empty memory.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Store a value by key.
+    pub fn set(&mut self, key: impl Into<String>, value: serde_json::Value) {
+        self.store.insert(key.into(), value);
+    }
+
+    /// Get a value by key.
+    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+        self.store.get(key)
+    }
+
+    /// Remove a value by key.
+    pub fn remove(&mut self, key: &str) -> Option<serde_json::Value> {
+        self.store.remove(key)
+    }
+
+    /// Check if a key exists.
+    pub fn contains(&self, key: &str) -> bool {
+        self.store.contains_key(key)
+    }
+
+    /// Clear all stored data.
+    pub fn clear_store(&mut self) {
+        self.store.clear();
+    }
+
+    /// Add an extracted value to history.
+    pub fn add_extraction(&mut self, data: serde_json::Value) {
+        self.extractions.push(data);
+    }
+
+    /// Record a visited URL.
+    pub fn add_visited_url(&mut self, url: impl Into<String>) {
+        self.visited_urls.push(url.into());
+    }
+
+    /// Record an action summary (keeps max 50 entries).
+    pub fn add_action(&mut self, action: impl Into<String>) {
+        self.action_history.push(action.into());
+        // Keep only the last 50 actions to avoid unbounded growth
+        if self.action_history.len() > 50 {
+            self.action_history.remove(0);
+        }
+    }
+
+    /// Clear all history (extractions, URLs, actions) but keep the store.
+    pub fn clear_history(&mut self) {
+        self.extractions.clear();
+        self.visited_urls.clear();
+        self.action_history.clear();
+    }
+
+    /// Clear everything.
+    pub fn clear_all(&mut self) {
+        self.store.clear();
+        self.extractions.clear();
+        self.visited_urls.clear();
+        self.action_history.clear();
+    }
+
+    /// Check if memory is empty.
+    pub fn is_empty(&self) -> bool {
+        self.store.is_empty()
+            && self.extractions.is_empty()
+            && self.visited_urls.is_empty()
+            && self.action_history.is_empty()
+    }
+
+    /// Generate a context string for inclusion in LLM prompts.
+    pub fn to_context_string(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+
+        let mut parts = Vec::new();
+
+        if !self.store.is_empty() {
+            if let Ok(json) = serde_json::to_string_pretty(&self.store) {
+                parts.push(format!("## Memory Store\n```json\n{}\n```", json));
+            }
+        }
+
+        if !self.visited_urls.is_empty() {
+            let recent: Vec<_> = self.visited_urls.iter().rev().take(10).collect();
+            parts.push(format!(
+                "## Recent URLs (last {})\n{}",
+                recent.len(),
+                recent
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(i, u)| format!("{}. {}", i + 1, u))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+
+        if !self.extractions.is_empty() {
+            let recent: Vec<_> = self.extractions.iter().rev().take(5).collect();
+            let json_strs: Vec<_> = recent
+                .iter()
+                .rev()
+                .filter_map(|v| serde_json::to_string(v).ok())
+                .collect();
+            parts.push(format!(
+                "## Recent Extractions (last {})\n{}",
+                json_strs.len(),
+                json_strs.join("\n")
+            ));
+        }
+
+        if !self.action_history.is_empty() {
+            let recent: Vec<_> = self.action_history.iter().rev().take(10).collect();
+            parts.push(format!(
+                "## Recent Actions (last {})\n{}",
+                recent.len(),
+                recent
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(i, a)| format!("{}. {}", i + 1, a))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+
+        parts.join("\n\n")
+    }
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -458,7 +634,7 @@ impl Default for RemoteMultimodalConfig {
             extra_ai_data: false,
             extraction_prompt: None,
             extraction_schema: None,
-            screenshot: false,
+            screenshot: true,
         }
     }
 }
@@ -1295,6 +1471,7 @@ impl RemoteMultimodalEngine {
         html: &str,
         round_idx: usize,
         stagnated: bool,
+        memory: Option<&AutomationMemory>,
     ) -> String {
         // pre-size: helps avoid repeated allocations
         let mut out = String::with_capacity(
@@ -1314,6 +1491,18 @@ impl RemoteMultimodalEngine {
         out.push_str("- stagnated: ");
         out.push_str(if stagnated { "true" } else { "false" });
         out.push_str("\n\n");
+
+        // Include memory context if available and non-empty
+        if let Some(mem) = memory {
+            if !mem.is_empty() {
+                let mem_ctx = mem.to_context_string();
+                if !mem_ctx.is_empty() {
+                    out.push_str("SESSION MEMORY:\n");
+                    out.push_str(&mem_ctx);
+                    out.push_str("\n\n");
+                }
+            }
+        }
 
         if effective_cfg.include_url && !url_now.is_empty() {
             out.push_str("CURRENT URL:\n");
@@ -1396,6 +1585,41 @@ impl RemoteMultimodalEngine {
     /// - A match may supply an override config (merged onto base config).
     #[cfg(feature = "chrome")]
     pub async fn run(&self, page: &Page, url_input: &str) -> EngineResult<AutomationResult> {
+        self.run_with_memory(page, url_input, None).await
+    }
+
+    /// Runs iterative automation with session memory for agentic workflows.
+    ///
+    /// Same as `run()` but accepts a mutable memory reference that persists
+    /// data across automation rounds. The LLM can read from and write to
+    /// this memory using memory operations in its responses.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to automate
+    /// * `url_input` - The URL being processed
+    /// * `memory` - Optional mutable memory for session state
+    ///
+    /// # Memory Operations
+    /// The LLM can include a `memory_ops` array in its response:
+    /// ```json
+    /// {
+    ///   "label": "...",
+    ///   "done": false,
+    ///   "steps": [...],
+    ///   "memory_ops": [
+    ///     { "op": "set", "key": "user_id", "value": "12345" },
+    ///     { "op": "delete", "key": "temp" },
+    ///     { "op": "clear" }
+    ///   ]
+    /// }
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn run_with_memory(
+        &self,
+        page: &Page,
+        url_input: &str,
+        mut memory: Option<&mut AutomationMemory>,
+    ) -> EngineResult<AutomationResult> {
         // 0) URL gating + config override
         let cfg_override: Option<&RemoteMultimodalConfig> =
             if let Some(gate) = &self.prompt_url_gate {
@@ -1488,7 +1712,7 @@ impl RemoteMultimodalEngine {
             let stagnated = last_sig.as_ref().map(|p| p.eq_soft(&sig)).unwrap_or(false);
             last_sig = Some(sig);
 
-            // Ask model (with retry policy)
+            // Ask model (with retry policy) - pass memory as immutable ref for context
             let plan = self
                 .infer_plan_with_retry(
                     &base_effective_cfg,
@@ -1500,6 +1724,7 @@ impl RemoteMultimodalEngine {
                     &screenshot,
                     round_idx,
                     stagnated,
+                    memory.as_deref(),
                 )
                 .await?;
 
@@ -1507,14 +1732,38 @@ impl RemoteMultimodalEngine {
             total_usage.accumulate(&plan.usage);
             last_label = plan.label.clone();
 
+            // Process memory operations from the plan
+            if let Some(ref mut mem) = memory {
+                for op in &plan.memory_ops {
+                    match op {
+                        MemoryOperation::Set { key, value } => {
+                            mem.set(key.clone(), value.clone());
+                        }
+                        MemoryOperation::Delete { key } => {
+                            mem.remove(key);
+                        }
+                        MemoryOperation::Clear => {
+                            mem.clear_store();
+                        }
+                    }
+                }
+                // Record this round's URL and action
+                mem.add_visited_url(&url_now);
+                mem.add_action(format!("Round {}: {}", round_idx + 1, &plan.label));
+            }
+
             // Save extracted data if present
             if plan.extracted.is_some() {
                 last_extracted = plan.extracted.clone();
+                // Also store in memory if available
+                if let (Some(ref mut mem), Some(ref extracted)) = (&mut memory, &plan.extracted) {
+                    mem.add_extraction(extracted.clone());
+                }
             }
 
             // Done condition (model-driven)
             if plan.done || plan.steps.is_empty() {
-                // Take final screenshot if enabled
+                // Capture final screenshot (enabled by default)
                 let final_screenshot = if base_effective_cfg.screenshot {
                     self.take_final_screenshot(page).await.ok()
                 } else {
@@ -1561,7 +1810,7 @@ impl RemoteMultimodalEngine {
                     continue;
                 }
 
-                // Take screenshot on failure if enabled
+                // Capture screenshot on failure (enabled by default)
                 let final_screenshot = if base_effective_cfg.screenshot {
                     self.take_final_screenshot(page).await.ok()
                 } else {
@@ -1588,7 +1837,7 @@ impl RemoteMultimodalEngine {
             }
         }
 
-        // Take final screenshot if enabled
+        // Capture final screenshot (enabled by default)
         let final_screenshot = if base_effective_cfg.screenshot {
             self.take_final_screenshot(page).await.ok()
         } else {
@@ -1622,6 +1871,7 @@ impl RemoteMultimodalEngine {
         screenshot: &str,
         round_idx: usize,
         stagnated: bool,
+        memory: Option<&AutomationMemory>,
     ) -> EngineResult<ParsedPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err: Option<EngineError> = None;
@@ -1637,6 +1887,7 @@ impl RemoteMultimodalEngine {
             html,
             round_idx,
             stagnated,
+            memory,
         );
 
         for attempt_idx in 0..max_attempts {
@@ -1865,14 +2116,50 @@ impl RemoteMultimodalEngine {
         // Extract structured data if present (used when extra_ai_data is enabled)
         let extracted = plan_value.get("extracted").cloned();
 
+        // Extract memory operations if present
+        let memory_ops = plan_value
+            .get("memory_ops")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|op| serde_json::from_value::<MemoryOperation>(op.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(ParsedPlan {
             label,
             done,
             steps,
             usage,
             extracted,
+            memory_ops,
         })
     }
+}
+
+/// Memory operation requested by the LLM.
+///
+/// These operations allow the model to persist data across automation rounds
+/// without requiring external storage.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "lowercase")]
+pub enum MemoryOperation {
+    /// Store a value in memory.
+    Set {
+        /// The key to store under.
+        key: String,
+        /// The value to store (any JSON value).
+        value: serde_json::Value,
+    },
+    /// Delete a value from memory.
+    Delete {
+        /// The key to delete.
+        key: String,
+    },
+    /// Clear all stored values.
+    Clear,
 }
 
 /// Parsed plan returned by the model.
@@ -1891,6 +2178,7 @@ impl RemoteMultimodalEngine {
 /// - `steps`: Concrete automation steps to execute on the page.
 /// - `usage`: Token usage from this inference call.
 /// - `extracted`: Optional structured data extracted from the page.
+/// - `memory_ops`: Memory operations to execute (set/delete/clear).
 ///
 /// Note: `ParsedPlan` is intentionally not public because its shape may change
 /// as the engine evolves its planning loop (e.g., adding confidence, reasons,
@@ -1908,6 +2196,8 @@ struct ParsedPlan {
     usage: AutomationUsage,
     /// Structured data extracted from the page (when extraction is enabled).
     extracted: Option<serde_json::Value>,
+    /// Memory operations to execute.
+    memory_ops: Vec<MemoryOperation>,
 }
 
 /// Token usage returned from OpenAI-compatible endpoints.
@@ -2454,17 +2744,45 @@ You receive (each round):
 - Optional page title
 - Optional cleaned HTML context
 - Round/attempt metadata
+- Session memory (if enabled): key-value store, recent URLs, extractions, and action history
 
 You MUST output a single JSON object ONLY (no prose), with shape:
 {
   "label": "short description",
   "done": true|false,
-  "steps": [ ... ]
+  "steps": [ ... ],
+  "memory_ops": [ ... ],  // optional
+  "extracted": { ... }    // optional
 }
 
 Completion rules:
 - If the task/challenge is solved OR the user goal is satisfied, set "done": true and set "steps": [].
 - If additional actions are needed, set "done": false and provide next steps.
+
+## Memory Operations (optional)
+
+You can persist data across rounds using the "memory_ops" array. This is useful for:
+- Storing extracted information for later use
+- Tracking state across page navigations
+- Accumulating data from multiple pages
+
+Memory operations:
+- { "op": "set", "key": "name", "value": any_json_value }  // Store a value
+- { "op": "delete", "key": "name" }                        // Remove a value
+- { "op": "clear" }                                        // Clear all stored values
+
+Example with memory:
+{
+  "label": "Extracted product price, storing for comparison",
+  "done": false,
+  "steps": [{ "Click": ".next-page" }],
+  "memory_ops": [
+    { "op": "set", "key": "product_price", "value": 29.99 },
+    { "op": "set", "key": "page_count", "value": 1 }
+  ]
+}
+
+## Browser Actions
 
 The steps MUST be valid Rust-like enum objects for `WebAutomation` (externally deserialized).
 Use ONLY the actions listed below and follow their exact shapes.
@@ -2509,7 +2827,8 @@ Rules:
 2) Use WaitFor / WaitForWithTimeout before clicking if the page is dynamic.
 3) Use WaitForNavigation when a click likely triggers navigation.
 4) If you see stagnation (state not changing), try a different strategy: different selector, scroll, or small waits.
-5) Output JSON only.
+5) Use memory_ops to persist important data across rounds for multi-step workflows.
+6) Output JSON only.
 "##;
 
 /// Merged prompt configuration.
