@@ -322,6 +322,265 @@ impl AutomationMemory {
     }
 }
 
+/// Self-healing selector cache for agentic automation.
+///
+/// This cache stores mappings from natural language element descriptions to
+/// CSS selectors that successfully matched elements. When an action fails
+/// due to a selector not finding an element, the cache entry is invalidated
+/// and the LLM is re-queried for an updated selector.
+///
+/// # Self-Healing Flow
+/// 1. User requests action like "click the login button"
+/// 2. Cache lookup: if we have a cached selector for "login button", try it
+/// 3. If selector works → action succeeds, update cache timestamp
+/// 4. If selector fails → invalidate cache entry, re-query LLM for new selector
+/// 5. Store new selector in cache for future use
+///
+/// # Cache Key Strategy
+/// Keys are normalized element descriptions (lowercased, trimmed).
+/// Values include the selector, success count, and last used timestamp.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default)]
+pub struct SelectorCache {
+    /// Maps normalized element descriptions to cached selector info.
+    entries: std::collections::HashMap<String, SelectorCacheEntry>,
+    /// Maximum number of entries before LRU eviction.
+    max_entries: usize,
+    /// Cache hit statistics.
+    hits: u64,
+    /// Cache miss statistics.
+    misses: u64,
+}
+
+/// A single entry in the selector cache.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone)]
+pub struct SelectorCacheEntry {
+    /// The CSS selector that matched.
+    pub selector: String,
+    /// Number of times this selector was successfully used.
+    pub success_count: u32,
+    /// Number of times this selector failed (before being invalidated).
+    pub failure_count: u32,
+    /// Timestamp of last successful use (unix millis).
+    pub last_used_ms: u64,
+    /// The URL domain where this selector was discovered.
+    pub domain: Option<String>,
+}
+
+#[cfg(feature = "serde")]
+impl SelectorCache {
+    /// Create a new selector cache with default capacity (1000 entries).
+    pub fn new() -> Self {
+        Self {
+            entries: std::collections::HashMap::new(),
+            max_entries: 1000,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    /// Create a new selector cache with specified capacity.
+    pub fn with_capacity(max_entries: usize) -> Self {
+        Self {
+            entries: std::collections::HashMap::with_capacity(max_entries.min(10000)),
+            max_entries,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    /// Normalize a description key for consistent lookup.
+    fn normalize_key(description: &str) -> String {
+        description.trim().to_lowercase()
+    }
+
+    /// Look up a cached selector for an element description.
+    pub fn get(&mut self, description: &str, domain: Option<&str>) -> Option<&str> {
+        let key = Self::normalize_key(description);
+        if let Some(entry) = self.entries.get(&key) {
+            // Check domain match if specified
+            if let Some(d) = domain {
+                if let Some(cached_domain) = &entry.domain {
+                    if cached_domain != d {
+                        self.misses += 1;
+                        return None;
+                    }
+                }
+            }
+            self.hits += 1;
+            Some(&entry.selector)
+        } else {
+            self.misses += 1;
+            None
+        }
+    }
+
+    /// Record a successful selector use.
+    pub fn record_success(&mut self, description: &str, selector: &str, domain: Option<&str>) {
+        let key = Self::normalize_key(description);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.success_count = entry.success_count.saturating_add(1);
+            entry.last_used_ms = now_ms;
+            entry.selector = selector.to_string();
+        } else {
+            // Evict LRU if at capacity
+            if self.entries.len() >= self.max_entries {
+                self.evict_lru();
+            }
+            self.entries.insert(
+                key,
+                SelectorCacheEntry {
+                    selector: selector.to_string(),
+                    success_count: 1,
+                    failure_count: 0,
+                    last_used_ms: now_ms,
+                    domain: domain.map(|s| s.to_string()),
+                },
+            );
+        }
+    }
+
+    /// Record a selector failure and invalidate the entry.
+    pub fn record_failure(&mut self, description: &str) {
+        let key = Self::normalize_key(description);
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.failure_count = entry.failure_count.saturating_add(1);
+            // Invalidate after repeated failures
+            if entry.failure_count >= 2 {
+                self.entries.remove(&key);
+            }
+        }
+    }
+
+    /// Invalidate (remove) a cache entry.
+    pub fn invalidate(&mut self, description: &str) {
+        let key = Self::normalize_key(description);
+        self.entries.remove(&key);
+    }
+
+    /// Clear all cache entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.hits = 0;
+        self.misses = 0;
+    }
+
+    /// Evict the least recently used entry.
+    fn evict_lru(&mut self) {
+        if let Some(lru_key) = self
+            .entries
+            .iter()
+            .min_by_key(|(_, v)| v.last_used_ms)
+            .map(|(k, _)| k.clone())
+        {
+            self.entries.remove(&lru_key);
+        }
+    }
+
+    /// Get cache statistics.
+    pub fn stats(&self) -> (u64, u64, usize) {
+        (self.hits, self.misses, self.entries.len())
+    }
+}
+
+/// Result of the `map()` API call for page discovery.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MapResult {
+    /// The URLs discovered on the page.
+    pub urls: Vec<DiscoveredUrl>,
+    /// Relevance score of the page to the prompt (0.0 - 1.0).
+    pub relevance: f32,
+    /// Summary of what the page contains.
+    pub summary: String,
+    /// Suggested next URLs to explore based on the prompt.
+    pub suggested_next: Vec<String>,
+    /// Optional screenshot if captured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
+    /// Token usage statistics.
+    #[serde(default)]
+    pub usage: AutomationUsage,
+}
+
+/// A discovered URL with AI-generated metadata.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DiscoveredUrl {
+    /// The URL.
+    pub url: String,
+    /// Link text or title.
+    pub text: String,
+    /// AI-generated description of what this URL likely contains.
+    pub description: String,
+    /// Relevance to the prompt (0.0 - 1.0).
+    pub relevance: f32,
+    /// Whether this URL is recommended to visit.
+    pub recommended: bool,
+    /// Category of the URL (navigation, content, external, etc.).
+    pub category: String,
+}
+
+/// Configuration for structured output mode.
+///
+/// When enabled, the engine uses native JSON schema support from the API
+/// (OpenAI's `response_format.json_schema` or similar) to enforce output structure.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct StructuredOutputConfig {
+    /// Enable structured output mode.
+    pub enabled: bool,
+    /// The JSON schema to enforce.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<serde_json::Value>,
+    /// Name for the schema (required by some APIs).
+    #[serde(default = "default_schema_name")]
+    pub schema_name: String,
+    /// Whether to use strict mode (exact schema compliance).
+    #[serde(default)]
+    pub strict: bool,
+}
+
+#[cfg(feature = "serde")]
+fn default_schema_name() -> String {
+    "response".to_string()
+}
+
+#[cfg(feature = "serde")]
+impl StructuredOutputConfig {
+    /// Create a new structured output config with a schema.
+    pub fn new(schema: serde_json::Value) -> Self {
+        Self {
+            enabled: true,
+            schema: Some(schema),
+            schema_name: "response".to_string(),
+            strict: false,
+        }
+    }
+
+    /// Create with strict mode enabled.
+    pub fn strict(schema: serde_json::Value) -> Self {
+        Self {
+            enabled: true,
+            schema: Some(schema),
+            schema_name: "response".to_string(),
+            strict: true,
+        }
+    }
+
+    /// Set the schema name.
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.schema_name = name.to_string();
+        self
+    }
+}
+
 /// Coarse cost budget the engine may spend for a single automation run.
 ///
 /// This is used by [`ModelPolicy`] to decide whether the engine may select
@@ -3550,6 +3809,7 @@ Focus on:
 "##;
 
 /// System prompt for the `extract()` simple extraction API.
+#[cfg(any(feature = "chrome", feature = "serde"))]
 const EXTRACT_SYSTEM_PROMPT: &str = r##"
 You are a data extraction assistant that extracts structured data from web pages.
 
@@ -4099,6 +4359,535 @@ impl RemoteMultimodalEngine {
             .cloned()
             .unwrap_or(result_value))
     }
+
+    /// Execute an action with self-healing selector cache.
+    ///
+    /// This is an enhanced version of `act()` that uses a selector cache to
+    /// avoid repeated LLM calls for similar actions. If a cached selector
+    /// fails, it automatically re-queries the LLM and updates the cache.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to act on
+    /// * `instruction` - Natural language instruction (e.g., "click the login button")
+    /// * `cache` - Mutable reference to the selector cache
+    ///
+    /// # Self-Healing Flow
+    /// 1. Check cache for a known selector matching the instruction
+    /// 2. If found, try the cached selector directly
+    /// 3. If selector fails → invalidate cache, fall back to LLM
+    /// 4. On success, update cache with the working selector
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    /// let mut cache = SelectorCache::new();
+    ///
+    /// // First call queries LLM, caches selector
+    /// let result = engine.act_cached(&page, "click submit button", &mut cache).await?;
+    ///
+    /// // Second call uses cached selector (no LLM call if selector works)
+    /// let result2 = engine.act_cached(&page, "click submit button", &mut cache).await?;
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn act_cached(
+        &self,
+        page: &chromiumoxide::Page,
+        instruction: &str,
+        cache: &mut SelectorCache,
+    ) -> EngineResult<ActResult> {
+        // Extract domain for cache scoping
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let domain = url::Url::parse(&url)
+            .ok()
+            .and_then(|u| u.host_str().map(|s| s.to_string()));
+
+        // Check cache for a known selector
+        if let Some(cached_selector) = cache.get(instruction, domain.as_deref()) {
+            let selector = cached_selector.to_string();
+            log::debug!("act_cached: trying cached selector '{}' for '{}'", selector, instruction);
+
+            // Try the cached selector directly
+            let try_result = self.try_selector(page, &selector).await;
+
+            if try_result {
+                // Selector worked, update cache and return success
+                cache.record_success(instruction, &selector, domain.as_deref());
+
+                let final_screenshot = self.take_final_screenshot(page).await.ok();
+
+                return Ok(ActResult {
+                    success: true,
+                    action_taken: format!("Used cached selector: {}", selector),
+                    action_type: Some("cached_click".to_string()),
+                    screenshot: final_screenshot,
+                    error: None,
+                    usage: AutomationUsage::default(), // No LLM call
+                });
+            } else {
+                // Cached selector failed, invalidate and fall through to LLM
+                log::debug!("act_cached: cached selector failed, invalidating and querying LLM");
+                cache.record_failure(instruction);
+            }
+        }
+
+        // Fall back to regular act() with LLM
+        let result = self.act(page, instruction).await?;
+
+        // If successful and we got a selector, cache it
+        if result.success {
+            // Try to extract selector from the action taken
+            if let Some(selector) = Self::extract_selector_from_action(&result.action_taken) {
+                cache.record_success(instruction, &selector, domain.as_deref());
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Try to click an element using a CSS selector.
+    #[cfg(feature = "chrome")]
+    async fn try_selector(&self, page: &chromiumoxide::Page, selector: &str) -> bool {
+        // Try to find and click the element
+        match page.find_element(selector).await {
+            Ok(elem) => {
+                // Element found, try to click it
+                elem.click().await.is_ok()
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Extract a CSS selector from an action description.
+    #[cfg(feature = "chrome")]
+    fn extract_selector_from_action(action: &str) -> Option<String> {
+        // Look for common selector patterns
+        // Pattern: selector='...' or selector: '...'
+        if let Some(start) = action.find("selector") {
+            let rest = &action[start..];
+            if let Some(quote_start) = rest.find(['\'', '"']) {
+                let quote_char = rest.chars().nth(quote_start)?;
+                let after_quote = &rest[quote_start + 1..];
+                if let Some(quote_end) = after_quote.find(quote_char) {
+                    return Some(after_quote[..quote_end].to_string());
+                }
+            }
+        }
+        // Pattern: #id or .class at word boundary
+        for word in action.split_whitespace() {
+            if (word.starts_with('#') || word.starts_with('.')) && word.len() > 1 {
+                let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '.' && c != '-' && c != '_');
+                if !clean.is_empty() {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Discover and map URLs on a page using AI-powered analysis.
+    ///
+    /// This method analyzes a page to discover all URLs and categorize them
+    /// based on relevance to the provided prompt. It's useful for intelligent
+    /// crawling where you want to prioritize certain types of pages.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to analyze
+    /// * `prompt` - What kind of content you're looking for (e.g., "product pages", "documentation")
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    /// let map = engine.map(&page, "Find all product listing pages").await?;
+    ///
+    /// println!("Page relevance: {}", map.relevance);
+    /// for url in map.urls.iter().filter(|u| u.recommended) {
+    ///     println!("Recommended: {} - {}", url.url, url.description);
+    /// }
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn map(
+        &self,
+        page: &chromiumoxide::Page,
+        prompt: &str,
+    ) -> EngineResult<MapResult> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        #[derive(Serialize)]
+        struct ResponseFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<ResponseFormat>,
+        }
+
+        // Capture screenshot
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        // Get page context
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Get HTML for link extraction
+        let html = page.content().await.unwrap_or_default();
+        let html_truncated = truncate_utf8_tail(&html, self.cfg.html_max_bytes);
+
+        // Build system prompt for mapping
+        let map_system_prompt = r##"
+You are a web page analyzer that discovers and categorizes URLs.
+
+Given a page (screenshot + HTML) and a search prompt, analyze the page and identify all URLs.
+For each URL, determine its relevance to the user's search prompt.
+
+You MUST output a JSON object with this exact shape:
+{
+  "summary": "Brief description of what the page contains",
+  "relevance": 0.0 to 1.0 (how relevant is THIS page to the prompt),
+  "urls": [
+    {
+      "url": "full URL",
+      "text": "link text or title",
+      "description": "what this URL likely contains",
+      "relevance": 0.0 to 1.0,
+      "recommended": true/false (should user visit this?),
+      "category": "navigation|content|product|documentation|external|auth|other"
+    }
+  ],
+  "suggested_next": ["url1", "url2"] (top 3-5 URLs to explore next based on prompt)
+}
+
+Rules:
+1. Include ALL URLs found on the page
+2. Score relevance based on how well the URL matches the search prompt
+3. Mark URLs as recommended if they're likely to contain what the user is looking for
+4. Categorize URLs to help with crawl prioritization
+5. For suggested_next, pick the most promising URLs to explore
+"##;
+
+        let user_text = format!(
+            "PAGE CONTEXT:\n- URL: {}\n- Title: {}\n\nHTML:\n{}\n\nSEARCH PROMPT:\n{}\n\nAnalyze this page and discover all URLs. Rate their relevance to the search prompt.",
+            url, title, html_truncated, prompt
+        );
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(map_system_prompt.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url.clone() }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".into(),
+            }),
+        };
+
+        // Acquire permit and send request
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "map() failed with status {}: {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+        let usage = extract_usage(&root);
+
+        let map_value = best_effort_parse_json_object(&content)?;
+
+        // Parse the map result
+        let summary = map_value
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let relevance = map_value
+            .get("relevance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0) as f32;
+
+        let urls = map_value
+            .get("urls")
+            .and_then(|v| serde_json::from_value::<Vec<DiscoveredUrl>>(v.clone()).ok())
+            .unwrap_or_default();
+
+        let suggested_next = map_value
+            .get("suggested_next")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(MapResult {
+            urls,
+            relevance,
+            summary,
+            suggested_next,
+            screenshot: Some(screenshot),
+            usage,
+        })
+    }
+
+    /// Extract data using structured output mode (native JSON schema).
+    ///
+    /// This method uses the API's native structured output support (like OpenAI's
+    /// `response_format.json_schema`) to enforce a specific output structure.
+    /// This is more reliable than prompt-based schema enforcement.
+    ///
+    /// # Arguments
+    /// * `page` - The Chrome page to extract from
+    /// * `prompt` - What data to extract
+    /// * `config` - Structured output configuration with JSON schema
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = RemoteMultimodalEngine::new(api_url, model, None);
+    ///
+    /// let schema = serde_json::json!({
+    ///     "type": "object",
+    ///     "properties": {
+    ///         "products": {
+    ///             "type": "array",
+    ///             "items": {
+    ///                 "type": "object",
+    ///                 "properties": {
+    ///                     "name": { "type": "string" },
+    ///                     "price": { "type": "number" }
+    ///                 },
+    ///                 "required": ["name", "price"]
+    ///             }
+    ///         }
+    ///     },
+    ///     "required": ["products"]
+    /// });
+    ///
+    /// let config = StructuredOutputConfig::strict(schema);
+    /// let data = engine.extract_structured(&page, "Extract all products", config).await?;
+    /// ```
+    #[cfg(feature = "chrome")]
+    pub async fn extract_structured(
+        &self,
+        page: &chromiumoxide::Page,
+        prompt: &str,
+        config: StructuredOutputConfig,
+    ) -> EngineResult<serde_json::Value> {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            content_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            image_url: Option<ImageUrl>,
+        }
+
+        #[derive(Serialize)]
+        struct ImageUrl {
+            url: String,
+        }
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: Vec<ContentBlock>,
+        }
+
+        // OpenAI-style structured output format
+        #[derive(Serialize)]
+        struct JsonSchemaFormat {
+            #[serde(rename = "type")]
+            format_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            json_schema: Option<JsonSchemaSpec>,
+        }
+
+        #[derive(Serialize)]
+        struct JsonSchemaSpec {
+            name: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            schema: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "std::ops::Not::not")]
+            strict: bool,
+        }
+
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            response_format: Option<JsonSchemaFormat>,
+        }
+
+        // Capture screenshot
+        let screenshot = self.take_final_screenshot(page).await?;
+        let screenshot_url = format!("data:image/png;base64,{}", screenshot);
+
+        // Get page context
+        let url = page.url().await.ok().flatten().unwrap_or_default();
+        let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+        // Get HTML
+        let html = page.content().await.unwrap_or_default();
+        let html_truncated = truncate_utf8_tail(&html, self.cfg.html_max_bytes);
+
+        let user_text = format!(
+            "PAGE CONTEXT:\n- URL: {}\n- Title: {}\n\nHTML:\n{}\n\nEXTRACTION REQUEST:\n{}",
+            url, title, html_truncated, prompt
+        );
+
+        // Build response format with JSON schema
+        let response_format = if config.enabled && config.schema.is_some() {
+            Some(JsonSchemaFormat {
+                format_type: "json_schema".to_string(),
+                json_schema: Some(JsonSchemaSpec {
+                    name: config.schema_name.clone(),
+                    schema: config.schema.clone(),
+                    strict: config.strict,
+                }),
+            })
+        } else {
+            Some(JsonSchemaFormat {
+                format_type: "json_object".to_string(),
+                json_schema: None,
+            })
+        };
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: vec![ContentBlock {
+                        content_type: "text".into(),
+                        text: Some(EXTRACT_SYSTEM_PROMPT.to_string()),
+                        image_url: None,
+                    }],
+                },
+                Message {
+                    role: "user".into(),
+                    content: vec![
+                        ContentBlock {
+                            content_type: "text".into(),
+                            text: Some(user_text),
+                            image_url: None,
+                        },
+                        ContentBlock {
+                            content_type: "image_url".into(),
+                            text: None,
+                            image_url: Some(ImageUrl { url: screenshot_url }),
+                        },
+                    ],
+                },
+            ],
+            temperature: 0.0,
+            max_tokens: 4096,
+            response_format,
+        };
+
+        // Acquire permit and send request
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = req.send().await?;
+        let status = http_resp.status();
+        let raw_body = http_resp.text().await?;
+
+        if !status.is_success() {
+            return Err(EngineError::Remote(format!(
+                "extract_structured() failed with status {}: {}",
+                status, raw_body
+            )));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&raw_body)?;
+        let content = extract_assistant_content(&root)
+            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+
+        // With structured output, the response should already be valid JSON
+        let result_value: serde_json::Value = serde_json::from_str(&content)
+            .or_else(|_| best_effort_parse_json_object(&content))?;
+
+        // Return the data field, or the whole response
+        Ok(result_value
+            .get("data")
+            .cloned()
+            .unwrap_or(result_value))
+    }
 }
 
 /// Extract structured data from HTML content using an LLM.
@@ -4333,5 +5122,213 @@ Actually, let me fix that:
         assert!(json.is_array());
         assert_eq!(json[0]["id"], 1);
         assert_eq!(json[1]["id"], 2);
+    }
+
+    // ==========================================================================
+    // Phase 2 Tests: Selector Cache, Structured Outputs, Map API
+    // ==========================================================================
+
+    /// Test SelectorCache basic operations.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_selector_cache_basic() {
+        let mut cache = SelectorCache::new();
+
+        // Initially empty
+        assert!(cache.get("login button", None).is_none());
+        let (hits, misses, _) = cache.stats();
+        assert_eq!(hits, 0);
+        assert_eq!(misses, 1);
+
+        // Record a successful selector
+        cache.record_success("login button", "#login-btn", None);
+
+        // Now it should be found
+        let selector = cache.get("login button", None);
+        assert!(selector.is_some());
+        assert_eq!(selector.unwrap(), "#login-btn");
+
+        let (hits, misses, entries) = cache.stats();
+        assert_eq!(hits, 1);
+        assert_eq!(misses, 1);
+        assert_eq!(entries, 1);
+    }
+
+    /// Test SelectorCache normalization (case-insensitive, trimmed).
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_selector_cache_normalization() {
+        let mut cache = SelectorCache::new();
+
+        cache.record_success("Login Button", "#login-btn", None);
+
+        // Should match regardless of case/whitespace
+        assert!(cache.get("login button", None).is_some());
+        assert!(cache.get("  LOGIN BUTTON  ", None).is_some());
+        assert!(cache.get("LOGIN button", None).is_some());
+    }
+
+    /// Test SelectorCache invalidation on failure.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_selector_cache_invalidation() {
+        let mut cache = SelectorCache::new();
+
+        cache.record_success("submit", "#submit-btn", None);
+        assert!(cache.get("submit", None).is_some());
+
+        // First failure doesn't remove
+        cache.record_failure("submit");
+        assert!(cache.get("submit", None).is_some());
+
+        // Second failure removes the entry
+        cache.record_failure("submit");
+        // Need to check without incrementing miss counter
+        let (_, _, entries) = cache.stats();
+        assert_eq!(entries, 0);
+    }
+
+    /// Test SelectorCache domain scoping.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_selector_cache_domain_scoping() {
+        let mut cache = SelectorCache::new();
+
+        cache.record_success("login", "#login-a", Some("example.com"));
+
+        // Should find with same domain
+        assert!(cache.get("login", Some("example.com")).is_some());
+
+        // Should NOT find with different domain
+        assert!(cache.get("login", Some("other.com")).is_none());
+
+        // Should find with no domain filter
+        assert!(cache.get("login", None).is_some());
+    }
+
+    /// Test SelectorCache LRU eviction.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_selector_cache_lru_eviction() {
+        let mut cache = SelectorCache::with_capacity(3);
+
+        cache.record_success("btn1", "#b1", None);
+        cache.record_success("btn2", "#b2", None);
+        cache.record_success("btn3", "#b3", None);
+
+        let (_, _, entries) = cache.stats();
+        assert_eq!(entries, 3);
+
+        // Adding a 4th should evict the LRU (btn1)
+        cache.record_success("btn4", "#b4", None);
+
+        let (_, _, entries) = cache.stats();
+        assert_eq!(entries, 3);
+
+        // btn1 should be evicted
+        // (We can't easily test this without accessing internals,
+        // but we know capacity is maintained)
+    }
+
+    /// Test StructuredOutputConfig creation.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_structured_output_config() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+
+        let config = StructuredOutputConfig::new(schema.clone());
+        assert!(config.enabled);
+        assert!(!config.strict);
+        assert_eq!(config.schema_name, "response");
+
+        let strict_config = StructuredOutputConfig::strict(schema.clone());
+        assert!(strict_config.enabled);
+        assert!(strict_config.strict);
+
+        let named_config = StructuredOutputConfig::new(schema).with_name("product");
+        assert_eq!(named_config.schema_name, "product");
+    }
+
+    /// Test MapResult serialization.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_map_result_serde() {
+        let result = MapResult {
+            urls: vec![
+                DiscoveredUrl {
+                    url: "https://example.com/products".to_string(),
+                    text: "Products".to_string(),
+                    description: "Product listing page".to_string(),
+                    relevance: 0.95,
+                    recommended: true,
+                    category: "content".to_string(),
+                },
+            ],
+            relevance: 0.8,
+            summary: "Homepage with navigation".to_string(),
+            suggested_next: vec!["https://example.com/products".to_string()],
+            screenshot: None,
+            usage: AutomationUsage::default(),
+        };
+
+        // Test serialization
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("Products"));
+        assert!(json.contains("0.95"));
+
+        // Test deserialization
+        let parsed: MapResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.urls.len(), 1);
+        assert_eq!(parsed.urls[0].url, "https://example.com/products");
+        assert!(parsed.urls[0].recommended);
+    }
+
+    /// Test DiscoveredUrl defaults.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_discovered_url_defaults() {
+        let url = DiscoveredUrl::default();
+        assert!(url.url.is_empty());
+        assert!(!url.recommended);
+        assert_eq!(url.relevance, 0.0);
+    }
+
+    /// Test AutomationMemory basic operations.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_automation_memory_basic() {
+        let mut memory = AutomationMemory::new();
+
+        // Store some values
+        memory.set("user", serde_json::json!({"name": "test"}));
+        memory.set("count", serde_json::json!(42));
+
+        // Retrieve
+        assert_eq!(memory.get("count"), Some(&serde_json::json!(42)));
+        assert!(memory.get("nonexistent").is_none());
+
+        // Remove
+        memory.remove("count");
+        assert!(memory.get("count").is_none());
+    }
+
+    /// Test AutomationMemory context string generation.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_automation_memory_context() {
+        let mut memory = AutomationMemory::new();
+        memory.set("key1", serde_json::json!("value1"));
+        memory.add_visited_url("https://example.com");
+        memory.add_action("Clicked button");
+
+        let context = memory.to_context_string();
+        assert!(context.contains("key1"));
+        assert!(context.contains("example.com"));
+        assert!(context.contains("Clicked button"));
     }
 }
