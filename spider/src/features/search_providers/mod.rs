@@ -1,6 +1,6 @@
 //! Search provider implementations.
 //!
-//! This module contains implementations of the [`SearchProvider`] trait
+//! This module contains implementations of the [`super::search::SearchProvider`] trait
 //! for various web search APIs.
 
 #[cfg(feature = "search_serper")]

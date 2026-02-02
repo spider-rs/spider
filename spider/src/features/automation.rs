@@ -3788,7 +3788,7 @@ pub enum MemoryOperation {
 /// - extracting assistant text from the provider response,
 /// - parsing JSON (optionally best-effort),
 /// - validating required fields (`label`, `steps`),
-/// - deserializing `steps` into concrete [`WebAutomation`] actions.
+/// - deserializing `steps` into concrete [`crate::features::chrome_common::WebAutomation`] actions.
 ///
 /// ## Fields
 /// - `label`: Human-readable short description of the plan (from the model).
@@ -3862,7 +3862,7 @@ impl AutomationUsage {
 ///   This typically implies the engine reached a completion condition (model said `done`,
 ///   no steps were needed, or the engine determined the page is stable / complete).
 /// - `success == false` means execution stopped due to an error (HTTP/JSON/provider error)
-///   or because a [`WebAutomation`] step failed to execute.
+///   or because a [`crate::features::chrome_common::WebAutomation`] step failed to execute.
 ///
 /// If `success == false`, `error` should contain a human-readable explanation.
 ///

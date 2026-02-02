@@ -6524,7 +6524,7 @@ impl Website {
     ) {
     }
 
-    /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(not(feature = "sitemap"))]
     pub async fn sitemap_crawl_chain(
         &mut self,
@@ -7263,7 +7263,7 @@ impl Website {
         }
     }
 
-    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(feature = "sitemap")]
     pub async fn sitemap_crawl(
         &mut self,
@@ -7274,7 +7274,7 @@ impl Website {
         self.sitemap_crawl_raw(client, handle, scrape).await
     }
 
-    /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists chain. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(all(
         feature = "sitemap",
         any(not(feature = "chrome"), feature = "decentralized")
@@ -7290,7 +7290,7 @@ impl Website {
         }
     }
 
-    /// Sitemap crawl entire lists chain using chrome. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the [sitemap] flag.
+    /// Sitemap crawl entire lists chain using chrome. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
     #[cfg(all(
         feature = "sitemap",
         feature = "chrome",
@@ -7864,7 +7864,7 @@ impl Website {
 
     /// Use an immutable closure to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
     ///
-    /// Slightly slower than [`with_on_should_crawl_callback`].
+    /// Slightly slower than [`Self::with_on_should_crawl_callback`].
     pub fn with_on_should_crawl_callback_closure<F: OnShouldCrawlClosure>(
         &mut self,
         on_should_crawl_closure: Option<F>,
