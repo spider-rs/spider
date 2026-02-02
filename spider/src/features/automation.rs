@@ -2161,7 +2161,81 @@ fn extract_usage(root: &Value) -> AutomationUsage {
     AutomationUsage::new(prompt_tokens, completion_tokens, total_tokens)
 }
 
+/// Extract the LAST ```json``` or ``` code block from text.
+/// Thinking/reasoning models often output multiple blocks, refining their answer.
+/// The last block is typically the final, valid JSON.
+#[cfg(feature = "serde")]
+fn extract_last_json_block(s: &str) -> Option<&str> {
+    let mut last_block: Option<&str> = None;
+    let mut search_start = 0;
+
+    // Find all ```json blocks and keep track of the last one
+    while let Some(rel_start) = s[search_start..].find("```json") {
+        let abs_start = search_start + rel_start + 7; // skip "```json"
+        if abs_start < s.len() {
+            if let Some(rel_end) = s[abs_start..].find("```") {
+                let block = s[abs_start..abs_start + rel_end].trim();
+                if !block.is_empty() {
+                    last_block = Some(block);
+                }
+                search_start = abs_start + rel_end + 3;
+            } else {
+                // No closing fence, take rest of string
+                let block = s[abs_start..].trim();
+                if !block.is_empty() {
+                    last_block = Some(block);
+                }
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // If no ```json found, try generic ``` blocks
+    if last_block.is_none() {
+        search_start = 0;
+        while let Some(rel_start) = s[search_start..].find("```") {
+            let after_fence = search_start + rel_start + 3;
+            if after_fence >= s.len() {
+                break;
+            }
+
+            // Skip language identifier if present (e.g., ```javascript)
+            let rest = &s[after_fence..];
+            let content_start = rest
+                .find('\n')
+                .map(|i| after_fence + i + 1)
+                .unwrap_or(after_fence);
+
+            if content_start < s.len() {
+                if let Some(rel_end) = s[content_start..].find("```") {
+                    let block = s[content_start..content_start + rel_end].trim();
+                    // Only consider blocks that look like JSON
+                    if !block.is_empty()
+                        && (block.starts_with('{') || block.starts_with('['))
+                    {
+                        last_block = Some(block);
+                    }
+                    search_start = content_start + rel_end + 3;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    last_block
+}
+
 /// Best effort parse the json object.
+///
+/// Handles common LLM output quirks:
+/// - Multiple ```json``` blocks (uses the LAST one, as thinking models refine answers)
+/// - Reasoning/thinking text before JSON
+/// - Malformed JSON (when `llm_json` feature is enabled)
 #[cfg(feature = "serde")]
 fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
     // Try direct parse first
@@ -2171,57 +2245,75 @@ fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
 
     let trimmed = s.trim();
 
-    // Try to find ```json block anywhere in the text (handles reasoning before JSON)
-    let unfenced = if let Some(start) = trimmed.find("```json") {
-        let after_marker = &trimmed[start + 7..];
-        if let Some(end) = after_marker.find("```") {
-            after_marker[..end].trim()
-        } else {
-            after_marker.trim()
+    // Try to extract the LAST json block (thinking models refine their answer)
+    if let Some(block) = extract_last_json_block(trimmed) {
+        if let Ok(v) = serde_json::from_str::<Value>(block) {
+            return Ok(v);
         }
-    } else if let Some(start) = trimmed.find("```") {
-        // Try generic code block
-        let after_marker = &trimmed[start + 3..];
-        if let Some(end) = after_marker.find("```") {
-            after_marker[..end].trim()
-        } else {
-            after_marker.trim()
+
+        // Try llm_json repair on the extracted block
+        #[cfg(feature = "llm_json")]
+        if let Ok(v) = llm_json::loads(block, &Default::default()) {
+            return Ok(v);
         }
-    } else {
-        // Fallback: strip prefix/suffix if at boundaries
-        let unfenced = trimmed
-            .strip_prefix("```json")
-            .or_else(|| trimmed.strip_prefix("```"))
-            .map(|x| x.trim())
-            .unwrap_or(trimmed);
-        unfenced
-            .strip_suffix("```")
-            .map(|x| x.trim())
-            .unwrap_or(unfenced)
-    };
+    }
+
+    // Fallback: strip prefix/suffix if at boundaries
+    let unfenced = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .map(|x| x.trim())
+        .unwrap_or(trimmed);
+    let unfenced = unfenced
+        .strip_suffix("```")
+        .map(|x| x.trim())
+        .unwrap_or(unfenced);
 
     if let Ok(v) = serde_json::from_str::<Value>(unfenced) {
         return Ok(v);
     }
 
-    // Try to find JSON object/array directly in the text
-    if let (Some(a), Some(b)) = (unfenced.find('{'), unfenced.rfind('}')) {
+    // Try llm_json repair on unfenced content
+    #[cfg(feature = "llm_json")]
+    if let Ok(v) = llm_json::loads(unfenced, &Default::default()) {
+        return Ok(v);
+    }
+
+    // Try to find JSON object/array directly in the text (last occurrence)
+    if let (Some(a), Some(b)) = (unfenced.rfind('{'), unfenced.rfind('}')) {
         if b > a {
+            // Find the matching opening brace for the last closing brace
             let slice = &unfenced[a..=b];
             if let Ok(v) = serde_json::from_str::<Value>(slice) {
+                return Ok(v);
+            }
+
+            #[cfg(feature = "llm_json")]
+            if let Ok(v) = llm_json::loads(slice, &Default::default()) {
                 return Ok(v);
             }
         }
     }
 
-    // Try array as well
-    if let (Some(a), Some(b)) = (unfenced.find('['), unfenced.rfind(']')) {
+    // Try array as well (last occurrence)
+    if let (Some(a), Some(b)) = (unfenced.rfind('['), unfenced.rfind(']')) {
         if b > a {
             let slice = &unfenced[a..=b];
             if let Ok(v) = serde_json::from_str::<Value>(slice) {
                 return Ok(v);
             }
+
+            #[cfg(feature = "llm_json")]
+            if let Ok(v) = llm_json::loads(slice, &Default::default()) {
+                return Ok(v);
+            }
         }
+    }
+
+    // Final attempt: try llm_json on the entire input
+    #[cfg(feature = "llm_json")]
+    if let Ok(v) = llm_json::loads(trimmed, &Default::default()) {
+        return Ok(v);
     }
 
     Err(EngineError::InvalidField(

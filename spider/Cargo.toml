@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.43.4"
+version = "2.43.5"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -69,6 +69,7 @@ string-interner = { version = "0.19", default-features = false, features = [
 httpdate = { version = "1", optional = true }
 rand = { version = "0.9", optional = true }
 serde_regex = { version = "1", optional = true }
+llm_json = { version = "1", optional = true }
 thirtyfour = { version = "0.36", optional = true }
 statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1" }
@@ -278,6 +279,7 @@ firewall = ["dep:spider_firewall", "chromey/firewall"]
 wreq = ["dep:wreq", "dep:wreq-util"]
 rquest_hickory_dns = ["wreq/hickory-dns"]
 extra_information = []
+llm_json = ["dep:llm_json"]
 webdriver = ["dep:thirtyfour", "serde", "dep:rand", "dep:fastrand"]
 webdriver_headed = ["webdriver"]
 webdriver_stealth = ["webdriver"]

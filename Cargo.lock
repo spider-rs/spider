@@ -471,7 +471,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.43.4",
+ "spider 2.43.5",
 ]
 
 [[package]]
@@ -2992,6 +2992,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
+name = "llm_json"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d6a0ee634dc2211a67b3ee239fac8098647352fc73a39b50c57fbf7fb7a2928"
+dependencies = [
+ "clap",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "llm_readability"
 version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5139,7 +5150,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.43.4"
+version = "2.43.5"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5170,6 +5181,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "libc",
+ "llm_json",
  "log",
  "lol_html",
  "moka",
@@ -5251,7 +5263,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.43.4"
+version = "2.43.5"
 dependencies = [
  "clap",
  "env_logger",
@@ -5259,7 +5271,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.43.4",
+ "spider 2.43.5",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5274,7 +5286,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.43.4",
+ "spider 2.43.5",
  "spider_transformations",
  "spider_utils 2.41.1",
 ]
@@ -5390,7 +5402,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.43.4"
+version = "2.43.5"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -5406,11 +5418,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.43.4"
+version = "2.43.5"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.43.4",
+ "spider 2.43.5",
  "warp",
 ]
 

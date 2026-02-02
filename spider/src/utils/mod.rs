@@ -133,8 +133,6 @@ error was encountered while trying to use an ErrorDocument to handle the request
 <center><h1>403 Forbidden</h1></center>
 <hr><center>openresty</center>"#;
 
-    /// Empty HTML.
-    pub static ref EMPTY_HTML: &'static [u8; 39] = b"<html><head></head><body></body></html>";
     /// Empty html.
     pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
 
