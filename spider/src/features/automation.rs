@@ -1965,6 +1965,9 @@ pub struct RemoteMultimodalConfig {
     pub extraction_schema: Option<ExtractionSchema>,
     /// Take a screenshot after automation completes and include it in results.
     pub screenshot: bool,
+    /// Search provider configuration for web search integration.
+    #[cfg(feature = "search")]
+    pub search_config: Option<crate::configuration::SearchConfig>,
 }
 
 impl Default for RemoteMultimodalConfig {
@@ -1988,6 +1991,8 @@ impl Default for RemoteMultimodalConfig {
             extraction_prompt: None,
             extraction_schema: None,
             screenshot: true,
+            #[cfg(feature = "search")]
+            search_config: None,
         }
     }
 }
@@ -2504,6 +2509,26 @@ impl RemoteMultimodalEngine {
     pub fn with_extraction_schema(&mut self, schema: Option<ExtractionSchema>) -> &mut Self {
         self.cfg.extraction_schema = schema;
         self
+    }
+
+    /// Configure web search integration.
+    #[cfg(feature = "search")]
+    pub fn with_search_config(
+        &mut self,
+        config: Option<crate::configuration::SearchConfig>,
+    ) -> &mut Self {
+        self.cfg.search_config = config;
+        self
+    }
+
+    /// Check if search is enabled and properly configured.
+    #[cfg(feature = "search")]
+    pub fn search_enabled(&self) -> bool {
+        self.cfg
+            .search_config
+            .as_ref()
+            .map(|c| c.is_enabled())
+            .unwrap_or(false)
     }
 
     /// Acquire the permit.
@@ -6988,6 +7013,106 @@ Rules:
     ) -> EngineResult<AgentResult> {
         let config = AgentConfig::new(goal).with_extraction(extraction_prompt);
         self.execute(page, config).await
+    }
+
+    /// Search the web and return structured results.
+    ///
+    /// Uses the configured search provider (Serper, Brave, Bing, or Tavily) to query
+    /// the web and return relevant URLs with snippets.
+    ///
+    /// # Arguments
+    /// * `query` - The search query
+    /// * `options` - Optional search options (limit, country, etc.)
+    /// * `client` - Optional HTTP client to reuse (from crawl)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let results = engine.search("rust web crawlers", None, None).await?;
+    /// for result in results.results {
+    ///     println!("{}: {}", result.title, result.url);
+    /// }
+    /// ```
+    #[cfg(feature = "search")]
+    pub async fn search(
+        &self,
+        query: &str,
+        options: Option<crate::features::search::SearchOptions>,
+        client: Option<&crate::Client>,
+    ) -> EngineResult<crate::features::search::SearchResults> {
+        use crate::configuration::SearchProviderType;
+        use crate::features::search::SearchProvider;
+
+        let config = self.cfg.search_config.as_ref().ok_or_else(|| {
+            EngineError::Unsupported("Search not configured - set search_config first")
+        })?;
+
+        if !config.is_enabled() {
+            return Err(EngineError::Unsupported(
+                "Search not enabled - provide API key or custom API URL",
+            ));
+        }
+
+        let opts = options.unwrap_or_else(|| {
+            config
+                .default_options
+                .clone()
+                .unwrap_or_default()
+        });
+
+        match config.provider {
+            #[cfg(feature = "search_serper")]
+            SearchProviderType::Serper => {
+                let mut provider =
+                    crate::features::search_providers::SerperProvider::new(&config.api_key);
+                if let Some(ref url) = config.api_url {
+                    provider = provider.with_api_url(url);
+                }
+                provider
+                    .search(query, &opts, client)
+                    .await
+                    .map_err(|e| EngineError::Remote(e.to_string()))
+            }
+            #[cfg(feature = "search_brave")]
+            SearchProviderType::Brave => {
+                let mut provider =
+                    crate::features::search_providers::BraveProvider::new(&config.api_key);
+                if let Some(ref url) = config.api_url {
+                    provider = provider.with_api_url(url);
+                }
+                provider
+                    .search(query, &opts, client)
+                    .await
+                    .map_err(|e| EngineError::Remote(e.to_string()))
+            }
+            #[cfg(feature = "search_bing")]
+            SearchProviderType::Bing => {
+                let mut provider =
+                    crate::features::search_providers::BingProvider::new(&config.api_key);
+                if let Some(ref url) = config.api_url {
+                    provider = provider.with_api_url(url);
+                }
+                provider
+                    .search(query, &opts, client)
+                    .await
+                    .map_err(|e| EngineError::Remote(e.to_string()))
+            }
+            #[cfg(feature = "search_tavily")]
+            SearchProviderType::Tavily => {
+                let mut provider =
+                    crate::features::search_providers::TavilyProvider::new(&config.api_key);
+                if let Some(ref url) = config.api_url {
+                    provider = provider.with_api_url(url);
+                }
+                provider
+                    .search(query, &opts, client)
+                    .await
+                    .map_err(|e| EngineError::Remote(e.to_string()))
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(EngineError::Unsupported(
+                "Selected search provider feature not enabled",
+            )),
+        }
     }
 }
 

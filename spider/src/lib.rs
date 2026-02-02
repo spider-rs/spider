@@ -174,6 +174,11 @@ pub use client::{Client, ClientBuilder};
 #[cfg(feature = "chrome")]
 pub use chromiumoxide;
 
+#[cfg(feature = "search")]
+pub use features::search;
+#[cfg(feature = "search")]
+pub use features::search_providers;
+
 #[cfg(feature = "regex")]
 /// Black list checking url exist with Regex.
 pub mod black_list {

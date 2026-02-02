@@ -9,6 +9,8 @@ pub use crate::features::chrome_common::{
 pub use crate::features::gemini_common::GeminiConfigs;
 pub use crate::features::openai_common::GPTConfigs;
 pub use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
+#[cfg(feature = "search")]
+pub use crate::features::search::{SearchError, SearchOptions, SearchResult, SearchResults, TimeRange};
 use crate::utils::get_domain_from_url;
 use crate::utils::BasicCachePolicy;
 use crate::website::CronType;
@@ -331,6 +333,9 @@ pub struct Configuration {
     #[cfg(feature = "webdriver")]
     /// WebDriver configuration for browser automation. This does nothing without the `webdriver` flag enabled.
     pub webdriver_config: Option<Box<WebDriverConfig>>,
+    #[cfg(feature = "search")]
+    /// Search provider configuration for web search integration. This does nothing without the `search` flag enabled.
+    pub search_config: Option<Box<SearchConfig>>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1668,4 +1673,80 @@ impl Configuration {
     pub fn build(&self) -> Self {
         self.to_owned()
     }
+
+    #[cfg(feature = "search")]
+    /// Configure web search integration. This does nothing without the `search` flag enabled.
+    pub fn with_search_config(&mut self, search_config: Option<SearchConfig>) -> &mut Self {
+        self.search_config = search_config.map(Box::new);
+        self
+    }
+
+    #[cfg(not(feature = "search"))]
+    /// Configure web search integration. This does nothing without the `search` flag enabled.
+    pub fn with_search_config(&mut self, _search_config: Option<()>) -> &mut Self {
+        self
+    }
+}
+
+/// Search provider configuration for web search integration.
+#[cfg(feature = "search")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SearchConfig {
+    /// The search provider to use.
+    pub provider: SearchProviderType,
+    /// API key for the search provider.
+    pub api_key: String,
+    /// Custom API URL (overrides default endpoint for the provider).
+    pub api_url: Option<String>,
+    /// Default search options.
+    pub default_options: Option<SearchOptions>,
+}
+
+#[cfg(feature = "search")]
+impl SearchConfig {
+    /// Create a new search configuration.
+    pub fn new(provider: SearchProviderType, api_key: impl Into<String>) -> Self {
+        Self {
+            provider,
+            api_key: api_key.into(),
+            api_url: None,
+            default_options: None,
+        }
+    }
+
+    /// Use a custom API endpoint for this provider.
+    pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
+        self.api_url = Some(url.into());
+        self
+    }
+
+    /// Set default search options.
+    pub fn with_default_options(mut self, options: SearchOptions) -> Self {
+        self.default_options = Some(options);
+        self
+    }
+
+    /// Check if this configuration is valid and search is enabled.
+    ///
+    /// Returns true if an API key is set or a custom API URL is configured.
+    pub fn is_enabled(&self) -> bool {
+        !self.api_key.is_empty() || self.api_url.is_some()
+    }
+}
+
+/// Available search providers.
+#[cfg(feature = "search")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SearchProviderType {
+    /// Serper.dev - Google SERP API (high quality).
+    #[default]
+    Serper,
+    /// Brave Search API (privacy-focused).
+    Brave,
+    /// Microsoft Bing Web Search API.
+    Bing,
+    /// Tavily AI Search (optimized for LLMs).
+    Tavily,
 }

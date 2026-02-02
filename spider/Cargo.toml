@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.43.16"
+version = "2.43.17"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -287,6 +287,11 @@ webdriver_chrome = ["webdriver"]
 webdriver_firefox = ["webdriver"]
 webdriver_edge = ["webdriver"]
 webdriver_screenshot = ["webdriver"]
+search = ["serde"]
+search_serper = ["search"]
+search_brave = ["search"]
+search_bing = ["search"]
+search_tavily = ["search"]
 
 # Allows full concurrency.
 cowboy = []

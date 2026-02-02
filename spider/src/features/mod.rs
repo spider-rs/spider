@@ -49,3 +49,10 @@ pub(crate) use sonic_rs as serde_json;
 
 /// Automation scripts.
 pub mod automation;
+
+/// Web search integration.
+#[cfg(feature = "search")]
+pub mod search;
+/// Search provider implementations.
+#[cfg(feature = "search")]
+pub mod search_providers;
