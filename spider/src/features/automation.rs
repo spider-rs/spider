@@ -7114,6 +7114,378 @@ Rules:
             )),
         }
     }
+
+    /// Search the web and extract data from top results.
+    ///
+    /// Combines search with page fetching and LLM extraction:
+    /// 1. Searches using the configured provider
+    /// 2. Fetches HTML from each result URL
+    /// 3. Uses LLM to extract data according to the extraction prompt
+    ///
+    /// # Arguments
+    /// * `query` - The search query
+    /// * `extraction_prompt` - What data to extract from each page
+    /// * `options` - Optional search options (limit, country, etc.)
+    /// * `client` - Optional HTTP client to reuse
+    ///
+    /// # Example
+    /// ```ignore
+    /// let data = engine.search_and_extract(
+    ///     "best rust web frameworks 2024",
+    ///     "Extract framework name, description, and GitHub stars",
+    ///     Some(SearchOptions::new().with_limit(5)),
+    ///     None,
+    /// ).await?;
+    ///
+    /// for (url, extracted) in data {
+    ///     println!("{}: {:?}", url, extracted);
+    /// }
+    /// ```
+    #[cfg(feature = "search")]
+    pub async fn search_and_extract(
+        &self,
+        query: &str,
+        extraction_prompt: &str,
+        options: Option<crate::features::search::SearchOptions>,
+        client: Option<&crate::Client>,
+    ) -> EngineResult<Vec<(String, serde_json::Value)>> {
+        // Search first
+        let search_results = self.search(query, options, client).await?;
+
+        if search_results.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Create client if not provided
+        let owned_client;
+        let http_client = match client {
+            Some(c) => c,
+            None => {
+                owned_client = crate::ClientBuilder::new()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| EngineError::Remote(e.to_string()))?;
+                &owned_client
+            }
+        };
+
+        // Configure extraction
+        let mut extraction_engine = self.clone();
+        extraction_engine.cfg.extraction_prompt = Some(extraction_prompt.to_string());
+        extraction_engine.cfg.extra_ai_data = true;
+
+        let mut results = Vec::new();
+
+        for result in search_results.results {
+            // Fetch page HTML
+            let response = http_client
+                .get(&result.url)
+                .send()
+                .await
+                .map_err(|e| EngineError::Remote(format!("Failed to fetch {}: {}", result.url, e)))?;
+
+            if !response.status().is_success() {
+                log::debug!("Skipping {} - HTTP {}", result.url, response.status());
+                continue;
+            }
+
+            let html = response
+                .text()
+                .await
+                .map_err(|e| EngineError::Remote(format!("Failed to read {}: {}", result.url, e)))?;
+
+            // Extract using LLM
+            match extraction_engine
+                .extract_from_html(&html, &result.url, Some(&result.title))
+                .await
+            {
+                Ok(extraction_result) => {
+                    if let Some(extracted) = extraction_result.extracted {
+                        results.push((result.url.clone(), extracted));
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Extraction failed for {}: {}", result.url, e);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Research a topic using search, extraction, and synthesis.
+    ///
+    /// Higher-level research function that:
+    /// 1. Searches for the query
+    /// 2. Fetches and extracts data from each result page
+    /// 3. Synthesizes findings into a coherent summary
+    ///
+    /// # Arguments
+    /// * `topic` - The research topic or question
+    /// * `options` - Research options (max pages, synthesis, etc.)
+    /// * `client` - Optional HTTP client to reuse
+    ///
+    /// # Example
+    /// ```ignore
+    /// let research = engine.research(
+    ///     "How do Tokio and async-std compare?",
+    ///     ResearchOptions {
+    ///         max_pages: 5,
+    ///         synthesize: true,
+    ///         ..Default::default()
+    ///     },
+    ///     None,
+    /// ).await?;
+    ///
+    /// println!("Summary: {}", research.summary.unwrap());
+    /// ```
+    #[cfg(feature = "search")]
+    pub async fn research(
+        &self,
+        topic: &str,
+        options: ResearchOptions,
+        client: Option<&crate::Client>,
+    ) -> EngineResult<ResearchResult> {
+        use crate::features::search::SearchOptions;
+
+        // Build search options
+        let search_opts = options.search_options.clone().unwrap_or_else(|| {
+            SearchOptions::new().with_limit(options.max_pages.max(5))
+        });
+
+        // Search first
+        let search_results = self.search(topic, Some(search_opts), client).await?;
+
+        // Create client if not provided
+        let owned_client;
+        let http_client = match client {
+            Some(c) => c,
+            None => {
+                owned_client = crate::ClientBuilder::new()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| EngineError::Remote(e.to_string()))?;
+                &owned_client
+            }
+        };
+
+        // Configure extraction
+        let extraction_prompt = options.extraction_prompt.clone().unwrap_or_else(|| {
+            format!(
+                "Extract key information relevant to: {}. Include facts, data points, and insights.",
+                topic
+            )
+        });
+
+        let mut extraction_engine = self.clone();
+        extraction_engine.cfg.extraction_prompt = Some(extraction_prompt);
+        extraction_engine.cfg.extra_ai_data = true;
+
+        let mut extractions = Vec::new();
+        let mut total_usage = AutomationUsage::default();
+
+        // Limit pages to process
+        let max_pages = options.max_pages.min(search_results.results.len());
+
+        for result in search_results.results.iter().take(max_pages) {
+            // Fetch page HTML
+            let response = match http_client.get(&result.url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    log::debug!("Failed to fetch {}: {}", result.url, e);
+                    continue;
+                }
+            };
+
+            if !response.status().is_success() {
+                log::debug!("Skipping {} - HTTP {}", result.url, response.status());
+                continue;
+            }
+
+            let html = match response.text().await {
+                Ok(h) => h,
+                Err(e) => {
+                    log::debug!("Failed to read {}: {}", result.url, e);
+                    continue;
+                }
+            };
+
+            // Extract using LLM
+            match extraction_engine
+                .extract_from_html(&html, &result.url, Some(&result.title))
+                .await
+            {
+                Ok(extraction_result) => {
+                    total_usage.accumulate(&extraction_result.usage);
+                    if let Some(extracted) = extraction_result.extracted {
+                        extractions.push(PageExtraction {
+                            url: result.url.clone(),
+                            title: result.title.clone(),
+                            extracted,
+                        });
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Extraction failed for {}: {}", result.url, e);
+                }
+            }
+        }
+
+        // Synthesize if requested
+        let summary = if options.synthesize && !extractions.is_empty() {
+            Some(self.synthesize_research(topic, &extractions, &mut total_usage).await?)
+        } else {
+            None
+        };
+
+        Ok(ResearchResult {
+            topic: topic.to_string(),
+            search_results,
+            extractions,
+            summary,
+            usage: total_usage,
+        })
+    }
+
+    /// Synthesize research findings into a coherent summary.
+    #[cfg(feature = "search")]
+    async fn synthesize_research(
+        &self,
+        topic: &str,
+        extractions: &[PageExtraction],
+        usage: &mut AutomationUsage,
+    ) -> EngineResult<String> {
+        // Build context from extractions
+        let mut context = String::new();
+        for (i, extraction) in extractions.iter().enumerate() {
+            context.push_str(&format!(
+                "\n--- Source {}: {} ({})\n{}\n",
+                i + 1,
+                extraction.title,
+                extraction.url,
+                serde_json::to_string_pretty(&extraction.extracted).unwrap_or_default()
+            ));
+        }
+
+        let synthesis_prompt = format!(
+            "Based on the following research findings, provide a comprehensive summary answering: {}\n\n{}",
+            topic, context
+        );
+
+        // Use the LLM to synthesize
+        let mut synthesis_engine = self.clone();
+        synthesis_engine.cfg.extraction_prompt = None;
+        synthesis_engine.system_prompt = Some(
+            "You are a research assistant. Synthesize the provided findings into a clear, comprehensive summary. \
+             Focus on key insights, patterns, and conclusions. Be concise but thorough.".to_string()
+        );
+
+        let result = synthesis_engine
+            .extract_from_html(&synthesis_prompt, "research://synthesis", None)
+            .await?;
+
+        usage.accumulate(&result.usage);
+
+        // Extract the summary text from the result
+        let summary = if let Some(ref extracted) = result.extracted {
+            // Try to get summary or content field
+            if let Some(s) = extracted.get("summary").or(extracted.get("content")) {
+                s.as_str().map(String::from).unwrap_or_else(|| {
+                    serde_json::to_string(s).unwrap_or_default()
+                })
+            } else if let Some(s) = extracted.as_str() {
+                s.to_string()
+            } else {
+                serde_json::to_string(extracted).unwrap_or_default()
+            }
+        } else {
+            String::new()
+        };
+
+        Ok(summary)
+    }
+}
+
+/// Options for research tasks.
+#[cfg(feature = "search")]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ResearchOptions {
+    /// Maximum pages to visit (default: 5).
+    pub max_pages: usize,
+    /// Search options for the initial query.
+    pub search_options: Option<crate::features::search::SearchOptions>,
+    /// Custom extraction prompt (default: auto-generated from topic).
+    pub extraction_prompt: Option<String>,
+    /// Whether to synthesize findings into a summary (default: false).
+    pub synthesize: bool,
+}
+
+#[cfg(feature = "search")]
+impl ResearchOptions {
+    /// Create new research options with defaults.
+    pub fn new() -> Self {
+        Self {
+            max_pages: 5,
+            search_options: None,
+            extraction_prompt: None,
+            synthesize: false,
+        }
+    }
+
+    /// Set maximum pages to visit.
+    pub fn with_max_pages(mut self, max: usize) -> Self {
+        self.max_pages = max;
+        self
+    }
+
+    /// Set search options.
+    pub fn with_search_options(mut self, opts: crate::features::search::SearchOptions) -> Self {
+        self.search_options = Some(opts);
+        self
+    }
+
+    /// Set custom extraction prompt.
+    pub fn with_extraction_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.extraction_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Enable synthesis of findings into a summary.
+    pub fn with_synthesis(mut self) -> Self {
+        self.synthesize = true;
+        self
+    }
+}
+
+/// Result of a research task.
+#[cfg(feature = "search")]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ResearchResult {
+    /// The original research topic/question.
+    pub topic: String,
+    /// Search results used.
+    pub search_results: crate::features::search::SearchResults,
+    /// Extracted data from each visited page.
+    pub extractions: Vec<PageExtraction>,
+    /// Synthesized summary (if enabled).
+    pub summary: Option<String>,
+    /// Token usage.
+    pub usage: AutomationUsage,
+}
+
+/// Extraction from a single page during research.
+#[cfg(feature = "search")]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PageExtraction {
+    /// URL of the page.
+    pub url: String,
+    /// Title of the page.
+    pub title: String,
+    /// Extracted data.
+    pub extracted: serde_json::Value,
 }
 
 /// Extract structured data from HTML content using an LLM.
