@@ -278,3 +278,13 @@ required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_stealt
 name = "webdriver_screenshot"
 path = "webdriver_screenshot.rs"
 required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_screenshot"]
+
+[[example]]
+name = "remote_multimodal"
+path = "remote_multimodal.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
+name = "remote_multimodal_scrape"
+path = "remote_multimodal_scrape.rs"
+required-features = ["spider/sync", "spider/chrome"]
