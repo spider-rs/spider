@@ -146,18 +146,19 @@ pub extern crate strum;
 pub extern crate lazy_static;
 #[cfg(feature = "firewall")]
 pub extern crate spider_firewall;
-#[cfg(feature = "agent")]
 pub extern crate spider_agent;
 
-/// Re-export agent types when agent feature is enabled.
-#[cfg(feature = "agent")]
+/// Re-export agent types from spider_agent crate.
 pub mod agent {
     //! Agent module re-exports from spider_agent crate.
     //!
     //! This provides convenient access to the multimodal agent functionality.
     pub use spider_agent::{
         Agent, AgentBuilder, AgentConfig, AgentError, AgentMemory, AgentResult,
-        FetchResult, HtmlCleaningMode, Message, RetryConfig, UsageSnapshot, UsageStats,
+        FetchResult, HtmlCleaningMode, LimitType, Message, RetryConfig,
+        UsageLimits, UsageSnapshot, UsageStats,
+        // Custom tool types
+        AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod,
     };
 
     #[cfg(feature = "agent_openai")]
@@ -165,6 +166,9 @@ pub mod agent {
 
     #[cfg(feature = "agent_chrome")]
     pub use spider_agent::BrowserContext;
+
+    #[cfg(feature = "agent_webdriver")]
+    pub use spider_agent::WebDriverContext;
 
     #[cfg(feature = "agent_fs")]
     pub use spider_agent::{TempStorage, TempFile};
