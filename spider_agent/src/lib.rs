@@ -81,6 +81,7 @@
 #![warn(missing_docs)]
 
 mod agent;
+pub mod automation;
 mod config;
 mod error;
 mod llm;
@@ -104,6 +105,16 @@ pub use config::{AgentConfig, HtmlCleaningMode, ResearchOptions, RetryConfig, Se
 pub use error::{AgentError, AgentResult, SearchError};
 pub use llm::{CompletionOptions, CompletionResponse, LLMProvider, Message, MessageContent, TokenUsage};
 pub use memory::AgentMemory;
+
+// Automation re-exports
+pub use automation::{
+    ActionRecord, ActionResult, ActionType, AutomationConfig, AutomationResult, AutomationUsage,
+    CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep,
+    ChainStepResult, CleaningIntent, ContentAnalysis, CostTier, ExtractionSchema, FormField,
+    FormInfo, HtmlCleaningProfile, InteractiveElement, ModelPolicy, NavigationOption,
+    PageObservation, RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry,
+    StructuredOutputConfig,
+};
 
 #[cfg(feature = "search")]
 pub use agent::ResearchResult;
