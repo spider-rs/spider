@@ -293,3 +293,8 @@ required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 name = "remote_multimodal_benchmark"
 path = "remote_multimodal_benchmark.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
+
+[[example]]
+name = "remote_multimodal_multi"
+path = "remote_multimodal_multi.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
