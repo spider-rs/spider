@@ -46,7 +46,6 @@
 //! ```no_run
 //! use spider::tokio;
 //! use spider::website::Website;
-//! use tokio::io::AsyncWriteExt;
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -54,12 +53,8 @@
 //!     let mut rx2 = website.subscribe(16).unwrap();
 //!
 //!     tokio::spawn(async move {
-//!         let mut stdout = tokio::io::stdout();
-//!
 //!         while let Ok(res) = rx2.recv().await {
-//!             let _ = stdout
-//!                 .write_all(format!("- {}\n", res.get_url()).as_bytes())
-//!                 .await;
+//!             println!("- {}", res.get_url());
 //!         }
 //!     });
 //!
