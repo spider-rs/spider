@@ -112,7 +112,7 @@ impl Default for ModelPolicy {
             large: "gpt-4o".to_string(),
             allow_large: true,
             max_latency_ms: None,
-            max_cost_tier: CostTier::Medium,
+            max_cost_tier: CostTier::High,
         }
     }
 }

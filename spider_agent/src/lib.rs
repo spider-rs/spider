@@ -116,6 +116,11 @@ pub use automation::{
     StructuredOutputConfig,
 };
 
+// Performance re-exports
+pub use automation::cache::{CacheStats, CacheValue, SmartCache};
+pub use automation::executor::{BatchExecutor, ChainExecutor, PrefetchManager};
+pub use automation::router::{ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory};
+
 #[cfg(feature = "search")]
 pub use agent::ResearchResult;
 

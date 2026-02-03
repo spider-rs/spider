@@ -11,10 +11,13 @@
 //! that can be used across spider ecosystem.
 
 mod actions;
+pub mod cache;
 mod chain;
 mod config;
 mod content;
+pub mod executor;
 mod observation;
+pub mod router;
 mod selector_cache;
 
 pub use actions::{ActionRecord, ActionResult, ActionType};

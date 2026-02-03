@@ -90,6 +90,59 @@ pub enum MessageContent {
     MultiPart(Vec<ContentPart>),
 }
 
+impl MessageContent {
+    /// Get text content as a string reference.
+    ///
+    /// For multi-part content, returns the concatenated text parts.
+    pub fn as_text(&self) -> &str {
+        match self {
+            Self::Text(s) => s,
+            Self::MultiPart(parts) => {
+                // Return first text part, or empty string
+                for part in parts {
+                    if let ContentPart::Text { text } = part {
+                        return text;
+                    }
+                }
+                ""
+            }
+        }
+    }
+
+    /// Get the full text from all text parts.
+    pub fn full_text(&self) -> String {
+        match self {
+            Self::Text(s) => s.clone(),
+            Self::MultiPart(parts) => {
+                parts
+                    .iter()
+                    .filter_map(|p| {
+                        if let ContentPart::Text { text } = p {
+                            Some(text.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        }
+    }
+
+    /// Check if this is text-only content.
+    pub fn is_text(&self) -> bool {
+        matches!(self, Self::Text(_))
+    }
+
+    /// Check if this contains images.
+    pub fn has_images(&self) -> bool {
+        match self {
+            Self::Text(_) => false,
+            Self::MultiPart(parts) => parts.iter().any(|p| matches!(p, ContentPart::ImageUrl { .. })),
+        }
+    }
+}
+
 /// A part of multi-part content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
