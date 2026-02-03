@@ -474,7 +474,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.43.23",
+ "spider 2.43.24",
 ]
 
 [[package]]
@@ -5143,7 +5143,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.43.23"
+version = "2.43.24"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -5218,7 +5218,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-openai",
  "async-trait",
@@ -5289,7 +5289,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.43.23",
+ "spider 2.43.24",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -5304,7 +5304,7 @@ dependencies = [
  "env_logger",
  "flexbuffers",
  "htr",
- "spider 2.43.23",
+ "spider 2.43.24",
  "spider_transformations",
  "spider_utils 2.41.1",
 ]
@@ -5440,7 +5440,7 @@ version = "2.43.20"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.43.23",
+ "spider 2.43.24",
  "warp",
 ]
 

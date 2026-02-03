@@ -3822,7 +3822,7 @@ struct ParsedPlan {
 /// Token usage returned from OpenAI-compatible endpoints.
 ///
 /// This struct tracks the token consumption for remote multimodal automation,
-/// conforming to the OpenAI API response format.
+/// conforming to the OpenAI API response format with granular call tracking.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AutomationUsage {
@@ -3832,23 +3832,43 @@ pub struct AutomationUsage {
     pub completion_tokens: u32,
     /// The total number of tokens used.
     pub total_tokens: u32,
-    /// The number of API/function calls made.
+    /// The number of LLM API calls made.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub llm_calls: u32,
+    /// The number of search API calls made.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub search_calls: u32,
+    /// The number of HTTP fetch calls made.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fetch_calls: u32,
+    /// The number of web browser automation calls made.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub webbrowser_calls: u32,
+    /// Custom tool calls tracked by tool name.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub custom_tool_calls: std::collections::HashMap<String, u32>,
+    /// The total number of API/function calls made (legacy, sum of all calls).
     #[cfg_attr(feature = "serde", serde(default))]
     pub api_calls: u32,
 }
 
 impl AutomationUsage {
-    /// Create a new usage instance.
+    /// Create a new usage instance (counts as 1 LLM call).
     pub fn new(prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> Self {
         Self {
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            llm_calls: 1,
+            search_calls: 0,
+            fetch_calls: 0,
+            webbrowser_calls: 0,
+            custom_tool_calls: std::collections::HashMap::new(),
             api_calls: 1,
         }
     }
 
-    /// Create a new usage instance with API call count.
+    /// Create a new usage instance with API call count (legacy).
     pub fn with_api_calls(
         prompt_tokens: u32,
         completion_tokens: u32,
@@ -3859,6 +3879,11 @@ impl AutomationUsage {
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            llm_calls: api_calls,
+            search_calls: 0,
+            fetch_calls: 0,
+            webbrowser_calls: 0,
+            custom_tool_calls: std::collections::HashMap::new(),
             api_calls,
         }
     }
@@ -3868,10 +3893,58 @@ impl AutomationUsage {
         self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
         self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.llm_calls = self.llm_calls.saturating_add(other.llm_calls);
+        self.search_calls = self.search_calls.saturating_add(other.search_calls);
+        self.fetch_calls = self.fetch_calls.saturating_add(other.fetch_calls);
+        self.webbrowser_calls = self.webbrowser_calls.saturating_add(other.webbrowser_calls);
+        // Merge custom tool calls
+        for (tool, count) in &other.custom_tool_calls {
+            *self.custom_tool_calls.entry(tool.clone()).or_insert(0) += count;
+        }
         self.api_calls = self.api_calls.saturating_add(other.api_calls);
     }
 
-    /// Increment the API call count.
+    /// Increment the LLM call count.
+    pub fn increment_llm_calls(&mut self) {
+        self.llm_calls = self.llm_calls.saturating_add(1);
+        self.api_calls = self.api_calls.saturating_add(1);
+    }
+
+    /// Increment the search call count.
+    pub fn increment_search_calls(&mut self) {
+        self.search_calls = self.search_calls.saturating_add(1);
+        self.api_calls = self.api_calls.saturating_add(1);
+    }
+
+    /// Increment the fetch call count.
+    pub fn increment_fetch_calls(&mut self) {
+        self.fetch_calls = self.fetch_calls.saturating_add(1);
+        self.api_calls = self.api_calls.saturating_add(1);
+    }
+
+    /// Increment the web browser call count.
+    pub fn increment_webbrowser_calls(&mut self) {
+        self.webbrowser_calls = self.webbrowser_calls.saturating_add(1);
+        self.api_calls = self.api_calls.saturating_add(1);
+    }
+
+    /// Increment a custom tool call count by name.
+    pub fn increment_custom_tool_calls(&mut self, tool_name: &str) {
+        *self.custom_tool_calls.entry(tool_name.to_string()).or_insert(0) += 1;
+        self.api_calls = self.api_calls.saturating_add(1);
+    }
+
+    /// Get the call count for a specific custom tool.
+    pub fn get_custom_tool_calls(&self, tool_name: &str) -> u32 {
+        self.custom_tool_calls.get(tool_name).copied().unwrap_or(0)
+    }
+
+    /// Get total custom tool calls across all tools.
+    pub fn total_custom_tool_calls(&self) -> u32 {
+        self.custom_tool_calls.values().sum()
+    }
+
+    /// Increment the API call count (legacy, prefer specific methods).
     pub fn increment_api_calls(&mut self) {
         self.api_calls = self.api_calls.saturating_add(1);
     }

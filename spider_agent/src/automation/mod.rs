@@ -141,8 +141,8 @@ impl PromptUrlGate {
     }
 }
 
-/// Token usage tracking for automation operations.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Token usage tracking for automation operations with granular call tracking.
+#[derive(Debug, Clone, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AutomationUsage {
     /// Prompt tokens used.
@@ -151,28 +151,69 @@ pub struct AutomationUsage {
     pub completion_tokens: u32,
     /// Total tokens used.
     pub total_tokens: u32,
-    /// Number of API/function calls made.
+    /// Number of LLM API calls made.
+    #[serde(default)]
+    pub llm_calls: u32,
+    /// Number of search API calls made.
+    #[serde(default)]
+    pub search_calls: u32,
+    /// Number of HTTP fetch calls made.
+    #[serde(default)]
+    pub fetch_calls: u32,
+    /// Number of web browser automation calls made.
+    #[serde(default)]
+    pub webbrowser_calls: u32,
+    /// Custom tool calls tracked by tool name.
+    #[serde(default)]
+    pub custom_tool_calls: std::collections::HashMap<String, u32>,
+    /// Total number of API/function calls made (sum of all calls).
     #[serde(default)]
     pub api_calls: u32,
 }
 
+impl PartialEq for AutomationUsage {
+    fn eq(&self, other: &Self) -> bool {
+        self.prompt_tokens == other.prompt_tokens
+            && self.completion_tokens == other.completion_tokens
+            && self.total_tokens == other.total_tokens
+            && self.llm_calls == other.llm_calls
+            && self.search_calls == other.search_calls
+            && self.fetch_calls == other.fetch_calls
+            && self.webbrowser_calls == other.webbrowser_calls
+            && self.custom_tool_calls == other.custom_tool_calls
+            && self.api_calls == other.api_calls
+    }
+}
+
+impl Eq for AutomationUsage {}
+
 impl AutomationUsage {
-    /// Create new usage stats.
+    /// Create new usage stats (counts as 1 LLM call).
     pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
         Self {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            llm_calls: 1,
+            search_calls: 0,
+            fetch_calls: 0,
+            webbrowser_calls: 0,
+            custom_tool_calls: std::collections::HashMap::new(),
             api_calls: 1,
         }
     }
 
-    /// Create new usage stats with API call count.
+    /// Create new usage stats with API call count (legacy).
     pub fn with_api_calls(prompt_tokens: u32, completion_tokens: u32, api_calls: u32) -> Self {
         Self {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            llm_calls: api_calls,
+            search_calls: 0,
+            fetch_calls: 0,
+            webbrowser_calls: 0,
+            custom_tool_calls: std::collections::HashMap::new(),
             api_calls,
         }
     }
@@ -182,10 +223,58 @@ impl AutomationUsage {
         self.prompt_tokens += other.prompt_tokens;
         self.completion_tokens += other.completion_tokens;
         self.total_tokens += other.total_tokens;
+        self.llm_calls += other.llm_calls;
+        self.search_calls += other.search_calls;
+        self.fetch_calls += other.fetch_calls;
+        self.webbrowser_calls += other.webbrowser_calls;
+        // Merge custom tool calls
+        for (tool, count) in &other.custom_tool_calls {
+            *self.custom_tool_calls.entry(tool.clone()).or_insert(0) += count;
+        }
         self.api_calls += other.api_calls;
     }
 
-    /// Increment the API call count.
+    /// Increment the LLM call count.
+    pub fn increment_llm_calls(&mut self) {
+        self.llm_calls += 1;
+        self.api_calls += 1;
+    }
+
+    /// Increment the search call count.
+    pub fn increment_search_calls(&mut self) {
+        self.search_calls += 1;
+        self.api_calls += 1;
+    }
+
+    /// Increment the fetch call count.
+    pub fn increment_fetch_calls(&mut self) {
+        self.fetch_calls += 1;
+        self.api_calls += 1;
+    }
+
+    /// Increment the web browser call count.
+    pub fn increment_webbrowser_calls(&mut self) {
+        self.webbrowser_calls += 1;
+        self.api_calls += 1;
+    }
+
+    /// Increment a custom tool call count by name.
+    pub fn increment_custom_tool_calls(&mut self, tool_name: &str) {
+        *self.custom_tool_calls.entry(tool_name.to_string()).or_insert(0) += 1;
+        self.api_calls += 1;
+    }
+
+    /// Get the call count for a specific custom tool.
+    pub fn get_custom_tool_calls(&self, tool_name: &str) -> u32 {
+        self.custom_tool_calls.get(tool_name).copied().unwrap_or(0)
+    }
+
+    /// Get total custom tool calls across all tools.
+    pub fn total_custom_tool_calls(&self) -> u32 {
+        self.custom_tool_calls.values().sum()
+    }
+
+    /// Increment the API call count (legacy, prefer specific methods).
     pub fn increment_api_calls(&mut self) {
         self.api_calls += 1;
     }
@@ -200,12 +289,21 @@ impl std::ops::Add for AutomationUsage {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        Self {
+        let mut result = Self {
             prompt_tokens: self.prompt_tokens + other.prompt_tokens,
             completion_tokens: self.completion_tokens + other.completion_tokens,
             total_tokens: self.total_tokens + other.total_tokens,
+            llm_calls: self.llm_calls + other.llm_calls,
+            search_calls: self.search_calls + other.search_calls,
+            fetch_calls: self.fetch_calls + other.fetch_calls,
+            webbrowser_calls: self.webbrowser_calls + other.webbrowser_calls,
+            custom_tool_calls: self.custom_tool_calls.clone(),
             api_calls: self.api_calls + other.api_calls,
+        };
+        for (tool, count) in &other.custom_tool_calls {
+            *result.custom_tool_calls.entry(tool.clone()).or_insert(0) += count;
         }
+        result
     }
 }
 
