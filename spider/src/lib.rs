@@ -146,9 +146,11 @@ pub extern crate strum;
 pub extern crate lazy_static;
 #[cfg(feature = "firewall")]
 pub extern crate spider_firewall;
+#[cfg(feature = "agent")]
 pub extern crate spider_agent;
 
 /// Re-export agent types from spider_agent crate.
+#[cfg(feature = "agent")]
 pub mod agent {
     //! Agent module re-exports from spider_agent crate.
     //!

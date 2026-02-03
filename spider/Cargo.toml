@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.44.0"
+version = "2.44.1"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -119,6 +119,7 @@ features = ["serde", "headers", "dynamic-versions"]
 [dependencies.spider_agent]
 path = "../spider_agent"
 version = "0.6"
+optional = true
 default-features = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -298,16 +299,17 @@ search_brave = ["search"]
 search_bing = ["search"]
 search_tavily = ["search"]
 
-# Agent features - spider_agent is always included, these enable sub-features
-agent_openai = ["spider_agent/openai"]
-agent_chrome = ["spider_agent/chrome"]
-agent_webdriver = ["spider_agent/webdriver"]
-agent_fs = ["spider_agent/fs"]
-agent_search_serper = ["spider_agent/search_serper"]
-agent_search_brave = ["spider_agent/search_brave"]
-agent_search_bing = ["spider_agent/search_bing"]
-agent_search_tavily = ["spider_agent/search_tavily"]
-agent_full = ["spider_agent/full"]
+# Agent features - enables spider_agent with sub-features
+agent = ["dep:spider_agent"]
+agent_openai = ["agent", "spider_agent/openai"]
+agent_chrome = ["agent", "spider_agent/chrome"]
+agent_webdriver = ["agent", "spider_agent/webdriver"]
+agent_fs = ["agent", "spider_agent/fs"]
+agent_search_serper = ["agent", "spider_agent/search_serper"]
+agent_search_brave = ["agent", "spider_agent/search_brave"]
+agent_search_bing = ["agent", "spider_agent/search_bing"]
+agent_search_tavily = ["agent", "spider_agent/search_tavily"]
+agent_full = ["agent", "spider_agent/full"]
 
 # Allows full concurrency.
 cowboy = []
