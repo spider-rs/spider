@@ -3832,6 +3832,9 @@ pub struct AutomationUsage {
     pub completion_tokens: u32,
     /// The total number of tokens used.
     pub total_tokens: u32,
+    /// The number of API/function calls made.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub api_calls: u32,
 }
 
 impl AutomationUsage {
@@ -3841,6 +3844,22 @@ impl AutomationUsage {
             prompt_tokens,
             completion_tokens,
             total_tokens,
+            api_calls: 1,
+        }
+    }
+
+    /// Create a new usage instance with API call count.
+    pub fn with_api_calls(
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        total_tokens: u32,
+        api_calls: u32,
+    ) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            api_calls,
         }
     }
 
@@ -3849,6 +3868,12 @@ impl AutomationUsage {
         self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
         self.completion_tokens = self.completion_tokens.saturating_add(other.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.api_calls = self.api_calls.saturating_add(other.api_calls);
+    }
+
+    /// Increment the API call count.
+    pub fn increment_api_calls(&mut self) {
+        self.api_calls = self.api_calls.saturating_add(1);
     }
 }
 
@@ -3921,6 +3946,7 @@ impl AutomationResult {
             content_output: self.extracted.clone().unwrap_or(serde_json::Value::Null),
             screenshot_output: self.screenshot.clone(),
             error: self.error.clone(),
+            usage: Some(self.usage.clone()),
         }
     }
 
@@ -3931,6 +3957,7 @@ impl AutomationResult {
             content_output: self.extracted.clone().unwrap_or(serde_json::Value::Null),
             screenshot_output: self.screenshot.clone(),
             error: self.error.clone(),
+            usage: Some(self.usage.clone()),
         }
     }
 }

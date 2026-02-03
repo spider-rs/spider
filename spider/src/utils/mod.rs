@@ -275,11 +275,11 @@ pub struct PageResponse {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<crate::page::AIResults>>,
-    #[cfg(feature = "chrome")]
-    /// The usage from remote multimodal automation.
+    /// The usage from remote multimodal automation (extraction, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
-    #[cfg(feature = "chrome")]
-    /// The extra data from the remote multimodal automation.
+    /// The extra data from the remote multimodal automation (extraction results, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub extra_remote_multimodal_data: Option<Vec<crate::page::AutomationResults>>,
     /// A WAF was found on the page.
     pub waf_check: bool,

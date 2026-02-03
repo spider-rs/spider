@@ -151,6 +151,9 @@ pub struct AutomationUsage {
     pub completion_tokens: u32,
     /// Total tokens used.
     pub total_tokens: u32,
+    /// Number of API/function calls made.
+    #[serde(default)]
+    pub api_calls: u32,
 }
 
 impl AutomationUsage {
@@ -160,6 +163,17 @@ impl AutomationUsage {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            api_calls: 1,
+        }
+    }
+
+    /// Create new usage stats with API call count.
+    pub fn with_api_calls(prompt_tokens: u32, completion_tokens: u32, api_calls: u32) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+            api_calls,
         }
     }
 
@@ -168,6 +182,12 @@ impl AutomationUsage {
         self.prompt_tokens += other.prompt_tokens;
         self.completion_tokens += other.completion_tokens;
         self.total_tokens += other.total_tokens;
+        self.api_calls += other.api_calls;
+    }
+
+    /// Increment the API call count.
+    pub fn increment_api_calls(&mut self) {
+        self.api_calls += 1;
     }
 
     /// Check if any tokens were used.
@@ -184,6 +204,7 @@ impl std::ops::Add for AutomationUsage {
             prompt_tokens: self.prompt_tokens + other.prompt_tokens,
             completion_tokens: self.completion_tokens + other.completion_tokens,
             total_tokens: self.total_tokens + other.total_tokens,
+            api_calls: self.api_calls + other.api_calls,
         }
     }
 }

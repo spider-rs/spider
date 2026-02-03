@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v2.43.22
+
+1. feat(automation): add `api_calls` tracking to AutomationUsage
+1. feat(page): make `remote_multimodal_usage` and `extra_remote_multimodal_data` work for HTTP-only crawls (not just Chrome)
+1. feat(page): add `usage` field to AutomationResults for per-result token tracking
+
+## spider_agent v0.5.1
+
+1. feat(automation): add `api_calls` tracking to AutomationUsage for counting LLM API calls
+
 ## v2.43.21
 
 1. chore(spider): update spider_agent dependency to 0.5

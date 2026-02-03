@@ -343,19 +343,40 @@ pub struct AIResults {
     pub error: Option<String>,
 }
 
-/// The automation results..
-#[cfg(feature = "chrome")]
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Results from automation operations (extraction, observation, etc.).
+///
+/// This struct stores the output from remote multimodal automation
+/// and can be used with both Chrome and HTTP-only crawls.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AutomationResults {
-    /// The prompt used for the GPT.
+    /// The prompt used for the GPT/LLM.
     pub input: String,
-    /// The content output returned from observing the changes.
+    /// The content output returned from the automation.
     pub content_output: serde_json::Value,
-    /// The base64 image of the page.
+    /// The base64 image of the page (if captured).
     pub screenshot_output: Option<String>,
-    /// The error that occured if any.
+    /// The error that occurred if any.
     pub error: Option<String>,
+    /// Token usage for this automation result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::features::automation::AutomationUsage>,
+}
+
+/// Results from automation operations (extraction, observation, etc.).
+#[cfg(not(feature = "serde"))]
+#[derive(Debug, Clone, Default)]
+pub struct AutomationResults {
+    /// The prompt used for the GPT/LLM.
+    pub input: String,
+    /// The content output returned from the automation (as string without serde).
+    pub content_output: String,
+    /// The base64 image of the page (if captured).
+    pub screenshot_output: Option<String>,
+    /// The error that occurred if any.
+    pub error: Option<String>,
+    /// Token usage for this automation result.
+    pub usage: Option<crate::features::automation::AutomationUsage>,
 }
 
 /// Page-level metadata extracted from HTML.
@@ -517,11 +538,11 @@ pub struct Page {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<AIResults>>,
-    #[cfg(feature = "chrome")]
-    /// The usage from remote multimodal automation.
+    /// The usage from remote multimodal automation (extraction, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
-    #[cfg(feature = "chrome")]
-    /// The extra data from the remote multimodal automation.
+    /// The extra data from the remote multimodal automation (extraction results, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
@@ -583,11 +604,11 @@ pub struct Page {
     #[cfg(feature = "gemini")]
     /// The extra data from the Gemini AI.
     pub extra_gemini_data: Option<Vec<AIResults>>,
-    #[cfg(feature = "chrome")]
-    /// The usage from remote multimodal automation.
+    /// The usage from remote multimodal automation (extraction, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub remote_multimodal_usage: Option<Vec<crate::features::automation::AutomationUsage>>,
-    #[cfg(feature = "chrome")]
-    /// The extra data from the remote multimodal automation.
+    /// The extra data from the remote multimodal automation (extraction results, etc.).
+    /// Works with both Chrome and HTTP-only crawls.
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
@@ -1154,9 +1175,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         gemini_credits_used: res.gemini_credits_used,
         #[cfg(feature = "gemini")]
         extra_gemini_data: res.extra_gemini_data,
-        #[cfg(feature = "chrome")]
         remote_multimodal_usage: res.remote_multimodal_usage,
-        #[cfg(feature = "chrome")]
         extra_remote_multimodal_data: res.extra_remote_multimodal_data,
         should_retry,
         waf_check: res.waf_check,
@@ -4995,6 +5014,7 @@ fn test_automation_results_structure() {
         content_output: serde_json::json!({"result": "test"}),
         screenshot_output: Some("base64_screenshot_data".to_string()),
         error: None,
+        usage: None,
     };
 
     assert_eq!(automation_result.input, "Test prompt");
@@ -5011,6 +5031,7 @@ fn test_metadata_with_automation() {
         content_output: serde_json::json!({"clicked": true}),
         screenshot_output: None,
         error: None,
+        usage: None,
     }];
 
     let metadata = Metadata {
@@ -5041,6 +5062,7 @@ fn test_set_metadata_preserves_automation() {
         content_output: serde_json::json!({"original": true}),
         screenshot_output: None,
         error: None,
+        usage: None,
     }];
 
     let existing_metadata = Metadata {
