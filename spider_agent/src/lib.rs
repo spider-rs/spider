@@ -108,14 +108,47 @@ pub use llm::{CompletionOptions, CompletionResponse, LLMProvider, Message, Messa
 pub use memory::AgentMemory;
 pub use tools::{AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod};
 
-// Automation re-exports
+// Automation re-exports - core types
 pub use automation::{
-    ActionRecord, ActionResult, ActionType, AutomationConfig, AutomationResult, AutomationUsage,
+    ActionRecord, ActionResult, ActionType, ActResult, AutomationConfig, AutomationResult, AutomationUsage,
     CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep,
-    ChainStepResult, CleaningIntent, ContentAnalysis, CostTier, ExtractionSchema, FormField,
-    FormInfo, HtmlCleaningProfile, InteractiveElement, ModelPolicy, NavigationOption,
-    PageObservation, RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry,
+    ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier, ExtractionSchema,
+    FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelPolicy, NavigationOption,
+    PageObservation, PromptUrlGate, RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry,
     StructuredOutputConfig,
+};
+
+// Automation re-exports - engine and configuration
+pub use automation::{
+    RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine,
+};
+
+// Automation re-exports - engine error types
+pub use automation::{EngineError, EngineResult};
+
+// Automation re-exports - helper functions
+pub use automation::{
+    best_effort_parse_json_object, extract_assistant_content, extract_last_code_block,
+    extract_last_json_array, extract_last_json_boundaries, extract_last_json_object, extract_usage,
+    fnv1a64, truncate_utf8_tail,
+};
+
+// Automation re-exports - HTML cleaning
+pub use automation::{
+    clean_html, clean_html_base, clean_html_full, clean_html_raw, clean_html_slim,
+    clean_html_with_profile, clean_html_with_profile_and_intent, smart_clean_html,
+};
+
+// Automation re-exports - map result types
+pub use automation::{categories, DiscoveredUrl, MapResult};
+
+// Automation re-exports - memory operations
+pub use automation::{AutomationMemory, MemoryOperation};
+
+// Automation re-exports - system prompts
+pub use automation::{
+    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
+    EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
 };
 
 // Performance re-exports
@@ -146,6 +179,9 @@ pub use search::TavilyProvider;
 
 #[cfg(feature = "chrome")]
 pub use browser::BrowserContext;
+
+#[cfg(feature = "chrome")]
+pub use automation::run_remote_multimodal_with_page;
 
 #[cfg(feature = "webdriver")]
 pub use webdriver::WebDriverContext;

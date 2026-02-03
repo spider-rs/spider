@@ -407,6 +407,66 @@ impl FormField {
     }
 }
 
+/// Result of a single action execution via `act()`.
+#[derive(Debug, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ActResult {
+    /// Whether the action was executed successfully.
+    pub success: bool,
+    /// Description of the action that was taken.
+    pub action_taken: String,
+    /// The specific action executed (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_type: Option<String>,
+    /// Base64-encoded screenshot after the action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screenshot: Option<String>,
+    /// Error message if the action failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Token usage for this action.
+    #[serde(default)]
+    pub usage: AutomationUsage,
+}
+
+impl ActResult {
+    /// Create a successful action result.
+    pub fn success(action_taken: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            action_taken: action_taken.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Create a failed action result.
+    pub fn failure(error: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            error: Some(error.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Set the action type.
+    pub fn with_action_type(mut self, action_type: impl Into<String>) -> Self {
+        self.action_type = Some(action_type.into());
+        self
+    }
+
+    /// Set the screenshot.
+    pub fn with_screenshot(mut self, screenshot: impl Into<String>) -> Self {
+        self.screenshot = Some(screenshot.into());
+        self
+    }
+
+    /// Set usage stats.
+    pub fn with_usage(mut self, usage: AutomationUsage) -> Self {
+        self.usage = usage;
+        self
+    }
+}
+
 /// A navigation option on the page.
 #[derive(Debug, Clone, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]

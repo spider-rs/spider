@@ -4,6 +4,43 @@
 //! - Whether screenshots are needed for extraction
 //! - Optimal cleaning profile for the content
 //! - Content type and complexity
+//!
+//! Uses Aho-Corasick algorithm for efficient multi-pattern matching.
+
+use aho_corasick::AhoCorasick;
+use std::sync::LazyLock;
+
+/// Aho-Corasick pattern matcher for visual element tags (case-insensitive).
+static VISUAL_ELEMENT_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(&["<iframe", "<video", "<canvas", "<embed", "<object"])
+        .expect("valid patterns")
+});
+
+/// Aho-Corasick pattern matcher for SPA framework indicators.
+static SPA_INDICATOR_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(&[
+            "data-reactroot",
+            "__next",
+            "id=\"app\"",
+            "id=\"root\"",
+            "ng-app",
+            "v-app",
+            "data-v-",
+        ])
+        .expect("valid patterns")
+});
+
+/// Aho-Corasick pattern matcher for SVG tags.
+static SVG_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(&["<svg"])
+        .expect("valid patterns")
+});
 
 /// Result of analyzing HTML content.
 ///
@@ -85,16 +122,22 @@ impl ContentAnalysis {
             ..Default::default()
         };
 
-        // Count visual elements
-        analysis.iframe_count = count_tags(html_bytes, b"<iframe");
-        analysis.video_count = count_tags(html_bytes, b"<video");
-        analysis.canvas_count = count_tags(html_bytes, b"<canvas");
-        analysis.embed_count =
-            count_tags(html_bytes, b"<embed") + count_tags(html_bytes, b"<object");
-        analysis.svg_count = count_tags(html_bytes, b"<svg");
+        // Count visual elements using Aho-Corasick (single pass, case-insensitive)
+        for mat in VISUAL_ELEMENT_MATCHER.find_iter(html_bytes) {
+            match mat.pattern().as_usize() {
+                0 => analysis.iframe_count += 1, // <iframe
+                1 => analysis.video_count += 1,  // <video
+                2 => analysis.canvas_count += 1, // <canvas
+                3 | 4 => analysis.embed_count += 1, // <embed, <object
+                _ => {}
+            }
+        }
 
-        // Check for SPA indicators
-        analysis.has_dynamic_content = has_spa_indicators(html_bytes);
+        // Count SVGs using Aho-Corasick
+        analysis.svg_count = SVG_MATCHER.find_iter(html_bytes).count();
+
+        // Check for SPA indicators using Aho-Corasick
+        analysis.has_dynamic_content = SPA_INDICATOR_MATCHER.find(html_bytes).is_some();
 
         // Estimate text length
         analysis.text_length = estimate_text_length(html);
@@ -108,8 +151,8 @@ impl ContentAnalysis {
         } else {
             // Fast estimation using heuristics
             analysis.svg_bytes = analysis.svg_count * 5_000;
-            analysis.script_bytes = count_tags(html_bytes, b"<script") * 10_000;
-            analysis.style_bytes = count_tags(html_bytes, b"<style") * 2_000;
+            analysis.script_bytes = count_script_tags_fast(html_bytes) * 10_000;
+            analysis.style_bytes = count_style_tags_fast(html_bytes) * 2_000;
             analysis.base64_bytes = estimate_base64_bytes_fast(html_bytes);
         }
 
@@ -161,14 +204,15 @@ impl ContentAnalysis {
     }
 
     /// Quick check if screenshot is needed (inline, no full analysis).
+    ///
+    /// Uses Aho-Corasick for efficient multi-pattern matching without
+    /// allocating memory for lowercase conversion.
+    #[inline]
     pub fn quick_needs_screenshot(html: &str) -> bool {
         let bytes = html.as_bytes();
 
-        // Quick checks for visual elements
-        if contains_ci(bytes, b"<iframe")
-            || contains_ci(bytes, b"<video")
-            || contains_ci(bytes, b"<canvas")
-        {
+        // Quick check for visual elements using Aho-Corasick
+        if VISUAL_ELEMENT_MATCHER.find(bytes).is_some() {
             return true;
         }
 
@@ -178,7 +222,7 @@ impl ContentAnalysis {
         }
 
         // Check for SPA indicators with thin content
-        if has_spa_indicators(bytes) {
+        if SPA_INDICATOR_MATCHER.find(bytes).is_some() {
             let text_len = estimate_text_length(html);
             if text_len < 200 {
                 return true;
@@ -186,6 +230,12 @@ impl ContentAnalysis {
         }
 
         false
+    }
+
+    /// Check if HTML has any visual elements (iframe, video, canvas, embed, object).
+    #[inline]
+    pub fn has_visual_elements_quick(html: &str) -> bool {
+        VISUAL_ELEMENT_MATCHER.find(html.as_bytes()).is_some()
     }
 
     /// Get recommended cleaning profile based on analysis.
@@ -223,65 +273,28 @@ impl ContentAnalysis {
     }
 }
 
-/// Count occurrences of a tag (case-insensitive).
-fn count_tags(html: &[u8], tag: &[u8]) -> usize {
-    let mut count = 0;
-    let mut i = 0;
-    while i + tag.len() <= html.len() {
-        if html[i..].starts_with(tag)
-            || html[i..]
-                .iter()
-                .take(tag.len())
-                .zip(tag.iter())
-                .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
-        {
-            count += 1;
-            i += tag.len();
-        } else {
-            i += 1;
-        }
-    }
-    count
+/// Fast estimate of script tag count.
+#[inline]
+fn count_script_tags_fast(html: &[u8]) -> usize {
+    static SCRIPT_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+        AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(&["<script"])
+            .expect("valid patterns")
+    });
+    SCRIPT_MATCHER.find_iter(html).count()
 }
 
-/// Check if bytes contain a pattern (case-insensitive).
-fn contains_ci(html: &[u8], pattern: &[u8]) -> bool {
-    let len = pattern.len();
-    if html.len() < len {
-        return false;
-    }
-
-    for i in 0..=(html.len() - len) {
-        if html[i..]
-            .iter()
-            .take(len)
-            .zip(pattern.iter())
-            .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
-        {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check for SPA framework indicators.
-fn has_spa_indicators(html: &[u8]) -> bool {
-    const INDICATORS: &[&[u8]] = &[
-        b"data-reactroot",
-        b"__next",
-        b"id=\"app\"",
-        b"id=\"root\"",
-        b"ng-app",
-        b"v-app",
-        b"data-v-",
-    ];
-
-    for indicator in INDICATORS {
-        if contains_ci(html, indicator) {
-            return true;
-        }
-    }
-    false
+/// Fast estimate of style tag count.
+#[inline]
+fn count_style_tags_fast(html: &[u8]) -> usize {
+    static STYLE_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+        AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(&["<style"])
+            .expect("valid patterns")
+    });
+    STYLE_MATCHER.find_iter(html).count()
 }
 
 /// Estimate visible text length (fast heuristic).
@@ -363,8 +376,14 @@ fn estimate_base64_bytes(html: &str) -> usize {
 
 /// Fast estimation of base64 bytes.
 fn estimate_base64_bytes_fast(html: &[u8]) -> usize {
+    static DATA_URI_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+        AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(&["data:"])
+            .expect("valid patterns")
+    });
     // Count "data:" occurrences and estimate average size
-    let count = count_tags(html, b"data:");
+    let count = DATA_URI_MATCHER.find_iter(html).count();
     count * 5_000 // Average data URI size estimate
 }
 
@@ -446,5 +465,46 @@ mod tests {
         let html = "<p>Hello World</p><script>console.log('ignored')</script>";
         let len = estimate_text_length(html);
         assert_eq!(len, 10); // "HelloWorld" without spaces
+    }
+
+    #[test]
+    fn test_aho_corasick_visual_elements() {
+        // Test Aho-Corasick matcher for visual elements
+        assert!(ContentAnalysis::has_visual_elements_quick("<IFRAME src='test'>"));
+        assert!(ContentAnalysis::has_visual_elements_quick("<Video>"));
+        assert!(ContentAnalysis::has_visual_elements_quick("<CANVAS>"));
+        assert!(ContentAnalysis::has_visual_elements_quick("<embed>"));
+        assert!(ContentAnalysis::has_visual_elements_quick("<OBJECT>"));
+        assert!(!ContentAnalysis::has_visual_elements_quick("<div>No visuals</div>"));
+    }
+
+    #[test]
+    fn test_spa_detection() {
+        // Test SPA indicator detection
+        let react_html = r#"<div id="root" data-reactroot></div>"#;
+        let analysis = ContentAnalysis::analyze(react_html);
+        assert!(analysis.has_dynamic_content);
+
+        let next_html = r#"<div id="__next"></div>"#;
+        let analysis = ContentAnalysis::analyze(next_html);
+        assert!(analysis.has_dynamic_content);
+
+        let vue_html = r#"<div data-v-abc123></div>"#;
+        let analysis = ContentAnalysis::analyze(vue_html);
+        assert!(analysis.has_dynamic_content);
+
+        let plain_html = r#"<div>Plain HTML</div>"#;
+        let analysis = ContentAnalysis::analyze(plain_html);
+        assert!(!analysis.has_dynamic_content);
+    }
+
+    #[test]
+    fn test_content_analysis_summary() {
+        let html = r#"<html><body><p>Test content here</p></body></html>"#;
+        let analysis = ContentAnalysis::analyze(html);
+        let summary = analysis.summary();
+        assert!(summary.contains("text="));
+        assert!(summary.contains("html="));
+        assert!(summary.contains("ratio="));
     }
 }

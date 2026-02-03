@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.44.4"
+version = "2.44.5"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -29,6 +29,7 @@ base64 = "0.22"
 
 # HTML processing
 lol_html = "2"
+aho-corasick = "1"
 
 # LLM Providers (optional)
 async-openai = { version = "0.29", optional = true }

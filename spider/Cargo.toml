@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.44.4"
+version = "2.44.5"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -302,7 +302,7 @@ search_tavily = ["search"]
 # Agent features - enables spider_agent with sub-features
 agent = ["dep:spider_agent"]
 agent_openai = ["agent", "spider_agent/openai"]
-agent_chrome = ["agent", "spider_agent/chrome"]
+agent_chrome = ["agent", "spider_agent/chrome", "chrome"]
 agent_webdriver = ["agent", "spider_agent/webdriver"]
 agent_fs = ["agent", "spider_agent/fs"]
 agent_search_serper = ["agent", "spider_agent/search_serper"]

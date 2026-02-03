@@ -8881,7 +8881,8 @@ impl Website {
     ///
     /// website.crawl().await;
     /// ```
-    #[cfg(feature = "serde")]
+    /// Requires the `agent` and `serde` features.
+    #[cfg(all(feature = "agent", feature = "serde"))]
     pub async fn configure_from_prompt(
         &mut self,
         api_url: &str,

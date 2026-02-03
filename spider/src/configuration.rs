@@ -222,6 +222,7 @@ pub struct Configuration {
     /// The Gemini configs to use to help drive the chrome browser. This does nothing without the 'gemini' flag.
     pub gemini_config: Option<Box<GeminiConfigs>>,
     /// Remote multimodal automation config (vision + LLM-driven steps).
+    /// Requires the `agent` feature for full functionality, uses stub type otherwise.
     pub remote_multimodal: Option<Box<crate::features::automation::RemoteMultimodalConfigs>>,
     /// Use a shared queue strategy when crawling. This can scale workloads evenly that do not need priority.
     pub shared_queue: bool,
@@ -532,6 +533,8 @@ impl Configuration {
     }
 
     /// Build a `RemoteMultimodalEngine` from `RemoteMultimodalConfigs`.
+    /// Requires the `agent` feature.
+    #[cfg(feature = "agent")]
     pub fn build_remote_multimodal_engine(
         &self,
     ) -> Option<crate::features::automation::RemoteMultimodalEngine> {
@@ -819,7 +822,19 @@ impl Configuration {
     }
 
     /// Use a remote multimodal model to drive browser automation.
-    /// This method does nothing if the `chrome` feature is not enabled.
+    /// Requires the `agent` feature.
+    #[cfg(feature = "agent")]
+    pub fn with_remote_multimodal(
+        &mut self,
+        remote_multimodal: Option<crate::features::automation::RemoteMultimodalConfigs>,
+    ) -> &mut Self {
+        self.remote_multimodal = remote_multimodal.map(Box::new);
+        self
+    }
+
+    /// Use a remote multimodal model to drive browser automation.
+    /// When the `agent` feature is not enabled, this uses a stub type.
+    #[cfg(not(feature = "agent"))]
     pub fn with_remote_multimodal(
         &mut self,
         remote_multimodal: Option<crate::features::automation::RemoteMultimodalConfigs>,

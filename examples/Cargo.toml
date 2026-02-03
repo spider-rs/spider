@@ -282,14 +282,14 @@ required-features = ["spider/sync", "spider/webdriver", "spider/webdriver_screen
 [[example]]
 name = "remote_multimodal"
 path = "remote_multimodal.rs"
-required-features = ["spider/sync", "spider/chrome"]
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 
 [[example]]
 name = "remote_multimodal_scrape"
 path = "remote_multimodal_scrape.rs"
-required-features = ["spider/sync", "spider/chrome"]
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 
 [[example]]
 name = "remote_multimodal_benchmark"
 path = "remote_multimodal_benchmark.rs"
-required-features = ["spider/sync", "spider/chrome"]
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]

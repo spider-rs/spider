@@ -5220,6 +5220,7 @@ dependencies = [
 name = "spider_agent"
 version = "2.44.4"
 dependencies = [
+ "aho-corasick",
  "async-openai",
  "async-trait",
  "base64 0.22.1",

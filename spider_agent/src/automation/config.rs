@@ -1,6 +1,12 @@
 //! Configuration types for automation.
+//!
+//! Contains all configuration types for remote multimodal automation,
+//! including runtime configs, retry policies, model selection, and capture profiles.
 
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use super::ContentAnalysis;
 
 /// Recovery strategy for handling failures during automation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -164,6 +170,188 @@ pub enum HtmlCleaningProfile {
     Raw,
     /// Auto-select based on content analysis.
     Auto,
+}
+
+impl HtmlCleaningProfile {
+    // Size thresholds for smart cleaning decisions (in bytes).
+    const SVG_HEAVY_THRESHOLD: usize = 50_000; // 50KB of SVG is heavy
+    const SVG_VERY_HEAVY_THRESHOLD: usize = 100_000; // 100KB of SVG is very heavy
+    const BASE64_HEAVY_THRESHOLD: usize = 100_000; // 100KB of base64 data
+    const SCRIPT_HEAVY_THRESHOLD: usize = 200_000; // 200KB of scripts
+    const CLEANABLE_RATIO_HIGH: f32 = 0.4; // 40% of HTML is cleanable
+    const CLEANABLE_RATIO_MEDIUM: f32 = 0.25; // 25% of HTML is cleanable
+
+    /// Determine the best cleaning profile based on content analysis.
+    ///
+    /// This is used when `Auto` is selected to intelligently choose
+    /// the appropriate cleaning level based on the HTML content.
+    pub fn from_content_analysis(analysis: &ContentAnalysis) -> Self {
+        Self::from_content_analysis_with_intent(analysis, CleaningIntent::General)
+    }
+
+    /// Determine the best cleaning profile based on content analysis and intended use.
+    ///
+    /// Uses **byte sizes** (not just counts) for accurate decisions:
+    /// - SVG > 100KB → always Slim
+    /// - base64 > 100KB → always Slim
+    /// - cleanable_ratio > 40% → Slim
+    ///
+    /// Intent modifies behavior:
+    /// - `Extraction` → more aggressive, removes nav/footer/heavy elements
+    /// - `Action` → preserves interactive elements (buttons, forms, links)
+    /// - `General` → balanced heuristics
+    pub fn from_content_analysis_with_intent(
+        analysis: &ContentAnalysis,
+        intent: CleaningIntent,
+    ) -> Self {
+        // === BYTE-SIZE BASED DECISIONS (more accurate than counts!) ===
+
+        // Very heavy SVGs - always slim regardless of intent
+        if analysis.svg_bytes > Self::SVG_VERY_HEAVY_THRESHOLD {
+            return HtmlCleaningProfile::Slim;
+        }
+
+        // Very heavy base64 data (inline images, fonts) - always slim
+        if analysis.base64_bytes > Self::BASE64_HEAVY_THRESHOLD {
+            return HtmlCleaningProfile::Slim;
+        }
+
+        // High cleanable ratio means lots of bloat - slim is worthwhile
+        if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_HIGH {
+            return HtmlCleaningProfile::Slim;
+        }
+
+        match intent {
+            CleaningIntent::Extraction => {
+                // For extraction, we can be aggressive - we only need text content
+
+                // Heavy SVGs (50KB+) - slim them out
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Large HTML with lots of scripts - aggressive
+                if analysis.script_bytes > Self::SCRIPT_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                // Large HTML overall
+                if analysis.html_length > 100_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                // Medium cleanable ratio - slim is beneficial
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Canvas/video/embeds present - slim
+                if analysis.canvas_count > 0
+                    || analysis.video_count > 1
+                    || analysis.embed_count > 0
+                {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Low text ratio with medium+ HTML - aggressive
+                if analysis.text_ratio < 0.1 && analysis.html_length > 30_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                // Default to slim for extraction (safe choice)
+                HtmlCleaningProfile::Slim
+            }
+            CleaningIntent::Action => {
+                // For actions, preserve interactive elements but remove heavy visual bloat
+
+                // Heavy SVGs - slim (they're not interactive)
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Medium cleanable ratio - default cleaning preserves interactivity
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                // Very large HTML - need some cleaning
+                if analysis.html_length > 150_000 {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                // Keep minimal to preserve interactive elements
+                HtmlCleaningProfile::Minimal
+            }
+            CleaningIntent::General => {
+                // Balanced approach based on content characteristics
+
+                // Heavy SVGs - slim
+                if analysis.svg_bytes > Self::SVG_HEAVY_THRESHOLD {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Medium cleanable ratio - slim is beneficial
+                if analysis.cleanable_ratio > Self::CLEANABLE_RATIO_MEDIUM {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Canvas/video present - slim
+                if analysis.canvas_count > 0 || analysis.video_count > 2 {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Low text ratio with large HTML - aggressive
+                if analysis.text_ratio < 0.05 && analysis.html_length > 50_000 {
+                    return HtmlCleaningProfile::Aggressive;
+                }
+
+                // Embeds present - slim
+                if analysis.embed_count > 0 {
+                    return HtmlCleaningProfile::Slim;
+                }
+
+                // Large HTML with moderate text - default
+                if analysis.html_length > 100_000 && analysis.text_ratio < 0.15 {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                // Medium HTML - default
+                if analysis.html_length > 30_000 {
+                    return HtmlCleaningProfile::Default;
+                }
+
+                // Small HTML - minimal cleaning
+                HtmlCleaningProfile::Minimal
+            }
+        }
+    }
+
+    /// Quick check if this profile removes SVGs.
+    pub fn removes_svgs(&self) -> bool {
+        matches!(self, HtmlCleaningProfile::Slim | HtmlCleaningProfile::Aggressive)
+    }
+
+    /// Quick check if this profile removes video/canvas elements.
+    pub fn removes_media(&self) -> bool {
+        matches!(self, HtmlCleaningProfile::Slim)
+    }
+
+    /// Estimate bytes that will be removed by this cleaning profile.
+    pub fn estimate_savings(&self, analysis: &ContentAnalysis) -> usize {
+        match self {
+            HtmlCleaningProfile::Raw => 0,
+            HtmlCleaningProfile::Minimal => analysis.script_bytes + analysis.style_bytes,
+            HtmlCleaningProfile::Default => {
+                analysis.script_bytes + analysis.style_bytes + (analysis.base64_bytes / 2)
+            }
+            HtmlCleaningProfile::Slim => analysis.cleanable_bytes,
+            HtmlCleaningProfile::Aggressive => {
+                // Aggressive also removes nav/footer, estimate ~10% more
+                analysis.cleanable_bytes + (analysis.html_length / 10)
+            }
+            HtmlCleaningProfile::Auto => 0, // Can't estimate without analyzing
+        }
+    }
 }
 
 /// Intent for HTML cleaning decisions.
@@ -446,6 +634,465 @@ impl AutomationConfig {
     }
 }
 
+// =============================================================================
+// REMOTE MULTIMODAL ENGINE CONFIGURATION
+// =============================================================================
+
+/// Runtime configuration for `RemoteMultimodalEngine`.
+///
+/// This struct controls:
+/// 1) what context is captured (URL/title/HTML),
+/// 2) how chat completion is requested (temperature/max tokens/JSON mode),
+/// 3) how long the engine loops and retries,
+/// 4) capture/model selection policies.
+///
+/// The engine should be able to **export this config** to users, and it should
+/// be safe to merge with user-provided prompts.
+#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RemoteMultimodalConfig {
+    // -----------------------------------------------------------------
+    // Context capture
+    // -----------------------------------------------------------------
+    /// Whether to include cleaned HTML in the model input.
+    pub include_html: bool,
+    /// Maximum number of bytes of cleaned HTML to include (global default).
+    ///
+    /// A `CaptureProfile` may override this with its own `html_max_bytes`.
+    pub html_max_bytes: usize,
+    /// Whether to include the current URL in the model input.
+    pub include_url: bool,
+    /// Whether to include the current document title in the model input.
+    pub include_title: bool,
+
+    // -----------------------------------------------------------------
+    // LLM knobs
+    // -----------------------------------------------------------------
+    /// Sampling temperature used by the remote/local model.
+    pub temperature: f32,
+    /// Maximum tokens the model is allowed to generate for the plan.
+    pub max_tokens: u16,
+    /// If true, include `response_format: {"type":"json_object"}` in the request.
+    ///
+    /// Some local servers ignore or reject this; disable if you see 400 errors.
+    pub request_json_object: bool,
+    /// Best-effort JSON extraction (strip fences / extract `{...}`).
+    pub best_effort_json_extract: bool,
+
+    // -----------------------------------------------------------------
+    // Loop + retry
+    // -----------------------------------------------------------------
+    /// Maximum number of plan/execute/re-capture rounds before giving up.
+    ///
+    /// Each round is:
+    /// 1) capture state
+    /// 2) ask model for plan
+    /// 3) execute steps
+    /// 4) optionally wait
+    /// 5) re-capture and decide whether complete
+    pub max_rounds: usize,
+
+    /// Retry policy for model output parsing failures and/or execution failures.
+    pub retry: RetryPolicy,
+
+    // -----------------------------------------------------------------
+    // Capture / model policies
+    // -----------------------------------------------------------------
+    /// Capture profiles to try across attempts.
+    ///
+    /// If empty, the engine should build a sensible default list.
+    pub capture_profiles: Vec<CaptureProfile>,
+
+    /// Model selection policy (small/medium/large).
+    ///
+    /// The engine may choose a model size depending on constraints such as
+    /// latency limits, cost tier, and whether retries are escalating.
+    pub model_policy: ModelPolicy,
+
+    /// Optional: wait after executing a plan before re-capturing state (ms).
+    ///
+    /// This is useful for pages that animate, load asynchronously, or perform
+    /// challenge transitions after clicks.
+    pub post_plan_wait_ms: u64,
+    /// Maximum number of concurrent LLM HTTP requests for this engine instance.
+    /// If `None`, no throttling is applied.
+    pub max_inflight_requests: Option<usize>,
+
+    // -----------------------------------------------------------------
+    // Extraction
+    // -----------------------------------------------------------------
+    /// Enable extraction mode to return structured data from pages.
+    ///
+    /// When enabled, the model is instructed to include an `extracted` field
+    /// in its JSON response containing data extracted from the page.
+    pub extra_ai_data: bool,
+    /// Optional custom extraction prompt appended to the system prompt.
+    ///
+    /// Example: "Extract all product names and prices as a JSON array."
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extraction_prompt: Option<String>,
+    /// Optional JSON schema for structured extraction output.
+    ///
+    /// When provided, the model is instructed to return the `extracted` field
+    /// conforming to this schema. This enables type-safe extraction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extraction_schema: Option<super::ExtractionSchema>,
+    /// Take a screenshot after automation completes and include it in results.
+    pub screenshot: bool,
+}
+
+impl Default for RemoteMultimodalConfig {
+    fn default() -> Self {
+        Self {
+            include_html: true,
+            html_max_bytes: 24_000,
+            include_url: true,
+            include_title: true,
+            temperature: 0.1,
+            max_tokens: 1024,
+            request_json_object: true,
+            best_effort_json_extract: true,
+            max_rounds: 6,
+            retry: RetryPolicy::default(),
+            model_policy: ModelPolicy::default(),
+            capture_profiles: Vec::new(),
+            post_plan_wait_ms: 350,
+            max_inflight_requests: None,
+            extra_ai_data: false,
+            extraction_prompt: None,
+            extraction_schema: None,
+            screenshot: true,
+        }
+    }
+}
+
+impl RemoteMultimodalConfig {
+    /// Create a new config with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set whether to include HTML.
+    pub fn with_html(mut self, include: bool) -> Self {
+        self.include_html = include;
+        self
+    }
+
+    /// Set maximum HTML bytes.
+    pub fn with_html_max_bytes(mut self, bytes: usize) -> Self {
+        self.html_max_bytes = bytes;
+        self
+    }
+
+    /// Set temperature.
+    pub fn with_temperature(mut self, temp: f32) -> Self {
+        self.temperature = temp;
+        self
+    }
+
+    /// Set max tokens.
+    pub fn with_max_tokens(mut self, tokens: u16) -> Self {
+        self.max_tokens = tokens;
+        self
+    }
+
+    /// Set max rounds.
+    pub fn with_max_rounds(mut self, rounds: usize) -> Self {
+        self.max_rounds = rounds;
+        self
+    }
+
+    /// Set retry policy.
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// Set model policy.
+    pub fn with_model_policy(mut self, policy: ModelPolicy) -> Self {
+        self.model_policy = policy;
+        self
+    }
+
+    /// Enable extraction mode.
+    pub fn with_extraction(mut self, enabled: bool) -> Self {
+        self.extra_ai_data = enabled;
+        self
+    }
+
+    /// Set extraction prompt.
+    pub fn with_extraction_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.extraction_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set extraction schema.
+    pub fn with_extraction_schema(mut self, schema: super::ExtractionSchema) -> Self {
+        self.extraction_schema = Some(schema);
+        self
+    }
+
+    /// Enable/disable screenshots.
+    pub fn with_screenshot(mut self, enabled: bool) -> Self {
+        self.screenshot = enabled;
+        self
+    }
+
+    /// Add a capture profile.
+    pub fn add_capture_profile(&mut self, profile: CaptureProfile) {
+        self.capture_profiles.push(profile);
+    }
+}
+
+/// Everything needed to configure RemoteMultimodalEngine.
+///
+/// This is the complete configuration bundle that includes:
+/// - API endpoint and credentials
+/// - Model selection
+/// - System/user prompts
+/// - Runtime configuration
+/// - URL gating
+#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RemoteMultimodalConfigs {
+    /// OpenAI-compatible chat completions URL.
+    pub api_url: String,
+    /// Optional bearer key for `Authorization: Bearer ...`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Model name/id for the target endpoint.
+    pub model_name: String,
+    /// Optional base system prompt (None => engine default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// Optional extra system instructions appended at runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt_extra: Option<String>,
+    /// Optional extra user instructions appended at runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_message_extra: Option<String>,
+    /// Runtime knobs (capture policies, retry, looping, etc.)
+    pub cfg: RemoteMultimodalConfig,
+    /// Optional URL gating and per-URL overrides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_url_gate: Option<super::PromptUrlGate>,
+    /// Optional concurrency limit for remote inference calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency_limit: Option<usize>,
+    /// Semaphore control for concurrency limiting.
+    #[serde(skip, default = "RemoteMultimodalConfigs::default_semaphore")]
+    pub semaphore: OnceLock<Arc<tokio::sync::Semaphore>>,
+}
+
+impl PartialEq for RemoteMultimodalConfigs {
+    fn eq(&self, other: &Self) -> bool {
+        self.api_url == other.api_url
+            && self.api_key == other.api_key
+            && self.model_name == other.model_name
+            && self.system_prompt == other.system_prompt
+            && self.system_prompt_extra == other.system_prompt_extra
+            && self.user_message_extra == other.user_message_extra
+            && self.cfg == other.cfg
+            && self.prompt_url_gate == other.prompt_url_gate
+            && self.concurrency_limit == other.concurrency_limit
+        // NOTE: intentionally ignoring `semaphore`
+    }
+}
+
+impl Eq for RemoteMultimodalConfigs {}
+
+impl Default for RemoteMultimodalConfigs {
+    fn default() -> Self {
+        Self {
+            api_url: String::new(),
+            api_key: None,
+            model_name: String::new(),
+            system_prompt: None,
+            system_prompt_extra: None,
+            user_message_extra: None,
+            cfg: RemoteMultimodalConfig::default(),
+            prompt_url_gate: None,
+            concurrency_limit: None,
+            semaphore: Self::default_semaphore(),
+        }
+    }
+}
+
+impl RemoteMultimodalConfigs {
+    /// Create a new remote multimodal config bundle.
+    ///
+    /// This sets the minimum required fields:
+    /// - `api_url`: the OpenAI-compatible `/v1/chat/completions` endpoint
+    /// - `model_name`: the model identifier understood by that endpoint
+    ///
+    /// All other fields fall back to [`Default::default`].
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider_agent::automation::RemoteMultimodalConfigs;
+    ///
+    /// let mm = RemoteMultimodalConfigs::new(
+    ///     "http://localhost:11434/v1/chat/completions",
+    ///     "qwen2.5-vl",
+    /// );
+    /// ```
+    pub fn new(api_url: impl Into<String>, model_name: impl Into<String>) -> Self {
+        Self {
+            api_url: api_url.into(),
+            model_name: model_name.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Default semaphore.
+    fn default_semaphore() -> OnceLock<Arc<tokio::sync::Semaphore>> {
+        OnceLock::new()
+    }
+
+    /// Get (and lazily init) the shared semaphore from `concurrency_limit`.
+    /// This is safe to call concurrently; `OnceLock` handles the race.
+    pub fn get_or_init_semaphore(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        let n = self.concurrency_limit?;
+        if n == 0 {
+            return None;
+        }
+        Some(
+            self.semaphore
+                .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(n)))
+                .clone(),
+        )
+    }
+
+    /// Attach an optional API key for authenticated endpoints.
+    ///
+    /// When set, the engine will send:
+    /// `Authorization: Bearer <api_key>`
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Set the base system prompt for the model.
+    ///
+    /// - `Some(prompt)` uses your prompt as the base system prompt.
+    /// - `None` means the engine should use its built-in default system prompt.
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Append additional system-level instructions.
+    ///
+    /// This is appended after the base system prompt and before any runtime config summary
+    /// the engine might embed.
+    pub fn with_system_prompt_extra(mut self, extra: impl Into<String>) -> Self {
+        self.system_prompt_extra = Some(extra.into());
+        self
+    }
+
+    /// Append additional user instructions for the task.
+    ///
+    /// This is appended to the user message after the captured page context.
+    pub fn with_user_message_extra(mut self, extra: impl Into<String>) -> Self {
+        self.user_message_extra = Some(extra.into());
+        self
+    }
+
+    /// Replace the runtime automation configuration.
+    pub fn with_cfg(mut self, cfg: RemoteMultimodalConfig) -> Self {
+        self.cfg = cfg;
+        self
+    }
+
+    /// Set optional URL gating and per-URL overrides.
+    pub fn with_prompt_url_gate(mut self, gate: super::PromptUrlGate) -> Self {
+        self.prompt_url_gate = Some(gate);
+        self
+    }
+
+    /// Set an optional concurrency limit for remote inference calls.
+    pub fn with_concurrency_limit(mut self, limit: usize) -> Self {
+        self.concurrency_limit = Some(limit);
+        self
+    }
+
+    /// Enable extraction mode to return structured data from pages.
+    pub fn with_extra_ai_data(mut self, enabled: bool) -> Self {
+        self.cfg.extra_ai_data = enabled;
+        self
+    }
+
+    /// Set a custom extraction prompt.
+    pub fn with_extraction_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.cfg.extraction_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Enable screenshot capture after automation completes.
+    pub fn with_screenshot(mut self, enabled: bool) -> Self {
+        self.cfg.screenshot = enabled;
+        self
+    }
+
+    /// Set a JSON schema for structured extraction output.
+    pub fn with_extraction_schema(mut self, schema: super::ExtractionSchema) -> Self {
+        self.cfg.extraction_schema = Some(schema);
+        self
+    }
+}
+
+/// Merge a base config with an override config.
+///
+/// Override values take precedence. This is used for URL-specific config overrides.
+pub fn merged_config(
+    base: &RemoteMultimodalConfig,
+    override_cfg: &RemoteMultimodalConfig,
+) -> RemoteMultimodalConfig {
+    let mut out = base.clone();
+
+    out.include_html = override_cfg.include_html;
+    out.html_max_bytes = override_cfg.html_max_bytes;
+    out.include_url = override_cfg.include_url;
+    out.include_title = override_cfg.include_title;
+
+    out.temperature = override_cfg.temperature;
+    out.max_tokens = override_cfg.max_tokens;
+    out.request_json_object = override_cfg.request_json_object;
+    out.best_effort_json_extract = override_cfg.best_effort_json_extract;
+
+    out.max_rounds = override_cfg.max_rounds;
+    out.post_plan_wait_ms = override_cfg.post_plan_wait_ms;
+
+    out.retry = override_cfg.retry.clone();
+    out.model_policy = override_cfg.model_policy.clone();
+
+    if !override_cfg.capture_profiles.is_empty() {
+        out.capture_profiles = override_cfg.capture_profiles.clone();
+    }
+
+    // Extraction settings
+    out.extra_ai_data = override_cfg.extra_ai_data;
+    out.extraction_prompt = override_cfg.extraction_prompt.clone();
+    out.extraction_schema = override_cfg.extraction_schema.clone();
+    out.screenshot = override_cfg.screenshot;
+
+    out
+}
+
+/// Check if a URL is allowed by the gate.
+///
+/// Returns:
+/// - `true` if the URL is allowed (no gate, or gate allows the URL)
+/// - `false` if the URL is blocked
+pub fn is_url_allowed(gate: Option<&super::PromptUrlGate>, url: &str) -> bool {
+    match gate {
+        Some(g) => g.is_allowed(url),
+        None => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,5 +1126,102 @@ mod tests {
 
         assert_eq!(policy.model_for_tier(CostTier::Low), "gpt-4o-mini");
         assert_eq!(policy.model_for_tier(CostTier::High), "gpt-4o");
+    }
+
+    #[test]
+    fn test_remote_multimodal_config_defaults() {
+        let cfg = RemoteMultimodalConfig::default();
+
+        assert!(cfg.include_html);
+        assert_eq!(cfg.html_max_bytes, 24_000);
+        assert!(cfg.include_url);
+        assert!(cfg.include_title);
+        assert_eq!(cfg.temperature, 0.1);
+        assert_eq!(cfg.max_tokens, 1024);
+        assert!(cfg.request_json_object);
+        assert!(cfg.best_effort_json_extract);
+        assert_eq!(cfg.max_rounds, 6);
+        assert!(cfg.screenshot);
+        assert!(!cfg.extra_ai_data);
+    }
+
+    #[test]
+    fn test_remote_multimodal_config_builder() {
+        let cfg = RemoteMultimodalConfig::new()
+            .with_html(false)
+            .with_temperature(0.5)
+            .with_max_rounds(10)
+            .with_extraction(true)
+            .with_extraction_prompt("Extract products");
+
+        assert!(!cfg.include_html);
+        assert_eq!(cfg.temperature, 0.5);
+        assert_eq!(cfg.max_rounds, 10);
+        assert!(cfg.extra_ai_data);
+        assert_eq!(cfg.extraction_prompt, Some("Extract products".to_string()));
+    }
+
+    #[test]
+    fn test_remote_multimodal_configs_new() {
+        let configs = RemoteMultimodalConfigs::new(
+            "http://localhost:11434/v1/chat/completions",
+            "qwen2.5-vl",
+        );
+
+        assert_eq!(configs.api_url, "http://localhost:11434/v1/chat/completions");
+        assert_eq!(configs.model_name, "qwen2.5-vl");
+        assert!(configs.api_key.is_none());
+        assert!(configs.system_prompt.is_none());
+    }
+
+    #[test]
+    fn test_remote_multimodal_configs_builder() {
+        let configs = RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o")
+            .with_api_key("sk-test")
+            .with_system_prompt("You are a helpful assistant.")
+            .with_concurrency_limit(5)
+            .with_screenshot(true);
+
+        assert_eq!(configs.api_key, Some("sk-test".to_string()));
+        assert_eq!(configs.system_prompt, Some("You are a helpful assistant.".to_string()));
+        assert_eq!(configs.concurrency_limit, Some(5));
+        assert!(configs.cfg.screenshot);
+    }
+
+    #[test]
+    fn test_html_cleaning_profile_analysis() {
+        use super::ContentAnalysis;
+
+        // Test with high SVG bytes - should return Slim
+        let mut analysis = ContentAnalysis::default();
+        analysis.svg_bytes = 150_000; // > SVG_VERY_HEAVY_THRESHOLD
+        assert_eq!(
+            HtmlCleaningProfile::from_content_analysis(&analysis),
+            HtmlCleaningProfile::Slim
+        );
+
+        // Test with small HTML - should return Minimal
+        let mut analysis = ContentAnalysis::default();
+        analysis.html_length = 5_000;
+        analysis.text_ratio = 0.3;
+        assert_eq!(
+            HtmlCleaningProfile::from_content_analysis(&analysis),
+            HtmlCleaningProfile::Minimal
+        );
+    }
+
+    #[test]
+    fn test_html_cleaning_profile_estimate_savings() {
+        use super::ContentAnalysis;
+
+        let mut analysis = ContentAnalysis::default();
+        analysis.script_bytes = 10_000;
+        analysis.style_bytes = 5_000;
+        analysis.cleanable_bytes = 20_000;
+        analysis.html_length = 50_000;
+
+        assert_eq!(HtmlCleaningProfile::Raw.estimate_savings(&analysis), 0);
+        assert_eq!(HtmlCleaningProfile::Minimal.estimate_savings(&analysis), 15_000);
+        assert_eq!(HtmlCleaningProfile::Slim.estimate_savings(&analysis), 20_000);
     }
 }

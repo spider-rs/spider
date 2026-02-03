@@ -6,31 +6,90 @@
 //! - Page observation and understanding
 //! - Recovery strategies for resilient automation
 //! - Content analysis for smart decisions
+//! - Remote multimodal engine configuration
+//! - HTML cleaning utilities
+//! - Memory operations for session state
 //!
 //! This module is designed to be the core reusable automation logic
 //! that can be used across spider ecosystem.
 
 mod actions;
+#[cfg(feature = "chrome")]
+mod browser;
 pub mod cache;
 mod chain;
 mod config;
 mod content;
+mod engine;
+mod engine_error;
 pub mod executor;
+mod helpers;
+mod html_cleaning;
+mod map_result;
+mod memory_ops;
 mod observation;
+mod prompts;
 pub mod router;
 mod selector_cache;
 
+// Re-export actions
 pub use actions::{ActionRecord, ActionResult, ActionType};
+
+// Re-export chain types
 pub use chain::{ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep, ChainStepResult};
+
+// Re-export config types
 pub use config::{
-    AutomationConfig, CaptureProfile, CleaningIntent, CostTier, HtmlCleaningProfile, ModelPolicy,
-    RecoveryStrategy, RetryPolicy, ClipViewport,
+    is_url_allowed, merged_config, AutomationConfig, CaptureProfile, CleaningIntent,
+    ClipViewport, CostTier, HtmlCleaningProfile, ModelPolicy, RecoveryStrategy,
+    RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy,
 };
+
+// Re-export content analysis
 pub use content::ContentAnalysis;
-pub use observation::{
-    FormField, FormInfo, InteractiveElement, NavigationOption, PageObservation,
+
+// Re-export engine
+pub use engine::RemoteMultimodalEngine;
+
+// Re-export error types
+pub use engine_error::{EngineError, EngineResult};
+
+// Re-export helpers
+pub use helpers::{
+    best_effort_parse_json_object, extract_assistant_content, extract_last_code_block,
+    extract_last_json_array, extract_last_json_boundaries, extract_last_json_object, extract_usage,
+    fnv1a64, truncate_utf8_tail,
 };
+
+// Re-export HTML cleaning
+pub use html_cleaning::{
+    clean_html, clean_html_base, clean_html_full, clean_html_raw, clean_html_slim,
+    clean_html_with_profile, clean_html_with_profile_and_intent, smart_clean_html,
+};
+
+// Re-export map result types
+pub use map_result::{categories, DiscoveredUrl, MapResult};
+
+// Re-export memory operations
+pub use memory_ops::{AutomationMemory, MemoryOperation};
+
+// Re-export observation types
+pub use observation::{
+    ActResult, FormField, FormInfo, InteractiveElement, NavigationOption, PageObservation,
+};
+
+// Re-export prompts
+pub use prompts::{
+    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
+    EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
+};
+
+// Re-export selector cache
 pub use selector_cache::{SelectorCache, SelectorCacheEntry};
+
+// Re-export browser functions (chrome feature)
+#[cfg(feature = "chrome")]
+pub use browser::run_remote_multimodal_with_page;
 
 /// URL-based prompt gating for per-URL config overrides.
 ///

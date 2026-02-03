@@ -2898,7 +2898,7 @@ pub async fn fetch_page_html_chrome_base(
             }
 
             if remote_multimodal.is_some() && !base_timeout.is_zero() {
-                use crate::features::automation::run_remote_multimodal_if_enabled;
+                use crate::features::automation::{run_remote_multimodal_if_enabled, AutomationResultExt};
 
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
