@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -25,6 +25,7 @@ log = "0.4"
 thiserror = "1"
 dashmap = "6"
 parking_lot = "0.12"
+base64 = "0.22"
 
 # HTML processing
 lol_html = "2"

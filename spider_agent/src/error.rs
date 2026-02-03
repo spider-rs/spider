@@ -1,5 +1,6 @@
 //! Error types for spider_agent.
 
+use crate::config::LimitType;
 use std::fmt;
 
 /// Agent error types.
@@ -36,6 +37,8 @@ pub enum AgentError {
     RateLimited,
     /// Timeout.
     Timeout,
+    /// Usage limit exceeded.
+    LimitExceeded(LimitType),
 }
 
 impl fmt::Display for AgentError {
@@ -58,6 +61,7 @@ impl fmt::Display for AgentError {
             Self::Tool(msg) => write!(f, "Tool error: {}", msg),
             Self::RateLimited => write!(f, "Rate limit exceeded"),
             Self::Timeout => write!(f, "Request timed out"),
+            Self::LimitExceeded(limit) => write!(f, "Usage limit exceeded: {}", limit),
         }
     }
 }

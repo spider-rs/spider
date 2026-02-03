@@ -86,6 +86,7 @@ mod config;
 mod error;
 mod llm;
 mod memory;
+pub mod tools;
 
 #[cfg(feature = "search")]
 pub mod search;
@@ -101,10 +102,11 @@ pub mod temp;
 
 // Re-exports
 pub use agent::{Agent, AgentBuilder, FetchResult, PageExtraction};
-pub use config::{AgentConfig, HtmlCleaningMode, ResearchOptions, RetryConfig, SearchOptions, TimeRange, UsageSnapshot, UsageStats};
+pub use config::{AgentConfig, HtmlCleaningMode, LimitType, ResearchOptions, RetryConfig, SearchOptions, TimeRange, UsageLimits, UsageSnapshot, UsageStats};
 pub use error::{AgentError, AgentResult, SearchError};
 pub use llm::{CompletionOptions, CompletionResponse, LLMProvider, Message, MessageContent, TokenUsage};
 pub use memory::AgentMemory;
+pub use tools::{AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod};
 
 // Automation re-exports
 pub use automation::{

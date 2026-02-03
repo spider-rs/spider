@@ -1,8 +1,196 @@
 //! Configuration types for spider_agent.
 
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Usage limits for controlling agent resource consumption.
+#[derive(Debug, Clone, Default)]
+pub struct UsageLimits {
+    /// Maximum total tokens (prompt + completion).
+    pub max_total_tokens: Option<u64>,
+    /// Maximum prompt tokens.
+    pub max_prompt_tokens: Option<u64>,
+    /// Maximum completion tokens.
+    pub max_completion_tokens: Option<u64>,
+    /// Maximum LLM API calls.
+    pub max_llm_calls: Option<u64>,
+    /// Maximum search API calls.
+    pub max_search_calls: Option<u64>,
+    /// Maximum HTTP fetch calls.
+    pub max_fetch_calls: Option<u64>,
+    /// Maximum web browser calls (Chrome/WebDriver combined).
+    pub max_webbrowser_calls: Option<u64>,
+    /// Maximum custom tool calls.
+    pub max_custom_tool_calls: Option<u64>,
+    /// Maximum generic tool calls.
+    pub max_tool_calls: Option<u64>,
+}
+
+impl UsageLimits {
+    /// Create new usage limits with no restrictions.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set maximum total tokens.
+    pub fn with_max_total_tokens(mut self, limit: u64) -> Self {
+        self.max_total_tokens = Some(limit);
+        self
+    }
+
+    /// Set maximum prompt tokens.
+    pub fn with_max_prompt_tokens(mut self, limit: u64) -> Self {
+        self.max_prompt_tokens = Some(limit);
+        self
+    }
+
+    /// Set maximum completion tokens.
+    pub fn with_max_completion_tokens(mut self, limit: u64) -> Self {
+        self.max_completion_tokens = Some(limit);
+        self
+    }
+
+    /// Set maximum LLM calls.
+    pub fn with_max_llm_calls(mut self, limit: u64) -> Self {
+        self.max_llm_calls = Some(limit);
+        self
+    }
+
+    /// Set maximum search calls.
+    pub fn with_max_search_calls(mut self, limit: u64) -> Self {
+        self.max_search_calls = Some(limit);
+        self
+    }
+
+    /// Set maximum fetch calls.
+    pub fn with_max_fetch_calls(mut self, limit: u64) -> Self {
+        self.max_fetch_calls = Some(limit);
+        self
+    }
+
+    /// Set maximum web browser calls.
+    pub fn with_max_webbrowser_calls(mut self, limit: u64) -> Self {
+        self.max_webbrowser_calls = Some(limit);
+        self
+    }
+
+    /// Set maximum custom tool calls.
+    pub fn with_max_custom_tool_calls(mut self, limit: u64) -> Self {
+        self.max_custom_tool_calls = Some(limit);
+        self
+    }
+
+    /// Set maximum tool calls.
+    pub fn with_max_tool_calls(mut self, limit: u64) -> Self {
+        self.max_tool_calls = Some(limit);
+        self
+    }
+}
+
+/// Type of limit that was exceeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LimitType {
+    /// Total tokens limit exceeded.
+    TotalTokens {
+        /// Tokens used so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Prompt tokens limit exceeded.
+    PromptTokens {
+        /// Tokens used so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Completion tokens limit exceeded.
+    CompletionTokens {
+        /// Tokens used so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// LLM calls limit exceeded.
+    LlmCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Search calls limit exceeded.
+    SearchCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Fetch calls limit exceeded.
+    FetchCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Web browser calls limit exceeded.
+    WebbrowserCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Custom tool calls limit exceeded.
+    CustomToolCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+    /// Tool calls limit exceeded.
+    ToolCalls {
+        /// Calls made so far.
+        used: u64,
+        /// The limit that was set.
+        limit: u64,
+    },
+}
+
+impl std::fmt::Display for LimitType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TotalTokens { used, limit } => {
+                write!(f, "total tokens ({} used, {} limit)", used, limit)
+            }
+            Self::PromptTokens { used, limit } => {
+                write!(f, "prompt tokens ({} used, {} limit)", used, limit)
+            }
+            Self::CompletionTokens { used, limit } => {
+                write!(f, "completion tokens ({} used, {} limit)", used, limit)
+            }
+            Self::LlmCalls { used, limit } => {
+                write!(f, "LLM calls ({} used, {} limit)", used, limit)
+            }
+            Self::SearchCalls { used, limit } => {
+                write!(f, "search calls ({} used, {} limit)", used, limit)
+            }
+            Self::FetchCalls { used, limit } => {
+                write!(f, "fetch calls ({} used, {} limit)", used, limit)
+            }
+            Self::WebbrowserCalls { used, limit } => {
+                write!(f, "web browser calls ({} used, {} limit)", used, limit)
+            }
+            Self::CustomToolCalls { used, limit } => {
+                write!(f, "custom tool calls ({} used, {} limit)", used, limit)
+            }
+            Self::ToolCalls { used, limit } => {
+                write!(f, "tool calls ({} used, {} limit)", used, limit)
+            }
+        }
+    }
+}
 
 /// Agent configuration.
 #[derive(Debug, Clone)]
@@ -33,6 +221,9 @@ pub struct AgentConfig {
 
     /// Whether to request JSON output from LLM.
     pub json_mode: bool,
+
+    /// Usage limits for resource control.
+    pub limits: UsageLimits,
 }
 
 impl Default for AgentConfig {
@@ -47,6 +238,7 @@ impl Default for AgentConfig {
             html_max_bytes: 24_000,
             html_cleaning: HtmlCleaningMode::Default,
             json_mode: true,
+            limits: UsageLimits::default(),
         }
     }
 }
@@ -108,6 +300,12 @@ impl AgentConfig {
     /// Enable or disable JSON mode.
     pub fn with_json_mode(mut self, enabled: bool) -> Self {
         self.json_mode = enabled;
+        self
+    }
+
+    /// Set usage limits.
+    pub fn with_limits(mut self, limits: UsageLimits) -> Self {
+        self.limits = limits;
         self
     }
 }
@@ -298,7 +496,7 @@ impl ResearchOptions {
 /// Usage statistics for tracking agent operations.
 ///
 /// Uses atomic counters for lock-free concurrent updates.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UsageStats {
     /// Total LLM prompt tokens used.
     pub prompt_tokens: AtomicU64,
@@ -310,8 +508,27 @@ pub struct UsageStats {
     pub search_calls: AtomicU64,
     /// Total HTTP fetch calls made.
     pub fetch_calls: AtomicU64,
+    /// Total web browser calls made (Chrome/WebDriver combined).
+    pub webbrowser_calls: AtomicU64,
+    /// Custom tool calls tracked by tool name (lock-free via DashMap).
+    pub custom_tool_calls: DashMap<String, AtomicU64>,
     /// Total tool calls made.
     pub tool_calls: AtomicU64,
+}
+
+impl Default for UsageStats {
+    fn default() -> Self {
+        Self {
+            prompt_tokens: AtomicU64::new(0),
+            completion_tokens: AtomicU64::new(0),
+            llm_calls: AtomicU64::new(0),
+            search_calls: AtomicU64::new(0),
+            fetch_calls: AtomicU64::new(0),
+            webbrowser_calls: AtomicU64::new(0),
+            custom_tool_calls: DashMap::new(),
+            tool_calls: AtomicU64::new(0),
+        }
+    }
 }
 
 impl UsageStats {
@@ -341,6 +558,35 @@ impl UsageStats {
         self.fetch_calls.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increment web browser call count (Chrome/WebDriver).
+    pub fn increment_webbrowser_calls(&self) {
+        self.webbrowser_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment custom tool call count for a specific tool.
+    pub fn increment_custom_tool_calls(&self, tool_name: &str) {
+        self.custom_tool_calls
+            .entry(tool_name.to_string())
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get custom tool call count for a specific tool.
+    pub fn get_custom_tool_calls(&self, tool_name: &str) -> u64 {
+        self.custom_tool_calls
+            .get(tool_name)
+            .map(|v| v.load(Ordering::Relaxed))
+            .unwrap_or(0)
+    }
+
+    /// Get total custom tool calls across all tools.
+    pub fn total_custom_tool_calls(&self) -> u64 {
+        self.custom_tool_calls
+            .iter()
+            .map(|entry| entry.value().load(Ordering::Relaxed))
+            .sum()
+    }
+
     /// Increment tool call count.
     pub fn increment_tool_calls(&self) {
         self.tool_calls.fetch_add(1, Ordering::Relaxed);
@@ -354,12 +600,20 @@ impl UsageStats {
 
     /// Get a snapshot of all stats.
     pub fn snapshot(&self) -> UsageSnapshot {
+        let custom_tool_calls: HashMap<String, u64> = self
+            .custom_tool_calls
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
+            .collect();
+
         UsageSnapshot {
             prompt_tokens: self.prompt_tokens.load(Ordering::Relaxed),
             completion_tokens: self.completion_tokens.load(Ordering::Relaxed),
             llm_calls: self.llm_calls.load(Ordering::Relaxed),
             search_calls: self.search_calls.load(Ordering::Relaxed),
             fetch_calls: self.fetch_calls.load(Ordering::Relaxed),
+            webbrowser_calls: self.webbrowser_calls.load(Ordering::Relaxed),
+            custom_tool_calls,
             tool_calls: self.tool_calls.load(Ordering::Relaxed),
         }
     }
@@ -371,7 +625,104 @@ impl UsageStats {
         self.llm_calls.store(0, Ordering::Relaxed);
         self.search_calls.store(0, Ordering::Relaxed);
         self.fetch_calls.store(0, Ordering::Relaxed);
+        self.webbrowser_calls.store(0, Ordering::Relaxed);
+        self.custom_tool_calls.clear();
         self.tool_calls.store(0, Ordering::Relaxed);
+    }
+
+    // ==================== Limit Checking Methods ====================
+
+    /// Check if LLM call limit would be exceeded.
+    pub fn check_llm_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_llm_calls {
+            let used = self.llm_calls.load(Ordering::Relaxed);
+            if used >= limit {
+                return Some(LimitType::LlmCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if search call limit would be exceeded.
+    pub fn check_search_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_search_calls {
+            let used = self.search_calls.load(Ordering::Relaxed);
+            if used >= limit {
+                return Some(LimitType::SearchCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if fetch call limit would be exceeded.
+    pub fn check_fetch_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_fetch_calls {
+            let used = self.fetch_calls.load(Ordering::Relaxed);
+            if used >= limit {
+                return Some(LimitType::FetchCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if web browser call limit would be exceeded.
+    pub fn check_webbrowser_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_webbrowser_calls {
+            let used = self.webbrowser_calls.load(Ordering::Relaxed);
+            if used >= limit {
+                return Some(LimitType::WebbrowserCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if custom tool call limit would be exceeded (total across all tools).
+    pub fn check_custom_tool_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_custom_tool_calls {
+            let used = self.total_custom_tool_calls();
+            if used >= limit {
+                return Some(LimitType::CustomToolCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if tool call limit would be exceeded.
+    pub fn check_tool_limit(&self, limits: &UsageLimits) -> Option<LimitType> {
+        if let Some(limit) = limits.max_tool_calls {
+            let used = self.tool_calls.load(Ordering::Relaxed);
+            if used >= limit {
+                return Some(LimitType::ToolCalls { used, limit });
+            }
+        }
+        None
+    }
+
+    /// Check if token limits would be exceeded.
+    pub fn check_token_limits(&self, limits: &UsageLimits) -> Option<LimitType> {
+        let prompt = self.prompt_tokens.load(Ordering::Relaxed);
+        let completion = self.completion_tokens.load(Ordering::Relaxed);
+        let total = prompt + completion;
+
+        if let Some(limit) = limits.max_total_tokens {
+            if total >= limit {
+                return Some(LimitType::TotalTokens { used: total, limit });
+            }
+        }
+
+        if let Some(limit) = limits.max_prompt_tokens {
+            if prompt >= limit {
+                return Some(LimitType::PromptTokens { used: prompt, limit });
+            }
+        }
+
+        if let Some(limit) = limits.max_completion_tokens {
+            if completion >= limit {
+                return Some(LimitType::CompletionTokens { used: completion, limit });
+            }
+        }
+
+        None
     }
 }
 
@@ -388,6 +739,10 @@ pub struct UsageSnapshot {
     pub search_calls: u64,
     /// Total HTTP fetch calls.
     pub fetch_calls: u64,
+    /// Total web browser calls (Chrome/WebDriver combined).
+    pub webbrowser_calls: u64,
+    /// Custom tool calls by tool name.
+    pub custom_tool_calls: HashMap<String, u64>,
     /// Total tool calls.
     pub tool_calls: u64,
 }
@@ -396,5 +751,184 @@ impl UsageSnapshot {
     /// Get total tokens.
     pub fn total_tokens(&self) -> u64 {
         self.prompt_tokens + self.completion_tokens
+    }
+
+    /// Get total custom tool calls across all tools.
+    pub fn total_custom_tool_calls(&self) -> u64 {
+        self.custom_tool_calls.values().sum()
+    }
+
+    /// Get call count for a specific custom tool.
+    pub fn get_custom_tool_calls(&self, tool_name: &str) -> u64 {
+        self.custom_tool_calls.get(tool_name).copied().unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_usage_limits_builder() {
+        let limits = UsageLimits::new()
+            .with_max_total_tokens(10000)
+            .with_max_llm_calls(100)
+            .with_max_search_calls(50)
+            .with_max_fetch_calls(200)
+            .with_max_webbrowser_calls(30)
+            .with_max_custom_tool_calls(25)
+            .with_max_tool_calls(500);
+
+        assert_eq!(limits.max_total_tokens, Some(10000));
+        assert_eq!(limits.max_llm_calls, Some(100));
+        assert_eq!(limits.max_search_calls, Some(50));
+        assert_eq!(limits.max_fetch_calls, Some(200));
+        assert_eq!(limits.max_webbrowser_calls, Some(30));
+        assert_eq!(limits.max_custom_tool_calls, Some(25));
+        assert_eq!(limits.max_tool_calls, Some(500));
+    }
+
+    #[test]
+    fn test_usage_stats_tracking() {
+        let stats = UsageStats::new();
+
+        // Track various calls
+        stats.increment_llm_calls();
+        stats.increment_llm_calls();
+        stats.increment_search_calls();
+        stats.increment_fetch_calls();
+        stats.increment_fetch_calls();
+        stats.increment_fetch_calls();
+        stats.increment_webbrowser_calls();
+        stats.increment_custom_tool_calls("my_api");
+        stats.increment_custom_tool_calls("my_api");
+        stats.increment_custom_tool_calls("other_api");
+        stats.add_tokens(100, 50);
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.llm_calls, 2);
+        assert_eq!(snapshot.search_calls, 1);
+        assert_eq!(snapshot.fetch_calls, 3);
+        assert_eq!(snapshot.webbrowser_calls, 1);
+        assert_eq!(snapshot.prompt_tokens, 100);
+        assert_eq!(snapshot.completion_tokens, 50);
+        assert_eq!(snapshot.total_tokens(), 150);
+
+        // Check custom tool tracking
+        assert_eq!(snapshot.get_custom_tool_calls("my_api"), 2);
+        assert_eq!(snapshot.get_custom_tool_calls("other_api"), 1);
+        assert_eq!(snapshot.get_custom_tool_calls("unknown"), 0);
+        assert_eq!(snapshot.total_custom_tool_calls(), 3);
+    }
+
+    #[test]
+    fn test_usage_stats_reset() {
+        let stats = UsageStats::new();
+        stats.increment_llm_calls();
+        stats.increment_search_calls();
+        stats.increment_custom_tool_calls("my_api");
+        stats.add_tokens(100, 50);
+
+        stats.reset();
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.llm_calls, 0);
+        assert_eq!(snapshot.search_calls, 0);
+        assert_eq!(snapshot.prompt_tokens, 0);
+        assert_eq!(snapshot.total_custom_tool_calls(), 0);
+    }
+
+    #[test]
+    fn test_limit_checking_llm() {
+        let stats = UsageStats::new();
+        let limits = UsageLimits::new().with_max_llm_calls(3);
+
+        // Under limit
+        stats.increment_llm_calls();
+        stats.increment_llm_calls();
+        assert!(stats.check_llm_limit(&limits).is_none());
+
+        // At limit
+        stats.increment_llm_calls();
+        let exceeded = stats.check_llm_limit(&limits);
+        assert!(exceeded.is_some());
+        match exceeded.unwrap() {
+            LimitType::LlmCalls { used, limit } => {
+                assert_eq!(used, 3);
+                assert_eq!(limit, 3);
+            }
+            _ => panic!("Expected LlmCalls limit type"),
+        }
+    }
+
+    #[test]
+    fn test_limit_checking_tokens() {
+        let stats = UsageStats::new();
+        let limits = UsageLimits::new()
+            .with_max_total_tokens(100)
+            .with_max_prompt_tokens(60);
+
+        // Under limit
+        stats.add_tokens(30, 20);
+        assert!(stats.check_token_limits(&limits).is_none());
+
+        // Prompt limit exceeded
+        stats.add_tokens(40, 0);
+        let exceeded = stats.check_token_limits(&limits);
+        assert!(exceeded.is_some());
+        match exceeded.unwrap() {
+            LimitType::PromptTokens { used, limit } => {
+                assert_eq!(used, 70);
+                assert_eq!(limit, 60);
+            }
+            _ => panic!("Expected PromptTokens limit type"),
+        }
+    }
+
+    #[test]
+    fn test_limit_checking_custom_tools() {
+        let stats = UsageStats::new();
+        let limits = UsageLimits::new().with_max_custom_tool_calls(5);
+
+        stats.increment_custom_tool_calls("api_a");
+        stats.increment_custom_tool_calls("api_b");
+        stats.increment_custom_tool_calls("api_a");
+        stats.increment_custom_tool_calls("api_c");
+        assert!(stats.check_custom_tool_limit(&limits).is_none());
+
+        stats.increment_custom_tool_calls("api_a");
+        let exceeded = stats.check_custom_tool_limit(&limits);
+        assert!(exceeded.is_some());
+        match exceeded.unwrap() {
+            LimitType::CustomToolCalls { used, limit } => {
+                assert_eq!(used, 5);
+                assert_eq!(limit, 5);
+            }
+            _ => panic!("Expected CustomToolCalls limit type"),
+        }
+    }
+
+    #[test]
+    fn test_agent_config_with_limits() {
+        let limits = UsageLimits::new()
+            .with_max_llm_calls(100)
+            .with_max_search_calls(50);
+
+        let config = AgentConfig::new().with_limits(limits);
+
+        assert_eq!(config.limits.max_llm_calls, Some(100));
+        assert_eq!(config.limits.max_search_calls, Some(50));
+    }
+
+    #[test]
+    fn test_limit_type_display() {
+        let limit = LimitType::LlmCalls { used: 10, limit: 5 };
+        assert_eq!(format!("{}", limit), "LLM calls (10 used, 5 limit)");
+
+        let limit = LimitType::CustomToolCalls { used: 25, limit: 20 };
+        assert_eq!(format!("{}", limit), "custom tool calls (25 used, 20 limit)");
+
+        let limit = LimitType::TotalTokens { used: 1000, limit: 500 };
+        assert_eq!(format!("{}", limit), "total tokens (1000 used, 500 limit)");
     }
 }

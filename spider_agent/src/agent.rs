@@ -8,6 +8,7 @@ use crate::llm::{CompletionOptions, CompletionResponse, LLMProvider, Message};
 #[cfg(feature = "search")]
 use crate::llm::TokenUsage;
 use crate::memory::AgentMemory;
+use crate::tools::{CustomTool, CustomToolRegistry, CustomToolResult};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -77,6 +78,9 @@ pub struct Agent {
 
     /// Usage statistics (atomic counters for lock-free updates).
     usage: Arc<UsageStats>,
+
+    /// Custom tool registry.
+    custom_tools: CustomToolRegistry,
 }
 
 impl Agent {
@@ -101,6 +105,11 @@ impl Agent {
         query: &str,
         options: SearchOptions,
     ) -> AgentResult<SearchResults> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_search_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let provider = self
             .search_provider
             .as_ref()
@@ -124,6 +133,14 @@ impl Agent {
 
     /// Send a completion request with full options.
     pub async fn complete(&self, messages: Vec<Message>) -> AgentResult<CompletionResponse> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_llm_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+        if let Some(limit) = self.usage.check_token_limits(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let llm = self
             .llm
             .as_ref()
@@ -201,6 +218,11 @@ impl Agent {
 
     /// Fetch a URL and return the HTML content.
     pub async fn fetch(&self, url: &str) -> AgentResult<FetchResult> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_fetch_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         self.usage.increment_fetch_calls();
 
         let response = self
@@ -394,6 +416,73 @@ impl Agent {
         self.usage.reset();
     }
 
+    // ==================== Custom Tool Methods ====================
+
+    /// Register a custom tool.
+    pub fn register_custom_tool(&self, tool: CustomTool) {
+        self.custom_tools.register(tool);
+    }
+
+    /// Remove a custom tool.
+    pub fn remove_custom_tool(&self, name: &str) -> bool {
+        self.custom_tools.remove(name).is_some()
+    }
+
+    /// List all registered custom tools.
+    pub fn list_custom_tools(&self) -> Vec<String> {
+        self.custom_tools.list()
+    }
+
+    /// Check if a custom tool is registered.
+    pub fn has_custom_tool(&self, name: &str) -> bool {
+        self.custom_tools.contains(name)
+    }
+
+    /// Execute a custom tool by name.
+    ///
+    /// # Arguments
+    /// * `name` - The registered tool name
+    /// * `path` - Optional path to append to the base URL
+    /// * `query` - Optional query parameters
+    /// * `body` - Optional request body
+    pub async fn execute_custom_tool(
+        &self,
+        name: &str,
+        path: Option<&str>,
+        query: Option<&[(&str, &str)]>,
+        body: Option<&str>,
+    ) -> AgentResult<CustomToolResult> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_custom_tool_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
+        // Track the call
+        self.usage.increment_custom_tool_calls(name);
+
+        // Execute the tool
+        self.custom_tools
+            .execute(name, &self.client, path, query, body)
+            .await
+    }
+
+    /// Execute a custom tool and parse the JSON response.
+    pub async fn execute_custom_tool_json(
+        &self,
+        name: &str,
+        path: Option<&str>,
+        query: Option<&[(&str, &str)]>,
+        body: Option<&str>,
+    ) -> AgentResult<serde_json::Value> {
+        let result = self.execute_custom_tool(name, path, query, body).await?;
+        serde_json::from_str(&result.body).map_err(AgentError::Json)
+    }
+
+    /// Get the custom tool registry for direct access.
+    pub fn custom_tool_registry(&self) -> &CustomToolRegistry {
+        &self.custom_tools
+    }
+
     // ==================== Browser Methods ====================
 
     /// Get the browser context if configured.
@@ -405,8 +494,16 @@ impl Agent {
     /// Navigate to a URL using the browser.
     #[cfg(feature = "chrome")]
     pub async fn navigate(&self, url: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.navigate(url).await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -414,8 +511,16 @@ impl Agent {
     /// Get HTML from the current browser page.
     #[cfg(feature = "chrome")]
     pub async fn browser_html(&self) -> AgentResult<String> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.html().await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -423,8 +528,16 @@ impl Agent {
     /// Take a screenshot of the current browser page.
     #[cfg(feature = "chrome")]
     pub async fn screenshot(&self) -> AgentResult<Vec<u8>> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.screenshot().await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -432,8 +545,16 @@ impl Agent {
     /// Open a new page/tab in the browser.
     #[cfg(feature = "chrome")]
     pub async fn new_page(&self) -> AgentResult<crate::browser::BrowserContext> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.clone_page().await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -441,8 +562,16 @@ impl Agent {
     /// Open a new page and navigate to URL.
     #[cfg(feature = "chrome")]
     pub async fn new_page_with_url(&self, url: &str) -> AgentResult<std::sync::Arc<crate::browser::Page>> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.new_page_with_url(url).await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -450,8 +579,16 @@ impl Agent {
     /// Click an element in the browser.
     #[cfg(feature = "chrome")]
     pub async fn click(&self, selector: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.click(selector).await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -459,8 +596,16 @@ impl Agent {
     /// Type text into an element in the browser.
     #[cfg(feature = "chrome")]
     pub async fn type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let browser = self.browser.as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         browser.type_text(selector, text).await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
@@ -483,8 +628,16 @@ impl Agent {
     /// Navigate using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_navigate(&self, url: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.navigate(url).await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -492,8 +645,16 @@ impl Agent {
     /// Get HTML from WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_html(&self) -> AgentResult<String> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.html().await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -501,8 +662,16 @@ impl Agent {
     /// Take a screenshot using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_screenshot(&self) -> AgentResult<Vec<u8>> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.screenshot().await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -510,8 +679,16 @@ impl Agent {
     /// Click an element using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_click(&self, selector: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.click(selector).await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -519,8 +696,16 @@ impl Agent {
     /// Type text into an element using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.type_text(selector, text).await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -528,6 +713,7 @@ impl Agent {
     /// Extract from the current WebDriver page using the LLM.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_extract_page(&self, prompt: &str) -> AgentResult<serde_json::Value> {
+        // Note: webdriver_html already tracks the webbrowser call
         let html = self.webdriver_html().await?;
         self.extract(&html, prompt).await
     }
@@ -535,8 +721,16 @@ impl Agent {
     /// Open a new tab using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_new_tab(&self) -> AgentResult<crate::webdriver::WindowHandle> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let driver = self.webdriver.as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
+
+        self.usage.increment_webbrowser_calls();
+
         driver.new_tab().await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
@@ -903,6 +1097,7 @@ impl AgentBuilder {
             llm_semaphore: semaphore,
             config: self.config,
             usage: Arc::new(UsageStats::new()),
+            custom_tools: CustomToolRegistry::new(),
         })
     }
 }
