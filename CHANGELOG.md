@@ -33,9 +33,89 @@
 
 ## v2
 
+### Multimodal AI Integration
+
+1. feat(openai): OpenAI integration for dynamic browser scripting and automation
+1. feat(gemini): Gemini AI support for intelligent web interaction
+1. feat(solver): built-in Gemini Nano support for web challenge solving
+1. feat(chrome): remote multimodal web automation with vision capabilities
+1. feat(automation): token usage tracking for LLM-powered extraction
+
+### Agentic Web Automation
+
+1. feat(automation): simplified agentic APIs - `act()`, `observe()`, `extract()`
+1. feat(automation): agentic memory for multi-round automation sessions
+1. feat(automation): prompt-based website configuration
+1. feat(automation): selector cache with self-healing and LRU eviction
+1. feat(automation): structured outputs with ExtractionSchema
+1. feat(automation): autonomous agent with action chaining and error recovery
+1. feat(automation): intelligent screenshot detection based on content analysis
+1. feat(automation): byte-size-based smart HTML cleaning for optimal performance
+1. feat(llm_json): robust JSON parsing from LLM outputs with thinking model support
+
+### WebDriver Support
+
+1. feat(webdriver): WebDriver support via thirtyfour crate
+1. feat(webdriver): Selenium Grid and remote browser connectivity
+1. feat(webdriver): multi-browser support (Chrome, Firefox, Edge)
+1. feat(webdriver): stealth mode with spider_fingerprint integration
+1. feat(webdriver): automation script support
+1. feat(webdriver): screenshot capabilities
+
+### Web Search Integration
+
+1. feat(search): web search integration with multiple providers
+1. feat(search): Serper.dev, Brave Search, Bing, and Tavily AI Search support
+1. feat(search): `search_and_extract()` for combined search + data extraction
+1. feat(search): `research()` method for multi-source topic research
+
+### spider_agent Crate
+
+1. feat(agent): standalone concurrent-safe multimodal agent crate
+1. feat(agent): feature-gated LLM providers (OpenAI, OpenAI-compatible)
+1. feat(agent): feature-gated search providers (Serper, Brave, Bing, Tavily)
+1. feat(agent): Chrome browser automation support
+1. feat(agent): smart caching with LRU eviction and TTL expiration
+1. feat(agent): high-performance chain executor with parallel step support
+1. feat(agent): batch processing and prefetch management
+1. feat(agent): smart model routing based on task complexity
+
+### Browser & Chrome Enhancements
+
+1. feat(chrome): remote cache support (disk and memory)
+1. feat(chrome): skip browser mode with smart HTML cleaning
+1. feat(chrome): adblock integration via chromey
+1. feat(chrome): idle network detection for page load completion
+1. feat(chrome): auto geo-detection
+1. feat(chrome): max page bytes control
+1. feat(smart): improved smart mode with JS rendering detection
+1. feat(smart): Imperva and sessionStorage detection handling
+
+### Anti-Bot & Security
+
+1. feat(antibot): anti-bot detection capabilities
+1. feat(fingerprint): centralized browser fingerprint emulation
+1. feat(fingerprint): header emulation for stealth
+1. feat(solver): deterministic and AI-powered web challenge solvers
+1. feat(solver): Lemin solver support
+1. feat(firewall): firewall integration for request filtering
+
+### Data Processing
+
 1. feat(transform): HTML transformation crate with spider_transformations
-1. feat(css_scraping): CSS scraping with the spider_utils
-1. chore(chrome): stabilize concurrent screenshot handling
+1. feat(css_scraping): CSS/XPath scraping with spider_utils
+1. feat(page): metadata extraction from pages
+1. feat(website): seeded page link and metadata extraction
+1. feat(decentralized): improved decentralized crawling with remote multimodal support
+
+### Performance & Infrastructure
+
+1. feat(cache): hybrid caching (Chrome + HTTP cache)
+1. feat(cache): memory and disk cache options
+1. feat(cmd): command-line crawling support
+1. feat(disk): shared state multi-profiling
+1. perf(website): reduced unnecessary clones and allocations
+1. chore(chrome): stabilized concurrent screenshot handling
 
 ## v1.98.0
 
