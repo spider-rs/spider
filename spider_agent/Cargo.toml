@@ -1,0 +1,77 @@
+[package]
+name = "spider_agent"
+version = "0.1.0"
+authors = ["j-mendez <jeff@spider.cloud>"]
+description = "A concurrent-safe multimodal agent for web automation and research."
+repository = "https://github.com/spider-rs/spider"
+readme = "README.md"
+keywords = ["agent", "llm", "automation", "web", "search"]
+categories = ["web-programming", "asynchronous"]
+license = "MIT"
+documentation = "https://docs.rs/spider_agent"
+edition = "2021"
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+# Core
+tokio = { version = "1", features = ["sync", "rt"] }
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+thiserror = "1"
+dashmap = "6"
+
+# HTML processing
+lol_html = "2"
+
+# LLM Providers (optional)
+async-openai = { version = "0.29", optional = true }
+tiktoken-rs = { version = "0.7", optional = true }
+
+# Browser (optional)
+chromiumoxide = { version = "0.7", optional = true, default-features = false, features = [
+    "tokio-runtime",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+env_logger = "0.11"
+
+[features]
+default = []
+
+# LLM Providers
+openai = ["dep:async-openai", "dep:tiktoken-rs"]
+
+# Browser automation
+chrome = ["dep:chromiumoxide"]
+
+# Search providers
+search = []
+search_serper = ["search"]
+search_brave = ["search"]
+search_bing = ["search"]
+search_tavily = ["search"]
+
+# Full feature set
+full = ["openai", "chrome", "search_serper", "search_brave", "search_bing", "search_tavily"]
+
+[[example]]
+name = "basic_search"
+required-features = ["search_serper"]
+
+[[example]]
+name = "research"
+required-features = ["openai", "search_serper"]
+
+[[example]]
+name = "extract"
+required-features = ["openai"]
+
+[[example]]
+name = "concurrent"
+required-features = ["openai", "search_serper"]
