@@ -288,3 +288,8 @@ required-features = ["spider/sync", "spider/chrome"]
 name = "remote_multimodal_scrape"
 path = "remote_multimodal_scrape.rs"
 required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
+name = "remote_multimodal_benchmark"
+path = "remote_multimodal_benchmark.rs"
+required-features = ["spider/sync", "spider/chrome"]
