@@ -82,7 +82,7 @@ async fn main() {
     let mut rx = website.subscribe(16).unwrap();
 
     // Spawn task to handle received pages
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
             println!("=== Page Received ===");
             println!("URL: {}", page.get_url());
@@ -123,10 +123,16 @@ async fn main() {
         }
     });
 
-    // Start crawling
+    // Start scraping
     let start = tokio::time::Instant::now();
     website.crawl().await;
     let duration = start.elapsed();
+
+    // Unsubscribe to close the channel and let the spawned task exit
+    website.unsubscribe();
+
+    // Wait for the spawned task to complete
+    let _ = join_handle.await;
 
     println!("\n=== Completed ===");
     println!("Time elapsed: {:?}", duration);

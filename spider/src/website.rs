@@ -4325,24 +4325,44 @@ impl Website {
                 self.pages = Some(Vec::new());
             }
 
+            // Signal channel to notify when crawl is done
+            let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+
             let crawl = async move {
                 w.crawl().await;
                 w.unsubscribe();
+                // Signal that crawl is complete
+                let _ = done_tx.send(());
             };
 
-            let sub = async move {
-                while let Ok(page) = rx2.recv().await {
-                    if let Some(sid) = page.signature {
-                        self.insert_signature(sid).await;
-                    }
-                    self.insert_link(page.get_url().into()).await;
-                    if let Some(p) = self.pages.as_mut() {
-                        p.push(page);
+            let sub = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        // Check if crawl is done first
+                        _ = &mut done_rx => {
+                            break;
+                        }
+                        result = rx2.recv() => {
+                            if let Ok(page) = result {
+                                if let Some(sid) = page.signature {
+                                    self.insert_signature(sid).await;
+                                }
+                                self.insert_link(page.get_url().into()).await;
+                                if let Some(p) = self.pages.as_mut() {
+                                    p.push(page);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
             };
 
             tokio::join!(sub, crawl);
+            // Unsubscribe from self to close the original channel for any external subscribers
+            self.unsubscribe();
         }
     }
 
@@ -4355,24 +4375,39 @@ impl Website {
             if self.pages.is_none() {
                 self.pages = Some(Vec::new());
             }
+
+            let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+
             let crawl = async move {
                 w.crawl_raw().await;
                 w.unsubscribe();
+                let _ = done_tx.send(());
             };
 
-            let sub = async move {
-                while let Ok(page) = rx2.recv().await {
-                    if let Some(sid) = page.signature {
-                        self.insert_signature(sid).await;
-                    }
-                    self.insert_link(page.get_url().into()).await;
-                    if let Some(p) = self.pages.as_mut() {
-                        p.push(page);
+            let sub = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut done_rx => break,
+                        result = rx2.recv() => {
+                            if let Ok(page) = result {
+                                if let Some(sid) = page.signature {
+                                    self.insert_signature(sid).await;
+                                }
+                                self.insert_link(page.get_url().into()).await;
+                                if let Some(p) = self.pages.as_mut() {
+                                    p.push(page);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
             };
 
             tokio::join!(sub, crawl);
+            self.unsubscribe();
         }
     }
 
@@ -4386,24 +4421,38 @@ impl Website {
                 self.pages = Some(Vec::new());
             }
 
+            let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+
             let crawl = async move {
                 w.crawl_smart().await;
                 w.unsubscribe();
+                let _ = done_tx.send(());
             };
 
-            let sub = async move {
-                while let Ok(page) = rx2.recv().await {
-                    if let Some(sid) = page.signature {
-                        self.insert_signature(sid).await;
-                    }
-                    self.insert_link(page.get_url().into()).await;
-                    if let Some(p) = self.pages.as_mut() {
-                        p.push(page);
+            let sub = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut done_rx => break,
+                        result = rx2.recv() => {
+                            if let Ok(page) = result {
+                                if let Some(sid) = page.signature {
+                                    self.insert_signature(sid).await;
+                                }
+                                self.insert_link(page.get_url().into()).await;
+                                if let Some(p) = self.pages.as_mut() {
+                                    p.push(page);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
             };
 
             tokio::join!(sub, crawl);
+            self.unsubscribe();
         }
     }
 
@@ -4417,24 +4466,38 @@ impl Website {
                 self.pages = Some(Vec::new());
             }
 
+            let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+
             let crawl = async move {
                 w.crawl_sitemap().await;
                 w.unsubscribe();
+                let _ = done_tx.send(());
             };
 
-            let sub = async move {
-                while let Ok(page) = rx2.recv().await {
-                    if let Some(sid) = page.signature {
-                        self.insert_signature(sid).await;
-                    }
-                    self.insert_link(page.get_url().into()).await;
-                    if let Some(p) = self.pages.as_mut() {
-                        p.push(page);
+            let sub = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut done_rx => break,
+                        result = rx2.recv() => {
+                            if let Ok(page) = result {
+                                if let Some(sid) = page.signature {
+                                    self.insert_signature(sid).await;
+                                }
+                                self.insert_link(page.get_url().into()).await;
+                                if let Some(p) = self.pages.as_mut() {
+                                    p.push(page);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
             };
 
             tokio::join!(sub, crawl);
+            self.unsubscribe();
         }
     }
 
