@@ -91,7 +91,7 @@ pub mod search;
 
 // Re-exports
 pub use agent::{Agent, AgentBuilder, FetchResult, PageExtraction};
-pub use config::{AgentConfig, HtmlCleaningMode, ResearchOptions, RetryConfig, SearchOptions, TimeRange};
+pub use config::{AgentConfig, HtmlCleaningMode, ResearchOptions, RetryConfig, SearchOptions, TimeRange, UsageSnapshot, UsageStats};
 pub use error::{AgentError, AgentResult, SearchError};
 pub use llm::{CompletionOptions, CompletionResponse, LLMProvider, Message, MessageContent, TokenUsage};
 pub use memory::AgentMemory;

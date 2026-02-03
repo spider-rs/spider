@@ -5304,6 +5304,7 @@ dependencies = [
  "chromiumoxide",
  "dashmap",
  "env_logger",
+ "fastrand",
  "log",
  "lol_html",
  "reqwest",

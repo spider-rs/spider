@@ -1,6 +1,6 @@
 //! Core Agent struct and builder for spider_agent.
 
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, UsageSnapshot, UsageStats};
 use crate::error::{AgentError, AgentResult};
 #[cfg(feature = "search")]
 use crate::config::{ResearchOptions, SearchOptions};
@@ -53,6 +53,9 @@ pub struct Agent {
 
     /// Configuration.
     config: AgentConfig,
+
+    /// Usage statistics (atomic counters for lock-free updates).
+    usage: Arc<UsageStats>,
 }
 
 impl Agent {
@@ -81,6 +84,8 @@ impl Agent {
             .search_provider
             .as_ref()
             .ok_or(AgentError::NotConfigured("search provider"))?;
+
+        self.usage.increment_search_calls();
 
         provider
             .search(query, &options, &self.client)
@@ -113,7 +118,17 @@ impl Agent {
             json_mode: self.config.json_mode,
         };
 
-        llm.complete(messages, &options, &self.client).await
+        self.usage.increment_llm_calls();
+
+        let response = llm.complete(messages, &options, &self.client).await?;
+
+        // Track token usage
+        self.usage.add_tokens(
+            response.usage.prompt_tokens as u64,
+            response.usage.completion_tokens as u64,
+        );
+
+        Ok(response)
     }
 
     // ==================== Extraction Methods ====================
@@ -165,6 +180,8 @@ impl Agent {
 
     /// Fetch a URL and return the HTML content.
     pub async fn fetch(&self, url: &str) -> AgentResult<FetchResult> {
+        self.usage.increment_fetch_calls();
+
         let response = self
             .client
             .get(url)
@@ -337,6 +354,23 @@ impl Agent {
     /// Get the memory instance for direct access.
     pub fn memory(&self) -> &AgentMemory {
         &self.memory
+    }
+
+    // ==================== Usage Methods ====================
+
+    /// Get a snapshot of usage statistics.
+    pub fn usage(&self) -> UsageSnapshot {
+        self.usage.snapshot()
+    }
+
+    /// Get the raw usage stats for direct access.
+    pub fn usage_stats(&self) -> &Arc<UsageStats> {
+        &self.usage
+    }
+
+    /// Reset usage statistics.
+    pub fn reset_usage(&self) {
+        self.usage.reset();
     }
 
     // ==================== Helper Methods ====================
@@ -592,6 +626,7 @@ impl AgentBuilder {
             memory: AgentMemory::new(),
             llm_semaphore: semaphore,
             config: self.config,
+            usage: Arc::new(UsageStats::new()),
         })
     }
 }

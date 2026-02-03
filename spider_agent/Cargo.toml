@@ -40,6 +40,7 @@ chromiumoxide = { version = "0.7", optional = true, default-features = false, fe
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"
+fastrand = "2"
 
 [features]
 default = []
@@ -74,4 +75,8 @@ required-features = ["openai"]
 
 [[example]]
 name = "concurrent"
+required-features = ["openai", "search_serper"]
+
+[[example]]
+name = "multimodal"
 required-features = ["openai", "search_serper"]

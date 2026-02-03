@@ -1,6 +1,7 @@
 //! Configuration types for spider_agent.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Agent configuration.
@@ -291,5 +292,109 @@ impl ResearchOptions {
     pub fn with_synthesize(mut self, enabled: bool) -> Self {
         self.synthesize = enabled;
         self
+    }
+}
+
+/// Usage statistics for tracking agent operations.
+///
+/// Uses atomic counters for lock-free concurrent updates.
+#[derive(Debug, Default)]
+pub struct UsageStats {
+    /// Total LLM prompt tokens used.
+    pub prompt_tokens: AtomicU64,
+    /// Total LLM completion tokens used.
+    pub completion_tokens: AtomicU64,
+    /// Total LLM calls made.
+    pub llm_calls: AtomicU64,
+    /// Total search calls made.
+    pub search_calls: AtomicU64,
+    /// Total HTTP fetch calls made.
+    pub fetch_calls: AtomicU64,
+    /// Total tool calls made.
+    pub tool_calls: AtomicU64,
+}
+
+impl UsageStats {
+    /// Create new usage stats.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add tokens from an LLM response.
+    pub fn add_tokens(&self, prompt: u64, completion: u64) {
+        self.prompt_tokens.fetch_add(prompt, Ordering::Relaxed);
+        self.completion_tokens.fetch_add(completion, Ordering::Relaxed);
+    }
+
+    /// Increment LLM call count.
+    pub fn increment_llm_calls(&self) {
+        self.llm_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment search call count.
+    pub fn increment_search_calls(&self) {
+        self.search_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment fetch call count.
+    pub fn increment_fetch_calls(&self) {
+        self.fetch_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment tool call count.
+    pub fn increment_tool_calls(&self) {
+        self.tool_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total tokens used.
+    pub fn total_tokens(&self) -> u64 {
+        self.prompt_tokens.load(Ordering::Relaxed)
+            + self.completion_tokens.load(Ordering::Relaxed)
+    }
+
+    /// Get a snapshot of all stats.
+    pub fn snapshot(&self) -> UsageSnapshot {
+        UsageSnapshot {
+            prompt_tokens: self.prompt_tokens.load(Ordering::Relaxed),
+            completion_tokens: self.completion_tokens.load(Ordering::Relaxed),
+            llm_calls: self.llm_calls.load(Ordering::Relaxed),
+            search_calls: self.search_calls.load(Ordering::Relaxed),
+            fetch_calls: self.fetch_calls.load(Ordering::Relaxed),
+            tool_calls: self.tool_calls.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Reset all counters.
+    pub fn reset(&self) {
+        self.prompt_tokens.store(0, Ordering::Relaxed);
+        self.completion_tokens.store(0, Ordering::Relaxed);
+        self.llm_calls.store(0, Ordering::Relaxed);
+        self.search_calls.store(0, Ordering::Relaxed);
+        self.fetch_calls.store(0, Ordering::Relaxed);
+        self.tool_calls.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Snapshot of usage statistics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageSnapshot {
+    /// Total LLM prompt tokens.
+    pub prompt_tokens: u64,
+    /// Total LLM completion tokens.
+    pub completion_tokens: u64,
+    /// Total LLM calls.
+    pub llm_calls: u64,
+    /// Total search calls.
+    pub search_calls: u64,
+    /// Total HTTP fetch calls.
+    pub fetch_calls: u64,
+    /// Total tool calls.
+    pub tool_calls: u64,
+}
+
+impl UsageSnapshot {
+    /// Get total tokens.
+    pub fn total_tokens(&self) -> u64 {
+        self.prompt_tokens + self.completion_tokens
     }
 }
