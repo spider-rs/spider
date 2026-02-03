@@ -3,28 +3,110 @@
 use super::AutomationUsage;
 
 /// Types of actions that can be performed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum ActionType {
     /// Navigate to a URL.
     Navigate,
     /// Click an element.
     Click,
+    /// Click all elements matching a selector.
+    ClickAll(String),
+    /// Click at specific x,y coordinates.
+    ClickPoint {
+        /// The horizontal (X) coordinate.
+        x: f64,
+        /// The vertical (Y) coordinate.
+        y: f64,
+    },
+    /// Click and hold on an element.
+    ClickHold {
+        /// The selector of the element to click-hold.
+        selector: String,
+        /// How long to hold (ms).
+        hold_ms: u64,
+    },
+    /// Click and hold at a specific point.
+    ClickHoldPoint {
+        /// The horizontal (X) coordinate.
+        x: f64,
+        /// The vertical (Y) coordinate.
+        y: f64,
+        /// How long to hold (ms).
+        hold_ms: u64,
+    },
+    /// Click-and-drag from one element to another.
+    ClickDrag {
+        /// Drag start selector.
+        from: String,
+        /// Drag end selector.
+        to: String,
+        /// Optional modifier (e.g. 8 for Shift).
+        modifier: Option<i64>,
+    },
+    /// Click-and-drag from one point to another.
+    ClickDragPoint {
+        /// Start X.
+        from_x: f64,
+        /// Start Y.
+        from_y: f64,
+        /// End X.
+        to_x: f64,
+        /// End Y.
+        to_y: f64,
+        /// Optional modifier (e.g. 8 for Shift).
+        modifier: Option<i64>,
+    },
+    /// Click all clickable elements on the page.
+    ClickAllClickable,
     /// Type text into an element.
     Type,
+    /// Fill an input element with a value (clears first).
+    Fill {
+        /// The selector of the input element.
+        selector: String,
+        /// The value to fill.
+        value: String,
+    },
     /// Clear an input field.
     Clear,
     /// Select an option from a dropdown.
     Select,
     /// Check/uncheck a checkbox.
     Check,
-    /// Scroll the page or element.
+    /// Scroll the page or element (generic).
     Scroll,
-    /// Wait for an element or condition.
+    /// Scroll horizontally by pixels.
+    ScrollX(i32),
+    /// Scroll vertically by pixels.
+    ScrollY(i32),
+    /// Infinite scroll (auto-scroll to page end).
+    InfiniteScroll(u32),
+    /// Wait for a fixed duration (ms).
     Wait,
+    /// Wait for an element to appear.
+    WaitFor(String),
+    /// Wait for an element with timeout.
+    WaitForWithTimeout {
+        /// The selector to wait for.
+        selector: String,
+        /// Timeout in milliseconds.
+        timeout: u64,
+    },
+    /// Wait for the next navigation event.
+    WaitForNavigation,
+    /// Wait for DOM updates to stop.
+    WaitForDom {
+        /// Optional selector to watch (defaults to body).
+        selector: Option<String>,
+        /// Timeout in milliseconds.
+        timeout: u32,
+    },
+    /// Wait for an element then click it.
+    WaitForAndClick(String),
     /// Take a screenshot.
     Screenshot,
-    /// Execute JavaScript.
+    /// Execute JavaScript (alias: Evaluate).
     Script,
     /// Press a key or key combination.
     KeyPress,
@@ -42,6 +124,8 @@ pub enum ActionType {
     Refresh,
     /// Extract data from the page.
     Extract,
+    /// Only continue if prior step was valid (chain control).
+    ValidateChain,
     /// Custom action.
     Custom(String),
 }
@@ -51,12 +135,48 @@ impl std::fmt::Display for ActionType {
         match self {
             Self::Navigate => write!(f, "navigate"),
             Self::Click => write!(f, "click"),
+            Self::ClickAll(s) => write!(f, "click_all:{}", s),
+            Self::ClickPoint { x, y } => write!(f, "click_point:({},{})", x, y),
+            Self::ClickHold { selector, hold_ms } => {
+                write!(f, "click_hold:{}:{}ms", selector, hold_ms)
+            }
+            Self::ClickHoldPoint { x, y, hold_ms } => {
+                write!(f, "click_hold_point:({},{}){}ms", x, y, hold_ms)
+            }
+            Self::ClickDrag { from, to, modifier } => {
+                write!(f, "click_drag:{}->{}:{:?}", from, to, modifier)
+            }
+            Self::ClickDragPoint {
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                modifier,
+            } => write!(
+                f,
+                "click_drag_point:({},{})->({},{}):{:?}",
+                from_x, from_y, to_x, to_y, modifier
+            ),
+            Self::ClickAllClickable => write!(f, "click_all_clickable"),
             Self::Type => write!(f, "type"),
+            Self::Fill { selector, .. } => write!(f, "fill:{}", selector),
             Self::Clear => write!(f, "clear"),
             Self::Select => write!(f, "select"),
             Self::Check => write!(f, "check"),
             Self::Scroll => write!(f, "scroll"),
+            Self::ScrollX(px) => write!(f, "scroll_x:{}", px),
+            Self::ScrollY(px) => write!(f, "scroll_y:{}", px),
+            Self::InfiniteScroll(n) => write!(f, "infinite_scroll:{}", n),
             Self::Wait => write!(f, "wait"),
+            Self::WaitFor(s) => write!(f, "wait_for:{}", s),
+            Self::WaitForWithTimeout { selector, timeout } => {
+                write!(f, "wait_for_timeout:{}:{}ms", selector, timeout)
+            }
+            Self::WaitForNavigation => write!(f, "wait_for_navigation"),
+            Self::WaitForDom { selector, timeout } => {
+                write!(f, "wait_for_dom:{:?}:{}ms", selector, timeout)
+            }
+            Self::WaitForAndClick(s) => write!(f, "wait_and_click:{}", s),
             Self::Screenshot => write!(f, "screenshot"),
             Self::Script => write!(f, "script"),
             Self::KeyPress => write!(f, "keypress"),
@@ -67,6 +187,7 @@ impl std::fmt::Display for ActionType {
             Self::Forward => write!(f, "forward"),
             Self::Refresh => write!(f, "refresh"),
             Self::Extract => write!(f, "extract"),
+            Self::ValidateChain => write!(f, "validate_chain"),
             Self::Custom(name) => write!(f, "custom:{}", name),
         }
     }
@@ -252,5 +373,11 @@ mod tests {
         assert_eq!(ActionType::Click.to_string(), "click");
         assert_eq!(ActionType::Navigate.to_string(), "navigate");
         assert_eq!(ActionType::Custom("foo".to_string()).to_string(), "custom:foo");
+        assert_eq!(ActionType::ClickAll("button".to_string()).to_string(), "click_all:button");
+        assert_eq!(ActionType::ScrollX(100).to_string(), "scroll_x:100");
+        assert_eq!(ActionType::ScrollY(-50).to_string(), "scroll_y:-50");
+        assert_eq!(ActionType::InfiniteScroll(5).to_string(), "infinite_scroll:5");
+        assert_eq!(ActionType::WaitFor(".modal".to_string()).to_string(), "wait_for:.modal");
+        assert_eq!(ActionType::ValidateChain.to_string(), "validate_chain");
     }
 }

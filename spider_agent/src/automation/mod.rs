@@ -24,13 +24,122 @@ pub use actions::{ActionRecord, ActionResult, ActionType};
 pub use chain::{ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep, ChainStepResult};
 pub use config::{
     AutomationConfig, CaptureProfile, CleaningIntent, CostTier, HtmlCleaningProfile, ModelPolicy,
-    RecoveryStrategy, RetryPolicy,
+    RecoveryStrategy, RetryPolicy, ClipViewport,
 };
 pub use content::ContentAnalysis;
 pub use observation::{
     FormField, FormInfo, InteractiveElement, NavigationOption, PageObservation,
 };
 pub use selector_cache::{SelectorCache, SelectorCacheEntry};
+
+/// URL-based prompt gating for per-URL config overrides.
+///
+/// This allows different prompts or configurations to be applied based on URL patterns.
+/// Useful for handling different page types differently (e.g., login pages vs. product pages).
+///
+/// # Example
+/// ```rust
+/// use spider_agent::automation::{PromptUrlGate, AutomationConfig};
+/// use std::collections::HashMap;
+///
+/// let mut url_map = HashMap::new();
+/// url_map.insert(
+///     "https://example.com/login".to_string(),
+///     Box::new(AutomationConfig::new("Handle login page"))
+/// );
+///
+/// let gate = PromptUrlGate {
+///     prompt_url_map: Some(Box::new(url_map)),
+///     paths_map: true, // Enable path-prefix matching
+/// };
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PromptUrlGate {
+    /// Map of URLs to config overrides.
+    /// Keys can be exact URLs or path prefixes (if paths_map is true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_url_map: Option<Box<std::collections::HashMap<String, Box<AutomationConfig>>>>,
+    /// Whether to use path-prefix matching (case-insensitive).
+    /// When true, URLs are matched by prefix, not just exact match.
+    #[serde(default)]
+    pub paths_map: bool,
+}
+
+impl PromptUrlGate {
+    /// Create a new empty prompt URL gate.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create with a URL map.
+    pub fn with_map(map: std::collections::HashMap<String, Box<AutomationConfig>>) -> Self {
+        Self {
+            prompt_url_map: Some(Box::new(map)),
+            paths_map: false,
+        }
+    }
+
+    /// Enable path-prefix matching.
+    pub fn with_paths_map(mut self) -> Self {
+        self.paths_map = true;
+        self
+    }
+
+    /// Add a URL override.
+    pub fn add_override(&mut self, url: impl Into<String>, config: AutomationConfig) {
+        let map = self.prompt_url_map.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        map.insert(url.into(), Box::new(config));
+    }
+
+    /// Match a URL and return the config override if any.
+    ///
+    /// Returns:
+    /// - `None` => blocked (map exists, URL not matched)
+    /// - `Some(None)` => allowed, no override
+    /// - `Some(Some(cfg))` => allowed, use override config
+    pub fn match_url<'a>(&'a self, url: &str) -> Option<Option<&'a AutomationConfig>> {
+        let map = match self.prompt_url_map.as_deref() {
+            Some(m) => m,
+            None => return Some(None), // No map = allow all, no override
+        };
+
+        let url_lower = url.to_lowercase();
+
+        // Exact match first
+        if let Some(cfg) = map.get(&url_lower) {
+            return Some(Some(cfg));
+        }
+
+        // Also try original case
+        if let Some(cfg) = map.get(url) {
+            return Some(Some(cfg));
+        }
+
+        // Path-prefix match
+        if self.paths_map {
+            for (pattern, cfg) in map.iter() {
+                let pattern_lower = pattern.to_lowercase();
+                if url_lower.starts_with(&pattern_lower) {
+                    return Some(Some(cfg));
+                }
+            }
+        }
+
+        // Map exists but no match = blocked
+        None
+    }
+
+    /// Check if a URL is allowed (matches or no map exists).
+    pub fn is_allowed(&self, url: &str) -> bool {
+        self.match_url(url).is_some()
+    }
+
+    /// Get the override config for a URL, if any.
+    pub fn get_override(&self, url: &str) -> Option<&AutomationConfig> {
+        self.match_url(url).flatten()
+    }
+}
 
 /// Token usage tracking for automation operations.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -283,5 +392,52 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.steps_executed, 5);
         assert!(result.extracted.is_some());
+    }
+
+    #[test]
+    fn test_prompt_url_gate_empty() {
+        let gate = PromptUrlGate::new();
+        // Empty gate allows all URLs with no override
+        assert!(gate.is_allowed("https://example.com"));
+        assert!(gate.get_override("https://example.com").is_none());
+    }
+
+    #[test]
+    fn test_prompt_url_gate_exact_match() {
+        let mut gate = PromptUrlGate::new();
+        gate.add_override("https://example.com/login", AutomationConfig::new("Login handling"));
+
+        // Exact match returns override
+        assert!(gate.is_allowed("https://example.com/login"));
+        let override_cfg = gate.get_override("https://example.com/login");
+        assert!(override_cfg.is_some());
+        assert_eq!(override_cfg.unwrap().goal, "Login handling");
+
+        // Non-matching URL is blocked (map exists but no match)
+        assert!(!gate.is_allowed("https://example.com/other"));
+    }
+
+    #[test]
+    fn test_prompt_url_gate_path_prefix() {
+        let mut gate = PromptUrlGate::new().with_paths_map();
+        gate.add_override("https://example.com/admin", AutomationConfig::new("Admin handling"));
+
+        // Path prefix match
+        assert!(gate.is_allowed("https://example.com/admin/users"));
+        assert!(gate.is_allowed("https://example.com/admin"));
+
+        // Non-matching path is blocked
+        assert!(!gate.is_allowed("https://example.com/public"));
+    }
+
+    #[test]
+    fn test_prompt_url_gate_case_insensitive() {
+        let mut gate = PromptUrlGate::new().with_paths_map();
+        gate.add_override("https://example.com/Admin", AutomationConfig::new("Admin"));
+
+        // Case-insensitive matching
+        assert!(gate.is_allowed("https://example.com/admin"));
+        assert!(gate.is_allowed("https://example.com/ADMIN"));
+        assert!(gate.is_allowed("https://example.com/Admin/Users"));
     }
 }

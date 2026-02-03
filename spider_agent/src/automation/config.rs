@@ -87,7 +87,7 @@ pub enum CostTier {
 }
 
 /// Policy for selecting models based on cost/quality tradeoffs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ModelPolicy {
     /// Small/cheap model identifier.
@@ -180,7 +180,7 @@ pub enum CleaningIntent {
 }
 
 /// Capture profile for screenshots and HTML.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct CaptureProfile {
     /// Capture full page screenshot.
@@ -262,7 +262,7 @@ impl ClipViewport {
 }
 
 /// Main automation configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AutomationConfig {
     /// The goal to achieve.
@@ -293,6 +293,15 @@ pub struct AutomationConfig {
     pub retry_policy: RetryPolicy,
     /// Model policy.
     pub model_policy: ModelPolicy,
+    /// Optional system prompt for automation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// Optional extra system instructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt_extra: Option<String>,
+    /// Optional extra user message instructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_message_extra: Option<String>,
 }
 
 impl Default for AutomationConfig {
@@ -312,6 +321,9 @@ impl Default for AutomationConfig {
             capture_profile: CaptureProfile::default(),
             retry_policy: RetryPolicy::default(),
             model_policy: ModelPolicy::default(),
+            system_prompt: None,
+            system_prompt_extra: None,
+            user_message_extra: None,
         }
     }
 }
@@ -395,6 +407,24 @@ impl AutomationConfig {
     /// Set model policy.
     pub fn with_model_policy(mut self, policy: ModelPolicy) -> Self {
         self.model_policy = policy;
+        self
+    }
+
+    /// Set system prompt.
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set extra system instructions.
+    pub fn with_system_prompt_extra(mut self, extra: impl Into<String>) -> Self {
+        self.system_prompt_extra = Some(extra.into());
+        self
+    }
+
+    /// Set extra user message instructions.
+    pub fn with_user_message_extra(mut self, extra: impl Into<String>) -> Self {
+        self.user_message_extra = Some(extra.into());
         self
     }
 

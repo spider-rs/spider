@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+1. chore(spider): update spider_agent dependency to 0.5
+
+## spider_agent v0.5.0
+
+1. feat(actions): add complete WebAutomation parity with 17 new ActionType variants
+   - Click variants: ClickAll, ClickPoint, ClickHold, ClickHoldPoint, ClickDrag, ClickDragPoint, ClickAllClickable
+   - Wait variants: WaitFor, WaitForWithTimeout, WaitForNavigation, WaitForDom, WaitForAndClick
+   - Scroll variants: ScrollX, ScrollY, InfiniteScroll
+   - Input: Fill (clear + type)
+   - Chain control: ValidateChain
+1. feat(automation): add PromptUrlGate for URL-based prompt/config overrides
+   - Exact URL matching
+   - Path-prefix matching (case-insensitive)
+   - Per-URL config overrides
+1. feat(browser): add comprehensive browser methods for all new action types
+   - click_all, click_point, click_hold, click_hold_point
+   - click_drag, click_drag_point, click_all_clickable
+   - wait_for_timeout, wait_for_navigation, wait_for_dom, wait_and_click
+   - scroll_x, scroll_y, infinite_scroll
+   - fill, find_elements, get_element_bounds
+1. feat(config): add system_prompt, system_prompt_extra, user_message_extra to AutomationConfig
+
 ## v2.43.20
 
 1. fix(spider): fix doctest and update chromey for adblock compatibility

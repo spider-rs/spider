@@ -103,6 +103,220 @@ impl BrowserContext {
         Ok(())
     }
 
+    /// Click all elements matching a selector.
+    /// Returns the number of elements clicked.
+    pub async fn click_all(&self, selector: &str) -> Result<usize, CdpError> {
+        let elements = self.page.find_elements(selector).await?;
+        let count = elements.len();
+        for element in elements {
+            let _ = element.click().await;
+        }
+        Ok(count)
+    }
+
+    /// Click at specific x,y coordinates.
+    pub async fn click_point(&self, x: f64, y: f64) -> Result<(), CdpError> {
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+        };
+
+        // Mouse down
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(x)
+                .y(y)
+                .r#type(DispatchMouseEventType::MousePressed)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        // Mouse up
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(x)
+                .y(y)
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        Ok(())
+    }
+
+    /// Click and hold on an element.
+    pub async fn click_hold(&self, selector: &str, hold_ms: u64) -> Result<(), CdpError> {
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+        };
+
+        let element = self.page.find_element(selector).await?;
+        let point = element.clickable_point().await?;
+
+        // Mouse down
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(point.x)
+                .y(point.y)
+                .r#type(DispatchMouseEventType::MousePressed)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        // Hold
+        tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
+
+        // Mouse up
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(point.x)
+                .y(point.y)
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        Ok(())
+    }
+
+    /// Click and hold at a specific point.
+    pub async fn click_hold_point(&self, x: f64, y: f64, hold_ms: u64) -> Result<(), CdpError> {
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+        };
+
+        // Mouse down
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(x)
+                .y(y)
+                .r#type(DispatchMouseEventType::MousePressed)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        // Hold
+        tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
+
+        // Mouse up
+        self.page.execute(
+            DispatchMouseEventParams::builder()
+                .x(x)
+                .y(y)
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap()
+        ).await?;
+
+        Ok(())
+    }
+
+    /// Click and drag from one element to another.
+    pub async fn click_drag(&self, from_selector: &str, to_selector: &str, modifier: Option<i64>) -> Result<(), CdpError> {
+        let from_elem = self.page.find_element(from_selector).await?;
+        let to_elem = self.page.find_element(to_selector).await?;
+
+        let from_point = from_elem.clickable_point().await?;
+        let to_point = to_elem.clickable_point().await?;
+
+        self.click_drag_point((from_point.x, from_point.y), (to_point.x, to_point.y), modifier).await
+    }
+
+    /// Click and drag from one point to another.
+    pub async fn click_drag_point(&self, from: (f64, f64), to: (f64, f64), modifier: Option<i64>) -> Result<(), CdpError> {
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+        };
+
+        let modifiers = modifier.map(|m| m as i64);
+
+        // Mouse down at start
+        let mut down_params = DispatchMouseEventParams::builder()
+            .x(from.0)
+            .y(from.1)
+            .r#type(DispatchMouseEventType::MousePressed)
+            .button(MouseButton::Left)
+            .click_count(1);
+
+        if let Some(m) = modifiers {
+            down_params = down_params.modifiers(m);
+        }
+
+        self.page.execute(down_params.build().unwrap()).await?;
+
+        // Move to destination
+        let mut move_params = DispatchMouseEventParams::builder()
+            .x(to.0)
+            .y(to.1)
+            .r#type(DispatchMouseEventType::MouseMoved)
+            .button(MouseButton::Left);
+
+        if let Some(m) = modifiers {
+            move_params = move_params.modifiers(m);
+        }
+
+        self.page.execute(move_params.build().unwrap()).await?;
+
+        // Mouse up at destination
+        let mut up_params = DispatchMouseEventParams::builder()
+            .x(to.0)
+            .y(to.1)
+            .r#type(DispatchMouseEventType::MouseReleased)
+            .button(MouseButton::Left)
+            .click_count(1);
+
+        if let Some(m) = modifiers {
+            up_params = up_params.modifiers(m);
+        }
+
+        self.page.execute(up_params.build().unwrap()).await?;
+
+        Ok(())
+    }
+
+    /// Click all clickable elements on the page.
+    pub async fn click_all_clickable(&self) -> Result<usize, CdpError> {
+        // Find common clickable elements
+        let script = r#"
+            Array.from(document.querySelectorAll('a, button, [onclick], [role="button"], input[type="submit"], input[type="button"]'))
+                .filter(el => {
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+                })
+                .length
+        "#;
+
+        let count: usize = self.page.evaluate(script).await?.into_value()
+            .map_err(|e| CdpError::ChromeMessage(format!("Failed to count clickable elements: {}", e)))?;
+
+        // Click each one (with error handling)
+        let click_script = r#"
+            const elements = Array.from(document.querySelectorAll('a, button, [onclick], [role="button"], input[type="submit"], input[type="button"]'))
+                .filter(el => {
+                    const style = window.getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+                });
+            elements.forEach(el => { try { el.click(); } catch(e) {} });
+            elements.length
+        "#;
+
+        let clicked: usize = self.page.evaluate(click_script).await?.into_value()
+            .unwrap_or(0);
+
+        Ok(clicked.min(count))
+    }
+
     /// Type text into an element.
     pub async fn type_text(&self, selector: &str, text: &str) -> Result<(), CdpError> {
         let element = self.page.find_element(selector).await?;
@@ -117,6 +331,65 @@ impl BrowserContext {
         Ok(())
     }
 
+    /// Wait for a selector with timeout.
+    pub async fn wait_for_timeout(&self, selector: &str, timeout_ms: u64) -> Result<(), CdpError> {
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        tokio::time::timeout(timeout, self.page.find_element(selector))
+            .await
+            .map_err(|_| CdpError::Timeout)?
+            .map(|_| ())
+    }
+
+    /// Wait for navigation to complete.
+    pub async fn wait_for_navigation(&self) -> Result<(), CdpError> {
+        // Wait for load event
+        self.page.evaluate("new Promise(r => { if (document.readyState === 'complete') r(); else window.addEventListener('load', r); })").await?;
+        Ok(())
+    }
+
+    /// Wait for DOM to stabilize (no mutations for a period).
+    pub async fn wait_for_dom(&self, selector: Option<&str>, timeout_ms: u32) -> Result<(), CdpError> {
+        let sel = selector.unwrap_or("body");
+        let script = format!(r#"
+            new Promise((resolve, reject) => {{
+                const timeout = {};
+                const target = document.querySelector('{}');
+                if (!target) {{ resolve(); return; }}
+
+                let timer;
+                const observer = new MutationObserver(() => {{
+                    clearTimeout(timer);
+                    timer = setTimeout(() => {{
+                        observer.disconnect();
+                        resolve();
+                    }}, 100);
+                }});
+
+                observer.observe(target, {{ childList: true, subtree: true, attributes: true }});
+
+                timer = setTimeout(() => {{
+                    observer.disconnect();
+                    resolve();
+                }}, 100);
+
+                setTimeout(() => {{
+                    observer.disconnect();
+                    resolve();
+                }}, timeout);
+            }})
+        "#, timeout_ms, sel);
+
+        self.page.evaluate(script).await?;
+        Ok(())
+    }
+
+    /// Wait for element then click it.
+    pub async fn wait_and_click(&self, selector: &str) -> Result<(), CdpError> {
+        let element = self.page.find_element(selector).await?;
+        element.click().await?;
+        Ok(())
+    }
+
     /// Evaluate JavaScript and return the result.
     pub async fn evaluate<T: serde::de::DeserializeOwned>(&self, script: &str) -> Result<T, CdpError> {
         self.page.evaluate(script).await?.into_value()
@@ -127,6 +400,113 @@ impl BrowserContext {
     pub async fn execute(&self, script: &str) -> Result<(), CdpError> {
         self.page.evaluate(script).await?;
         Ok(())
+    }
+
+    /// Scroll horizontally by pixels.
+    pub async fn scroll_x(&self, pixels: i32) -> Result<(), CdpError> {
+        let script = format!("window.scrollBy({}, 0)", pixels);
+        self.page.evaluate(script).await?;
+        Ok(())
+    }
+
+    /// Scroll vertically by pixels.
+    pub async fn scroll_y(&self, pixels: i32) -> Result<(), CdpError> {
+        let script = format!("window.scrollBy(0, {})", pixels);
+        self.page.evaluate(script).await?;
+        Ok(())
+    }
+
+    /// Infinite scroll - scroll to the bottom of the page repeatedly.
+    /// Returns when no new content is loaded after scrolling.
+    pub async fn infinite_scroll(&self, max_scrolls: u32) -> Result<usize, CdpError> {
+        let script = r#"
+            (async function() {
+                const maxScrolls = arguments[0];
+                let lastHeight = document.body.scrollHeight;
+                let scrollCount = 0;
+
+                while (scrollCount < maxScrolls) {
+                    window.scrollTo(0, document.body.scrollHeight);
+                    await new Promise(r => setTimeout(r, 1000));
+                    const newHeight = document.body.scrollHeight;
+                    if (newHeight === lastHeight) break;
+                    lastHeight = newHeight;
+                    scrollCount++;
+                }
+                return scrollCount;
+            })
+        "#;
+
+        let count: usize = self.page
+            .evaluate(format!("({script})({max_scrolls})"))
+            .await?
+            .into_value()
+            .unwrap_or(0);
+
+        Ok(count)
+    }
+
+    /// Fill an input element with a value (clears existing content first).
+    pub async fn fill(&self, selector: &str, value: &str) -> Result<(), CdpError> {
+        let element = self.page.find_element(selector).await?;
+
+        // Clear existing value via triple-click + delete
+        element.click().await?;
+        element.click().await?;
+        element.click().await?;
+
+        // Clear with keyboard
+        use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
+        self.page.execute(
+            DispatchKeyEventParams::builder()
+                .r#type(DispatchKeyEventType::KeyDown)
+                .key("a")
+                .modifiers(2) // Ctrl/Cmd
+                .build()
+                .unwrap()
+        ).await?;
+        self.page.execute(
+            DispatchKeyEventParams::builder()
+                .r#type(DispatchKeyEventType::KeyUp)
+                .key("a")
+                .build()
+                .unwrap()
+        ).await?;
+
+        // Type new value
+        element.type_str(value).await?;
+        Ok(())
+    }
+
+    /// Find all elements matching a selector.
+    pub async fn find_elements(&self, selector: &str) -> Result<Vec<chromiumoxide::element::Element>, CdpError> {
+        self.page.find_elements(selector).await
+    }
+
+    /// Get element bounding box via JavaScript.
+    pub async fn get_element_bounds(&self, selector: &str) -> Result<Option<(f64, f64, f64, f64)>, CdpError> {
+        let script = format!(
+            r#"
+            (function() {{
+                const el = document.querySelector('{}');
+                if (!el) return null;
+                const rect = el.getBoundingClientRect();
+                return [rect.x, rect.y, rect.width, rect.height];
+            }})()
+            "#,
+            selector.replace('\'', "\\'")
+        );
+
+        let result: Option<Vec<f64>> = self.page.evaluate(script).await?.into_value()
+            .map_err(|e| CdpError::ChromeMessage(format!("Failed to get bounds: {}", e)))?;
+
+        Ok(result.and_then(|v| {
+            if v.len() >= 4 {
+                Some((v[0], v[1], v[2], v[3]))
+            } else {
+                None
+            }
+        }))
     }
 
     /// Close the current page.
