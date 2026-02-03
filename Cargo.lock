@@ -5228,6 +5228,7 @@ dependencies = [
  "fastrand",
  "log",
  "lol_html",
+ "parking_lot",
  "reqwest",
  "serde",
  "serde_json",
