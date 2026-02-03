@@ -45,6 +45,12 @@ The fastest web crawler written in Rust. Primitives for data curation workloads 
 - [Firewall](https://github.com/spider-rs/spider_firewall)
 - Blacklisting, whitelisting, and depth budgeting
 
+### AI Agent
+- [spider_agent](./spider_agent/) - Concurrent-safe multimodal agent for web automation and research
+- Multiple LLM providers (OpenAI, OpenAI-compatible APIs)
+- Multiple search providers (Serper, Brave, Bing, Tavily)
+- HTML extraction and research synthesis
+
 ## Quick Start
 
 The fastest way to get started is with [Spider Cloud](https://spider.cloud) - no infrastructure to manage. Pay-per-use at $1/GB data transfer, designed to keep crawling costs low.
@@ -140,6 +146,7 @@ async fn main() {
 |--------|----------|
 | [Spider Cloud](https://spider.cloud) | Production workloads, no setup required |
 | [spider](./spider/README.md) | Rust applications |
+| [spider_agent](./spider_agent/README.md) | AI-powered web automation and research |
 | [spider_cli](./spider_cli/README.md) | Command-line usage |
 | [spider-nodejs](https://github.com/spider-rs/spider-nodejs) | Node.js projects |
 | [spider-py](https://github.com/spider-rs/spider-py) | Python projects |
