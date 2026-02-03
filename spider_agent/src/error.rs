@@ -24,6 +24,9 @@ pub enum AgentError {
     /// Browser automation error.
     #[cfg(feature = "chrome")]
     Browser(String),
+    /// IO error (file operations).
+    #[cfg(feature = "fs")]
+    Io(std::io::Error),
     /// Tool execution error.
     Tool(String),
     /// Rate limit exceeded.
@@ -45,6 +48,8 @@ impl fmt::Display for AgentError {
             Self::Llm(msg) => write!(f, "LLM error: {}", msg),
             #[cfg(feature = "chrome")]
             Self::Browser(msg) => write!(f, "Browser error: {}", msg),
+            #[cfg(feature = "fs")]
+            Self::Io(e) => write!(f, "IO error: {}", e),
             Self::Tool(msg) => write!(f, "Tool error: {}", msg),
             Self::RateLimited => write!(f, "Rate limit exceeded"),
             Self::Timeout => write!(f, "Request timed out"),
@@ -58,6 +63,8 @@ impl std::error::Error for AgentError {
             Self::Http(e) => Some(e),
             Self::Json(e) => Some(e),
             Self::Search(e) => Some(e),
+            #[cfg(feature = "fs")]
+            Self::Io(e) => Some(e),
             _ => None,
         }
     }

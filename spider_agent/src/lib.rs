@@ -89,6 +89,12 @@ mod memory;
 #[cfg(feature = "search")]
 pub mod search;
 
+#[cfg(feature = "chrome")]
+pub mod browser;
+
+#[cfg(feature = "fs")]
+pub mod temp;
+
 // Re-exports
 pub use agent::{Agent, AgentBuilder, FetchResult, PageExtraction};
 pub use config::{AgentConfig, HtmlCleaningMode, ResearchOptions, RetryConfig, SearchOptions, TimeRange, UsageSnapshot, UsageStats};
@@ -116,3 +122,9 @@ pub use search::BingProvider;
 
 #[cfg(feature = "search_tavily")]
 pub use search::TavilyProvider;
+
+#[cfg(feature = "chrome")]
+pub use browser::BrowserContext;
+
+#[cfg(feature = "fs")]
+pub use temp::{TempStorage, TempFile};

@@ -146,6 +146,52 @@ pub extern crate strum;
 pub extern crate lazy_static;
 #[cfg(feature = "firewall")]
 pub extern crate spider_firewall;
+#[cfg(feature = "agent")]
+pub extern crate spider_agent;
+
+/// Re-export agent types when agent feature is enabled.
+#[cfg(feature = "agent")]
+pub mod agent {
+    //! Agent module re-exports from spider_agent crate.
+    //!
+    //! This provides convenient access to the multimodal agent functionality.
+    pub use spider_agent::{
+        Agent, AgentBuilder, AgentConfig, AgentError, AgentMemory, AgentResult,
+        FetchResult, HtmlCleaningMode, Message, RetryConfig, UsageSnapshot, UsageStats,
+    };
+
+    #[cfg(feature = "agent_openai")]
+    pub use spider_agent::OpenAIProvider;
+
+    #[cfg(feature = "agent_chrome")]
+    pub use spider_agent::BrowserContext;
+
+    #[cfg(feature = "agent_fs")]
+    pub use spider_agent::{TempStorage, TempFile};
+
+    #[cfg(any(
+        feature = "agent_search_serper",
+        feature = "agent_search_brave",
+        feature = "agent_search_bing",
+        feature = "agent_search_tavily"
+    ))]
+    pub use spider_agent::{
+        ResearchOptions, ResearchResult, SearchOptions, SearchProvider,
+        SearchResult, SearchResults, TimeRange,
+    };
+
+    #[cfg(feature = "agent_search_serper")]
+    pub use spider_agent::SerperProvider;
+
+    #[cfg(feature = "agent_search_brave")]
+    pub use spider_agent::BraveProvider;
+
+    #[cfg(feature = "agent_search_bing")]
+    pub use spider_agent::BingProvider;
+
+    #[cfg(feature = "agent_search_tavily")]
+    pub use spider_agent::TavilyProvider;
+}
 
 /// Client interface.
 pub mod client;

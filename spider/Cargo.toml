@@ -116,6 +116,12 @@ version = "2"
 default-features = false
 features = ["serde", "headers", "dynamic-versions"]
 
+[dependencies.spider_agent]
+path = "../spider_agent"
+version = "0.1"
+optional = true
+default-features = false
+
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = { version = "0.4", optional = true }
 libc = "0.2"
@@ -292,6 +298,17 @@ search_serper = ["search"]
 search_brave = ["search"]
 search_bing = ["search"]
 search_tavily = ["search"]
+
+# Agent feature - re-exports spider_agent configs and types
+agent = ["dep:spider_agent"]
+agent_openai = ["agent", "spider_agent/openai"]
+agent_chrome = ["agent", "spider_agent/chrome"]
+agent_fs = ["agent", "spider_agent/fs"]
+agent_search_serper = ["agent", "spider_agent/search_serper"]
+agent_search_brave = ["agent", "spider_agent/search_brave"]
+agent_search_bing = ["agent", "spider_agent/search_bing"]
+agent_search_tavily = ["agent", "spider_agent/search_tavily"]
+agent_full = ["agent", "spider_agent/full"]
 
 # Allows full concurrency.
 cowboy = []

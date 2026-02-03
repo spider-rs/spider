@@ -14,6 +14,12 @@ use tokio::sync::Semaphore;
 #[cfg(feature = "search")]
 use crate::search::{SearchProvider, SearchResults};
 
+#[cfg(feature = "chrome")]
+use crate::browser::BrowserContext;
+
+#[cfg(feature = "fs")]
+use crate::temp::TempStorage;
+
 /// Multimodal agent for web automation and research.
 ///
 /// Designed to be wrapped in `Arc` for concurrent access.
@@ -44,6 +50,14 @@ pub struct Agent {
     /// Search provider (if configured).
     #[cfg(feature = "search")]
     search_provider: Option<Box<dyn SearchProvider>>,
+
+    /// Browser context for Chrome automation.
+    #[cfg(feature = "chrome")]
+    browser: Option<BrowserContext>,
+
+    /// Temporary storage for large operations.
+    #[cfg(feature = "fs")]
+    temp_storage: Option<TempStorage>,
 
     /// Session memory (lock-free via DashMap).
     memory: AgentMemory,
@@ -373,6 +387,128 @@ impl Agent {
         self.usage.reset();
     }
 
+    // ==================== Browser Methods ====================
+
+    /// Get the browser context if configured.
+    #[cfg(feature = "chrome")]
+    pub fn browser(&self) -> Option<&BrowserContext> {
+        self.browser.as_ref()
+    }
+
+    /// Navigate to a URL using the browser.
+    #[cfg(feature = "chrome")]
+    pub async fn navigate(&self, url: &str) -> AgentResult<()> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.navigate(url).await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Get HTML from the current browser page.
+    #[cfg(feature = "chrome")]
+    pub async fn browser_html(&self) -> AgentResult<String> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.html().await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Take a screenshot of the current browser page.
+    #[cfg(feature = "chrome")]
+    pub async fn screenshot(&self) -> AgentResult<Vec<u8>> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.screenshot().await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Open a new page/tab in the browser.
+    #[cfg(feature = "chrome")]
+    pub async fn new_page(&self) -> AgentResult<crate::browser::BrowserContext> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.clone_page().await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Open a new page and navigate to URL.
+    #[cfg(feature = "chrome")]
+    pub async fn new_page_with_url(&self, url: &str) -> AgentResult<std::sync::Arc<crate::browser::Page>> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.new_page_with_url(url).await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Click an element in the browser.
+    #[cfg(feature = "chrome")]
+    pub async fn click(&self, selector: &str) -> AgentResult<()> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.click(selector).await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Type text into an element in the browser.
+    #[cfg(feature = "chrome")]
+    pub async fn type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
+        let browser = self.browser.as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+        browser.type_text(selector, text).await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Extract from the current browser page using the LLM.
+    #[cfg(feature = "chrome")]
+    pub async fn extract_page(&self, prompt: &str) -> AgentResult<serde_json::Value> {
+        let html = self.browser_html().await?;
+        self.extract(&html, prompt).await
+    }
+
+    // ==================== Temp Storage Methods ====================
+
+    /// Get the temp storage if configured.
+    #[cfg(feature = "fs")]
+    pub fn temp_storage(&self) -> Option<&TempStorage> {
+        self.temp_storage.as_ref()
+    }
+
+    /// Store data in temp storage.
+    #[cfg(feature = "fs")]
+    pub fn store_temp(&self, name: &str, data: &[u8]) -> AgentResult<std::path::PathBuf> {
+        let storage = self.temp_storage.as_ref()
+            .ok_or(AgentError::NotConfigured("temp storage"))?;
+        storage.store_bytes(name, data)
+            .map_err(|e| AgentError::Io(e))
+    }
+
+    /// Store JSON in temp storage.
+    #[cfg(feature = "fs")]
+    pub fn store_temp_json(&self, name: &str, data: &serde_json::Value) -> AgentResult<std::path::PathBuf> {
+        let storage = self.temp_storage.as_ref()
+            .ok_or(AgentError::NotConfigured("temp storage"))?;
+        storage.store_json(name, data)
+            .map_err(|e| AgentError::Io(e))
+    }
+
+    /// Read data from temp storage.
+    #[cfg(feature = "fs")]
+    pub fn read_temp(&self, name: &str) -> AgentResult<Vec<u8>> {
+        let storage = self.temp_storage.as_ref()
+            .ok_or(AgentError::NotConfigured("temp storage"))?;
+        storage.read_bytes(name)
+            .map_err(|e| AgentError::Io(e))
+    }
+
+    /// Read JSON from temp storage.
+    #[cfg(feature = "fs")]
+    pub fn read_temp_json(&self, name: &str) -> AgentResult<serde_json::Value> {
+        let storage = self.temp_storage.as_ref()
+            .ok_or(AgentError::NotConfigured("temp storage"))?;
+        storage.read_json(name)
+            .map_err(|e| AgentError::Io(e))
+    }
+
     // ==================== Helper Methods ====================
 
     /// Clean HTML by removing scripts, styles, etc.
@@ -529,6 +665,10 @@ pub struct AgentBuilder {
     llm: Option<Box<dyn LLMProvider>>,
     #[cfg(feature = "search")]
     search_provider: Option<Box<dyn SearchProvider>>,
+    #[cfg(feature = "chrome")]
+    browser: Option<BrowserContext>,
+    #[cfg(feature = "fs")]
+    enable_temp_storage: bool,
 }
 
 impl AgentBuilder {
@@ -539,6 +679,10 @@ impl AgentBuilder {
             llm: None,
             #[cfg(feature = "search")]
             search_provider: None,
+            #[cfg(feature = "chrome")]
+            browser: None,
+            #[cfg(feature = "fs")]
+            enable_temp_storage: false,
         }
     }
 
@@ -609,6 +753,31 @@ impl AgentBuilder {
         self
     }
 
+    /// Configure with a browser context for Chrome automation.
+    #[cfg(feature = "chrome")]
+    pub fn with_browser(mut self, browser: BrowserContext) -> Self {
+        self.browser = Some(browser);
+        self
+    }
+
+    /// Configure with a browser from existing browser and page.
+    #[cfg(feature = "chrome")]
+    pub fn with_browser_page(
+        mut self,
+        browser: std::sync::Arc<crate::browser::Browser>,
+        page: std::sync::Arc<crate::browser::Page>,
+    ) -> Self {
+        self.browser = Some(BrowserContext::new(browser, page));
+        self
+    }
+
+    /// Enable temporary filesystem storage for large operations.
+    #[cfg(feature = "fs")]
+    pub fn with_temp_storage(mut self) -> Self {
+        self.enable_temp_storage = true;
+        self
+    }
+
     /// Build the agent.
     pub fn build(self) -> AgentResult<Agent> {
         let client = reqwest::Client::builder()
@@ -618,11 +787,22 @@ impl AgentBuilder {
 
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrent_llm_calls));
 
+        #[cfg(feature = "fs")]
+        let temp_storage = if self.enable_temp_storage {
+            Some(TempStorage::new().map_err(|e| AgentError::Io(e))?)
+        } else {
+            None
+        };
+
         Ok(Agent {
             llm: self.llm,
             client,
             #[cfg(feature = "search")]
             search_provider: self.search_provider,
+            #[cfg(feature = "chrome")]
+            browser: self.browser,
+            #[cfg(feature = "fs")]
+            temp_storage,
             memory: AgentMemory::new(),
             llm_semaphore: semaphore,
             config: self.config,
