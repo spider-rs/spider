@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## v2.43.20
+
+1. fix(spider): fix doctest and update chromey for adblock compatibility
+1. fix(search): use reqwest::Client directly for cache feature compatibility
+1. chore(spider): update spider_agent dependency to 0.4
+
+## spider_agent v0.4.0
+
+1. feat(cache): add SmartCache with size-aware LRU eviction and TTL expiration
+1. feat(executor): add ChainExecutor for parallel step execution with response caching
+1. feat(executor): add BatchExecutor for efficient batch processing
+1. feat(executor): add PrefetchManager for predictive page loading
+1. feat(router): add ModelRouter for smart model selection based on task complexity
+1. feat(llm): add MessageContent helper methods (as_text, full_text, is_text, has_images)
+1. fix(config): default ModelPolicy now allows High tier routing
+
+## spider_agent v0.3.0
+
+1. feat(automation): add comprehensive automation module with action chains
+1. feat(automation): add self-healing selector cache with LRU eviction
+1. feat(automation): add content analysis for smart screenshot decisions
+1. feat(automation): add configurable model policies and retry strategies
+
+## spider_agent v0.2.0
+
+1. feat(memory): enhance memory with URL, action, and extraction history
+1. feat(webdriver): add webdriver support via thirtyfour
+1. feat(browser): add chrome browser and temp storage support
+
 ## v2
 
 1. feat(transform): HTML transformation crate with spider_transformations
