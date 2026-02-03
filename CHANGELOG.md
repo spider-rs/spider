@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.43.21
+
 1. chore(spider): update spider_agent dependency to 0.5
 
 ## spider_agent v0.5.0
