@@ -38,6 +38,9 @@ chromey = { version = "2", optional = true, default-features = false, features =
     "stream",
 ] }
 
+# WebDriver (optional) - uses thirtyfour
+thirtyfour = { version = "0.36", optional = true }
+
 # Temp filesystem for large operations
 tempfile = { version = "3", optional = true }
 
@@ -55,6 +58,9 @@ openai = ["dep:async-openai", "dep:tiktoken-rs"]
 # Browser automation
 chrome = ["dep:chromey"]
 
+# WebDriver automation
+webdriver = ["dep:thirtyfour"]
+
 # Temp filesystem support
 fs = ["dep:tempfile"]
 
@@ -66,7 +72,7 @@ search_bing = ["search"]
 search_tavily = ["search"]
 
 # Full feature set
-full = ["openai", "chrome", "fs", "search_serper", "search_brave", "search_bing", "search_tavily"]
+full = ["openai", "chrome", "webdriver", "fs", "search_serper", "search_brave", "search_bing", "search_tavily"]
 
 [[example]]
 name = "basic_search"

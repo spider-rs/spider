@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ).await;
                     (url, Some(fetch.status), extraction.ok())
                 }
-                Err(e) => (url, None, None),
+                Err(_) => (url, None, None),
             }
         }));
     }

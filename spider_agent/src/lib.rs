@@ -92,6 +92,9 @@ pub mod search;
 #[cfg(feature = "chrome")]
 pub mod browser;
 
+#[cfg(feature = "webdriver")]
+pub mod webdriver;
+
 #[cfg(feature = "fs")]
 pub mod temp;
 
@@ -125,6 +128,9 @@ pub use search::TavilyProvider;
 
 #[cfg(feature = "chrome")]
 pub use browser::BrowserContext;
+
+#[cfg(feature = "webdriver")]
+pub use webdriver::WebDriverContext;
 
 #[cfg(feature = "fs")]
 pub use temp::{TempStorage, TempFile};

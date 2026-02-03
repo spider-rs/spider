@@ -17,6 +17,9 @@ use crate::search::{SearchProvider, SearchResults};
 #[cfg(feature = "chrome")]
 use crate::browser::BrowserContext;
 
+#[cfg(feature = "webdriver")]
+use crate::webdriver::WebDriverContext;
+
 #[cfg(feature = "fs")]
 use crate::temp::TempStorage;
 
@@ -54,6 +57,10 @@ pub struct Agent {
     /// Browser context for Chrome automation.
     #[cfg(feature = "chrome")]
     browser: Option<BrowserContext>,
+
+    /// WebDriver context for browser automation.
+    #[cfg(feature = "webdriver")]
+    webdriver: Option<WebDriverContext>,
 
     /// Temporary storage for large operations.
     #[cfg(feature = "fs")]
@@ -465,6 +472,75 @@ impl Agent {
         self.extract(&html, prompt).await
     }
 
+    // ==================== WebDriver Methods ====================
+
+    /// Get the WebDriver context if configured.
+    #[cfg(feature = "webdriver")]
+    pub fn webdriver(&self) -> Option<&WebDriverContext> {
+        self.webdriver.as_ref()
+    }
+
+    /// Navigate using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_navigate(&self, url: &str) -> AgentResult<()> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.navigate(url).await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
+    /// Get HTML from WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_html(&self) -> AgentResult<String> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.html().await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
+    /// Take a screenshot using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_screenshot(&self) -> AgentResult<Vec<u8>> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.screenshot().await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
+    /// Click an element using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_click(&self, selector: &str) -> AgentResult<()> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.click(selector).await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
+    /// Type text into an element using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.type_text(selector, text).await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
+    /// Extract from the current WebDriver page using the LLM.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_extract_page(&self, prompt: &str) -> AgentResult<serde_json::Value> {
+        let html = self.webdriver_html().await?;
+        self.extract(&html, prompt).await
+    }
+
+    /// Open a new tab using WebDriver.
+    #[cfg(feature = "webdriver")]
+    pub async fn webdriver_new_tab(&self) -> AgentResult<crate::webdriver::WindowHandle> {
+        let driver = self.webdriver.as_ref()
+            .ok_or(AgentError::NotConfigured("webdriver"))?;
+        driver.new_tab().await
+            .map_err(|e| AgentError::WebDriver(e.to_string()))
+    }
+
     // ==================== Temp Storage Methods ====================
 
     /// Get the temp storage if configured.
@@ -667,6 +743,8 @@ pub struct AgentBuilder {
     search_provider: Option<Box<dyn SearchProvider>>,
     #[cfg(feature = "chrome")]
     browser: Option<BrowserContext>,
+    #[cfg(feature = "webdriver")]
+    webdriver: Option<WebDriverContext>,
     #[cfg(feature = "fs")]
     enable_temp_storage: bool,
 }
@@ -681,6 +759,8 @@ impl AgentBuilder {
             search_provider: None,
             #[cfg(feature = "chrome")]
             browser: None,
+            #[cfg(feature = "webdriver")]
+            webdriver: None,
             #[cfg(feature = "fs")]
             enable_temp_storage: false,
         }
@@ -778,6 +858,20 @@ impl AgentBuilder {
         self
     }
 
+    /// Configure with a WebDriver context.
+    #[cfg(feature = "webdriver")]
+    pub fn with_webdriver(mut self, webdriver: WebDriverContext) -> Self {
+        self.webdriver = Some(webdriver);
+        self
+    }
+
+    /// Configure with a WebDriver from existing driver.
+    #[cfg(feature = "webdriver")]
+    pub fn with_webdriver_driver(mut self, driver: std::sync::Arc<crate::webdriver::WebDriver>) -> Self {
+        self.webdriver = Some(WebDriverContext::new(driver));
+        self
+    }
+
     /// Build the agent.
     pub fn build(self) -> AgentResult<Agent> {
         let client = reqwest::Client::builder()
@@ -801,6 +895,8 @@ impl AgentBuilder {
             search_provider: self.search_provider,
             #[cfg(feature = "chrome")]
             browser: self.browser,
+            #[cfg(feature = "webdriver")]
+            webdriver: self.webdriver,
             #[cfg(feature = "fs")]
             temp_storage,
             memory: AgentMemory::new(),

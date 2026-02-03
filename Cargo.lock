@@ -5232,6 +5232,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thirtyfour",
  "thiserror 1.0.69",
  "tiktoken-rs",
  "tokio",

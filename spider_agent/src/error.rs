@@ -24,6 +24,9 @@ pub enum AgentError {
     /// Browser automation error.
     #[cfg(feature = "chrome")]
     Browser(String),
+    /// WebDriver automation error.
+    #[cfg(feature = "webdriver")]
+    WebDriver(String),
     /// IO error (file operations).
     #[cfg(feature = "fs")]
     Io(std::io::Error),
@@ -48,6 +51,8 @@ impl fmt::Display for AgentError {
             Self::Llm(msg) => write!(f, "LLM error: {}", msg),
             #[cfg(feature = "chrome")]
             Self::Browser(msg) => write!(f, "Browser error: {}", msg),
+            #[cfg(feature = "webdriver")]
+            Self::WebDriver(msg) => write!(f, "WebDriver error: {}", msg),
             #[cfg(feature = "fs")]
             Self::Io(e) => write!(f, "IO error: {}", e),
             Self::Tool(msg) => write!(f, "Tool error: {}", msg),
