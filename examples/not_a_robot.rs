@@ -39,7 +39,7 @@ async fn main() {
     // Configure remote multimodal with OpenRouter - using Claude for better vision
     let mut mm_config = RemoteMultimodalConfigs::new(
         "https://openrouter.ai/api/v1/chat/completions",
-        "anthropic/claude-opus-4", // Best vision accuracy for image grids
+        "anthropic/claude-opus-4.5", // Best vision accuracy for image grids
     );
 
     // Set the API key

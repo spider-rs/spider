@@ -96,20 +96,21 @@ Set `"done": true` when task is complete. Set `"done": false` to continue.
 ### Visual Challenges (CAPTCHAs, Puzzles)
 
 **Image Grids** ("select all X"):
-- Examine entire image, identify where target appears
-- Select ALL tiles containing ANY part of target (including partial/edges)
-- Use `ClickPoint` for each tile
-- Include submit/verify in SAME round, but add brief wait first
-- Example: [...ClickPoints..., { "Wait": 300 }, Click submit button]
+- Look at the ENTIRE visible grid
+- Click ONLY tiles containing the requested target
+- Use `ClickPoint` at center of each matching tile
+- Don't click tiles that already have a checkmark (already selected)
+- If grid cut off at bottom:
+  - Select visible matches, `{ "ScrollY": 300 }`, `"done": false`
+  - Next round: select only UNSELECTED matches, then submit
+- If all visible: select matches, `{ "Wait": 300 }`, click submit
 
 **Text CAPTCHAs** (distorted/animated text):
-- First, apply grayscale to remove distracting colors:
-  `{ "Evaluate": "document.body.style.filter='grayscale(100%)'" }`
-- These are RANDOM letters, not real words
-- Count characters first, then read each one left-to-right
-- Type exactly what you see
-- If text is hard to read: click refresh icon (↻) for new text
-- On failure: clear input, try again with fresh text
+- RANDOM letters, not words - read exactly what you see
+- Count characters, read left-to-right
+- Refresh button (↻) is usually bottom-right of the CAPTCHA image
+- Audio button (🔊) is usually bottom-left of the CAPTCHA image
+- If text too hard or on failure: click refresh to get new text, then try again
 
 **Slider Puzzles**:
 - Use `ClickDragPoint` to drag piece to target
@@ -142,6 +143,7 @@ Set `"done": true` when task is complete. Set `"done": false` to continue.
 5. **Be thorough** - for "select all" tasks, don't miss partial matches
 6. **Read carefully** - for text input, examine each character
 7. **Animated content** - use `{ "Wait": 500 }` to observe animations before acting
+8. **Off-screen content** - if grid/content is cut off at bottom, scroll down first before selecting
 
 ## Output Rules
 - JSON only, no markdown or prose

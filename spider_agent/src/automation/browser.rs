@@ -84,20 +84,30 @@ impl RemoteMultimodalEngine {
         cap: &CaptureProfile,
     ) -> EngineResult<String> {
         // Auto-detect text CAPTCHA and apply grayscale for better readability
-        let is_text_captcha = page.evaluate(r#"
+        // Only apply if input is empty (first view) - don't grayscale after typing
+        let _ = page.evaluate(r#"
             (() => {
-                const text = document.body?.innerText?.toLowerCase() || '';
-                return text.includes('enter the text') ||
-                       text.includes('type the') ||
-                       text.includes('wiggles') ||
-                       text.includes('distorted');
+                const text = (document.body?.innerText || '').toLowerCase();
+                const input = document.querySelector('input[type="text"], input:not([type])');
+                const inputEmpty = input && !input.value;
+                const hasTextCaptcha = inputEmpty && (
+                    text.includes('enter the text') ||
+                    text.includes('enter the') ||
+                    text.includes('type the') ||
+                    text.includes('wiggles') ||
+                    text.includes('level 3') ||
+                    text.includes('below')
+                );
+                if (hasTextCaptcha) {
+                    // Grayscale + high contrast to make text clearer
+                    const filter = 'grayscale(100%) contrast(150%)';
+                    document.documentElement.style.filter = filter;
+                    document.querySelectorAll('canvas, img, svg, div').forEach(el => {
+                        el.style.filter = filter;
+                    });
+                }
             })()
-        "#).await.ok().and_then(|v| v.value().and_then(|v| v.as_bool())).unwrap_or(false);
-
-        if is_text_captcha {
-            // Apply grayscale to remove distracting colored lines
-            let _ = page.evaluate("document.body.style.filter = 'grayscale(100%)'").await;
-        }
+        "#).await;
 
         let params = ScreenshotParams::builder()
             .format(CaptureScreenshotFormat::Png)
@@ -111,9 +121,13 @@ impl RemoteMultimodalEngine {
             .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
 
         // Restore color after screenshot
-        if is_text_captcha {
-            let _ = page.evaluate("document.body.style.filter = ''").await;
-        }
+        let _ = page.evaluate(r#"
+            document.documentElement.style.filter = '';
+            document.body.style.filter = '';
+            document.querySelectorAll('canvas, img, svg, div').forEach(el => {
+                el.style.filter = '';
+            });
+        "#).await;
 
         let b64 = general_purpose::STANDARD.encode(png);
         Ok(format!("data:image/png;base64,{}", b64))
@@ -577,12 +591,9 @@ impl RemoteMultimodalEngine {
             response_format: Option<serde_json::Value>,
         }
 
-        // Build system prompt
-        let system_content = self
-            .system_prompt
-            .as_deref()
-            .unwrap_or(DEFAULT_SYSTEM_PROMPT);
-        let mut system_msg = system_content.to_string();
+        // Build system prompt - DEFAULT_SYSTEM_PROMPT is always the base
+        let mut system_msg = DEFAULT_SYSTEM_PROMPT.to_string();
+        // Add any extra system prompt content (but never replace the default)
         if let Some(extra) = &self.system_prompt_extra {
             system_msg.push_str("\n\n");
             system_msg.push_str(extra);

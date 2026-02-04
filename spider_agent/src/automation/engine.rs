@@ -208,16 +208,15 @@ impl RemoteMultimodalEngine {
     }
 
     /// Compile the system prompt with configuration.
+    /// DEFAULT_SYSTEM_PROMPT is always used as the base - cannot be replaced.
     pub fn system_prompt_compiled(&self, effective_cfg: &RemoteMultimodalConfig) -> String {
-        let mut s = self
-            .system_prompt
-            .as_deref()
-            .unwrap_or(DEFAULT_SYSTEM_PROMPT)
-            .to_string();
+        // Always start with the default system prompt from spider_agent
+        let mut s = DEFAULT_SYSTEM_PROMPT.to_string();
 
+        // Add any extra system prompt content (but never replace the default)
         if let Some(extra) = &self.system_prompt_extra {
             if !extra.trim().is_empty() {
-                s.push_str("\n\n---\nADDITIONAL SYSTEM INSTRUCTIONS:\n");
+                s.push_str("\n\n---\nADDITIONAL INSTRUCTIONS:\n");
                 s.push_str(extra.trim());
             }
         }
