@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.44.8"
+version = "2.44.9"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -119,7 +119,7 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.44.8"
+version = "2.44.9"
 optional = true
 default-features = false
 
