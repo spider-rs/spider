@@ -31,6 +31,9 @@ base64 = "0.22"
 lol_html = "2"
 aho-corasick = "1"
 
+# Model capabilities detection
+llm_models_spider = "0.1"
+
 # LLM Providers (optional)
 async-openai = { version = "0.29", optional = true }
 tiktoken-rs = { version = "0.7", optional = true }

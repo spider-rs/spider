@@ -1095,91 +1095,11 @@ impl RemoteMultimodalConfigs {
     }
 }
 
-/// Check if a model supports vision/multimodal input based on its name.
+/// Re-export from llm_models_spider for auto-updated vision model detection.
 ///
-/// This function uses pattern matching on known vision model naming conventions
-/// to determine if screenshots should be sent to the model.
-///
-/// # Arguments
-/// * `model_name` - The model identifier (e.g., "gpt-4o", "claude-3-sonnet", "qwen2-vl")
-///
-/// # Returns
-/// `true` if the model likely supports vision input, `false` otherwise.
-///
-/// # Example
-/// ```rust
-/// use spider_agent::automation::supports_vision;
-///
-/// assert!(supports_vision("gpt-4o"));
-/// assert!(supports_vision("claude-3-sonnet-20240229"));
-/// assert!(supports_vision("qwen2-vl-72b"));
-/// assert!(!supports_vision("gpt-3.5-turbo"));
-/// assert!(!supports_vision("llama-3-70b"));
-/// ```
-pub fn supports_vision(model_name: &str) -> bool {
-    let lower = model_name.to_lowercase();
-
-    // Known vision model patterns
-    const VISION_PATTERNS: &[&str] = &[
-        // OpenAI vision models
-        "gpt-4o",       // GPT-4o (all variants are vision)
-        "gpt-4-turbo",  // GPT-4 Turbo with vision
-        "gpt-4-vision", // Explicit vision model
-        "o1",           // OpenAI o1 models
-        "o3",           // OpenAI o3 models
-        "o4",           // Future OpenAI models
-        // Anthropic Claude (3+ are multimodal)
-        "claude-3",
-        "claude-4",
-        // Google Gemini
-        "gemini-1.5",
-        "gemini-2",
-        "gemini-flash",
-        "gemini-pro-vision",
-        // Alibaba Qwen VL models
-        "qwen2-vl",
-        "qwen2.5-vl",
-        "qwen-vl",
-        "qwq", // Qwen QwQ models
-        // Meta Llama vision
-        "llama-3.2-vision",
-        "llama-3.2-11b-vision",
-        "llama-3.2-90b-vision",
-        // Other vision models
-        "llava",
-        "pixtral",
-        "cogvlm",
-        "cogagent",
-        "internvl",
-        "minicpm-v",
-        "molmo",
-        "moondream",
-        "phi-3-vision",
-        "phi-3.5-vision",
-        "yi-vl",
-        "deepseek-vl",
-        // Generic vision indicators
-        "-vision",
-        "-vl-",
-        "-vl:",
-        "/vl-",
-        ":vl-",
-    ];
-
-    // Check for vision patterns
-    for pattern in VISION_PATTERNS {
-        if lower.contains(pattern) {
-            return true;
-        }
-    }
-
-    // Check for VL suffix (common for vision-language models)
-    if lower.ends_with("-vl") || lower.ends_with(":vl") || lower.ends_with("/vl") {
-        return true;
-    }
-
-    false
-}
+/// This uses the `llm_models_spider` crate which is automatically updated
+/// via GitHub Actions to fetch the latest model capabilities from OpenRouter.
+pub use llm_models_spider::supports_vision;
 
 /// Merge a base config with an override config.
 ///
@@ -1369,21 +1289,16 @@ mod tests {
         // GPT-4o variants (all vision)
         assert!(supports_vision("gpt-4o"));
         assert!(supports_vision("gpt-4o-mini"));
-        assert!(supports_vision("gpt-4o-2024-05-13"));
 
         // GPT-4 Turbo with vision
         assert!(supports_vision("gpt-4-turbo"));
-        assert!(supports_vision("gpt-4-turbo-2024-04-09"));
 
         // o1/o3 models
-        assert!(supports_vision("o1-preview"));
-        assert!(supports_vision("o1-mini"));
-        assert!(supports_vision("o3-mini"));
+        assert!(supports_vision("o1"));
+        assert!(supports_vision("o3"));
 
         // Non-vision models
-        assert!(!supports_vision("gpt-4"));
         assert!(!supports_vision("gpt-3.5-turbo"));
-        assert!(!supports_vision("gpt-4-0613"));
     }
 
     #[test]
@@ -1422,17 +1337,16 @@ mod tests {
 
     #[test]
     fn test_supports_vision_other() {
-        assert!(supports_vision("llava-1.5-7b"));
+        // Models from OpenRouter's vision list
         assert!(supports_vision("pixtral-12b"));
         assert!(supports_vision("llama-3.2-11b-vision-instruct"));
-        assert!(supports_vision("cogvlm2-llama3-chat-19b"));
-        assert!(supports_vision("moondream2"));
-        assert!(supports_vision("phi-3-vision-128k-instruct"));
+        assert!(supports_vision("internvl3-78b"));
+        assert!(supports_vision("molmo-2-8b"));
 
         // Non-vision models
-        assert!(!supports_vision("llama-3-70b"));
-        assert!(!supports_vision("mistral-7b"));
-        assert!(!supports_vision("mixtral-8x7b"));
+        assert!(!supports_vision("llama-3-70b-instruct"));
+        assert!(!supports_vision("mistral-7b-instruct"));
+        assert!(!supports_vision("mixtral-8x7b-instruct"));
     }
 
     #[test]

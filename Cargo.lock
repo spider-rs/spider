@@ -3016,6 +3016,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "llm_models_spider"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43335665ef7d4e0b22b92e77457ee8456e16c7002a348e8a9832f10fe6ea6834"
+
+[[package]]
 name = "llm_readability"
 version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5228,6 +5234,7 @@ dependencies = [
  "dashmap",
  "env_logger",
  "fastrand",
+ "llm_models_spider",
  "log",
  "lol_html",
  "parking_lot",
