@@ -25,6 +25,7 @@ ua_generator = { version = "^0.5", optional = true }
 string_concat = "0.0.1"
 lazy_static = "1"
 ahash = { version = "0.8", default-features = false, features = ["std"] }
+dashmap = { version = "6", optional = true }
 smallvec = "1"
 num_cpus = "1"
 bytes = { version = "1", features = ["serde"] }
@@ -302,7 +303,7 @@ search_tavily = ["search"]
 # Agent features - enables spider_agent with sub-features
 agent = ["dep:spider_agent"]
 agent_openai = ["agent", "spider_agent/openai"]
-agent_chrome = ["agent", "spider_agent/chrome", "chrome"]
+agent_chrome = ["agent", "spider_agent/chrome", "chrome", "dep:dashmap"]
 agent_webdriver = ["agent", "spider_agent/webdriver"]
 agent_fs = ["agent", "spider_agent/fs"]
 agent_search_serper = ["agent", "spider_agent/search_serper"]

@@ -18,6 +18,8 @@ mod actions;
 mod browser;
 pub mod cache;
 mod chain;
+mod concurrent_chain;
+mod confidence;
 mod config;
 mod content;
 mod engine;
@@ -25,12 +27,18 @@ mod engine_error;
 pub mod executor;
 mod helpers;
 mod html_cleaning;
+mod html_diff;
 mod map_result;
 mod memory_ops;
 mod observation;
+mod planning;
 mod prompts;
 pub mod router;
+mod schema_gen;
 mod selector_cache;
+mod self_healing;
+mod synthesis;
+mod tool_calling;
 
 // Re-export actions
 pub use actions::{ActionRecord, ActionResult, ActionType};
@@ -86,6 +94,59 @@ pub use prompts::{
 
 // Re-export selector cache
 pub use selector_cache::{SelectorCache, SelectorCacheEntry};
+
+// Re-export concurrent chain types
+pub use concurrent_chain::{
+    ConcurrentChainConfig, ConcurrentChainResult, DependencyGraph, DependentStep, StepResult,
+};
+
+// Re-export confidence types
+pub use confidence::{
+    Alternative, ConfidenceRetryStrategy, ConfidenceSummary, ConfidenceTracker, ConfidentStep,
+    Verification, VerificationType,
+};
+
+// Re-export tool calling types
+pub use tool_calling::{
+    ActionToolSchemas, FunctionCall, FunctionDefinition, ToolCall, ToolCallingMode, ToolDefinition,
+};
+
+// Re-export HTML diff types
+pub use html_diff::{
+    ChangeType, DiffStats, ElementChange, HtmlDiffMode, HtmlDiffResult, PageStateDiff,
+};
+
+// Re-export planning types
+pub use planning::{
+    Checkpoint, CheckpointResult, CheckpointType, ExecutionPlan, PageState, PlanExecutionState,
+    PlanningModeConfig, PlannedStep, ReplanContext,
+};
+
+// Re-export self-healing types
+pub use self_healing::{
+    HealedSelectorCache, HealingDiagnosis, HealingRequest, HealingResult, HealingStats,
+    SelectorIssueType, SelfHealingConfig,
+};
+
+// Re-export synthesis types
+pub use synthesis::{
+    MultiPageContext, PageContext, PageContribution, SynthesisConfig, SynthesisResult,
+};
+
+// Re-export schema generation types
+pub use schema_gen::{
+    build_schema_generation_prompt, generate_schema, infer_schema, infer_schema_from_examples,
+    refine_schema, GeneratedSchema, SchemaCache, SchemaGenerationRequest,
+};
+
+// Re-export self-healing helper functions
+pub use self_healing::extract_html_context;
+
+// Re-export tool calling helper functions
+pub use tool_calling::{parse_tool_calls, tool_calls_to_steps};
+
+// Re-export concurrent chain execution
+pub use concurrent_chain::execute_graph;
 
 // Re-export browser functions (chrome feature)
 #[cfg(feature = "chrome")]

@@ -151,6 +151,59 @@ pub use automation::{
     EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
 };
 
+// Automation re-exports - concurrent chain types
+pub use automation::{
+    ConcurrentChainConfig, ConcurrentChainResult, DependencyGraph, DependentStep, StepResult,
+};
+
+// Automation re-exports - confidence types
+pub use automation::{
+    Alternative, ConfidenceRetryStrategy, ConfidenceSummary, ConfidenceTracker, ConfidentStep,
+    Verification, VerificationType,
+};
+
+// Automation re-exports - tool calling types
+pub use automation::{
+    ActionToolSchemas, FunctionCall, FunctionDefinition, ToolCall, ToolCallingMode, ToolDefinition,
+};
+
+// Automation re-exports - HTML diff types
+pub use automation::{
+    ChangeType, DiffStats, ElementChange, HtmlDiffMode, HtmlDiffResult, PageStateDiff,
+};
+
+// Automation re-exports - planning types
+pub use automation::{
+    Checkpoint, CheckpointResult, CheckpointType, ExecutionPlan, PageState, PlanExecutionState,
+    PlanningModeConfig, PlannedStep, ReplanContext,
+};
+
+// Automation re-exports - self-healing types
+pub use automation::{
+    HealedSelectorCache, HealingDiagnosis, HealingRequest, HealingResult, HealingStats,
+    SelectorIssueType, SelfHealingConfig,
+};
+
+// Automation re-exports - synthesis types
+pub use automation::{
+    MultiPageContext, PageContext, PageContribution, SynthesisConfig, SynthesisResult,
+};
+
+// Automation re-exports - schema generation types
+pub use automation::{
+    build_schema_generation_prompt, generate_schema, infer_schema, infer_schema_from_examples,
+    refine_schema, GeneratedSchema, SchemaCache, SchemaGenerationRequest,
+};
+
+// Automation re-exports - self-healing helper functions
+pub use automation::extract_html_context;
+
+// Automation re-exports - tool calling helper functions
+pub use automation::{parse_tool_calls, tool_calls_to_steps};
+
+// Automation re-exports - concurrent chain execution
+pub use automation::execute_graph;
+
 // Performance re-exports
 pub use automation::cache::{CacheStats, CacheValue, SmartCache};
 pub use automation::executor::{BatchExecutor, ChainExecutor, PrefetchManager};

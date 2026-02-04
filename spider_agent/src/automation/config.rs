@@ -749,6 +749,59 @@ pub struct RemoteMultimodalConfig {
     pub extraction_schema: Option<super::ExtractionSchema>,
     /// Take a screenshot after automation completes and include it in results.
     pub screenshot: bool,
+
+    // -----------------------------------------------------------------
+    // Claude-optimized features
+    // -----------------------------------------------------------------
+    /// Tool calling mode for structured action output.
+    ///
+    /// - `JsonObject` (default): Use JSON object mode
+    /// - `ToolCalling`: Use OpenAI-compatible tool/function calling
+    /// - `Auto`: Auto-select based on model capabilities
+    #[serde(default)]
+    pub tool_calling_mode: super::tool_calling::ToolCallingMode,
+
+    /// HTML diff mode for condensed page state.
+    ///
+    /// When enabled, sends only HTML changes after the first round,
+    /// potentially reducing tokens by 50-70%.
+    #[serde(default)]
+    pub html_diff_mode: super::html_diff::HtmlDiffMode,
+
+    /// Planning mode configuration.
+    ///
+    /// When enabled, allows the LLM to plan multiple steps upfront,
+    /// reducing round-trips. Set to `None` to disable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planning_mode: Option<super::planning::PlanningModeConfig>,
+
+    /// Multi-page synthesis configuration.
+    ///
+    /// When configured, enables analyzing multiple pages in a single
+    /// LLM call. Set to `None` to disable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synthesis_config: Option<super::synthesis::SynthesisConfig>,
+
+    /// Confidence-based retry strategy.
+    ///
+    /// When configured, uses confidence scores to make smarter retry
+    /// decisions. Set to `None` for default retry behavior.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_strategy: Option<super::confidence::ConfidenceRetryStrategy>,
+
+    /// Self-healing configuration for automatic selector repair.
+    ///
+    /// When enabled, failed selectors trigger an LLM call to diagnose
+    /// and suggest alternatives. Set to `None` to disable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub self_healing: Option<super::self_healing::SelfHealingConfig>,
+
+    /// Enable concurrent execution of independent actions.
+    ///
+    /// When true, actions without dependencies can run in parallel
+    /// using `tokio::JoinSet`.
+    #[serde(default)]
+    pub concurrent_execution: bool,
 }
 
 impl Default for RemoteMultimodalConfig {
@@ -773,6 +826,14 @@ impl Default for RemoteMultimodalConfig {
             extraction_prompt: None,
             extraction_schema: None,
             screenshot: true,
+            // Claude-optimized features (all disabled by default for backward compatibility)
+            tool_calling_mode: super::tool_calling::ToolCallingMode::default(),
+            html_diff_mode: super::html_diff::HtmlDiffMode::default(),
+            planning_mode: None,
+            synthesis_config: None,
+            confidence_strategy: None,
+            self_healing: None,
+            concurrent_execution: false,
         }
     }
 }
@@ -781,6 +842,40 @@ impl RemoteMultimodalConfig {
     /// Create a new config with default settings.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a config optimized for maximum speed and efficiency.
+    ///
+    /// Enables all performance-positive features:
+    /// - `ToolCallingMode::Auto` for reliable action parsing
+    /// - `HtmlDiffMode::Auto` for 50-70% token reduction
+    /// - `ConfidenceRetryStrategy` for smarter retries
+    /// - `concurrent_execution` for parallel action execution
+    ///
+    /// These features have zero or positive performance impact.
+    pub fn fast() -> Self {
+        Self {
+            tool_calling_mode: super::tool_calling::ToolCallingMode::Auto,
+            html_diff_mode: super::html_diff::HtmlDiffMode::Auto,
+            confidence_strategy: Some(super::confidence::ConfidenceRetryStrategy::default()),
+            concurrent_execution: true,
+            ..Self::default()
+        }
+    }
+
+    /// Create a config optimized for maximum speed with planning enabled.
+    ///
+    /// Includes all `fast()` features plus:
+    /// - `PlanningModeConfig` for multi-step planning (fewer round-trips)
+    /// - `SelfHealingConfig` for auto-repair of failed selectors
+    ///
+    /// Best for complex multi-step automations.
+    pub fn fast_with_planning() -> Self {
+        Self {
+            planning_mode: Some(super::planning::PlanningModeConfig::default()),
+            self_healing: Some(super::self_healing::SelfHealingConfig::default()),
+            ..Self::fast()
+        }
     }
 
     /// Set whether to include HTML.
@@ -862,6 +957,55 @@ impl RemoteMultimodalConfig {
     /// Add a capture profile.
     pub fn add_capture_profile(&mut self, profile: CaptureProfile) {
         self.capture_profiles.push(profile);
+    }
+
+    // -------------------------------------------------------------------------
+    // Claude-optimized feature builders
+    // -------------------------------------------------------------------------
+
+    /// Set tool calling mode.
+    pub fn with_tool_calling_mode(mut self, mode: super::tool_calling::ToolCallingMode) -> Self {
+        self.tool_calling_mode = mode;
+        self
+    }
+
+    /// Set HTML diff mode for condensed page state.
+    pub fn with_html_diff_mode(mut self, mode: super::html_diff::HtmlDiffMode) -> Self {
+        self.html_diff_mode = mode;
+        self
+    }
+
+    /// Enable planning mode with configuration.
+    pub fn with_planning_mode(mut self, config: super::planning::PlanningModeConfig) -> Self {
+        self.planning_mode = Some(config);
+        self
+    }
+
+    /// Enable multi-page synthesis with configuration.
+    pub fn with_synthesis_config(mut self, config: super::synthesis::SynthesisConfig) -> Self {
+        self.synthesis_config = Some(config);
+        self
+    }
+
+    /// Set confidence-based retry strategy.
+    pub fn with_confidence_strategy(
+        mut self,
+        strategy: super::confidence::ConfidenceRetryStrategy,
+    ) -> Self {
+        self.confidence_strategy = Some(strategy);
+        self
+    }
+
+    /// Enable self-healing with configuration.
+    pub fn with_self_healing(mut self, config: super::self_healing::SelfHealingConfig) -> Self {
+        self.self_healing = Some(config);
+        self
+    }
+
+    /// Enable/disable concurrent execution of independent actions.
+    pub fn with_concurrent_execution(mut self, enabled: bool) -> Self {
+        self.concurrent_execution = enabled;
+        self
     }
 }
 

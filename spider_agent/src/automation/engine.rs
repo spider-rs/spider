@@ -793,6 +793,95 @@ impl RemoteMultimodalEngine {
 
         Ok((content, usage))
     }
+
+    // ===== New Feature Integration Methods =====
+
+    /// Generate an extraction schema from example data.
+    ///
+    /// Uses the schema generation utilities to create a JSON schema
+    /// from example outputs. Useful for zero-config extraction setup.
+    pub fn generate_schema_from_examples(
+        &self,
+        examples: &[serde_json::Value],
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> super::schema_gen::GeneratedSchema {
+        let request = super::schema_gen::SchemaGenerationRequest {
+            examples: examples.to_vec(),
+            description: description.map(|s| s.to_string()),
+            strict: false,
+            name: name.map(|s| s.to_string()),
+        };
+        super::schema_gen::generate_schema(&request)
+    }
+
+    /// Infer a JSON schema from a single example value.
+    pub fn infer_schema(&self, example: &serde_json::Value) -> serde_json::Value {
+        super::schema_gen::infer_schema(example)
+    }
+
+    /// Build a schema generation prompt for LLM-assisted schema creation.
+    pub fn build_schema_prompt(
+        &self,
+        examples: &[serde_json::Value],
+        description: Option<&str>,
+    ) -> String {
+        let request = super::schema_gen::SchemaGenerationRequest {
+            examples: examples.to_vec(),
+            description: description.map(|s| s.to_string()),
+            strict: false,
+            name: None,
+        };
+        super::schema_gen::build_schema_generation_prompt(&request)
+    }
+
+    /// Parse tool calls from an LLM response.
+    ///
+    /// Extracts OpenAI-compatible tool calls from a response JSON.
+    pub fn parse_tool_calls(&self, response: &serde_json::Value) -> Vec<super::tool_calling::ToolCall> {
+        super::tool_calling::parse_tool_calls(response)
+    }
+
+    /// Convert tool calls to automation step actions.
+    pub fn tool_calls_to_steps(&self, calls: &[super::tool_calling::ToolCall]) -> Vec<serde_json::Value> {
+        super::tool_calling::tool_calls_to_steps(calls)
+    }
+
+    /// Get all available action tool schemas.
+    ///
+    /// Returns OpenAI-compatible tool definitions for all supported actions.
+    pub fn action_tool_schemas(&self) -> Vec<super::tool_calling::ToolDefinition> {
+        super::tool_calling::ActionToolSchemas::all()
+    }
+
+    /// Extract HTML context around selectors for self-healing.
+    pub fn extract_html_context(&self, html: &str, max_bytes: usize) -> String {
+        super::self_healing::extract_html_context(html, max_bytes)
+    }
+
+    /// Create a new dependency graph for concurrent execution.
+    pub fn create_dependency_graph(
+        &self,
+        steps: Vec<super::concurrent_chain::DependentStep>,
+    ) -> Result<super::concurrent_chain::DependencyGraph, String> {
+        super::concurrent_chain::DependencyGraph::new(steps)
+    }
+
+    /// Execute a dependency graph with the provided executor.
+    ///
+    /// This enables parallel execution of independent steps using `tokio::JoinSet`.
+    pub async fn execute_dependency_graph<F, Fut>(
+        &self,
+        graph: &mut super::concurrent_chain::DependencyGraph,
+        config: &super::concurrent_chain::ConcurrentChainConfig,
+        executor: F,
+    ) -> super::concurrent_chain::ConcurrentChainResult
+    where
+        F: Fn(super::concurrent_chain::DependentStep) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = super::concurrent_chain::StepResult> + Send + 'static,
+    {
+        super::concurrent_chain::execute_graph(graph, config, executor).await
+    }
 }
 
 #[cfg(test)]
