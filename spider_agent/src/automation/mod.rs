@@ -40,8 +40,8 @@ pub use chain::{ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainSt
 
 // Re-export config types
 pub use config::{
-    is_url_allowed, merged_config, AutomationConfig, CaptureProfile, CleaningIntent,
-    ClipViewport, CostTier, HtmlCleaningProfile, ModelPolicy, RecoveryStrategy,
+    is_url_allowed, merged_config, supports_vision, AutomationConfig, CaptureProfile,
+    CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelPolicy, RecoveryStrategy,
     RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy,
 };
 

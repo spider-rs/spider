@@ -665,6 +665,15 @@ pub struct RemoteMultimodalConfig {
     pub include_url: bool,
     /// Whether to include the current document title in the model input.
     pub include_title: bool,
+    /// Whether to include screenshots in the LLM request.
+    ///
+    /// When `None` (default), automatically detects based on model name.
+    /// Vision models (gpt-4o, claude-3, etc.) will receive screenshots,
+    /// while text-only models will not.
+    ///
+    /// Set to `Some(true)` to always include screenshots.
+    /// Set to `Some(false)` to never include screenshots.
+    pub include_screenshot: Option<bool>,
 
     // -----------------------------------------------------------------
     // LLM knobs
@@ -749,6 +758,7 @@ impl Default for RemoteMultimodalConfig {
             html_max_bytes: 24_000,
             include_url: true,
             include_title: true,
+            include_screenshot: None, // Auto-detect based on model
             temperature: 0.1,
             max_tokens: 1024,
             request_json_object: true,
@@ -836,6 +846,16 @@ impl RemoteMultimodalConfig {
     /// Enable/disable screenshots.
     pub fn with_screenshot(mut self, enabled: bool) -> Self {
         self.screenshot = enabled;
+        self
+    }
+
+    /// Set whether to include screenshots in LLM requests.
+    ///
+    /// - `Some(true)`: Always include screenshots
+    /// - `Some(false)`: Never include screenshots
+    /// - `None`: Auto-detect based on model name (default)
+    pub fn with_include_screenshot(mut self, include: Option<bool>) -> Self {
+        self.include_screenshot = include;
         self
     }
 
@@ -1041,6 +1061,124 @@ impl RemoteMultimodalConfigs {
         self.cfg.extraction_schema = Some(schema);
         self
     }
+
+    /// Check if the configured model supports vision/multimodal input.
+    ///
+    /// Uses the `supports_vision` function to detect based on model name.
+    pub fn model_supports_vision(&self) -> bool {
+        supports_vision(&self.model_name)
+    }
+
+    /// Determine whether to include screenshots in LLM requests.
+    ///
+    /// This respects the `include_screenshot` config override:
+    /// - `Some(true)`: Always include screenshots
+    /// - `Some(false)`: Never include screenshots
+    /// - `None`: Auto-detect based on model name
+    pub fn should_include_screenshot(&self) -> bool {
+        match self.cfg.include_screenshot {
+            Some(explicit) => explicit,
+            None => self.model_supports_vision(),
+        }
+    }
+
+    /// Filter screenshot based on model capabilities.
+    ///
+    /// Returns the screenshot if the model supports vision and screenshots
+    /// are enabled, otherwise returns `None`.
+    pub fn filter_screenshot<'a>(&self, screenshot: Option<&'a str>) -> Option<&'a str> {
+        if self.should_include_screenshot() {
+            screenshot
+        } else {
+            None
+        }
+    }
+}
+
+/// Check if a model supports vision/multimodal input based on its name.
+///
+/// This function uses pattern matching on known vision model naming conventions
+/// to determine if screenshots should be sent to the model.
+///
+/// # Arguments
+/// * `model_name` - The model identifier (e.g., "gpt-4o", "claude-3-sonnet", "qwen2-vl")
+///
+/// # Returns
+/// `true` if the model likely supports vision input, `false` otherwise.
+///
+/// # Example
+/// ```rust
+/// use spider_agent::automation::supports_vision;
+///
+/// assert!(supports_vision("gpt-4o"));
+/// assert!(supports_vision("claude-3-sonnet-20240229"));
+/// assert!(supports_vision("qwen2-vl-72b"));
+/// assert!(!supports_vision("gpt-3.5-turbo"));
+/// assert!(!supports_vision("llama-3-70b"));
+/// ```
+pub fn supports_vision(model_name: &str) -> bool {
+    let lower = model_name.to_lowercase();
+
+    // Known vision model patterns
+    const VISION_PATTERNS: &[&str] = &[
+        // OpenAI vision models
+        "gpt-4o",       // GPT-4o (all variants are vision)
+        "gpt-4-turbo",  // GPT-4 Turbo with vision
+        "gpt-4-vision", // Explicit vision model
+        "o1",           // OpenAI o1 models
+        "o3",           // OpenAI o3 models
+        "o4",           // Future OpenAI models
+        // Anthropic Claude (3+ are multimodal)
+        "claude-3",
+        "claude-4",
+        // Google Gemini
+        "gemini-1.5",
+        "gemini-2",
+        "gemini-flash",
+        "gemini-pro-vision",
+        // Alibaba Qwen VL models
+        "qwen2-vl",
+        "qwen2.5-vl",
+        "qwen-vl",
+        "qwq", // Qwen QwQ models
+        // Meta Llama vision
+        "llama-3.2-vision",
+        "llama-3.2-11b-vision",
+        "llama-3.2-90b-vision",
+        // Other vision models
+        "llava",
+        "pixtral",
+        "cogvlm",
+        "cogagent",
+        "internvl",
+        "minicpm-v",
+        "molmo",
+        "moondream",
+        "phi-3-vision",
+        "phi-3.5-vision",
+        "yi-vl",
+        "deepseek-vl",
+        // Generic vision indicators
+        "-vision",
+        "-vl-",
+        "-vl:",
+        "/vl-",
+        ":vl-",
+    ];
+
+    // Check for vision patterns
+    for pattern in VISION_PATTERNS {
+        if lower.contains(pattern) {
+            return true;
+        }
+    }
+
+    // Check for VL suffix (common for vision-language models)
+    if lower.ends_with("-vl") || lower.ends_with(":vl") || lower.ends_with("/vl") {
+        return true;
+    }
+
+    false
 }
 
 /// Merge a base config with an override config.
@@ -1056,6 +1194,7 @@ pub fn merged_config(
     out.html_max_bytes = override_cfg.html_max_bytes;
     out.include_url = override_cfg.include_url;
     out.include_title = override_cfg.include_title;
+    out.include_screenshot = override_cfg.include_screenshot;
 
     out.temperature = override_cfg.temperature;
     out.max_tokens = override_cfg.max_tokens;
@@ -1223,5 +1362,144 @@ mod tests {
         assert_eq!(HtmlCleaningProfile::Raw.estimate_savings(&analysis), 0);
         assert_eq!(HtmlCleaningProfile::Minimal.estimate_savings(&analysis), 15_000);
         assert_eq!(HtmlCleaningProfile::Slim.estimate_savings(&analysis), 20_000);
+    }
+
+    #[test]
+    fn test_supports_vision_openai() {
+        // GPT-4o variants (all vision)
+        assert!(supports_vision("gpt-4o"));
+        assert!(supports_vision("gpt-4o-mini"));
+        assert!(supports_vision("gpt-4o-2024-05-13"));
+
+        // GPT-4 Turbo with vision
+        assert!(supports_vision("gpt-4-turbo"));
+        assert!(supports_vision("gpt-4-turbo-2024-04-09"));
+
+        // o1/o3 models
+        assert!(supports_vision("o1-preview"));
+        assert!(supports_vision("o1-mini"));
+        assert!(supports_vision("o3-mini"));
+
+        // Non-vision models
+        assert!(!supports_vision("gpt-4"));
+        assert!(!supports_vision("gpt-3.5-turbo"));
+        assert!(!supports_vision("gpt-4-0613"));
+    }
+
+    #[test]
+    fn test_supports_vision_anthropic() {
+        // Claude 3+ are multimodal
+        assert!(supports_vision("claude-3-sonnet-20240229"));
+        assert!(supports_vision("claude-3-opus-20240229"));
+        assert!(supports_vision("claude-3-haiku-20240307"));
+        assert!(supports_vision("claude-3-5-sonnet-20241022"));
+
+        // Claude 2 is not vision
+        assert!(!supports_vision("claude-2"));
+        assert!(!supports_vision("claude-2.1"));
+        assert!(!supports_vision("claude-instant-1.2"));
+    }
+
+    #[test]
+    fn test_supports_vision_qwen() {
+        assert!(supports_vision("qwen2-vl-72b"));
+        assert!(supports_vision("qwen2.5-vl-7b"));
+        assert!(supports_vision("qwen-vl-max"));
+        assert!(supports_vision("qwq-32b"));
+
+        // Non-VL Qwen
+        assert!(!supports_vision("qwen2-72b"));
+        assert!(!supports_vision("qwen2.5-7b"));
+    }
+
+    #[test]
+    fn test_supports_vision_gemini() {
+        assert!(supports_vision("gemini-1.5-pro"));
+        assert!(supports_vision("gemini-1.5-flash"));
+        assert!(supports_vision("gemini-2.0-flash"));
+        assert!(supports_vision("gemini-pro-vision"));
+    }
+
+    #[test]
+    fn test_supports_vision_other() {
+        assert!(supports_vision("llava-1.5-7b"));
+        assert!(supports_vision("pixtral-12b"));
+        assert!(supports_vision("llama-3.2-11b-vision-instruct"));
+        assert!(supports_vision("cogvlm2-llama3-chat-19b"));
+        assert!(supports_vision("moondream2"));
+        assert!(supports_vision("phi-3-vision-128k-instruct"));
+
+        // Non-vision models
+        assert!(!supports_vision("llama-3-70b"));
+        assert!(!supports_vision("mistral-7b"));
+        assert!(!supports_vision("mixtral-8x7b"));
+    }
+
+    #[test]
+    fn test_supports_vision_case_insensitive() {
+        assert!(supports_vision("GPT-4O"));
+        assert!(supports_vision("Claude-3-Sonnet"));
+        assert!(supports_vision("QWEN2-VL"));
+    }
+
+    #[test]
+    fn test_remote_multimodal_configs_vision_detection() {
+        // Vision model
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+        );
+        assert!(cfg.model_supports_vision());
+        assert!(cfg.should_include_screenshot());
+
+        // Non-vision model
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-3.5-turbo",
+        );
+        assert!(!cfg.model_supports_vision());
+        assert!(!cfg.should_include_screenshot());
+
+        // Explicit override to enable screenshots on non-vision model
+        let mut cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-3.5-turbo",
+        );
+        cfg.cfg.include_screenshot = Some(true);
+        assert!(cfg.should_include_screenshot());
+
+        // Explicit override to disable screenshots on vision model
+        let mut cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+        );
+        cfg.cfg.include_screenshot = Some(false);
+        assert!(!cfg.should_include_screenshot());
+    }
+
+    #[test]
+    fn test_filter_screenshot() {
+        let screenshot = "base64data...";
+
+        // Vision model - screenshot passes through
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+        );
+        assert_eq!(cfg.filter_screenshot(Some(screenshot)), Some(screenshot));
+
+        // Non-vision model - screenshot filtered out
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-3.5-turbo",
+        );
+        assert_eq!(cfg.filter_screenshot(Some(screenshot)), None);
+
+        // No screenshot provided
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+        );
+        assert_eq!(cfg.filter_screenshot(None), None);
     }
 }
