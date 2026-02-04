@@ -825,14 +825,18 @@ mod tests {
 
     #[test]
     fn test_engine_system_prompt_compiled() {
-        let engine = RemoteMultimodalEngine::new(
+        // System prompt is locked to DEFAULT_SYSTEM_PROMPT
+        // Custom instructions go through system_prompt_extra
+        let mut engine = RemoteMultimodalEngine::new(
             "https://api.openai.com/v1/chat/completions",
             "gpt-4o",
-            Some("Custom prompt".to_string()),
+            None,
         );
+        engine.with_system_prompt_extra(Some("Custom instructions"));
 
         let compiled = engine.system_prompt_compiled(&RemoteMultimodalConfig::default());
-        assert!(compiled.starts_with("Custom prompt"));
+        assert!(compiled.starts_with(super::DEFAULT_SYSTEM_PROMPT));
+        assert!(compiled.contains("Custom instructions"));
         assert!(compiled.contains("RUNTIME CONFIG"));
     }
 
