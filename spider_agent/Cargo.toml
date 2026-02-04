@@ -50,10 +50,14 @@ thirtyfour = { version = "0.36", optional = true }
 # Temp filesystem for large operations
 tempfile = { version = "3", optional = true }
 
+# Stream utilities for event handling
+futures = { version = "0.3", optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"
 fastrand = "2"
+futures = "0.3"
 
 [features]
 default = []
@@ -62,7 +66,7 @@ default = []
 openai = ["dep:async-openai", "dep:tiktoken-rs"]
 
 # Browser automation
-chrome = ["dep:chromey"]
+chrome = ["dep:chromey", "dep:futures"]
 
 # WebDriver automation
 webdriver = ["dep:thirtyfour"]
@@ -99,3 +103,7 @@ required-features = ["openai", "search_serper"]
 [[example]]
 name = "multimodal"
 required-features = ["openai", "search_serper"]
+
+[[example]]
+name = "open_page_concurrent"
+required-features = ["chrome"]

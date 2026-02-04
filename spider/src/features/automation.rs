@@ -79,6 +79,13 @@ pub use spider_agent::automation::router::{ModelRouter, RoutingDecision, TaskAna
 #[cfg(all(feature = "agent", feature = "agent_chrome"))]
 pub use spider_agent::automation::run_remote_multimodal_with_page;
 
+// Spawn pages support (requires agent + chrome)
+#[cfg(all(feature = "agent", feature = "agent_chrome"))]
+pub use spider_agent::automation::{
+    run_spawn_pages_concurrent, run_spawn_pages_with_factory, run_spawn_pages_with_options,
+    PageFactory, PageSetupFn, SpawnPageOptions, SpawnedPageResult,
+};
+
 // Chrome page type for browser automation (needed for both agent and stub implementations)
 #[cfg(feature = "chrome")]
 use chromiumoxide::Page;
@@ -120,6 +127,8 @@ pub struct AutomationResult {
     pub extracted: Option<serde_json::Value>,
     /// Screenshot (base64).
     pub screenshot: Option<String>,
+    /// URLs to open in new pages concurrently.
+    pub spawn_pages: Vec<String>,
 }
 
 /// Engine error type (stub when agent feature not enabled).
@@ -473,6 +482,7 @@ pub async fn run_remote_multimodal_extraction(
                 usage: AutomationUsage::default(),
                 extracted: None,
                 screenshot: None,
+                spawn_pages: Vec::new(),
             }));
         }
     }
@@ -533,6 +543,206 @@ impl AutomationResultExt for AutomationResult {
 }
 
 // =============================================================================
+// Spawn pages helper for spider
+// =============================================================================
+
+/// Process spawn_pages URLs concurrently with full spider configuration.
+///
+/// This function creates new pages using the browser, applies spider's full
+/// configuration (stealth mode, fingerprinting, event tracking, etc.), and runs
+/// automation on each page concurrently.
+///
+/// # Arguments
+/// * `browser` - The browser to create new pages from
+/// * `browser_context_id` - Optional browser context ID for incognito mode
+/// * `urls` - URLs to open (typically from `page_response.spawn_pages`)
+/// * `mm_cfgs` - Configuration for the automation engine
+/// * `spider_config` - Spider configuration to apply to each spawned page
+/// * `options` - Additional spawn options (extraction, screenshots, etc.)
+///
+/// # Example
+/// ```ignore
+/// if let Some(spawn_urls) = page_response.spawn_pages.take() {
+///     let options = SpawnPageOptions::new()
+///         .with_extraction("Extract page content");
+///
+///     let results = process_spawn_pages_with_config(
+///         &browser,
+///         &browser_context_id,
+///         spawn_urls,
+///         &mm_config,
+///         &configuration,
+///         options,
+///     ).await;
+/// }
+/// ```
+#[cfg(all(feature = "agent", feature = "agent_chrome"))]
+pub async fn process_spawn_pages_with_config(
+    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
+    browser_context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+    urls: Vec<String>,
+    mm_cfgs: &RemoteMultimodalConfigs,
+    spider_config: &crate::configuration::Configuration,
+    options: SpawnPageOptions,
+) -> Vec<SpawnedPageResult> {
+    use std::sync::Arc;
+
+    if urls.is_empty() {
+        return Vec::new();
+    }
+
+    let mm_cfgs = Arc::new(mm_cfgs.clone());
+    let spider_config = Arc::new(spider_config.clone());
+    let options = Arc::new(options);
+    let browser_context_id = browser_context_id.clone();
+
+    let mut handles = Vec::with_capacity(urls.len());
+
+    // Check if we should track network events
+    let track_events = spider_config.track_events.as_ref().map(|t| t.responses).unwrap_or(false);
+
+    for url in urls {
+        let browser = browser.clone();
+        let mm_cfgs = mm_cfgs.clone();
+        let spider_config = spider_config.clone();
+        let options = options.clone();
+        let browser_context_id = browser_context_id.clone();
+        let url_clone = url.clone();
+
+        handles.push(tokio::spawn(async move {
+            use chromiumoxide::cdp::browser_protocol::network::EventDataReceived;
+            use tokio_stream::StreamExt;
+
+            // Create new page using attempt_navigation (spider's standard approach)
+            let new_page = match crate::features::chrome::attempt_navigation(
+                &url_clone,
+                &browser,
+                &spider_config.request_timeout,
+                &browser_context_id,
+                &spider_config.viewport,
+            )
+            .await
+            {
+                Ok(page) => page,
+                Err(e) => {
+                    return SpawnedPageResult {
+                        url: url_clone,
+                        result: Err(format!("Failed to create page: {}", e)),
+                        bytes_transferred: None,
+                        response_map: None,
+                    };
+                }
+            };
+
+            // Apply spider configuration (stealth, fingerprinting, event tracking)
+            crate::features::chrome::setup_chrome_events(&new_page, &spider_config).await;
+
+            // Set up bytes tracking listener if event tracking is enabled
+            let bytes_listener = if track_events {
+                new_page.event_listener::<EventDataReceived>().await.ok()
+            } else {
+                None
+            };
+
+            // Track bytes in a separate task while automation runs
+            use std::sync::atomic::{AtomicU64, Ordering};
+            let total_bytes: std::sync::Arc<AtomicU64> = std::sync::Arc::new(AtomicU64::new(0));
+            let response_map: std::sync::Arc<dashmap::DashMap<String, u64>> =
+                std::sync::Arc::new(dashmap::DashMap::new());
+
+            let total_bytes_clone = total_bytes.clone();
+            let response_map_clone = response_map.clone();
+            let listener_handle = if let Some(mut listener) = bytes_listener {
+                Some(tokio::spawn(async move {
+                    while let Some(event) = listener.next().await {
+                        let bytes = event.encoded_data_length as u64;
+                        total_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
+                        response_map_clone
+                            .entry(event.request_id.inner().clone())
+                            .and_modify(|v| *v += bytes)
+                            .or_insert(bytes);
+                    }
+                }))
+            } else {
+                None
+            };
+
+            // Build page-specific config with options
+            let mut page_cfg = RemoteMultimodalConfig::new()
+                .with_max_rounds(options.max_rounds.max(1))
+                .with_screenshot(options.screenshot);
+
+            // Enable extraction if prompt is provided
+            if let Some(ref prompt) = options.extraction_prompt {
+                page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+            }
+
+            let mut page_cfgs = RemoteMultimodalConfigs::new(
+                &mm_cfgs.api_url,
+                &mm_cfgs.model_name,
+            )
+            .with_cfg(page_cfg);
+
+            // Copy API key
+            if let Some(ref key) = mm_cfgs.api_key {
+                page_cfgs = page_cfgs.with_api_key(key.clone());
+            }
+
+            // Add user message extra if provided
+            if let Some(ref msg) = options.user_message_extra {
+                page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+            }
+
+            // Run automation on the new page
+            let result = run_remote_multimodal_with_page(&page_cfgs, &new_page, &url_clone)
+                .await
+                .map_err(|e| format!("Automation failed: {}", e));
+
+            // Stop the listener and collect bytes data
+            if let Some(handle) = listener_handle {
+                handle.abort();
+            }
+
+            let (bytes_transferred, response_map_out) = {
+                let bytes_val = total_bytes.load(Ordering::Relaxed);
+                let bytes = if bytes_val > 0 { Some(bytes_val as f64) } else { None };
+                let map = if !response_map.is_empty() {
+                    Some(response_map.iter().map(|e| (e.key().clone(), *e.value() as f64)).collect())
+                } else {
+                    None
+                };
+                (bytes, map)
+            };
+
+            SpawnedPageResult {
+                url: url_clone,
+                result,
+                bytes_transferred,
+                response_map: response_map_out,
+            }
+        }));
+    }
+
+    // Collect all results
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.await {
+            Ok(spawn_result) => results.push(spawn_result),
+            Err(e) => {
+                results.push(SpawnedPageResult {
+                    url: "unknown".to_string(),
+                    result: Err(format!("Task failed: {}", e)),
+                    bytes_transferred: None,
+                    response_map: None,
+                });
+            }
+        }
+    }
+
+    results
+}
+
+// =============================================================================
 // Stub implementations (for various feature combinations)
 // =============================================================================
 
@@ -585,5 +795,90 @@ mod tests {
         let config: PromptConfiguration = serde_json::from_str(json).unwrap();
         assert_eq!(config.respect_robots_txt, Some(true));
         assert_eq!(config.depth, Some(5));
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn test_automation_result_spawn_pages() {
+        // Test that spawn_pages can be set and checked
+        let result = AutomationResult::success("test", 1)
+            .with_spawn_pages(vec![
+                "https://example.com/page1".to_string(),
+                "https://example.com/page2".to_string(),
+            ]);
+
+        assert!(result.has_spawn_pages());
+        assert_eq!(result.spawn_pages.len(), 2);
+        assert_eq!(result.spawn_pages[0], "https://example.com/page1");
+        assert_eq!(result.spawn_pages[1], "https://example.com/page2");
+
+        // Test empty spawn_pages
+        let result = AutomationResult::success("test", 1);
+        assert!(!result.has_spawn_pages());
+        assert!(result.spawn_pages.is_empty());
+    }
+
+    #[cfg(all(feature = "agent", feature = "agent_chrome"))]
+    #[test]
+    fn test_spawn_page_options() {
+        let options = SpawnPageOptions::new()
+            .with_extraction("Extract content")
+            .with_screenshot(true)
+            .with_max_rounds(2);
+
+        assert_eq!(options.extraction_prompt, Some("Extract content".to_string()));
+        assert!(options.screenshot);
+        assert_eq!(options.max_rounds, 2);
+    }
+
+    #[cfg(all(feature = "agent", feature = "agent_chrome"))]
+    #[test]
+    fn test_spawned_page_result_accessors() {
+        // Test success case
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Ok(AutomationResult::success("test", 1)
+                .with_extracted(serde_json::json!({"key": "value"}))),
+            bytes_transferred: Some(2048.0),
+            response_map: None,
+        };
+
+        assert!(result.is_ok());
+        assert!(result.error().is_none());
+        assert_eq!(result.label(), Some("test"));
+        assert!(result.extracted().is_some());
+        assert_eq!(result.bytes_transferred, Some(2048.0));
+
+        // Test error case
+        let error_result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Err("Connection error".to_string()),
+            bytes_transferred: None,
+            response_map: None,
+        };
+
+        assert!(!error_result.is_ok());
+        assert_eq!(error_result.error(), Some("Connection error"));
+        assert!(error_result.label().is_none());
+    }
+
+    #[cfg(all(feature = "agent", feature = "agent_chrome"))]
+    #[test]
+    fn test_spawned_page_result_with_response_map() {
+        let mut response_map = std::collections::HashMap::new();
+        response_map.insert("req-123".to_string(), 1024.0);
+        response_map.insert("req-456".to_string(), 2048.0);
+
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Ok(AutomationResult::success("test", 1)),
+            bytes_transferred: Some(3072.0),
+            response_map: Some(response_map),
+        };
+
+        assert!(result.bytes_transferred.is_some());
+        assert_eq!(result.bytes_transferred.unwrap(), 3072.0);
+        assert!(result.response_map.is_some());
+        assert_eq!(result.response_map.as_ref().unwrap().len(), 2);
     }
 }

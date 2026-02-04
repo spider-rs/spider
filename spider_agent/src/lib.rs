@@ -181,7 +181,10 @@ pub use search::TavilyProvider;
 pub use browser::BrowserContext;
 
 #[cfg(feature = "chrome")]
-pub use automation::run_remote_multimodal_with_page;
+pub use automation::{
+    run_remote_multimodal_with_page, run_spawn_pages_concurrent, run_spawn_pages_with_factory,
+    run_spawn_pages_with_options, PageFactory, PageSetupFn, SpawnPageOptions, SpawnedPageResult,
+};
 
 #[cfg(feature = "webdriver")]
 pub use webdriver::WebDriverContext;

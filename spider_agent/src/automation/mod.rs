@@ -89,7 +89,10 @@ pub use selector_cache::{SelectorCache, SelectorCacheEntry};
 
 // Re-export browser functions (chrome feature)
 #[cfg(feature = "chrome")]
-pub use browser::run_remote_multimodal_with_page;
+pub use browser::{
+    run_remote_multimodal_with_page, run_spawn_pages_concurrent, run_spawn_pages_with_factory,
+    run_spawn_pages_with_options, PageFactory, PageSetupFn, SpawnPageOptions, SpawnedPageResult,
+};
 
 /// URL-based prompt gating for per-URL config overrides.
 ///
@@ -493,6 +496,14 @@ pub struct AutomationResult {
     /// Screenshot (base64).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<String>,
+    /// URLs to open in new pages concurrently.
+    ///
+    /// When the LLM returns `OpenPage` actions for direct URL navigation,
+    /// those URLs are collected here instead of navigating the current page.
+    /// The caller should spawn new browser pages for these URLs and run
+    /// automation on them concurrently.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spawn_pages: Vec<String>,
 }
 
 impl AutomationResult {
@@ -533,6 +544,23 @@ impl AutomationResult {
         self.usage = usage;
         self
     }
+
+    /// Add URLs to spawn in new pages.
+    pub fn with_spawn_pages(mut self, pages: Vec<String>) -> Self {
+        self.spawn_pages = pages;
+        self
+    }
+
+    /// Add a single URL to spawn in a new page.
+    pub fn add_spawn_page(mut self, url: impl Into<String>) -> Self {
+        self.spawn_pages.push(url.into());
+        self
+    }
+
+    /// Check if there are pages to spawn.
+    pub fn has_spawn_pages(&self) -> bool {
+        !self.spawn_pages.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +598,60 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.steps_executed, 5);
         assert!(result.extracted.is_some());
+    }
+
+    #[test]
+    fn test_automation_result_spawn_pages() {
+        // Test with_spawn_pages
+        let result = AutomationResult::success("test", 1)
+            .with_spawn_pages(vec![
+                "https://example.com/page1".to_string(),
+                "https://example.com/page2".to_string(),
+            ]);
+
+        assert!(result.has_spawn_pages());
+        assert_eq!(result.spawn_pages.len(), 2);
+        assert_eq!(result.spawn_pages[0], "https://example.com/page1");
+        assert_eq!(result.spawn_pages[1], "https://example.com/page2");
+
+        // Test add_spawn_page
+        let result = AutomationResult::success("test", 1)
+            .add_spawn_page("https://example.com/page1")
+            .add_spawn_page("https://example.com/page2");
+
+        assert!(result.has_spawn_pages());
+        assert_eq!(result.spawn_pages.len(), 2);
+
+        // Test empty spawn_pages
+        let result = AutomationResult::success("test", 1);
+        assert!(!result.has_spawn_pages());
+        assert!(result.spawn_pages.is_empty());
+    }
+
+    #[test]
+    fn test_automation_result_serialization_with_spawn_pages() {
+        // Test that spawn_pages serializes correctly
+        let result = AutomationResult::success("test", 1)
+            .with_spawn_pages(vec![
+                "https://example.com/page1".to_string(),
+                "https://example.com/page2".to_string(),
+            ]);
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("spawn_pages"));
+        assert!(json.contains("https://example.com/page1"));
+        assert!(json.contains("https://example.com/page2"));
+
+        // Test that empty spawn_pages is not serialized (skip_serializing_if)
+        let result = AutomationResult::success("test", 1);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("spawn_pages"));
+
+        // Test deserialization
+        let json_with_spawn = r#"{"label":"test","steps_executed":1,"success":true,"spawn_pages":["https://a.com","https://b.com"]}"#;
+        let result: AutomationResult = serde_json::from_str(json_with_spawn).unwrap();
+        assert_eq!(result.spawn_pages.len(), 2);
+        assert_eq!(result.spawn_pages[0], "https://a.com");
     }
 
     #[test]

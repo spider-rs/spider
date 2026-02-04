@@ -72,8 +72,15 @@ Set `"done": true` when task is complete. Set `"done": false` to continue.
 - `{ "WaitForDom": { "selector": "sel", "timeout": 5000 } }`
 
 ### Navigate
-- `{ "Navigate": "https://url" }` - Go to URL
+- `{ "Navigate": "https://url" }` - Go to URL (replaces current page)
+- `{ "OpenPage": "https://url" }` - Open URL in new tab (concurrent)
+- `{ "OpenPage": ["url1", "url2"] }` - Open multiple URLs in new tabs
 - `{ "GoBack": null }` / `{ "GoForward": null }` / `{ "Reload": null }`
+
+**When to use OpenPage vs Navigate:**
+- Use `Navigate` when you want to follow a link flow on the current page
+- Use `OpenPage` when the user asks to "go to", "open", or "visit" a completely new URL
+- `OpenPage` spawns concurrent browser tabs and is ideal for parallel browsing
 
 ### Advanced
 - `{ "Evaluate": "javascript code" }` - Execute JS

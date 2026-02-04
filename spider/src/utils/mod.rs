@@ -300,6 +300,10 @@ pub struct PageResponse {
     /// The duration of the request.
     #[cfg(feature = "time")]
     pub duration: Option<tokio::time::Instant>,
+    /// URLs to spawn as new pages from OpenPage actions.
+    /// These are URLs the automation agent requested to open in new tabs.
+    /// The caller (website.rs) should create new pages for these using the browser.
+    pub spawn_pages: Option<Vec<String>>,
 }
 
 /// wait for event with timeout
@@ -2928,6 +2932,14 @@ pub async fn fetch_page_html_chrome_base(
                                 match page_response.extra_remote_multimodal_data.as_mut() {
                                     Some(v) => v.push(automation_result),
                                     None => page_response.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                }
+                            }
+
+                            // Store spawn_pages for the caller to process with browser access
+                            if !result.spawn_pages.is_empty() {
+                                match page_response.spawn_pages.as_mut() {
+                                    Some(v) => v.extend(result.spawn_pages.clone()),
+                                    None => page_response.spawn_pages = Some(result.spawn_pages.clone()),
                                 }
                             }
 

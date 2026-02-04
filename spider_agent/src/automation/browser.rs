@@ -332,6 +332,7 @@ impl RemoteMultimodalEngine {
                     usage: AutomationUsage::default(),
                     extracted: None,
                     screenshot: None,
+                    spawn_pages: Vec::new(),
                 });
             }
         }
@@ -370,6 +371,7 @@ impl RemoteMultimodalEngine {
         let mut last_sig: Option<StateSignature> = None;
         let mut total_usage = AutomationUsage::default();
         let mut last_extracted: Option<serde_json::Value> = None;
+        let mut all_spawn_pages: Vec<String> = Vec::new();
 
         let rounds = base_effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
@@ -451,8 +453,17 @@ impl RemoteMultimodalEngine {
                 }
             }
 
+            // Execute steps first (even if done=true, we need to process OpenPage actions)
+            if !plan.steps.is_empty() {
+                let (steps_executed, spawn_pages) = self
+                    .execute_steps(page, &plan.steps, &base_effective_cfg)
+                    .await?;
+                total_steps_executed += steps_executed;
+                all_spawn_pages.extend(spawn_pages);
+            }
+
             // Done condition (model-driven)
-            if plan.done || plan.steps.is_empty() {
+            if plan.done {
                 // Capture final screenshot (enabled by default)
                 let final_screenshot = if base_effective_cfg.screenshot {
                     self.take_final_screenshot(page).await.ok()
@@ -468,14 +479,9 @@ impl RemoteMultimodalEngine {
                     usage: total_usage,
                     extracted: last_extracted,
                     screenshot: final_screenshot,
+                    spawn_pages: all_spawn_pages,
                 });
             }
-
-            // Execute steps
-            let steps_executed = self
-                .execute_steps(page, &plan.steps, &base_effective_cfg)
-                .await?;
-            total_steps_executed += steps_executed;
 
             // Post-step delay
             if base_effective_cfg.post_plan_wait_ms > 0 {
@@ -501,6 +507,7 @@ impl RemoteMultimodalEngine {
             usage: total_usage,
             extracted: last_extracted,
             screenshot: final_screenshot,
+            spawn_pages: all_spawn_pages,
         })
     }
 
@@ -678,6 +685,7 @@ impl RemoteMultimodalEngine {
         // Extract content and usage
         let content = extract_assistant_content(&body)
             .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
+        log::debug!("LLM response content: {}", content);
         let mut usage = extract_usage(&body);
         usage.increment_llm_calls();
 
@@ -702,6 +710,7 @@ impl RemoteMultimodalEngine {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
+        log::debug!("Parsed plan - label: {}, done: {}, steps: {:?}", label, done, steps);
 
         // Try to get extracted field, or fallback to the entire response when in extraction mode
         let extracted = parsed.get("extracted").cloned().or_else(|| {
@@ -762,18 +771,41 @@ impl RemoteMultimodalEngine {
     /// Execute automation steps on the page.
     ///
     /// Handles WebAutomation enum-style actions like `{ "Click": "selector" }`.
+    /// Returns (steps_executed, spawn_pages) where spawn_pages contains URLs
+    /// from `OpenPage` actions that should be opened in new browser tabs.
     async fn execute_steps(
         &self,
         page: &Page,
         steps: &[serde_json::Value],
         _cfg: &RemoteMultimodalConfig,
-    ) -> EngineResult<usize> {
+    ) -> EngineResult<(usize, Vec<String>)> {
         let mut executed = 0;
+        let mut spawn_pages = Vec::new();
 
         for step in steps {
+            log::debug!("Executing step: {:?}", step);
             // Handle WebAutomation enum-style format: { "ActionName": value }
             if let Some(obj) = step.as_object() {
                 for (action, value) in obj {
+                    log::debug!("Action: {}, Value: {:?}", action, value);
+                    // Handle OpenPage specially - collect URLs instead of executing
+                    if action == "OpenPage" {
+                        log::info!("OpenPage action detected: {:?}", value);
+                        if let Some(url) = value.as_str() {
+                            spawn_pages.push(url.to_string());
+                            executed += 1;
+                        } else if let Some(urls) = value.as_array() {
+                            // Support array of URLs: { "OpenPage": ["url1", "url2"] }
+                            for url_val in urls {
+                                if let Some(url) = url_val.as_str() {
+                                    spawn_pages.push(url.to_string());
+                                }
+                            }
+                            executed += 1;
+                        }
+                        continue;
+                    }
+
                     let success = self.execute_single_action(page, action, value).await;
                     if success {
                         executed += 1;
@@ -782,7 +814,7 @@ impl RemoteMultimodalEngine {
             }
         }
 
-        Ok(executed)
+        Ok((executed, spawn_pages))
     }
 
     /// Execute a single WebAutomation action.
@@ -1411,7 +1443,7 @@ Only return the JSON object, no other text."#;
         let step = best_effort_parse_json_object(&content)?;
 
         // Execute the action
-        let steps_executed = self.execute_steps(page, &[step.clone()], &self.cfg).await?;
+        let (steps_executed, _spawn_pages) = self.execute_steps(page, &[step.clone()], &self.cfg).await?;
 
         let action_type = step.get("action").and_then(|v| v.as_str()).map(String::from);
         let description = step
@@ -1665,4 +1697,729 @@ pub async fn run_remote_multimodal_with_page(
     engine.with_semaphore(sem);
 
     engine.run(page, url).await
+}
+
+/// Result from processing a spawned page.
+#[cfg(feature = "chrome")]
+#[derive(Debug, Clone)]
+pub struct SpawnedPageResult {
+    /// The URL that was opened.
+    pub url: String,
+    /// The automation result from the page.
+    pub result: Result<AutomationResult, String>,
+    /// Total bytes transferred for this page (from network events).
+    pub bytes_transferred: Option<f64>,
+    /// Map of request IDs to bytes transferred (for detailed network tracking).
+    pub response_map: Option<std::collections::HashMap<String, f64>>,
+}
+
+#[cfg(feature = "chrome")]
+impl SpawnedPageResult {
+    /// Check if the page was processed successfully.
+    pub fn is_ok(&self) -> bool {
+        self.result.is_ok()
+    }
+
+    /// Get the extracted data from this page, if any.
+    pub fn extracted(&self) -> Option<&serde_json::Value> {
+        self.result.as_ref().ok().and_then(|r| r.extracted.as_ref())
+    }
+
+    /// Get the screenshot from this page, if any (base64 encoded).
+    pub fn screenshot(&self) -> Option<&str> {
+        self.result
+            .as_ref()
+            .ok()
+            .and_then(|r| r.screenshot.as_deref())
+    }
+
+    /// Get the label/description from this page.
+    pub fn label(&self) -> Option<&str> {
+        self.result.as_ref().ok().map(|r| r.label.as_str())
+    }
+
+    /// Get the error message if the page failed.
+    pub fn error(&self) -> Option<&str> {
+        self.result.as_ref().err().map(|s| s.as_str())
+    }
+
+    /// Get any additional spawn_pages from this page (for recursive crawling).
+    pub fn spawn_pages(&self) -> Option<&[String]> {
+        self.result
+            .as_ref()
+            .ok()
+            .map(|r| r.spawn_pages.as_slice())
+    }
+
+    /// Get the token usage from this page.
+    pub fn usage(&self) -> Option<&super::AutomationUsage> {
+        self.result.as_ref().ok().map(|r| &r.usage)
+    }
+}
+
+/// Callback type for setting up event tracking on spawned pages.
+///
+/// This allows spider to propagate ChromeEventTracker or similar tracking
+/// from the main page to spawned pages.
+#[cfg(feature = "chrome")]
+pub type PageSetupFn = Box<dyn Fn(&Page) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
+/// Options for configuring spawned page automation.
+///
+/// Configure extraction prompts, screenshots, and event tracking propagation
+/// for pages spawned from `OpenPage` actions.
+#[cfg(feature = "chrome")]
+#[derive(Default)]
+pub struct SpawnPageOptions {
+    /// Custom extraction prompt for each page.
+    /// If set, enables extraction mode and uses this prompt.
+    pub extraction_prompt: Option<String>,
+    /// Whether to capture screenshots from each page.
+    pub screenshot: bool,
+    /// Maximum rounds of automation per page.
+    pub max_rounds: usize,
+    /// Additional user message to append to each page's automation.
+    pub user_message_extra: Option<String>,
+    /// Optional callback to setup event tracking on each spawned page.
+    /// Use this to propagate network event tracking from the main page.
+    pub page_setup: Option<std::sync::Arc<PageSetupFn>>,
+    /// Whether to track bytes transferred via CDP network events.
+    pub track_bytes: bool,
+}
+
+#[cfg(feature = "chrome")]
+impl SpawnPageOptions {
+    /// Create new options with defaults (screenshot enabled, 1 round).
+    pub fn new() -> Self {
+        Self {
+            extraction_prompt: None,
+            screenshot: true,
+            max_rounds: 1,
+            user_message_extra: None,
+            page_setup: None,
+            track_bytes: false,
+        }
+    }
+
+    /// Enable extraction with a custom prompt.
+    pub fn with_extraction(mut self, prompt: impl Into<String>) -> Self {
+        self.extraction_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Enable or disable screenshots.
+    pub fn with_screenshot(mut self, enabled: bool) -> Self {
+        self.screenshot = enabled;
+        self
+    }
+
+    /// Set maximum automation rounds per page.
+    pub fn with_max_rounds(mut self, rounds: usize) -> Self {
+        self.max_rounds = rounds;
+        self
+    }
+
+    /// Add extra user instructions for each page.
+    pub fn with_user_message(mut self, message: impl Into<String>) -> Self {
+        self.user_message_extra = Some(message.into());
+        self
+    }
+
+    /// Set a page setup callback for event tracking propagation.
+    /// This callback is called on each spawned page to setup event listeners,
+    /// network tracking, etc. from the parent page context.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use std::sync::Arc;
+    ///
+    /// let options = SpawnPageOptions::new()
+    ///     .with_page_setup(Arc::new(|page: &Page| {
+    ///         Box::pin(async move {
+    ///             // Setup event tracking on this page
+    ///             // e.g., setup_chrome_events(page, tracker).await;
+    ///         })
+    ///     }));
+    /// ```
+    pub fn with_page_setup(mut self, setup: std::sync::Arc<PageSetupFn>) -> Self {
+        self.page_setup = Some(setup);
+        self
+    }
+
+    /// Enable bytes tracking via CDP network events.
+    /// When enabled, each spawned page will track bytes transferred and
+    /// populate `SpawnedPageResult.bytes_transferred` and `response_map`.
+    pub fn with_track_bytes(mut self, enabled: bool) -> Self {
+        self.track_bytes = enabled;
+        self
+    }
+}
+
+// Manual Debug implementation since PageSetupFn doesn't implement Debug
+#[cfg(feature = "chrome")]
+impl std::fmt::Debug for SpawnPageOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpawnPageOptions")
+            .field("extraction_prompt", &self.extraction_prompt)
+            .field("screenshot", &self.screenshot)
+            .field("max_rounds", &self.max_rounds)
+            .field("user_message_extra", &self.user_message_extra)
+            .field("page_setup", &self.page_setup.as_ref().map(|_| "<fn>"))
+            .field("track_bytes", &self.track_bytes)
+            .finish()
+    }
+}
+
+// Manual Clone implementation
+#[cfg(feature = "chrome")]
+impl Clone for SpawnPageOptions {
+    fn clone(&self) -> Self {
+        Self {
+            extraction_prompt: self.extraction_prompt.clone(),
+            screenshot: self.screenshot,
+            max_rounds: self.max_rounds,
+            user_message_extra: self.user_message_extra.clone(),
+            page_setup: self.page_setup.clone(),
+            track_bytes: self.track_bytes,
+        }
+    }
+}
+
+/// Process spawn_pages URLs concurrently with a browser.
+///
+/// This function takes URLs from `AutomationResult.spawn_pages` and runs
+/// automation on each in a new browser page concurrently.
+///
+/// # Arguments
+/// * `browser` - The browser to create new pages from
+/// * `urls` - URLs to open (typically from `result.spawn_pages`)
+/// * `cfgs` - Configuration for the automation engine
+///
+/// # Returns
+/// A vector of results, one for each URL, in completion order.
+///
+/// # Example
+/// ```ignore
+/// let result = run_remote_multimodal_with_page(&config, &page, url).await?;
+/// if result.has_spawn_pages() {
+///     let spawn_results = run_spawn_pages_concurrent(
+///         &browser,
+///         result.spawn_pages,
+///         &config,
+///     ).await;
+///     for spawn_result in spawn_results {
+///         println!("{}: {:?}", spawn_result.url, spawn_result.result);
+///     }
+/// }
+/// ```
+#[cfg(feature = "chrome")]
+pub async fn run_spawn_pages_concurrent(
+    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
+    urls: Vec<String>,
+    cfgs: &super::RemoteMultimodalConfigs,
+) -> Vec<SpawnedPageResult> {
+    run_spawn_pages_with_options(browser, urls, cfgs, SpawnPageOptions::new()).await
+}
+
+/// Process spawn_pages URLs concurrently with custom options.
+///
+/// This is the full-featured version that allows customizing extraction,
+/// screenshots, and other options for each spawned page.
+///
+/// # Arguments
+/// * `browser` - The browser to create new pages from
+/// * `urls` - URLs to open (typically from `result.spawn_pages`)
+/// * `base_cfgs` - Base configuration (API URL, model, etc.)
+/// * `options` - Options for extraction, screenshots, etc.
+///
+/// # Example
+/// ```ignore
+/// let options = SpawnPageOptions::new()
+///     .with_extraction("Extract the main content, title, and any links")
+///     .with_screenshot(true)
+///     .with_max_rounds(2);
+///
+/// let spawn_results = run_spawn_pages_with_options(
+///     &browser,
+///     result.spawn_pages,
+///     &config,
+///     options,
+/// ).await;
+///
+/// for spawn_result in &spawn_results {
+///     if let Some(data) = spawn_result.extracted() {
+///         println!("Extracted from {}: {}", spawn_result.url, data);
+///     }
+///     if let Some(screenshot) = spawn_result.screenshot() {
+///         // Save screenshot (base64 encoded PNG)
+///         println!("Got screenshot from {} ({} bytes)", spawn_result.url, screenshot.len());
+///     }
+/// }
+/// ```
+#[cfg(feature = "chrome")]
+pub async fn run_spawn_pages_with_options(
+    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
+    urls: Vec<String>,
+    base_cfgs: &super::RemoteMultimodalConfigs,
+    options: SpawnPageOptions,
+) -> Vec<SpawnedPageResult> {
+    use chromiumoxide::cdp::browser_protocol::network::EventDataReceived;
+    use dashmap::DashMap;
+    use futures::StreamExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    if urls.is_empty() {
+        return Vec::new();
+    }
+
+    let base_cfgs = Arc::new(base_cfgs.clone());
+    let options = Arc::new(options);
+    let mut handles = Vec::with_capacity(urls.len());
+
+    // Spawn all pages concurrently
+    for url in urls {
+        let browser = browser.clone();
+        let base_cfgs = base_cfgs.clone();
+        let options = options.clone();
+        let url_clone = url.clone();
+
+        handles.push(tokio::spawn(async move {
+            // Create new page for this URL
+            let new_page = match browser.new_page(&url_clone).await {
+                Ok(page) => page,
+                Err(e) => {
+                    return SpawnedPageResult {
+                        url: url_clone,
+                        result: Err(format!("Failed to create page: {}", e)),
+                        bytes_transferred: None,
+                        response_map: None,
+                    };
+                }
+            };
+
+            // Run page setup callback if provided (for event tracking propagation)
+            if let Some(ref setup) = options.page_setup {
+                setup(&new_page).await;
+            }
+
+            // Set up bytes tracking if enabled
+            let total_bytes: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+            let response_map: Arc<DashMap<String, u64>> = Arc::new(DashMap::new());
+
+            let bytes_listener = if options.track_bytes {
+                new_page.event_listener::<EventDataReceived>().await.ok()
+            } else {
+                None
+            };
+
+            // Spawn bytes tracking task if we have a listener
+            let tracking_handle = if let Some(mut listener) = bytes_listener {
+                let total_bytes = total_bytes.clone();
+                let response_map = response_map.clone();
+                Some(tokio::spawn(async move {
+                    while let Some(event) = listener.next().await {
+                        let bytes = event.encoded_data_length as u64;
+                        total_bytes.fetch_add(bytes, Ordering::Relaxed);
+                        response_map
+                            .entry(event.request_id.inner().to_string())
+                            .and_modify(|v| *v += bytes)
+                            .or_insert(bytes);
+                    }
+                }))
+            } else {
+                None
+            };
+
+            // Build page-specific config with options
+            let mut page_cfg = super::RemoteMultimodalConfig::new()
+                .with_max_rounds(options.max_rounds.max(1))
+                .with_screenshot(options.screenshot);
+
+            // Enable extraction if prompt is provided
+            if let Some(ref prompt) = options.extraction_prompt {
+                page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+            }
+
+            let mut page_cfgs = super::RemoteMultimodalConfigs::new(
+                &base_cfgs.api_url,
+                &base_cfgs.model_name,
+            )
+            .with_cfg(page_cfg);
+
+            // Copy API key
+            if let Some(ref key) = base_cfgs.api_key {
+                page_cfgs = page_cfgs.with_api_key(key.clone());
+            }
+
+            // Add user message extra if provided
+            if let Some(ref msg) = options.user_message_extra {
+                page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+            }
+
+            // Run automation on the new page
+            let result = run_remote_multimodal_with_page(&page_cfgs, &new_page, &url_clone)
+                .await
+                .map_err(|e| format!("Automation failed: {}", e));
+
+            // Stop bytes tracking
+            if let Some(handle) = tracking_handle {
+                handle.abort();
+            }
+
+            // Collect bytes data
+            let (bytes_transferred, response_map_out) = {
+                let bytes_val = total_bytes.load(Ordering::Relaxed);
+                let bytes = if bytes_val > 0 { Some(bytes_val as f64) } else { None };
+                let map = if !response_map.is_empty() {
+                    Some(response_map.iter().map(|e| (e.key().clone(), *e.value() as f64)).collect())
+                } else {
+                    None
+                };
+                (bytes, map)
+            };
+
+            SpawnedPageResult {
+                url: url_clone,
+                result,
+                bytes_transferred,
+                response_map: response_map_out,
+            }
+        }));
+    }
+
+    // Collect all results (concurrent execution, wait for all)
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.await {
+            Ok(spawn_result) => results.push(spawn_result),
+            Err(e) => {
+                // JoinError - task panicked or was cancelled
+                results.push(SpawnedPageResult {
+                    url: "unknown".to_string(),
+                    result: Err(format!("Task failed: {}", e)),
+                    bytes_transferred: None,
+                    response_map: None,
+                });
+            }
+        }
+    }
+
+    results
+}
+
+/// Page factory type for creating new pages.
+/// The factory receives a URL and should return a new Page navigated to that URL.
+#[cfg(feature = "chrome")]
+pub type PageFactory<E> = Box<
+    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Page, E>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Process spawn_pages URLs concurrently using a page factory function.
+///
+/// This version allows spider or other consumers to provide their own method
+/// for creating pages, rather than requiring direct Browser access. This is
+/// useful when the entry point only has access to a Page reference.
+///
+/// # Arguments
+/// * `page_factory` - A function that creates new pages from URLs
+/// * `urls` - URLs to open (typically from `result.spawn_pages`)
+/// * `base_cfgs` - Base configuration (API URL, model, etc.)
+/// * `options` - Options for extraction, screenshots, event tracking, etc.
+///
+/// # Example
+/// ```ignore
+/// use std::sync::Arc;
+///
+/// // Create a page factory from the browser
+/// let browser = Arc::clone(&browser);
+/// let page_factory: PageFactory<String> = Box::new(move |url| {
+///     let browser = browser.clone();
+///     Box::pin(async move {
+///         browser.new_page(&url).await.map_err(|e| e.to_string())
+///     })
+/// });
+///
+/// let options = SpawnPageOptions::new()
+///     .with_extraction("Extract page content")
+///     .with_page_setup(Arc::new(|page| {
+///         Box::pin(async move {
+///             // Setup event tracking propagated from main page
+///         })
+///     }));
+///
+/// let spawn_results = run_spawn_pages_with_factory(
+///     Arc::new(page_factory),
+///     result.spawn_pages,
+///     &config,
+///     options,
+/// ).await;
+/// ```
+#[cfg(feature = "chrome")]
+pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>(
+    page_factory: std::sync::Arc<PageFactory<E>>,
+    urls: Vec<String>,
+    base_cfgs: &super::RemoteMultimodalConfigs,
+    options: SpawnPageOptions,
+) -> Vec<SpawnedPageResult> {
+    use std::sync::Arc;
+
+    if urls.is_empty() {
+        return Vec::new();
+    }
+
+    let base_cfgs = Arc::new(base_cfgs.clone());
+    let options = Arc::new(options);
+    let mut handles = Vec::with_capacity(urls.len());
+
+    // Spawn all pages concurrently
+    for url in urls {
+        let page_factory = page_factory.clone();
+        let base_cfgs = base_cfgs.clone();
+        let options = options.clone();
+        let url_clone = url.clone();
+
+        handles.push(tokio::spawn(async move {
+            let result = async {
+                // Create new page using the factory
+                let new_page = page_factory(url_clone.clone())
+                    .await
+                    .map_err(|e| format!("Failed to create page: {}", e))?;
+
+                // Run page setup callback if provided (for event tracking propagation)
+                if let Some(ref setup) = options.page_setup {
+                    setup(&new_page).await;
+                }
+
+                // Build page-specific config with options
+                let mut page_cfg = super::RemoteMultimodalConfig::new()
+                    .with_max_rounds(options.max_rounds.max(1))
+                    .with_screenshot(options.screenshot);
+
+                // Enable extraction if prompt is provided
+                if let Some(ref prompt) = options.extraction_prompt {
+                    page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+                }
+
+                let mut page_cfgs = super::RemoteMultimodalConfigs::new(
+                    &base_cfgs.api_url,
+                    &base_cfgs.model_name,
+                )
+                .with_cfg(page_cfg);
+
+                // Copy API key
+                if let Some(ref key) = base_cfgs.api_key {
+                    page_cfgs = page_cfgs.with_api_key(key.clone());
+                }
+
+                // Add user message extra if provided
+                if let Some(ref msg) = options.user_message_extra {
+                    page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+                }
+
+                // Run automation on the new page
+                run_remote_multimodal_with_page(&page_cfgs, &new_page, &url_clone)
+                    .await
+                    .map_err(|e| format!("Automation failed: {}", e))
+            }
+            .await;
+
+            SpawnedPageResult {
+                url: url_clone,
+                result,
+                bytes_transferred: None, // Set by caller if needed
+                response_map: None,
+            }
+        }));
+    }
+
+    // Collect all results (concurrent execution, wait for all)
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.await {
+            Ok(spawn_result) => results.push(spawn_result),
+            Err(e) => {
+                // JoinError - task panicked or was cancelled
+                results.push(SpawnedPageResult {
+                    url: "unknown".to_string(),
+                    result: Err(format!("Task failed: {}", e)),
+                    bytes_transferred: None,
+                    response_map: None,
+                });
+            }
+        }
+    }
+
+    results
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spawn_page_options_default() {
+        let options = SpawnPageOptions::new();
+        assert!(options.extraction_prompt.is_none());
+        assert!(options.screenshot); // Default is true
+        assert_eq!(options.max_rounds, 1);
+        assert!(options.user_message_extra.is_none());
+        assert!(options.page_setup.is_none());
+    }
+
+    #[test]
+    fn test_spawn_page_options_builder() {
+        let options = SpawnPageOptions::new()
+            .with_extraction("Extract the title and main content")
+            .with_screenshot(false)
+            .with_max_rounds(3)
+            .with_user_message("Additional instructions");
+
+        assert_eq!(
+            options.extraction_prompt,
+            Some("Extract the title and main content".to_string())
+        );
+        assert!(!options.screenshot);
+        assert_eq!(options.max_rounds, 3);
+        assert_eq!(
+            options.user_message_extra,
+            Some("Additional instructions".to_string())
+        );
+    }
+
+    #[test]
+    fn test_spawn_page_options_clone() {
+        let options = SpawnPageOptions::new()
+            .with_extraction("test")
+            .with_screenshot(true)
+            .with_max_rounds(2);
+
+        let cloned = options.clone();
+        assert_eq!(cloned.extraction_prompt, options.extraction_prompt);
+        assert_eq!(cloned.screenshot, options.screenshot);
+        assert_eq!(cloned.max_rounds, options.max_rounds);
+    }
+
+    #[test]
+    fn test_spawn_page_options_debug() {
+        let options = SpawnPageOptions::new().with_extraction("test");
+        let debug_str = format!("{:?}", options);
+        assert!(debug_str.contains("SpawnPageOptions"));
+        assert!(debug_str.contains("extraction_prompt"));
+    }
+
+    #[test]
+    fn test_spawned_page_result_success() {
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Ok(crate::automation::AutomationResult::success("test", 1)
+                .with_extracted(serde_json::json!({"title": "Example"}))
+                .with_screenshot("base64data".to_string())),
+            bytes_transferred: Some(1024.0),
+            response_map: None,
+        };
+
+        assert!(result.is_ok());
+        assert!(result.error().is_none());
+        assert_eq!(result.label(), Some("test"));
+        assert!(result.extracted().is_some());
+        assert_eq!(result.screenshot(), Some("base64data"));
+        assert!(result.usage().is_some());
+        assert_eq!(result.bytes_transferred, Some(1024.0));
+    }
+
+    #[test]
+    fn test_spawned_page_result_error() {
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Err("Connection failed".to_string()),
+            bytes_transferred: None,
+            response_map: None,
+        };
+
+        assert!(!result.is_ok());
+        assert_eq!(result.error(), Some("Connection failed"));
+        assert!(result.label().is_none());
+        assert!(result.extracted().is_none());
+        assert!(result.screenshot().is_none());
+        assert!(result.usage().is_none());
+    }
+
+    #[test]
+    fn test_spawned_page_result_spawn_pages() {
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Ok(crate::automation::AutomationResult::success("test", 1)
+                .with_spawn_pages(vec![
+                    "https://example.com/page1".to_string(),
+                    "https://example.com/page2".to_string(),
+                ])),
+            bytes_transferred: None,
+            response_map: None,
+        };
+
+        let spawn_pages = result.spawn_pages();
+        assert!(spawn_pages.is_some());
+        assert_eq!(spawn_pages.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_spawned_page_result_with_bytes_tracking() {
+        let mut response_map = std::collections::HashMap::new();
+        response_map.insert("req1".to_string(), 512.0);
+        response_map.insert("req2".to_string(), 1024.0);
+
+        let result = SpawnedPageResult {
+            url: "https://example.com".to_string(),
+            result: Ok(crate::automation::AutomationResult::success("test", 1)),
+            bytes_transferred: Some(1536.0),
+            response_map: Some(response_map),
+        };
+
+        assert_eq!(result.bytes_transferred, Some(1536.0));
+        assert!(result.response_map.is_some());
+        assert_eq!(result.response_map.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_open_page_action_parsing_single_url() {
+        // Test that OpenPage with a single URL is correctly detected
+        let step = serde_json::json!({ "OpenPage": "https://example.com" });
+        if let Some(obj) = step.as_object() {
+            for (action, value) in obj {
+                if action == "OpenPage" {
+                    if let Some(url) = value.as_str() {
+                        assert_eq!(url, "https://example.com");
+                    } else {
+                        panic!("Expected string URL");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_open_page_action_parsing_multiple_urls() {
+        // Test that OpenPage with multiple URLs is correctly detected
+        let step = serde_json::json!({ "OpenPage": ["https://a.com", "https://b.com"] });
+        if let Some(obj) = step.as_object() {
+            for (action, value) in obj {
+                if action == "OpenPage" {
+                    if let Some(urls) = value.as_array() {
+                        assert_eq!(urls.len(), 2);
+                        assert_eq!(urls[0].as_str().unwrap(), "https://a.com");
+                        assert_eq!(urls[1].as_str().unwrap(), "https://b.com");
+                    } else {
+                        panic!("Expected array of URLs");
+                    }
+                }
+            }
+        }
+    }
 }

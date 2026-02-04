@@ -476,6 +476,7 @@ impl RemoteMultimodalEngine {
             usage,
             extracted,
             screenshot: None,
+            spawn_pages: Vec::new(),
         })
     }
 
@@ -708,6 +709,7 @@ impl RemoteMultimodalEngine {
             usage,
             extracted,
             screenshot: None,
+            spawn_pages: Vec::new(),
         })
     }
 
