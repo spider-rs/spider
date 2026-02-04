@@ -4573,6 +4573,7 @@ impl Website {
                 ),
                 self.domain_parsed.clone(),
                 self.on_link_find_callback.clone(),
+                self.configuration.remote_multimodal.clone(),
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
@@ -4719,6 +4720,36 @@ impl Website {
 
                                     if return_page_links {
                                         page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                                    }
+
+                                    // Run remote multimodal extraction if configured (HTTP-only path)
+                                    #[cfg(all(feature = "agent", feature = "serde"))]
+                                    if shared.10.is_some() {
+                                        let html = page.get_html();
+                                        if !html.is_empty() {
+                                            use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
+                                            let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
+                                            if let Ok(Some(result)) = run_remote_multimodal_extraction(
+                                                &shared.10,
+                                                &html,
+                                                target_url,
+                                                title,
+                                            ).await {
+                                                // Store usage on page
+                                                match page.remote_multimodal_usage.as_mut() {
+                                                    Some(v) => v.push(result.usage.clone()),
+                                                    None => page.remote_multimodal_usage = Some(vec![result.usage.clone()]),
+                                                }
+                                                // Store extracted data if available
+                                                if result.extracted.is_some() || result.screenshot.is_some() {
+                                                    let automation_result = result.to_automation_results();
+                                                    match page.extra_remote_multimodal_data.as_mut() {
+                                                        Some(v) => v.push(automation_result),
+                                                        None => page.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if let Some(ref cb) = on_should_crawl_callback {
@@ -5219,6 +5250,7 @@ impl Website {
                 ),
                 self.domain_parsed.clone(),
                 self.on_link_find_callback.clone(),
+                self.configuration.remote_multimodal.clone(),
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
@@ -5364,6 +5396,36 @@ impl Website {
 
                                     if return_page_links {
                                         page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
+                                    }
+
+                                    // Run remote multimodal extraction if configured (HTTP-only path)
+                                    #[cfg(all(feature = "agent", feature = "serde"))]
+                                    if shared.10.is_some() {
+                                        let html = page.get_html();
+                                        if !html.is_empty() {
+                                            use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
+                                            let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
+                                            if let Ok(Some(result)) = run_remote_multimodal_extraction(
+                                                &shared.10,
+                                                &html,
+                                                target_url,
+                                                title,
+                                            ).await {
+                                                // Store usage on page
+                                                match page.remote_multimodal_usage.as_mut() {
+                                                    Some(v) => v.push(result.usage.clone()),
+                                                    None => page.remote_multimodal_usage = Some(vec![result.usage.clone()]),
+                                                }
+                                                // Store extracted data if available
+                                                if result.extracted.is_some() || result.screenshot.is_some() {
+                                                    let automation_result = result.to_automation_results();
+                                                    match page.extra_remote_multimodal_data.as_mut() {
+                                                        Some(v) => v.push(automation_result),
+                                                        None => page.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if let Some(ref cb) = on_should_crawl_callback {
@@ -6511,6 +6573,36 @@ impl Website {
 
                                     if shared.4.normalize {
                                         page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                    }
+
+                                    // Run remote multimodal extraction if configured (smart HTTP path)
+                                    #[cfg(all(feature = "agent", feature = "serde"))]
+                                    if shared.4.remote_multimodal.is_some() {
+                                        let html = page.get_html();
+                                        if !html.is_empty() {
+                                            use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
+                                            let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
+                                            if let Ok(Some(result)) = run_remote_multimodal_extraction(
+                                                &shared.4.remote_multimodal,
+                                                &html,
+                                                url,
+                                                title,
+                                            ).await {
+                                                // Store usage on page
+                                                match page.remote_multimodal_usage.as_mut() {
+                                                    Some(v) => v.push(result.usage.clone()),
+                                                    None => page.remote_multimodal_usage = Some(vec![result.usage.clone()]),
+                                                }
+                                                // Store extracted data if available
+                                                if result.extracted.is_some() || result.screenshot.is_some() {
+                                                    let automation_result = result.to_automation_results();
+                                                    match page.extra_remote_multimodal_data.as_mut() {
+                                                        Some(v) => v.push(automation_result),
+                                                        None => page.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if let Some(ref cb) = on_should_crawl_callback {
