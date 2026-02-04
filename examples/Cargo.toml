@@ -21,6 +21,7 @@ env_logger = "0.11.3"
 htr = "0.5.27"
 flexbuffers = "2.0.0"
 console-subscriber = { version = "0.4" }
+serde_json = "1"
 
 [dependencies.spider]
 version = "2"
@@ -298,3 +299,8 @@ required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 name = "remote_multimodal_multi"
 path = "remote_multimodal_multi.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
+
+[[example]]
+name = "not_a_robot"
+path = "not_a_robot.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "spider/agent_chrome"]

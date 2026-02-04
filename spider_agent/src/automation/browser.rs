@@ -7,7 +7,12 @@
 use base64::{engine::general_purpose, Engine as _};
 #[cfg(feature = "chrome")]
 use chromiumoxide::{
-    cdp::browser_protocol::page::CaptureScreenshotFormat, page::ScreenshotParams, Page,
+    cdp::browser_protocol::{
+        input::{DispatchMouseEventParams, DispatchMouseEventType, MouseButton},
+        page::CaptureScreenshotFormat,
+    },
+    page::ScreenshotParams,
+    Page,
 };
 
 use super::{
@@ -72,11 +77,28 @@ impl RemoteMultimodalEngine {
     // -----------------------------------------------------------------
 
     /// Capture screenshot as data URL with profile settings.
+    /// Automatically applies grayscale filter for text CAPTCHAs to improve readability.
     pub(crate) async fn screenshot_as_data_url_with_profile(
         &self,
         page: &Page,
         cap: &CaptureProfile,
     ) -> EngineResult<String> {
+        // Auto-detect text CAPTCHA and apply grayscale for better readability
+        let is_text_captcha = page.evaluate(r#"
+            (() => {
+                const text = document.body?.innerText?.toLowerCase() || '';
+                return text.includes('enter the text') ||
+                       text.includes('type the') ||
+                       text.includes('wiggles') ||
+                       text.includes('distorted');
+            })()
+        "#).await.ok().and_then(|v| v.value().and_then(|v| v.as_bool())).unwrap_or(false);
+
+        if is_text_captcha {
+            // Apply grayscale to remove distracting colored lines
+            let _ = page.evaluate("document.body.style.filter = 'grayscale(100%)'").await;
+        }
+
         let params = ScreenshotParams::builder()
             .format(CaptureScreenshotFormat::Png)
             .full_page(cap.full_page)
@@ -87,6 +109,11 @@ impl RemoteMultimodalEngine {
             .screenshot(params)
             .await
             .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
+
+        // Restore color after screenshot
+        if is_text_captcha {
+            let _ = page.evaluate("document.body.style.filter = ''").await;
+        }
 
         let b64 = general_purpose::STANDARD.encode(png);
         Ok(format!("data:image/png;base64,{}", b64))
@@ -611,9 +638,14 @@ impl RemoteMultimodalEngine {
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        // Make HTTP request
+        // Make HTTP request with 2 minute timeout for LLM calls
         static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(reqwest::Client::new);
+            std::sync::LazyLock::new(|| {
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(120))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new())
+            });
 
         let mut req = CLIENT.post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
@@ -773,10 +805,25 @@ impl RemoteMultimodalEngine {
             "ClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.evaluate(format!(
-                    "document.elementFromPoint({}, {})?.click()",
-                    x, y
-                )).await;
+                // Use CDP mouse events for trusted clicks (important for CAPTCHAs)
+                let down = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                let up = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                if let (Ok(d), Ok(u)) = (down, up) {
+                    let _ = page.execute(d).await;
+                    let _ = page.execute(u).await;
+                }
                 true
             }
             "ClickHold" => {
@@ -801,16 +848,26 @@ impl RemoteMultimodalEngine {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
-                let _ = page.evaluate(format!(r#"
-                    (async () => {{
-                        const el = document.elementFromPoint({}, {});
-                        if (el) {{
-                            el.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: {}, clientY: {}}}));
-                            await new Promise(r => setTimeout(r, {}));
-                            el.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: {}, clientY: {}}}));
-                        }}
-                    }})()
-                "#, x, y, x, y, hold_ms, x, y)).await;
+                // Use CDP for trusted clicks
+                let down = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                let up = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                if let (Ok(d), Ok(u)) = (down, up) {
+                    let _ = page.execute(d).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
+                    let _ = page.execute(u).await;
+                }
                 true
             }
             "DoubleClick" => {
@@ -826,10 +883,25 @@ impl RemoteMultimodalEngine {
             "DoubleClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.evaluate(format!(
-                    "document.elementFromPoint({}, {})?.dispatchEvent(new MouseEvent('dblclick', {{bubbles: true}}))",
-                    x, y
-                )).await;
+                // CDP double click with click_count=2
+                let down = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .button(MouseButton::Left)
+                    .click_count(2)
+                    .build();
+                let up = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .button(MouseButton::Left)
+                    .click_count(2)
+                    .build();
+                if let (Ok(d), Ok(u)) = (down, up) {
+                    let _ = page.execute(d).await;
+                    let _ = page.execute(u).await;
+                }
                 true
             }
             "RightClick" => {
@@ -845,10 +917,25 @@ impl RemoteMultimodalEngine {
             "RightClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.evaluate(format!(
-                    "document.elementFromPoint({}, {})?.dispatchEvent(new MouseEvent('contextmenu', {{bubbles: true}}))",
-                    x, y
-                )).await;
+                // CDP right click
+                let down = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .button(MouseButton::Right)
+                    .click_count(1)
+                    .build();
+                let up = DispatchMouseEventParams::builder()
+                    .x(x)
+                    .y(y)
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .button(MouseButton::Right)
+                    .click_count(1)
+                    .build();
+                if let (Ok(d), Ok(u)) = (down, up) {
+                    let _ = page.execute(d).await;
+                    let _ = page.execute(u).await;
+                }
                 true
             }
             "ClickAllClickable" => {
@@ -885,16 +972,32 @@ impl RemoteMultimodalEngine {
                 let from_y = value.get("from_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_x = value.get("to_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_y = value.get("to_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.evaluate(format!(r#"
-                    (async () => {{
-                        const el = document.elementFromPoint({}, {});
-                        if (el) {{
-                            el.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: {}, clientY: {}}}));
-                            document.dispatchEvent(new MouseEvent('mousemove', {{bubbles: true, clientX: {}, clientY: {}}}));
-                            document.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: {}, clientY: {}}}));
-                        }}
-                    }})()
-                "#, from_x, from_y, from_x, from_y, to_x, to_y, to_x, to_y)).await;
+                // CDP drag: mouse down at start, move to end, mouse up
+                let down = DispatchMouseEventParams::builder()
+                    .x(from_x)
+                    .y(from_y)
+                    .r#type(DispatchMouseEventType::MousePressed)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                let mv = DispatchMouseEventParams::builder()
+                    .x(to_x)
+                    .y(to_y)
+                    .r#type(DispatchMouseEventType::MouseMoved)
+                    .button(MouseButton::Left)
+                    .build();
+                let up = DispatchMouseEventParams::builder()
+                    .x(to_x)
+                    .y(to_y)
+                    .r#type(DispatchMouseEventType::MouseReleased)
+                    .button(MouseButton::Left)
+                    .click_count(1)
+                    .build();
+                if let (Ok(d), Ok(m), Ok(u)) = (down, mv, up) {
+                    let _ = page.execute(d).await;
+                    let _ = page.execute(m).await;
+                    let _ = page.execute(u).await;
+                }
                 true
             }
 
@@ -1265,7 +1368,12 @@ Only return the JSON object, no other text."#;
         let _permit = self.acquire_llm_permit().await;
 
         static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(reqwest::Client::new);
+            std::sync::LazyLock::new(|| {
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(120))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new())
+            });
 
         let mut req = CLIENT.post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
@@ -1435,7 +1543,12 @@ Only return the JSON object."#;
         let _permit = self.acquire_llm_permit().await;
 
         static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(reqwest::Client::new);
+            std::sync::LazyLock::new(|| {
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(120))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new())
+            });
 
         let mut req = CLIENT.post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {

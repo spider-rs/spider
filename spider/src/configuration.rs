@@ -503,7 +503,7 @@ impl Configuration {
             delay: 0,
             depth: 25,
             redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_secs(60))),
+            request_timeout: Some(Box::new(Duration::from_secs(120))),
             only_html: true,
             modify_headers: true,
             ..Default::default()
@@ -517,7 +517,7 @@ impl Configuration {
             delay: 0,
             depth: 25,
             redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_secs(60))),
+            request_timeout: Some(Box::new(Duration::from_secs(120))),
             chrome_intercept: RequestInterceptConfiguration::new(cfg!(
                 feature = "chrome_intercept"
             )),
