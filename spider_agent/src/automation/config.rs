@@ -891,6 +891,17 @@ pub struct RemoteMultimodalConfig {
     /// When None, defaults to judging against extraction_prompt or general context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relevance_prompt: Option<String>,
+    /// Enable URL-level pre-filtering before HTTP fetch.
+    /// When enabled alongside `relevance_gate`, URLs are classified by the
+    /// text model BEFORE fetching. Irrelevant URLs are skipped entirely.
+    #[serde(default)]
+    pub url_prefilter: bool,
+    /// Batch size for URL classification calls (default 20).
+    #[serde(default = "default_url_prefilter_batch_size")]
+    pub url_prefilter_batch_size: usize,
+    /// Max tokens for URL classification response (default 200).
+    #[serde(default = "default_url_prefilter_max_tokens")]
+    pub url_prefilter_max_tokens: u16,
 }
 
 impl Default for RemoteMultimodalConfig {
@@ -925,12 +936,23 @@ impl Default for RemoteMultimodalConfig {
             concurrent_execution: false,
             relevance_gate: false,
             relevance_prompt: None,
+            url_prefilter: false,
+            url_prefilter_batch_size: default_url_prefilter_batch_size(),
+            url_prefilter_max_tokens: default_url_prefilter_max_tokens(),
             #[cfg(feature = "skills")]
             max_skills_per_round: default_max_skills_per_round(),
             #[cfg(feature = "skills")]
             max_skill_context_chars: default_max_skill_context_chars(),
         }
     }
+}
+
+fn default_url_prefilter_batch_size() -> usize {
+    20
+}
+
+fn default_url_prefilter_max_tokens() -> u16 {
+    200
 }
 
 #[cfg(feature = "skills")]
@@ -1119,6 +1141,16 @@ impl RemoteMultimodalConfig {
         self.relevance_prompt = prompt;
         self
     }
+
+    /// Enable URL-level pre-filtering before HTTP fetch.
+    /// Requires `relevance_gate` to also be enabled.
+    pub fn with_url_prefilter(mut self, batch_size: Option<usize>) -> Self {
+        self.url_prefilter = true;
+        if let Some(bs) = batch_size {
+            self.url_prefilter_batch_size = bs;
+        }
+        self
+    }
 }
 
 /// Everything needed to configure RemoteMultimodalEngine.
@@ -1186,6 +1218,9 @@ pub struct RemoteMultimodalConfigs {
     /// Counter for pages deemed irrelevant — each unit = one budget credit to restore.
     #[serde(skip)]
     pub relevance_credits: Arc<std::sync::atomic::AtomicU32>,
+    /// Cache of URL path → relevant classification to avoid re-classifying.
+    #[serde(skip)]
+    pub url_prefilter_cache: Arc<std::sync::RwLock<std::collections::HashMap<String, bool>>>,
 }
 
 impl PartialEq for RemoteMultimodalConfigs {
@@ -1229,6 +1264,7 @@ impl Default for RemoteMultimodalConfigs {
             s3_skill_source: None,
             semaphore: Self::default_semaphore(),
             relevance_credits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            url_prefilter_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -1430,6 +1466,16 @@ impl RemoteMultimodalConfigs {
         self
     }
 
+    /// Enable URL-level pre-filtering before HTTP fetch.
+    /// Requires `relevance_gate` to also be enabled.
+    pub fn with_url_prefilter(mut self, batch_size: Option<usize>) -> Self {
+        self.cfg.url_prefilter = true;
+        if let Some(bs) = batch_size {
+            self.cfg.url_prefilter_batch_size = bs;
+        }
+        self
+    }
+
     /// Whether dual-model routing is active
     /// (at least one of `vision_model` / `text_model` is configured).
     pub fn has_dual_model_routing(&self) -> bool {
@@ -1538,6 +1584,11 @@ pub fn merged_config(
     // Relevance gating
     out.relevance_gate = override_cfg.relevance_gate;
     out.relevance_prompt = override_cfg.relevance_prompt.clone();
+
+    // URL pre-filter
+    out.url_prefilter = override_cfg.url_prefilter;
+    out.url_prefilter_batch_size = override_cfg.url_prefilter_batch_size;
+    out.url_prefilter_max_tokens = override_cfg.url_prefilter_max_tokens;
 
     out
 }

@@ -962,6 +962,108 @@ impl RemoteMultimodalEngine {
         Ok((content, usage))
     }
 
+    // ===== URL Pre-filter Classification =====
+
+    /// Classify a batch of URLs as relevant or irrelevant using the text model.
+    /// Returns a `Vec<bool>` parallel to the input URLs (`true` = relevant).
+    ///
+    /// Uses `resolve_model_for_round(false)` to get the cheap/fast text model.
+    /// On any failure (HTTP, parse, length mismatch), returns all `true` (safe fallback).
+    pub async fn classify_urls(
+        &self,
+        urls: &[&str],
+        relevance_prompt: Option<&str>,
+        extraction_prompt: Option<&str>,
+        max_tokens: u16,
+    ) -> EngineResult<Vec<bool>> {
+        if urls.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let criteria = relevance_prompt
+            .or(extraction_prompt)
+            .unwrap_or("General web crawling");
+
+        let system = format!(
+            "You are a URL relevance classifier. Given a list of URLs, determine which are relevant to the crawl goal.\nGoal: {}\n\nRespond ONLY with a JSON array of 1s and 0s, one per URL. 1=relevant, 0=irrelevant.\nExample: [1,0,1,1,0]",
+            criteria
+        );
+
+        let mut user_msg = String::with_capacity(urls.len() * 80);
+        user_msg.push_str("Classify these URLs:\n");
+        for (i, url) in urls.iter().enumerate() {
+            user_msg.push_str(&format!("{}. {}\n", i + 1, url));
+        }
+
+        // Use the text model endpoint (cheap/fast)
+        let (api_url, model_name, api_key) = self.resolve_model_for_round(false);
+
+        #[derive(Serialize)]
+        struct Message {
+            role: String,
+            content: String,
+        }
+        #[derive(Serialize)]
+        struct InferenceRequest {
+            model: String,
+            messages: Vec<Message>,
+            temperature: f32,
+            max_tokens: u16,
+        }
+
+        let request_body = InferenceRequest {
+            model: model_name.to_string(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: system,
+                },
+                Message {
+                    role: "user".into(),
+                    content: user_msg,
+                },
+            ],
+            temperature: 0.0,
+            max_tokens,
+        };
+
+        let _permit = self.acquire_llm_permit().await;
+
+        let mut req = CLIENT.post(api_url).json(&request_body);
+        if let Some(key) = api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let http_resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("url_prefilter: HTTP error, assuming all relevant: {e}");
+                return Ok(vec![true; urls.len()]);
+            }
+        };
+
+        if !http_resp.status().is_success() {
+            log::warn!(
+                "url_prefilter: non-success status {}, assuming all relevant",
+                http_resp.status()
+            );
+            return Ok(vec![true; urls.len()]);
+        }
+
+        let raw_body = http_resp.text().await.unwrap_or_default();
+        let root: serde_json::Value = match serde_json::from_str(&raw_body) {
+            Ok(v) => v,
+            Err(_) => return Ok(vec![true; urls.len()]),
+        };
+
+        let content = match extract_assistant_content(&root) {
+            Some(c) => c,
+            None => return Ok(vec![true; urls.len()]),
+        };
+
+        Ok(parse_url_classifications(&content, urls.len()))
+    }
+
     // ===== New Feature Integration Methods =====
 
     /// Generate an extraction schema from example data.
@@ -1052,9 +1154,100 @@ impl RemoteMultimodalEngine {
     }
 }
 
+/// Parse a URL classification response into a `Vec<bool>`.
+///
+/// Expects a JSON array of 0/1 integers, e.g. `[1,0,1,1,0]`.
+/// On parse failure or length mismatch, returns all `true` (safe fallback).
+fn parse_url_classifications(response: &str, expected_len: usize) -> Vec<bool> {
+    // Try to find a JSON array in the response
+    let trimmed = response.trim();
+
+    // Find the array boundaries
+    let start = match trimmed.find('[') {
+        Some(i) => i,
+        None => return vec![true; expected_len],
+    };
+    let end = match trimmed.rfind(']') {
+        Some(i) => i + 1,
+        None => return vec![true; expected_len],
+    };
+
+    let arr_str = &trimmed[start..end];
+
+    let arr: Vec<serde_json::Value> = match serde_json::from_str(arr_str) {
+        Ok(v) => v,
+        Err(_) => return vec![true; expected_len],
+    };
+
+    if arr.len() != expected_len {
+        log::warn!(
+            "url_prefilter: classification length mismatch (got {}, expected {}), assuming all relevant",
+            arr.len(),
+            expected_len
+        );
+        return vec![true; expected_len];
+    }
+
+    arr.iter()
+        .map(|v| {
+            // Accept 1/0 as integers or booleans
+            v.as_i64().map(|n| n != 0).unwrap_or_else(|| {
+                v.as_bool().unwrap_or(true) // default to relevant
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_url_classifications_valid() {
+        assert_eq!(
+            parse_url_classifications("[1,0,1]", 3),
+            vec![true, false, true]
+        );
+    }
+
+    #[test]
+    fn test_parse_url_classifications_booleans() {
+        assert_eq!(
+            parse_url_classifications("[true,false,true]", 3),
+            vec![true, false, true]
+        );
+    }
+
+    #[test]
+    fn test_parse_url_classifications_length_mismatch() {
+        // Length mismatch → all true
+        assert_eq!(
+            parse_url_classifications("[1,0]", 3),
+            vec![true, true, true]
+        );
+    }
+
+    #[test]
+    fn test_parse_url_classifications_invalid_json() {
+        assert_eq!(
+            parse_url_classifications("not json", 2),
+            vec![true, true]
+        );
+    }
+
+    #[test]
+    fn test_parse_url_classifications_embedded_array() {
+        // Array embedded in surrounding text
+        assert_eq!(
+            parse_url_classifications("Here are the results: [1,0,1,0]", 4),
+            vec![true, false, true, false]
+        );
+    }
+
+    #[test]
+    fn test_parse_url_classifications_empty() {
+        assert_eq!(parse_url_classifications("[]", 0), Vec::<bool>::new());
+    }
 
     #[test]
     fn test_engine_new() {

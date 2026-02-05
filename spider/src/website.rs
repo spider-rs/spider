@@ -3007,6 +3007,9 @@ impl Website {
         };
 
         'outer: loop {
+            #[cfg(all(feature = "agent", feature = "serde"))]
+            self.apply_url_prefilter(&mut links).await;
+
             let mut stream =
                 tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
 
@@ -4800,6 +4803,16 @@ impl Website {
         }
     }
 
+    /// Apply URL pre-filter to links if configured. Returns filtered links.
+    #[cfg(all(feature = "agent", feature = "serde"))]
+    async fn apply_url_prefilter(&self, links: &mut HashSet<CaseInsensitiveString>) {
+        if let Some(ref cfgs) = self.configuration.remote_multimodal {
+            if cfgs.cfg.url_prefilter && cfgs.cfg.relevance_gate && !links.is_empty() {
+                *links = crate::features::automation::prefilter_urls(cfgs, links).await;
+            }
+        }
+    }
+
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
@@ -4869,6 +4882,9 @@ impl Website {
             };
 
             'outer: loop {
+                #[cfg(all(feature = "agent", feature = "serde"))]
+                self.apply_url_prefilter(&mut links).await;
+
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
 
@@ -5193,6 +5209,9 @@ impl Website {
                             };
 
                             'outer: loop {
+                                #[cfg(all(feature = "agent", feature = "serde"))]
+                                self.apply_url_prefilter(&mut links).await;
+
                                 let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
                                 );
@@ -5558,6 +5577,9 @@ impl Website {
             };
 
             'outer: loop {
+                #[cfg(all(feature = "agent", feature = "serde"))]
+                self.apply_url_prefilter(&mut links).await;
+
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
 
@@ -5893,6 +5915,9 @@ impl Website {
                             };
 
                             'outer: loop {
+                                #[cfg(all(feature = "agent", feature = "serde"))]
+                                self.apply_url_prefilter(&mut links).await;
+
                                 let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                                     links.drain().collect(),
                                 );
@@ -6308,6 +6333,9 @@ impl Website {
                     };
 
                     'outer: loop {
+                        #[cfg(all(feature = "agent", feature = "serde"))]
+                        self.apply_url_prefilter(&mut links).await;
+
                         let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
                             links.drain().collect(),
                         );
@@ -6551,6 +6579,9 @@ impl Website {
         let mut exceeded_budget = false;
 
         'outer: loop {
+            #[cfg(all(feature = "agent", feature = "serde"))]
+            self.apply_url_prefilter(&mut links).await;
+
             let stream =
                 tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
                     .throttle(*throttle);
@@ -6731,6 +6762,9 @@ impl Website {
             };
 
             'outer: loop {
+                #[cfg(all(feature = "agent", feature = "serde"))]
+                self.apply_url_prefilter(&mut links).await;
+
                 let mut stream =
                     tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
 

@@ -526,6 +526,130 @@ pub async fn run_remote_multimodal_extraction(
 }
 
 // =============================================================================
+// URL pre-filter
+// =============================================================================
+
+/// Pre-filter URLs using LLM classification. Returns only URLs classified as relevant.
+///
+/// Both `url_prefilter` and `relevance_gate` must be enabled on the config.
+/// On any error, all input URLs are returned (safe fallback).
+#[cfg(all(feature = "agent", feature = "serde"))]
+pub(crate) async fn prefilter_urls(
+    cfgs: &RemoteMultimodalConfigs,
+    urls: &hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>,
+) -> hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString> {
+    use case_insensitive_string::CaseInsensitiveString;
+
+    if !cfgs.cfg.url_prefilter || !cfgs.cfg.relevance_gate || urls.is_empty() {
+        return urls.clone();
+    }
+
+    let batch_size = cfgs.cfg.url_prefilter_batch_size;
+    let max_tokens = cfgs.cfg.url_prefilter_max_tokens;
+
+    // Partition URLs into cached and uncached
+    let mut relevant_set: hashbrown::HashSet<CaseInsensitiveString> =
+        hashbrown::HashSet::with_capacity(urls.len());
+    let mut uncached: Vec<CaseInsensitiveString> = Vec::new();
+
+    {
+        let cache = match cfgs.url_prefilter_cache.read() {
+            Ok(c) => c,
+            Err(_) => return urls.clone(), // poisoned lock fallback
+        };
+        for url in urls {
+            let path = url_to_cache_key(url.inner().as_str());
+            match cache.get(&path) {
+                Some(true) => {
+                    relevant_set.insert(url.clone());
+                }
+                Some(false) => {
+                    // cached as irrelevant — skip
+                }
+                None => {
+                    uncached.push(url.clone());
+                }
+            }
+        }
+    }
+
+    if uncached.is_empty() {
+        return relevant_set;
+    }
+
+    // Build engine from cfgs
+    let sem = cfgs.get_or_init_semaphore();
+    let mut engine = RemoteMultimodalEngine::new(
+        cfgs.api_url.clone(),
+        cfgs.model_name.clone(),
+        cfgs.system_prompt.clone(),
+    )
+    .with_api_key(cfgs.api_key.as_deref());
+
+    engine.with_semaphore(sem);
+
+    // Copy dual-model routing so text model is used
+    engine.with_vision_model(cfgs.vision_model.clone());
+    engine.with_text_model(cfgs.text_model.clone());
+    engine.with_vision_route_mode(cfgs.vision_route_mode);
+
+    // Process in batches
+    for batch in uncached.chunks(batch_size) {
+        let url_strs: Vec<&str> = batch.iter().map(|u| u.inner().as_str()).collect();
+
+        let classifications = match engine
+            .classify_urls(
+                &url_strs,
+                cfgs.cfg.relevance_prompt.as_deref(),
+                cfgs.cfg.extraction_prompt.as_deref(),
+                max_tokens,
+            )
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("url_prefilter: classify_urls error, assuming all relevant: {e}");
+                // On error, include all from this batch
+                relevant_set.extend(batch.iter().cloned());
+                continue;
+            }
+        };
+
+        // Update cache and build relevant set
+        let mut cache = match cfgs.url_prefilter_cache.write() {
+            Ok(c) => c,
+            Err(_) => {
+                // poisoned lock — include all
+                relevant_set.extend(batch.iter().cloned());
+                continue;
+            }
+        };
+
+        for (url, &is_relevant) in batch.iter().zip(classifications.iter()) {
+            let path = url_to_cache_key(url.inner().as_str());
+            cache.insert(path, is_relevant);
+            if is_relevant {
+                relevant_set.insert(url.clone());
+            }
+        }
+    }
+
+    relevant_set
+}
+
+/// Extract a cache key from a URL (path portion only, or full URL if parse fails).
+#[cfg(all(feature = "agent", feature = "serde"))]
+fn url_to_cache_key(url: &str) -> String {
+    // Try to extract just the path from the URL
+    if let Some(start) = url.find("://") {
+        if let Some(path_start) = url[start + 3..].find('/') {
+            return url[start + 3 + path_start..].to_string();
+        }
+    }
+    url.to_string()
+}
+
+// =============================================================================
 // Conversion helpers
 // =============================================================================
 
