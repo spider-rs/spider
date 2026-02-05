@@ -3921,12 +3921,11 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
 
 /// Fetch a single page via the spider.cloud REST API.
 ///
-/// Picks the right endpoint based on [`SpiderCloudMode`]:
-/// - `Api` / `Fallback` → `POST /crawl` with `limit: 1`
-/// - `Unblocker` → `POST /unblocker` (anti-bot bypass)
-/// - `Proxy` → not used (proxy is handled at the HTTP client level)
+/// Response shape (all routes): `[{"content","costs","duration_elapsed_ms","error","metadata","status","url"}]`
 ///
-/// Returns the HTML content as a [`PageResponse`].
+/// Route selection via [`SpiderCloudConfig::fallback_route`]:
+/// - `Smart` / `Unblocker` → `POST /unblocker`
+/// - `Api` / `Fallback` / `Proxy` → `POST /crawl` (with `limit: 1`)
 #[cfg(feature = "spider_cloud")]
 pub async fn fetch_page_html_spider_cloud(
     target_url: &str,
@@ -3969,9 +3968,14 @@ pub async fn fetch_page_html_spider_cloud(
             let status = resp.status();
             match resp.bytes().await {
                 Ok(bytes) => {
-                    // spider.cloud returns JSON array: [{"content": "...", "status": 200, "url": "..."}]
+                    // spider.cloud returns: [{"content","costs","duration_elapsed_ms","error","metadata","status","url"}]
                     if let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
                         if let Some(first) = arr.into_iter().next() {
+                            // Check for API-level error
+                            if let Some(err) = first.get("error").and_then(|v| v.as_str()) {
+                                log::warn!("spider.cloud error for {}: {}", target_url, err);
+                            }
+
                             let content = first
                                 .get("content")
                                 .and_then(|v| v.as_str())

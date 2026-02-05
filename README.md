@@ -44,6 +44,7 @@ The fastest web crawler written in Rust. Primitives for data curation workloads 
 - [Ad blocking](https://github.com/spider-rs/spider_network_blocker)
 - [Firewall](https://github.com/spider-rs/spider_firewall)
 - Blacklisting, whitelisting, and depth budgeting
+- [Spider Cloud](https://spider.cloud) integration for proxy rotation and anti-bot bypass (`spider_cloud` feature)
 
 ### AI Agent
 - [spider_agent](./spider_agent/) - Concurrent-safe multimodal agent for web automation and research

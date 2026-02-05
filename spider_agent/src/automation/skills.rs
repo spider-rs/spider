@@ -769,27 +769,28 @@ If verify fails (title shows ROTATED but tiles look wrong), fall back to manual 
 "##;
 
 /// JS executed by the engine before the LLM sees the TTT page.
-/// Reads board state, computes optimal move, writes result to document.title.
-/// Includes `n` (cells found) for diagnostics - should be 9 for a valid board.
-const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const board=cells.map(el=>{const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(n===9&&!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clickXY=null;if(best>=0&&cells[best]){const r=cells[best].getBoundingClientRect();clickXY={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};}document.title='TTT:'+JSON.stringify({n,me,board:board.join(''),best,clickXY,won_me:won(me),won_opp:won(opp)});}catch(e){document.title='TTT_ERR:'+e.message;}";
+/// Reads board state, computes optimal move, clicks the cell via dispatchEvent
+/// (more reliable than ClickPoint for JS-driven games), then writes result to title.
+/// Uses dots for empty cells to preserve positions. `clicked` indicates if a move was made.
+const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const board=cells.map(el=>{const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(n===9&&!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clicked=false;if(best>=0&&cells[best]){const el=cells[best];const r=el.getBoundingClientRect();const ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};el.dispatchEvent(new PointerEvent('pointerdown',ev));el.dispatchEvent(new MouseEvent('mousedown',ev));el.dispatchEvent(new PointerEvent('pointerup',ev));el.dispatchEvent(new MouseEvent('mouseup',ev));el.dispatchEvent(new MouseEvent('click',ev));clicked=true;}const bs=board.map((c,i)=>c||'.').join('');document.title='TTT:'+JSON.stringify({n,me,board:bs,best,clicked,won_me:won(me),won_opp:won(opp)});}catch(e){document.title='TTT_ERR:'+e.message;}";
 
-/// Simplified TTT skill content — model just reads the pre-computed title and clicks.
+/// Simplified TTT skill content — pre_evaluate handles clicking, model just checks outcome.
 const TTT_SKILL_SIMPLIFIED: &str = r##"
-Tic-tac-toe (XOXO): The board is auto-analyzed each round. Read `document.title` for the result.
+Tic-tac-toe (XOXO): The board is auto-analyzed AND the best move is auto-clicked each round.
+Read `document.title` for the result. Your move was already made via dispatchEvent.
 
 **Ignore image-grid-selection skill — this is NOT an image grid.**
 
-Title format: `TTT:{"n":9,"me":"X","board":"XO..X..O.","best":4,"clickXY":{"x":371,"y":403},"won_me":false,"won_opp":false}`
+Title format: `TTT:{"n":9,"me":"X","board":"XO..X..O.","best":4,"clicked":true,"won_me":false,"won_opp":false}`
 
 **Rules (check title EVERY round):**
-- **n != 9** → board not ready yet, wait: `[{"Wait":1000}]`
-- **clickXY present** → click that point, then wait: `[{"ClickPoint":{"x":371,"y":403}},{"Wait":600}]`
+- **clicked is true** → move was made, just wait for opponent: `[{"Wait":800}]`
 - **won_me is true** → click verify: `[{"Click":"#captcha-verify-button"}]`
-- **won_opp is true** → refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
-- **best is -1, no winner** → board is full draw, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
-- **TTT_ERR in title** → board reading failed, wait and retry: `[{"Wait":1000}]`
+- **won_opp is true** → refresh and retry: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **best is -1, no winner** → board is full (draw), refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **n != 9 or TTT_ERR** → board not ready, wait: `[{"Wait":1000}]`
 
-**Do NOT write any Evaluate JS. The board is read automatically each round.**
+**Do NOT write any Evaluate JS or use ClickPoint. Moves are made automatically.**
 "##;
 
 /// JS executed by the engine before the LLM sees the Word Search page.
