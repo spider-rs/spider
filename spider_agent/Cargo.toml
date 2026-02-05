@@ -56,6 +56,9 @@ futures = { version = "0.3", optional = true }
 # Long-term experience memory via semantic search
 memvid-rs = { version = "1.2", optional = true }
 
+# Skill definitions (optional)
+spider_skills = { version = "0.1", optional = true, default-features = false }
+
 # S3 skill loading (optional)
 aws-sdk-s3 = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
@@ -82,7 +85,7 @@ webdriver = ["dep:thirtyfour"]
 fs = ["dep:tempfile"]
 
 # Skills - dynamic skill loading for web challenge solving
-skills = []
+skills = ["dep:spider_skills"]
 
 # Long-term experience memory
 memvid = ["dep:memvid-rs"]

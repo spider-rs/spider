@@ -7795,6 +7795,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "spider_skills",
  "tempfile",
  "thirtyfour",
  "thiserror 1.0.69",
@@ -7938,6 +7939,17 @@ dependencies = [
  "serde",
  "smallvec",
  "tendril",
+]
+
+[[package]]
+name = "spider_skills"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f30530c575bc1894f466fd87d8850526c529a3005dfcc3b077af7cedcebad72"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

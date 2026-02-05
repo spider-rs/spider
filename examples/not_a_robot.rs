@@ -13,7 +13,7 @@
 
 extern crate spider;
 
-use spider::features::automation::skills::SkillRegistry;
+use spider::features::automation::skills;
 use spider::features::automation::RemoteMultimodalConfigs;
 use spider::tokio;
 use spider::website::Website;
@@ -98,7 +98,7 @@ async fn main() {
 
     // Load built-in web challenge skills (image grids, tic-tac-toe, word search, etc.)
     // Skills are matched per-round against page state and injected into the system prompt.
-    mm_config.skill_registry = Some(SkillRegistry::with_builtin_web_challenges());
+    mm_config.skill_registry = Some(skills::builtin_web_challenges());
 
     // Create a viewport with 2x device scale factor - larger viewport for better grid/text visibility
     let mut viewport = spider::configuration::Viewport::new(1440, 1080);
