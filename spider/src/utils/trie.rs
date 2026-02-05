@@ -55,15 +55,23 @@ impl<V: Debug> Trie<V> {
     /// Get the byte offset where the path portion starts, stripping scheme+host.
     #[inline]
     fn path_start(path: &str) -> usize {
-        if let Some(pos) = path.find("://") {
-            let after_scheme = pos + 3;
-            if after_scheme < path.len() {
-                path[after_scheme..]
-                    .find('/')
-                    .map_or(path.len(), |p| after_scheme + p)
-            } else {
-                0
-            }
+        // Fast path for common protocols (avoids generic find("://") scan)
+        let after_scheme = if path.starts_with("https://") {
+            8
+        } else if path.starts_with("http://") {
+            7
+        } else if let Some(pos) = path.find("://") {
+            pos + 3
+        } else {
+            return 0;
+        };
+
+        if after_scheme < path.len() {
+            // Find the first '/' after the host using memchr (via find on byte slice)
+            path.as_bytes()[after_scheme..]
+                .iter()
+                .position(|&b| b == b'/')
+                .map_or(path.len(), |p| after_scheme + p)
         } else {
             0
         }

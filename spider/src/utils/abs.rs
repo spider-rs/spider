@@ -96,9 +96,9 @@ fn handle_base(href: &str) -> LinkReturn {
 
             // protocol_end is the byte position of ':' (ASCII).
             // The full protocol with "://" is &href[..protocol_end + 3].
-            // All entries in PROTOCOLS are ASCII, so byte indexing is safe.
+            // All entries in PROTOCOLS are ASCII, so byte indexing is always valid.
             let proto_end = protocol_end + 3;
-            if proto_end <= href.len() && href.is_char_boundary(proto_end) {
+            if proto_end <= href.len() {
                 if PROTOCOLS.contains(&href[..proto_end]) {
                     if let Ok(mut next_url) = Url::parse(href) {
                         next_url.set_fragment(None);

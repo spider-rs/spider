@@ -188,6 +188,7 @@ impl Entry {
     }
 
     /// check if this entry applies to the specified agent
+    #[cfg(test)]
     fn applies_to(&self, useragent: &str) -> bool {
         self.applies_to_prepared(&Self::prepare_useragent(useragent))
     }
