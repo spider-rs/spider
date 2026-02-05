@@ -52,47 +52,42 @@ impl<V: Debug> Trie<V> {
         }
     }
 
-    /// Normalize a url. This will perform a match against paths across all domains.
-    fn normalize_path(path: &str) -> String {
-        let start_pos = if let Some(pos) = path.find("://") {
-            if pos + 3 < path.len() {
-                path[pos + 3..]
+    /// Get the byte offset where the path portion starts, stripping scheme+host.
+    #[inline]
+    fn path_start(path: &str) -> usize {
+        if let Some(pos) = path.find("://") {
+            let after_scheme = pos + 3;
+            if after_scheme < path.len() {
+                path[after_scheme..]
                     .find('/')
-                    .map_or(path.len(), |p| pos + 3 + p)
+                    .map_or(path.len(), |p| after_scheme + p)
             } else {
                 0
             }
         } else {
             0
-        };
+        }
+    }
 
-        let base_path = if start_pos < path.len() {
-            &path[start_pos..]
+    /// Iterate path segments without allocating.
+    #[inline]
+    fn path_segments(path: &str) -> impl Iterator<Item = &str> {
+        let start = Self::path_start(path);
+        let base = if start < path.len() {
+            &path[start..]
         } else {
             path
         };
-
-        let normalized_path = base_path
-            .split('/')
-            .filter(|segment| !segment.is_empty() && !segment.contains('.'))
-            .collect::<Vec<_>>()
-            .join("/");
-
-        string_concat!("/", normalized_path)
+        base.split('/')
+            .filter(|s| !s.is_empty() && !s.contains('.'))
     }
 
     /// Insert a path and its associated value into the trie.
     #[cfg_attr(feature = "inline-more", inline)]
     pub fn insert(&mut self, path: &str, value: V) {
-        let normalized_path = Self::normalize_path(path);
         let mut node = &mut self.root;
 
-        let segments: Vec<&str> = normalized_path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        for segment in segments {
+        for segment in Self::path_segments(path) {
             node = node
                 .children
                 .entry(segment.to_string())
@@ -115,9 +110,7 @@ impl<V: Debug> Trie<V> {
             return None;
         }
 
-        let normalized_path = Self::normalize_path(input);
-
-        for segment in normalized_path.split('/').filter(|s| !s.is_empty()) {
+        for segment in Self::path_segments(input) {
             if let Some(child) = node.children.get(segment) {
                 node = child;
             } else if !self.match_all {
@@ -192,5 +185,38 @@ mod tests {
 
         assert!(trie.search("/nonexistent").is_none());
         assert!(trie.search("/path/to/wrongnode").is_none());
+    }
+
+    #[test]
+    fn test_trie_empty_path() {
+        let mut trie: Trie<usize> = Trie::new();
+        trie.insert("", 1);
+        // Empty path normalizes to "/" which sets match_all
+        assert!(trie.search("").is_some() || trie.search("/anything").is_some());
+    }
+
+    #[test]
+    fn test_trie_unicode_paths() {
+        let mut trie: Trie<&str> = Trie::new();
+        trie.insert("/café/menü", "unicode");
+        assert_eq!(trie.search("/café/menü"), Some(&"unicode"));
+    }
+
+    #[test]
+    fn test_trie_many_entries() {
+        let mut trie: Trie<usize> = Trie::new();
+        for i in 0..1000 {
+            trie.insert(&format!("/path/{}", i), i);
+        }
+        assert_eq!(trie.search("/path/0"), Some(&0));
+        assert_eq!(trie.search("/path/999"), Some(&999));
+        assert!(trie.search("/path/1000").is_none());
+    }
+
+    #[test]
+    fn test_trie_default() {
+        let trie: Trie<usize> = Trie::default();
+        assert!(trie.root.children.is_empty());
+        assert!(!trie.match_all);
     }
 }

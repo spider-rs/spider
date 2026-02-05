@@ -94,3 +94,49 @@ pub fn has_ref(headers: &std::option::Option<Box<SerializableHeaderMap>>) -> boo
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, REFERER};
+
+    #[test]
+    fn test_header_map_to_hash_map() {
+        let mut hm = HeaderMap::new();
+        hm.insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+        hm.insert("x-custom", HeaderValue::from_static("value"));
+
+        let map = header_map_to_hash_map(&hm);
+        assert_eq!(map.get("content-type"), Some(&"text/html".to_string()));
+        assert_eq!(map.get("x-custom"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_header_map_to_hash_map_empty() {
+        let hm = HeaderMap::new();
+        let map = header_map_to_hash_map(&hm);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_has_ref_with_referer() {
+        let mut hm = SerializableHeaderMap::default();
+        hm.insert(REFERER, HeaderValue::from_static("https://example.com"));
+        let headers: Option<Box<SerializableHeaderMap>> = Some(Box::new(hm));
+        assert!(has_ref(&headers));
+    }
+
+    #[test]
+    fn test_has_ref_without_referer() {
+        let mut hm = SerializableHeaderMap::default();
+        hm.insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+        let headers: Option<Box<SerializableHeaderMap>> = Some(Box::new(hm));
+        assert!(!has_ref(&headers));
+    }
+
+    #[test]
+    fn test_has_ref_none() {
+        let headers: Option<Box<SerializableHeaderMap>> = None;
+        assert!(!has_ref(&headers));
+    }
+}

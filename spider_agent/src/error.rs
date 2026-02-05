@@ -135,3 +135,101 @@ impl std::error::Error for SearchError {}
 
 /// Result type for agent operations.
 pub type AgentResult<T> = Result<T, AgentError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_error_display_variants() {
+        let err = AgentError::MissingField("content");
+        assert_eq!(format!("{}", err), "Missing field: content");
+
+        let err = AgentError::InvalidField("type");
+        assert_eq!(format!("{}", err), "Invalid field: type");
+
+        let err = AgentError::Remote("server down".into());
+        assert_eq!(format!("{}", err), "Remote error: server down");
+
+        let err = AgentError::NotConfigured("api_key");
+        assert_eq!(format!("{}", err), "Not configured: api_key");
+
+        let err = AgentError::Llm("model not found".into());
+        assert_eq!(format!("{}", err), "LLM error: model not found");
+
+        let err = AgentError::Tool("execution failed".into());
+        assert_eq!(format!("{}", err), "Tool error: execution failed");
+
+        let err = AgentError::RateLimited;
+        assert_eq!(format!("{}", err), "Rate limit exceeded");
+
+        let err = AgentError::Timeout;
+        assert_eq!(format!("{}", err), "Request timed out");
+
+        let err = AgentError::LimitExceeded(LimitType::TotalTokens {
+            used: 100,
+            limit: 50,
+        });
+        assert!(format!("{}", err).contains("Usage limit exceeded"));
+    }
+
+    #[test]
+    fn test_search_error_display_variants() {
+        assert_eq!(
+            format!("{}", SearchError::RequestFailed("timeout".into())),
+            "Search request failed: timeout"
+        );
+        assert_eq!(
+            format!("{}", SearchError::AuthenticationFailed),
+            "Search authentication failed"
+        );
+        assert_eq!(
+            format!("{}", SearchError::RateLimited),
+            "Search rate limit exceeded"
+        );
+        assert_eq!(
+            format!("{}", SearchError::InvalidQuery("empty".into())),
+            "Invalid search query: empty"
+        );
+        assert_eq!(
+            format!("{}", SearchError::ProviderError("api error".into())),
+            "Search provider error: api error"
+        );
+        assert_eq!(
+            format!("{}", SearchError::NoProvider),
+            "No search provider configured"
+        );
+    }
+
+    #[test]
+    fn test_from_serde_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
+        let agent_err: AgentError = json_err.into();
+        assert!(format!("{}", agent_err).starts_with("JSON error:"));
+    }
+
+    #[test]
+    fn test_from_search_error() {
+        let search_err = SearchError::NoProvider;
+        let agent_err: AgentError = search_err.into();
+        assert!(format!("{}", agent_err).contains("Search error:"));
+    }
+
+    #[test]
+    fn test_error_source_chain() {
+        use std::error::Error;
+
+        let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
+        let agent_err = AgentError::Json(json_err);
+        assert!(agent_err.source().is_some());
+
+        let search_err = AgentError::Search(SearchError::NoProvider);
+        assert!(search_err.source().is_some());
+
+        let remote_err = AgentError::Remote("test".into());
+        assert!(remote_err.source().is_none());
+
+        let timeout_err = AgentError::Timeout;
+        assert!(timeout_err.source().is_none());
+    }
+}

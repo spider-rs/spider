@@ -7,10 +7,16 @@ edition = "2021"
 [dependencies]
 criterion = { version = "0.5.1", features = ["html_reports", "async_tokio"] }
 spider = { path = "../spider" }
+spider_utils = { path = "../spider_utils" }
 
 [[bench]]
 name = "crawl"
 path = "crawl.rs"
+harness = false
+
+[[bench]]
+name = "core"
+path = "core.rs"
 harness = false
 
 [features]

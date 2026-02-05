@@ -34,7 +34,7 @@ pub(crate) fn convert_abs_url(u: &mut Url) {
 }
 
 /// Parse the absolute url
-pub(crate) fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
+pub fn parse_absolute_url(url: &str) -> Option<Box<Url>> {
     match url::Url::parse(url) {
         Ok(mut u) => {
             convert_abs_url(&mut u);
@@ -94,37 +94,15 @@ fn handle_base(href: &str) -> LinkReturn {
                 return LinkReturn::EarlyReturn;
             }
 
-            let protocol_slice = if href.is_char_boundary(8) {
-                &href[0..8]
-            } else if href.is_char_boundary(7) {
-                &href[0..7]
-            } else if href.is_char_boundary(6) {
-                &href[0..6]
-            } else if href.is_char_boundary(5) {
-                &href[0..5]
-            } else {
-                ""
-            };
-
-            if protocol_slice.len() >= protocol_end + 3 {
-                if let Some((start_idx, _)) = href.char_indices().nth(protocol_end + 2) {
-                    let mut char_indices = href.char_indices().skip(protocol_end + 2);
-                    let mut end_idx = start_idx;
-
-                    for _ in 0..3 {
-                        if let Some((idx, _)) = char_indices.next() {
-                            end_idx = idx;
-                        } else {
-                            end_idx = href.len();
-                            break;
-                        }
-                    }
-
-                    if PROTOCOLS.contains(&href[..end_idx]) {
-                        if let Ok(mut next_url) = Url::parse(href) {
-                            next_url.set_fragment(None);
-                            return LinkReturn::Absolute(next_url);
-                        }
+            // protocol_end is the byte position of ':' (ASCII).
+            // The full protocol with "://" is &href[..protocol_end + 3].
+            // All entries in PROTOCOLS are ASCII, so byte indexing is safe.
+            let proto_end = protocol_end + 3;
+            if proto_end <= href.len() && href.is_char_boundary(proto_end) {
+                if PROTOCOLS.contains(&href[..proto_end]) {
+                    if let Ok(mut next_url) = Url::parse(href) {
+                        next_url.set_fragment(None);
+                        return LinkReturn::Absolute(next_url);
                     }
                 }
             }
@@ -137,7 +115,7 @@ fn handle_base(href: &str) -> LinkReturn {
 /// Convert to absolute path. The base url must be the root path to avoid infinite appending.
 /// We always handle the urls from the base path.
 #[inline]
-pub(crate) fn convert_abs_path(base: &Url, href: &str) -> Url {
+pub fn convert_abs_path(base: &Url, href: &str) -> Url {
     let href = href.trim();
 
     if base.as_str() == href {
@@ -252,5 +230,48 @@ mod tests {
             "https://www.example.com/",
             "Should treat domain-like href as full URL"
         );
+    }
+
+    #[test]
+    fn test_convert_abs_path_query_string() {
+        let base = parse_absolute_url("https://example.com").unwrap();
+        let href = "/page?key=value&other=123";
+        let result = convert_abs_path(&base, href);
+        assert_eq!(result.as_str(), "https://example.com/page?key=value&other=123");
+    }
+
+    #[test]
+    fn test_convert_abs_path_fragment() {
+        let base = parse_absolute_url("https://example.com").unwrap();
+        // Fragments are stripped
+        let href = "/page#section";
+        let result = convert_abs_path(&base, href);
+        assert_eq!(result.as_str(), "https://example.com/page");
+    }
+
+    #[test]
+    fn test_convert_abs_path_encoded_url() {
+        let base = parse_absolute_url("https://example.com").unwrap();
+        let href = "/path%20with%20spaces";
+        let result = convert_abs_path(&base, href);
+        assert!(result.as_str().contains("path%20with%20spaces"));
+    }
+
+    #[test]
+    fn test_convert_abs_path_port_number() {
+        let base = parse_absolute_url("https://example.com:8080").unwrap();
+        let href = "/api/data";
+        let result = convert_abs_path(&base, href);
+        assert!(result.as_str().contains(":8080"));
+        assert!(result.as_str().contains("/api/data"));
+    }
+
+    #[test]
+    fn test_convert_abs_path_deep_relative() {
+        let base = parse_absolute_url("https://example.com/a/b/c/").unwrap();
+        let href = "../../d";
+        let result = convert_abs_path(&base, href);
+        // base is stripped to root by parse_absolute_url, so join resolves from root
+        assert!(result.as_str().starts_with("https://example.com"));
     }
 }

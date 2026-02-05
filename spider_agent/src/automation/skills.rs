@@ -512,13 +512,14 @@ impl SkillRegistry {
                 .with_content(IMAGE_GRID_SKILL)
         );
 
-        // Rotation puzzle
+        // Rotation puzzle — pre_evaluate reads rotation state, model clicks tiles
         registry.add(
             Skill::new("rotation-puzzle", "Rotate an image or element to the correct orientation")
                 .with_trigger(SkillTrigger::title_contains("rotat"))
                 .with_trigger(SkillTrigger::html_contains("rotating-item"))
                 .with_priority(5)
-                .with_content(ROTATION_SKILL)
+                .with_pre_evaluate(ROTATION_PRE_EVALUATE_JS)
+                .with_content(ROTATION_SKILL_SIMPLIFIED)
         );
 
         // Tic-tac-toe / XOXO — high priority to override image-grid when both match
@@ -750,65 +751,84 @@ Key rules:
 - After 3 failures, re-read with Evaluate and try completely different selection.
 "##;
 
-const ROTATION_SKILL: &str = r##"
-Rotation puzzle: tiles form a larger image, some rotated. Each click = +90° clockwise.
+/// JS executed by the engine before the LLM sees the rotation page.
+/// Reads each tile's CSS transform, computes clicks needed, writes to title.
+/// Does NOT click — the model uses real Click actions based on the title info.
+const ROTATION_PRE_EVALUATE_JS: &str = "try{const t=[...document.querySelectorAll('.rotating-item')];const n=t.length;const tiles=t.map((e,i)=>{const m=getComputedStyle(e).transform;let c=0;if(m&&m!=='none'){const v=m.match(/matrix\\(([^)]+)\\)/);if(v){const p=v[1].split(',').map(Number);const a=Math.round(Math.atan2(p[1],p[0])*180/Math.PI);c=a>45&&a<135?3:Math.abs(a)>135?2:a<-45&&a>-135?1:0;}}return{i,c};});const done=tiles.every(t=>t.c===0);const clicks=tiles.filter(t=>t.c>0).map(t=>t.i+':'+t.c).join(',');document.title='ROT:'+JSON.stringify({n,done,clicks});}catch(e){document.title='ROT_ERR:'+e.message;}";
 
-**Use this Evaluate to auto-solve ALL rotations in one step, then click verify:**
-```js
-const t=[...document.querySelectorAll('.rotating-item')];const log=[];t.forEach((e,i)=>{const m=getComputedStyle(e).transform;let c=0;if(m&&m!=='none'){const v=m.match(/matrix\(([^)]+)\)/);if(v){const n=v[1].split(',').map(Number);const a=Math.round(Math.atan2(n[1],n[0])*180/Math.PI);c=a>45&&a<135?3:Math.abs(a)>135?2:a<-45&&a>-135?1:0;}}log.push(i+':'+c);const r=e.getBoundingClientRect();for(let j=0;j<c;j++){const o={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};e.dispatchEvent(new PointerEvent('pointerdown',o));e.dispatchEvent(new MouseEvent('mousedown',o));e.dispatchEvent(new PointerEvent('pointerup',o));e.dispatchEvent(new MouseEvent('mouseup',o));e.dispatchEvent(new MouseEvent('click',o));}});document.title='ROTATED:'+log.join(',');
-```
+/// Simplified rotation skill content — pre_evaluate reads state, model clicks tiles.
+const ROTATION_SKILL_SIMPLIFIED: &str = r##"
+Rotation puzzle: tiles form an image, some rotated 90/180/270°. Each click = +90° clockwise.
+Read `document.title` for auto-detected rotation state.
 
-Your steps this round:
+Title format: `ROT:{"n":9,"done":false,"clicks":"1:1,2:2,6:3,7:2,8:3"}`
+- `n` = number of tiles
+- `done` = true when all tiles are upright → click verify
+- `clicks` = "tileIndex:clicksNeeded" pairs (0-indexed tiles, use nth-child = index+1)
+
+**Rules:**
+- **done is true** → all upright, verify: `[{"Click":"#captcha-verify-button"}]`
+- **done is false** → click each tile the number of times shown. Use `.rotating-item:nth-child(N)` (N = index+1, 1-indexed):
 ```json
-"steps": [{"Evaluate":"...the JS above..."}, {"Wait":500}, {"Click":"#captcha-verify-button"}]
+"steps": [
+  {"Click":".rotating-item:nth-child(2)"},
+  {"Click":".rotating-item:nth-child(3)"},{"Click":".rotating-item:nth-child(3)"},
+  {"Click":".rotating-item:nth-child(7)"},{"Click":".rotating-item:nth-child(7)"},{"Click":".rotating-item:nth-child(7)"},
+  {"Wait":500},
+  {"Click":"#captcha-verify-button"}
+]
 ```
+- **ROT_ERR or n is 0** → wait: `[{"Wait":1000}]`
+- After verify, if still on rotation level, refresh and retry: `[{"Click":".captcha-refresh"},{"Wait":800}]`
 
-If verify fails (title shows ROTATED but tiles look wrong), fall back to manual clicks:
-- Use `.rotating-item:nth-child(N)` (1-indexed), click N times per tile
-- 90° → 3 clicks, 180° → 2 clicks, 270° → 1 click
+**Do NOT write any Evaluate JS. Rotation state is auto-detected.**
 "##;
 
 /// JS executed by the engine before the LLM sees the TTT page.
-/// Reads board state, computes optimal move, clicks the cell via dispatchEvent
-/// (more reliable than ClickPoint for JS-driven games), then writes result to title.
-/// Uses dots for empty cells to preserve positions. `clicked` indicates if a move was made.
-const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const board=cells.map(el=>{const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(n===9&&!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clicked=false;if(best>=0&&cells[best]){const el=cells[best];const r=el.getBoundingClientRect();const ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};el.dispatchEvent(new PointerEvent('pointerdown',ev));el.dispatchEvent(new MouseEvent('mousedown',ev));el.dispatchEvent(new PointerEvent('pointerup',ev));el.dispatchEvent(new MouseEvent('mouseup',ev));el.dispatchEvent(new MouseEvent('click',ev));clicked=true;}const bs=board.map((c,i)=>c||'.').join('');document.title='TTT:'+JSON.stringify({n,me,board:bs,best,clicked,won_me:won(me),won_opp:won(opp)});}catch(e){document.title='TTT_ERR:'+e.message;}";
+/// Tracks our moves in a persistent hidden DOM element (`#ttt-h`) to distinguish
+/// our marks (M) from opponent marks (T). CSS classes are temporal (cell-selected =
+/// last move, cell-disabled = older), so we can't use them for player identity.
+/// Uses proper win/block strategy and clicks via dispatchEvent.
+const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const occ=new Set();cells.forEach((el,i)=>{const inner=el.querySelector('.tic-tac-toe-cell');if(inner&&(inner.className.includes('cell-selected')||inner.className.includes('cell-disabled')))occ.add(i);});let tr=document.getElementById('ttt-h');if(!tr){tr=document.createElement('div');tr.id='ttt-h';tr.style.display='none';tr.dataset.m='';document.body.appendChild(tr);}const my=new Set(tr.dataset.m?tr.dataset.m.split(',').map(Number):[]);if(occ.size===0)my.clear();for(const m of my)if(!occ.has(m))my.delete(m);const opp=new Set([...occ].filter(i=>!my.has(i)));const board=Array.from({length:9},(_,i)=>my.has(i)?'M':opp.has(i)?'T':'.');const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];let myWin=false,thWin=false;for(const w of W){if(w.every(i=>board[i]==='M'))myWin=true;if(w.every(i=>board[i]==='T'))thWin=true;}let best=-1;if(!myWin&&!thWin){for(const w of W){const mi=w.filter(i=>board[i]==='M'),e=w.filter(i=>board[i]==='.');if(mi.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const ti=w.filter(i=>board[i]==='T'),e=w.filter(i=>board[i]==='.');if(ti.length===2&&e.length===1){best=e[0];break;}}if(best<0&&board[4]==='.')best=4;if(best<0)for(const c of[0,2,6,8])if(board[c]==='.'){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(board[c]==='.'){best=c;break;}}let clicked=false;if(best>=0&&cells[best]){const el=cells[best];const r=el.getBoundingClientRect();const ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};el.dispatchEvent(new PointerEvent('pointerdown',ev));el.dispatchEvent(new MouseEvent('mousedown',ev));el.dispatchEvent(new PointerEvent('pointerup',ev));el.dispatchEvent(new MouseEvent('mouseup',ev));el.dispatchEvent(new MouseEvent('click',ev));clicked=true;my.add(best);board[best]='M';for(const w of W)if(w.every(i=>board[i]==='M'))myWin=true;}tr.dataset.m=[...my].join(',');const full=!board.includes('.');document.title='TTT:'+JSON.stringify({n,board:board.join(''),best,clicked,myWin,thWin,full});}catch(e){document.title='TTT_ERR:'+e.message;}";
 
 /// Simplified TTT skill content — pre_evaluate handles clicking, model just checks outcome.
 const TTT_SKILL_SIMPLIFIED: &str = r##"
-Tic-tac-toe (XOXO): The board is auto-analyzed AND the best move is auto-clicked each round.
-Read `document.title` for the result. Your move was already made via dispatchEvent.
+Tic-tac-toe (XOXO): Board state is tracked across rounds. Moves are auto-made via dispatchEvent.
+Read `document.title` for result. M = my mark, T = opponent mark, . = empty.
 
 **Ignore image-grid-selection skill — this is NOT an image grid.**
 
-Title format: `TTT:{"n":9,"me":"X","board":"XO..X..O.","best":4,"clicked":true,"won_me":false,"won_opp":false}`
+Title format: `TTT:{"n":9,"board":"M..T.M..T","best":4,"clicked":true,"myWin":false,"thWin":false,"full":false}`
 
 **Rules (check title EVERY round):**
-- **clicked is true** → move was made, just wait for opponent: `[{"Wait":800}]`
-- **won_me is true** → click verify: `[{"Click":"#captcha-verify-button"}]`
-- **won_opp is true** → refresh and retry: `[{"Click":".captcha-refresh"},{"Wait":800}]`
-- **best is -1, no winner** → board is full (draw), refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **myWin is true** → we won! Click verify: `[{"Click":"#captcha-verify-button"}]`
+- **thWin is true** → opponent won, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **clicked is true, no winner** → wait for opponent: `[{"Wait":800}]`
+- **full is true, no winner** → draw, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **best is -1, not full** → wait for state: `[{"Wait":800}]`
 - **n != 9 or TTT_ERR** → board not ready, wait: `[{"Wait":1000}]`
 
 **Do NOT write any Evaluate JS or use ClickPoint. Moves are made automatically.**
 "##;
 
 /// JS executed by the engine before the LLM sees the Word Search page.
-/// Extracts grid, finds all words algorithmically, writes coordinates to document.title.
-/// Includes `n` (cells found) for diagnostics. Tries multiple selector strategies.
-const WORD_SEARCH_PRE_EVALUATE_JS: &str = "try{let cells=[...document.querySelectorAll('.word-search-grid-item')];if(!cells.length)cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.textContent.trim().length===1);if(!cells.length)cells=[...document.querySelectorAll('[class*=letter]')].filter(el=>el.textContent.trim().length===1);const n=cells.length;const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});const letters=cells.map(c=>c.textContent.trim().toUpperCase());const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);const rows=tops.length||1,cols=Math.round(cells.length/rows)||1;const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));let wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word')];if(!wordEls.length)wordEls=[...document.querySelectorAll('[class*=word-item],[class*=clue]')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.word-search-words li,.words li')];const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\\s+/g,'')).filter(w=>w.length>1&&w.match(/^[A-Z]+$/));const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];const found={};words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));found[w]={from:rects[si],to:rects[ei]};return;}}});document.title='WS:'+JSON.stringify({n,rows,cols,words,found});}catch(e){document.title='WS_ERR:'+e.message;}";
+/// Extracts grid + finds words algorithmically. If words found, provides drag coordinates.
+/// If words NOT found (selectors miss), provides grid text so model can solve visually.
+/// Does NOT overwrite title with empty data if model has already set useful info.
+const WORD_SEARCH_PRE_EVALUATE_JS: &str = "try{let cells=[...document.querySelectorAll('.word-search-grid-item')];if(!cells.length)cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.textContent.trim().length===1);if(!cells.length)cells=[...document.querySelectorAll('[class*=letter]')].filter(el=>el.textContent.trim().length===1);const n=cells.length;if(n<4){document.title='WS:'+JSON.stringify({n,err:'no_grid'});}else{const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});const letters=cells.map(c=>c.textContent.trim().toUpperCase());const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);const rows=tops.length||1,cols=Math.round(n/rows)||1;const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));let wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word')];if(!wordEls.length)wordEls=[...document.querySelectorAll('[class*=word-item],[class*=clue]')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.word-search-words li,.words li')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.words span')];if(!wordEls.length){const all=[...document.querySelectorAll('span,div')].filter(el=>!el.querySelector('*')&&el.textContent.trim().match(/^[A-Z\\s]{3,20}$/i)&&!el.closest('.grid-item,.word-search-grid-item'));wordEls=all;}const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\\s+/g,'')).filter(w=>w.length>1&&w.length<=20&&w.match(/^[A-Z]+$/));const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];const found={};words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));found[w]={from:rects[si],to:rects[ei]};return;}}});if(Object.keys(found).length>0){document.title='WS:'+JSON.stringify({n,rows,cols,words,found});}else{const gt=grid.map(r=>r.join('')).join('/');document.title='WS:'+JSON.stringify({n,rows,cols,grid:gt,words:[],found:{}});}}}catch(e){document.title='WS_ERR:'+e.message;}";
 
 /// Simplified Word Search skill content — model reads pre-computed title and drags.
 const WORD_SEARCH_SKILL_SIMPLIFIED: &str = r##"
-Word search puzzle: The grid is auto-analyzed each round. Read `document.title` for the result.
+Word search puzzle: Grid is auto-analyzed. Read `document.title` for result.
 
 **(Skip image-grid-selection skill — this is a word search, NOT an image grid.)**
 
-Title format: `WS:{"n":100,"rows":10,"cols":10,"words":["STOP","ROBOT",...],"found":{"STOP":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}},...}}`
+Title formats:
+- With found words: `WS:{"n":100,"rows":10,"cols":10,"words":["STOP"],"found":{"STOP":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}}}}`
+- Grid only (words not auto-detected): `WS:{"n":100,"rows":10,"cols":10,"grid":"CRNW.../PBRB...","words":[],"found":{}}`
 
 **Rules:**
-1. If `n` is 0 or `WS_ERR` in title → grid not loaded, wait: `[{"Wait":1000}]`
-2. For EACH word in `found`, use ClickDragPoint with the coordinates:
+1. If `found` has entries → drag each word using ClickDragPoint, then verify:
 ```json
 "steps": [
   {"ClickDragPoint":{"from_x":100,"from_y":200,"to_x":300,"to_y":200}},
@@ -818,10 +838,12 @@ Title format: `WS:{"n":100,"rows":10,"cols":10,"words":["STOP","ROBOT",...],"fou
   {"Click":"#captcha-verify-button"}
 ]
 ```
-3. Include ALL found words as ClickDragPoint actions in a single step list.
-4. End with `{"Click":"#captcha-verify-button"}`.
-
-**Do NOT write any Evaluate JS. The grid is solved automatically each round.**
+2. If `words:[]` (words not auto-detected) → use Evaluate to find words and solve:
+   - Read the words to find from the page (look for word list elements)
+   - Search the grid algorithmically for each word
+   - Get cell bounding rects and use ClickDragPoint
+3. If `n` is 0 or `WS_ERR` → wait: `[{"Wait":1000}]`
+4. After verify, if still on word search, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
 "##;
 
 const TEXT_CAPTCHA_SKILL: &str = r##"
@@ -1088,18 +1110,24 @@ Use Evaluate to click found cells programmatically."#;
         assert!(ttt.content.contains("Do NOT write any Evaluate JS"));
         assert!(!ttt.content.contains("querySelectorAll"));
 
-        // Word search simplified content should NOT contain Evaluate JS
+        // Word search may allow Evaluate as fallback when words aren't auto-detected
         let ws = registry.get("word-search").unwrap();
-        assert!(ws.content.contains("Do NOT write any Evaluate JS"));
-        assert!(!ws.content.contains("querySelectorAll"));
+        assert!(ws.content.contains("ClickDragPoint"), "WS skill should mention ClickDragPoint");
+        assert!(ws.pre_evaluate.is_some(), "WS should have pre_evaluate JS");
+
+        // Rotation simplified content should NOT contain Evaluate JS
+        let rot = registry.get("rotation-puzzle").unwrap();
+        assert!(rot.content.contains("Do NOT write any Evaluate JS"));
+        assert!(!rot.content.contains("querySelectorAll"));
+        assert!(rot.pre_evaluate.is_some(), "Rotation should have pre_evaluate JS");
     }
 
     #[test]
     fn test_skills_without_pre_evaluate_unchanged() {
         let registry = SkillRegistry::with_builtin_web_challenges();
 
-        // Image grid, rotation, text-captcha, slider should NOT have pre_evaluate
-        for name in &["image-grid-selection", "rotation-puzzle", "text-captcha", "slider-drag", "checkbox-click"] {
+        // Image grid, text-captcha, slider, checkbox should NOT have pre_evaluate
+        for name in &["image-grid-selection", "text-captcha", "slider-drag", "checkbox-click"] {
             let skill = registry.get(name).unwrap_or_else(|| panic!("{} missing", name));
             assert!(
                 skill.pre_evaluate.is_none(),

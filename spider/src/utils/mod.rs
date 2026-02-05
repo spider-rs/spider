@@ -687,9 +687,15 @@ pub fn detect_antibot_from_url(url: &str) -> Option<AntiBotTech> {
 /// Flip http -> https protocols.
 pub fn flip_http_https(url: &str) -> Option<String> {
     if let Some(rest) = url.strip_prefix("http://") {
-        Some(format!("https://{rest}"))
+        let mut s = String::with_capacity(8 + rest.len());
+        s.push_str("https://");
+        s.push_str(rest);
+        Some(s)
     } else if let Some(rest) = url.strip_prefix("https://") {
-        Some(format!("http://{rest}"))
+        let mut s = String::with_capacity(7 + rest.len());
+        s.push_str("http://");
+        s.push_str(rest);
+        Some(s)
     } else {
         None
     }
@@ -5643,42 +5649,17 @@ pub fn clean_html_base(html: &str) -> String {
         html,
         RewriteStrSettings {
             element_content_handlers: vec![
-                element!("script", |el| {
+                element!("script, style, link, iframe", |el| {
                     el.remove();
                     Ok(())
                 }),
-                element!("style", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("link", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("iframe", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[style*='display:none']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[id*='ad']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[class*='ad']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[id*='tracking']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[class*='tracking']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
+                element!(
+                    "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
+                    |el| {
+                        el.remove();
+                        Ok(())
+                    }
+                ),
                 element!("meta", |el| {
                     if let Some(attribute) = el.get_attribute("name") {
                         if attribute != "title" && attribute != "description" {
@@ -5710,39 +5691,14 @@ pub fn clean_html_slim(html: &str) -> String {
         html,
         RewriteStrSettings {
             element_content_handlers: vec![
-                element!("script", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("style", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("svg", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("noscript", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("link", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("iframe", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("canvas", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("video", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("img", |el| {
+                element!(
+                    "script, style, svg, noscript, link, iframe, canvas, video",
+                    |el| {
+                        el.remove();
+                        Ok(())
+                    }
+                ),
+                element!("img, picture", |el| {
                     if let Some(src) = el.get_attribute("src") {
                         if src.starts_with("data:image") {
                             el.remove();
@@ -5750,36 +5706,13 @@ pub fn clean_html_slim(html: &str) -> String {
                     }
                     Ok(())
                 }),
-                element!("picture", |el| {
-                    // picture usually has nested sources; still remove if it’s inline-data heavy
-                    // (this is conservative; keep if you want structure)
-                    if let Some(src) = el.get_attribute("src") {
-                        if src.starts_with("data:image") {
-                            el.remove();
-                        }
+                element!(
+                    "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
+                    |el| {
+                        el.remove();
+                        Ok(())
                     }
-                    Ok(())
-                }),
-                element!("[style*='display:none']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[id*='ad']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[class*='ad']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[id*='tracking']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("[class*='tracking']", |el| {
-                    el.remove();
-                    Ok(())
-                }),
+                ),
                 element!("meta", |el| {
                     if let Some(attribute) = el.get_attribute("name") {
                         if attribute != "title" && attribute != "description" {
@@ -5825,11 +5758,11 @@ pub fn clean_html_full(html: &str) -> String {
                 }),
                 element!("*", |el| {
                     // Keep only: id, class, data-*
-                    let mut to_remove: Vec<String> = Vec::new();
-                    for attr in el.attributes().iter() {
+                    let attrs = el.attributes();
+                    let mut to_remove = Vec::with_capacity(attrs.len());
+                    for attr in attrs.iter() {
                         let n = attr.name();
-                        let keep = n == "id" || n == "class" || n.starts_with("data-");
-                        if !keep {
+                        if n != "id" && n != "class" && !n.starts_with("data-") {
                             to_remove.push(n);
                         }
                     }
@@ -6334,4 +6267,177 @@ pub fn emit_log_shutdown(link: &str) {
 #[cfg(not(feature = "tracing"))]
 pub fn emit_log_shutdown(link: &str) {
     log::info!("shutdown {}", &link);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_open_resty_forbidden() {
+        let body = b"<html><head><title>403 Forbidden</title></head>\n<body>\n<center><h1>403 Forbidden</h1></center>\n<hr><center>openresty</center>";
+        assert!(detect_open_resty_forbidden(body));
+        assert!(!detect_open_resty_forbidden(b"<html><body>OK</body></html>"));
+    }
+
+    #[test]
+    fn test_detect_hard_forbidden_content() {
+        // OpenResty forbidden
+        let openresty = b"<html><head><title>403 Forbidden</title></head>\n<body>\n<center><h1>403 Forbidden</h1></center>\n<hr><center>openresty</center>";
+        assert!(detect_hard_forbidden_content(openresty));
+        // Normal content
+        assert!(!detect_hard_forbidden_content(b"<html><body>Hello</body></html>"));
+    }
+
+    #[test]
+    fn test_detect_anti_bot_from_body() {
+        // Too large - returns None
+        let large_body = vec![0u8; 40_000];
+        assert!(detect_anti_bot_from_body(&large_body).is_none());
+        // Normal page
+        let normal = b"<html><body>Hello world</body></html>".to_vec();
+        assert!(detect_anti_bot_from_body(&normal).is_none());
+    }
+
+    #[test]
+    fn test_detect_antibot_from_url() {
+        assert!(detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform").is_some());
+        assert!(detect_antibot_from_url("https://example.com/page").is_none());
+    }
+
+    #[test]
+    fn test_flip_http_https() {
+        assert_eq!(flip_http_https("http://example.com"), Some("https://example.com".to_string()));
+        assert_eq!(flip_http_https("https://example.com"), Some("http://example.com".to_string()));
+        assert_eq!(flip_http_https("ftp://example.com"), None);
+    }
+
+    #[test]
+    fn test_clean_html_raw() {
+        let html = "<html><body>Hello</body></html>";
+        assert_eq!(clean_html_raw(html), html);
+    }
+
+    #[test]
+    fn test_clean_html_base() {
+        let html = r#"<html><head><script>alert(1)</script><style>.x{}</style></head><body><p>Hello</p></body></html>"#;
+        let cleaned = clean_html_base(html);
+        assert!(!cleaned.contains("alert(1)"));
+        assert!(!cleaned.contains(".x{}"));
+        assert!(cleaned.contains("Hello"));
+    }
+
+    #[test]
+    fn test_clean_html_slim() {
+        let html = r#"<html><body><p>Hello</p><svg><circle/></svg><noscript>No JS</noscript></body></html>"#;
+        let cleaned = clean_html_slim(html);
+        assert!(cleaned.contains("Hello"));
+        assert!(!cleaned.contains("<svg>"));
+        assert!(!cleaned.contains("No JS"));
+    }
+
+    #[test]
+    fn test_clean_html_full() {
+        let html = r#"<html><body><nav>Menu</nav><p id="main" class="content" onclick="foo()">Hello</p><footer>Foot</footer></body></html>"#;
+        let cleaned = clean_html_full(html);
+        assert!(cleaned.contains("Hello"));
+        assert!(!cleaned.contains("Menu"));
+        assert!(!cleaned.contains("Foot"));
+    }
+
+    #[test]
+    fn test_get_last_segment() {
+        assert_eq!(get_last_segment("/foo/bar/baz"), "baz");
+        assert_eq!(get_last_segment("/foo/bar/"), "");
+        assert_eq!(get_last_segment("nopath"), "nopath");
+    }
+
+    #[test]
+    fn test_get_path_from_url() {
+        assert_eq!(get_path_from_url("https://example.com/foo/bar"), "/foo/bar");
+        assert_eq!(get_path_from_url("https://example.com"), "/");
+    }
+
+    #[test]
+    fn test_get_domain_from_url() {
+        assert_eq!(get_domain_from_url("https://example.com/path"), "example.com");
+        assert_eq!(get_domain_from_url("https://sub.example.com/path"), "sub.example.com");
+    }
+
+    #[test]
+    fn test_networking_capable() {
+        assert!(networking_capable("https://example.com"));
+        assert!(networking_capable("http://example.com"));
+        assert!(networking_capable("ftp://files.example.com"));
+        assert!(networking_capable("file:///local/path"));
+        assert!(!networking_capable("mailto:user@example.com"));
+        assert!(!networking_capable("javascript:void(0)"));
+    }
+
+    #[test]
+    fn test_prepare_url() {
+        let prepared = prepare_url("example.com");
+        assert!(prepared.starts_with("https://"));
+    }
+
+    #[test]
+    fn test_is_html_content_check() {
+        assert!(is_html_content_check(b"<!DOCTYPE html><html>"));
+        assert!(is_html_content_check(b"<html><body>"));
+        assert!(!is_html_content_check(b"{ \"json\": true }"));
+        assert!(!is_html_content_check(b"plain text content"));
+    }
+
+    #[test]
+    fn test_crawl_duration_expired() {
+        // None timeout → not expired
+        assert!(!crawl_duration_expired(&None, &None));
+        assert!(!crawl_duration_expired(&Some(Duration::from_secs(10)), &None));
+        assert!(!crawl_duration_expired(&None, &Some(Instant::now())));
+
+        // Very long timeout → not expired
+        let start = Some(Instant::now());
+        assert!(!crawl_duration_expired(&Some(Duration::from_secs(3600)), &start));
+
+        // Zero timeout → expired immediately
+        assert!(crawl_duration_expired(&Some(Duration::from_secs(0)), &start));
+    }
+
+    #[test]
+    fn test_split_hashset_round_robin() {
+        let mut set = HashSet::new();
+        for i in 0..10 {
+            set.insert(i);
+        }
+
+        let buckets = split_hashset_round_robin(set, 3);
+        assert_eq!(buckets.len(), 3);
+        let total: usize = buckets.iter().map(|b| b.len()).sum();
+        assert_eq!(total, 10);
+
+        // Single part
+        let mut set2 = HashSet::new();
+        set2.insert(1);
+        set2.insert(2);
+        let buckets2 = split_hashset_round_robin(set2, 1);
+        assert_eq!(buckets2.len(), 1);
+        assert_eq!(buckets2[0].len(), 2);
+    }
+
+    #[cfg(any(feature = "cache", feature = "cache_mem"))]
+    #[test]
+    fn test_create_cache_key_raw() {
+        assert_eq!(
+            create_cache_key_raw("https://example.com", None, None),
+            "GET:https://example.com"
+        );
+        assert_eq!(
+            create_cache_key_raw("https://example.com", Some("POST"), None),
+            "POST:https://example.com"
+        );
+        assert_eq!(
+            create_cache_key_raw("https://example.com", None, Some("token123")),
+            "GET:https://example.com:token123"
+        );
+    }
 }

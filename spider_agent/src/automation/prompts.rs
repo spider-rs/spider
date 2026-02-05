@@ -221,3 +221,69 @@ Return a JSON object:
 
 Focus on high-relevance content pages, skip ads and tracking links.
 "##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_system_prompt_contains_actions() {
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Click"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("ClickPoint"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Fill"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Type"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("ScrollY"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Navigate"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Evaluate"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("ClickDrag"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Press"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("WaitFor"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("SetViewport"));
+    }
+
+    #[test]
+    fn test_default_system_prompt_has_json_format() {
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("\"label\""));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("\"done\""));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("\"steps\""));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("JSON"));
+    }
+
+    #[test]
+    fn test_default_system_prompt_efficiency_directives() {
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("stagnat"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("Batch"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("READ ONLY"));
+        assert!(DEFAULT_SYSTEM_PROMPT.contains("efficient"));
+    }
+
+    #[test]
+    fn test_extract_system_prompt_nonempty() {
+        assert!(!EXTRACT_SYSTEM_PROMPT.is_empty());
+        assert!(EXTRACT_SYSTEM_PROMPT.contains("extract"));
+    }
+
+    #[test]
+    fn test_observe_system_prompt_nonempty() {
+        assert!(!OBSERVE_SYSTEM_PROMPT.is_empty());
+        assert!(OBSERVE_SYSTEM_PROMPT.contains("interactive_elements"));
+    }
+
+    #[test]
+    fn test_act_system_prompt_nonempty() {
+        assert!(!ACT_SYSTEM_PROMPT.is_empty());
+        assert!(ACT_SYSTEM_PROMPT.contains("action_taken"));
+    }
+
+    #[test]
+    fn test_configuration_system_prompt_nonempty() {
+        assert!(!CONFIGURATION_SYSTEM_PROMPT.is_empty());
+        assert!(CONFIGURATION_SYSTEM_PROMPT.contains("crawler"));
+    }
+
+    #[test]
+    fn test_map_system_prompt_nonempty() {
+        assert!(!MAP_SYSTEM_PROMPT.is_empty());
+        assert!(MAP_SYSTEM_PROMPT.contains("URL"));
+    }
+}

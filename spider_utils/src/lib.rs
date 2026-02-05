@@ -339,3 +339,101 @@ async fn test_xpath_query_select_map_streamed() {
 
     assert!(!data.is_empty(), "Xpath extraction failed",);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_css_query_empty_html() {
+        let map = QueryCSSMap::from([("item", QueryCSSSelectSet::from([".item"]))]);
+        let data = css_query_select_map("", &build_selectors(map));
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn test_css_query_no_matches() {
+        let map = QueryCSSMap::from([("item", QueryCSSSelectSet::from([".nonexistent"]))]);
+        let data = css_query_select_map(
+            r#"<html><body><p class="other">Hello</p></body></html>"#,
+            &build_selectors(map),
+        );
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn test_build_selectors_invalid_css() {
+        let map = QueryCSSMap::from([("bad", QueryCSSSelectSet::from(["[[[invalid"]))]);
+        let selectors = build_selectors(map);
+        // Invalid CSS should be rejected (not panic)
+        assert!(selectors.css.is_empty());
+    }
+
+    #[test]
+    fn test_build_selectors_mixed_css_xpath() {
+        let map = QueryCSSMap::from([(
+            "mixed",
+            QueryCSSSelectSet::from([".valid-css", "//*[@class='xpath']"]),
+        )]);
+        let selectors = build_selectors(map);
+        // Should have CSS selectors and/or XPath selectors
+        let has_css = selectors.css.contains_key("mixed");
+        let has_xpath = selectors.xpath.contains_key("mixed");
+        assert!(has_css || has_xpath);
+    }
+
+    #[test]
+    fn test_css_query_special_characters() {
+        let map = QueryCSSMap::from([("content", QueryCSSSelectSet::from(["p"]))]);
+        let data = css_query_select_map(
+            r#"<html><body><p>Hello &amp; "world" &lt;test&gt;</p></body></html>"#,
+            &build_selectors(map),
+        );
+        assert!(!data.is_empty());
+        let values = data.get("content").unwrap();
+        assert!(!values.is_empty());
+    }
+
+    #[test]
+    fn test_clean_element_text_basic() {
+        let html = Html::parse_fragment("<p>Hello <b>World</b></p>");
+        let selector = Selector::parse("p").unwrap();
+        if let Some(element) = html.select(&selector).next() {
+            let text = clean_element_text(&element);
+            assert!(text.contains("Hello"));
+            assert!(text.contains("World"));
+        }
+    }
+
+    #[test]
+    fn test_process_selector_img_element() {
+        let html =
+            Html::parse_fragment(r#"<img src="photo.jpg" alt="A photo">"#);
+        let selector = Selector::parse("img").unwrap();
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+
+        if let Some(element) = html.select(&selector).next() {
+            process_selector::<&str>(element, &"image", &mut map);
+        }
+        assert!(map.contains_key("image"));
+        let vals = &map["image"];
+        assert!(!vals.is_empty());
+        // Should contain src in brackets and alt in parens
+        assert!(vals[0].contains("photo.jpg"));
+    }
+
+    #[test]
+    fn test_process_selector_meta_element() {
+        let html = Html::parse_document(
+            r#"<html><head><meta name="description" content="Test description"></head><body></body></html>"#,
+        );
+        let selector = Selector::parse("meta[name='description']").unwrap();
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+
+        if let Some(element) = html.select(&selector).next() {
+            process_selector::<&str>(element, &"desc", &mut map);
+        }
+        assert!(map.contains_key("desc"));
+        assert_eq!(map["desc"][0], "Test description");
+    }
+}

@@ -2010,3 +2010,122 @@ impl SpiderCloudConfig {
         "raw".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_configuration_defaults() {
+        let config = Configuration::default();
+        assert!(!config.respect_robots_txt);
+        assert!(!config.subdomains);
+        assert!(!config.tld);
+        assert_eq!(config.delay, 0);
+        assert!(config.user_agent.is_none());
+        assert!(config.blacklist_url.is_none());
+        assert!(config.whitelist_url.is_none());
+        assert!(config.proxies.is_none());
+        assert!(!config.http2_prior_knowledge);
+    }
+
+    #[test]
+    fn test_redirect_policy_variants() {
+        assert_eq!(RedirectPolicy::default(), RedirectPolicy::Loose);
+        let strict = RedirectPolicy::Strict;
+        let none = RedirectPolicy::None;
+        assert_ne!(strict, RedirectPolicy::Loose);
+        assert_ne!(none, RedirectPolicy::Loose);
+        assert_ne!(strict, none);
+    }
+
+    #[test]
+    fn test_proxy_ignore_variants() {
+        assert_eq!(ProxyIgnore::default(), ProxyIgnore::No);
+        let chrome = ProxyIgnore::Chrome;
+        let http = ProxyIgnore::Http;
+        assert_ne!(chrome, ProxyIgnore::No);
+        assert_ne!(http, ProxyIgnore::No);
+        assert_ne!(chrome, http);
+    }
+
+    #[test]
+    fn test_request_proxy_construction() {
+        let proxy = RequestProxy {
+            addr: "http://proxy.example.com:8080".to_string(),
+            ignore: ProxyIgnore::No,
+        };
+        assert_eq!(proxy.addr, "http://proxy.example.com:8080");
+        assert_eq!(proxy.ignore, ProxyIgnore::No);
+    }
+
+    #[test]
+    fn test_request_proxy_default() {
+        let proxy = RequestProxy::default();
+        assert!(proxy.addr.is_empty());
+        assert_eq!(proxy.ignore, ProxyIgnore::No);
+    }
+
+    #[test]
+    fn test_configuration_blacklist_setup() {
+        let mut config = Configuration::default();
+        config.blacklist_url = Some(vec![
+            "https://example.com/private".into(),
+            "https://example.com/admin".into(),
+        ]);
+        assert_eq!(config.blacklist_url.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_configuration_whitelist_setup() {
+        let mut config = Configuration::default();
+        config.whitelist_url = Some(vec![
+            "https://example.com/public".into(),
+        ]);
+        assert_eq!(config.whitelist_url.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_configuration_external_domains() {
+        let mut config = Configuration::default();
+        config.external_domains_caseless = Box::new(
+            [
+                case_insensitive_string::CaseInsensitiveString::from("Example.Com"),
+                case_insensitive_string::CaseInsensitiveString::from("OTHER.org"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(config.external_domains_caseless.len(), 2);
+        assert!(config.external_domains_caseless.contains(
+            &case_insensitive_string::CaseInsensitiveString::from("example.com")
+        ));
+    }
+
+    #[test]
+    fn test_configuration_budget() {
+        let mut config = Configuration::default();
+        let mut budget = hashbrown::HashMap::new();
+        budget.insert(
+            case_insensitive_string::CaseInsensitiveString::from("/path"),
+            100u32,
+        );
+        config.budget = Some(budget);
+        assert!(config.budget.is_some());
+        assert_eq!(
+            config
+                .budget
+                .as_ref()
+                .unwrap()
+                .get(&case_insensitive_string::CaseInsensitiveString::from("/path")),
+            Some(&100u32)
+        );
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_allow_list_set_default() {
+        let allow_list = AllowListSet::default();
+        assert!(allow_list.0.is_empty());
+    }
+}

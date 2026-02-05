@@ -292,3 +292,117 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_bucket_new() {
+        let bucket: ListBucket<CaseInsensitiveString> = ListBucket::new();
+        assert!(bucket.is_empty());
+        assert_eq!(bucket.len(), 0);
+    }
+
+    #[test]
+    fn test_list_bucket_insert_contains() {
+        let mut bucket = ListBucket::new();
+        let link = CaseInsensitiveString::from("https://example.com");
+        bucket.insert(link.clone());
+        assert!(bucket.contains(&link));
+        assert!(!bucket.contains(&CaseInsensitiveString::from("https://other.com")));
+    }
+
+    #[test]
+    fn test_list_bucket_len_and_is_empty() {
+        let mut bucket = ListBucket::new();
+        assert!(bucket.is_empty());
+        assert_eq!(bucket.len(), 0);
+
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        assert!(!bucket.is_empty());
+        assert_eq!(bucket.len(), 1);
+
+        bucket.insert(CaseInsensitiveString::from("https://b.com"));
+        assert_eq!(bucket.len(), 2);
+    }
+
+    #[test]
+    fn test_list_bucket_clear() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        bucket.insert(CaseInsensitiveString::from("https://b.com"));
+        assert_eq!(bucket.len(), 2);
+
+        bucket.clear();
+        assert!(bucket.is_empty());
+        assert_eq!(bucket.len(), 0);
+    }
+
+    #[test]
+    fn test_list_bucket_drain() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        bucket.insert(CaseInsensitiveString::from("https://b.com"));
+
+        let drained: Vec<_> = bucket.drain().collect();
+        assert_eq!(drained.len(), 2);
+        assert!(bucket.is_empty());
+    }
+
+    #[test]
+    fn test_list_bucket_get_links() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        bucket.insert(CaseInsensitiveString::from("https://b.com"));
+
+        let links = bucket.get_links();
+        assert_eq!(links.len(), 2);
+        assert!(links.contains(&CaseInsensitiveString::from("https://a.com")));
+        assert!(links.contains(&CaseInsensitiveString::from("https://b.com")));
+    }
+
+    #[test]
+    fn test_list_bucket_extend_links() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://visited.com"));
+
+        let mut links = HashSet::new();
+        let mut msg = HashSet::new();
+        msg.insert(CaseInsensitiveString::from("https://visited.com"));
+        msg.insert(CaseInsensitiveString::from("https://new.com"));
+
+        bucket.extend_links(&mut links, msg);
+        assert_eq!(links.len(), 1);
+        assert!(links.contains(&CaseInsensitiveString::from("https://new.com")));
+    }
+
+    #[test]
+    fn test_list_bucket_extend_with_new_links() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://visited.com"));
+
+        let mut links = HashSet::new();
+
+        bucket.extend_with_new_links(
+            &mut links,
+            CaseInsensitiveString::from("https://visited.com"),
+        );
+        assert!(links.is_empty());
+
+        bucket.extend_with_new_links(
+            &mut links,
+            CaseInsensitiveString::from("https://new.com"),
+        );
+        assert_eq!(links.len(), 1);
+        assert!(links.contains(&CaseInsensitiveString::from("https://new.com")));
+    }
+
+    #[test]
+    fn test_list_bucket_duplicate_insert() {
+        let mut bucket = ListBucket::new();
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        bucket.insert(CaseInsensitiveString::from("https://a.com"));
+        assert_eq!(bucket.len(), 1);
+    }
+}

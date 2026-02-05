@@ -402,6 +402,8 @@ impl RobotFileParser {
         let mut state = 0;
         let mut entry = Entry::new();
 
+        self.entries.reserve(lines.len() / 10);
+
         for line in lines {
             let mut ln = line.as_ref();
             if ln.is_empty() {
@@ -426,67 +428,61 @@ impl RobotFileParser {
             if ln.is_empty() {
                 continue;
             }
-            let parts: Vec<&str> = ln.splitn(2, ':').collect();
 
-            if parts.len() == 2 {
-                let part0 = parts[0].trim().to_lowercase();
-                let part1 = String::from_utf8(percent_decode(parts[1].trim().as_bytes()).collect())
-                    .unwrap_or_default();
-                match part0 {
-                    ref x if x.to_lowercase() == "user-agent" => {
-                        if state == 2 {
-                            self._add_entry(entry);
-                            entry = Entry::new();
-                        }
-                        entry.push_useragent(&part1);
-                        state = 1;
-                        self.set_disallow_agents_list(&part1);
+            if let Some((left, right)) = ln.split_once(':') {
+                let part0 = left.trim();
+                let part1_raw = right.trim();
+                let part1 =
+                    String::from_utf8(percent_decode(part1_raw.as_bytes()).collect())
+                        .unwrap_or_default();
+
+                if part0.eq_ignore_ascii_case("user-agent") {
+                    if state == 2 {
+                        self._add_entry(entry);
+                        entry = Entry::new();
                     }
-                    ref x if x.to_lowercase() == "disallow" => {
-                        if state != 0 {
-                            entry.push_ruleline(RuleLine::new(&part1, false));
-                            state = 2;
-                            self.set_disallow_list(&part1);
-                        }
+                    entry.push_useragent(&part1);
+                    state = 1;
+                    self.set_disallow_agents_list(&part1);
+                } else if part0.eq_ignore_ascii_case("disallow") {
+                    if state != 0 {
+                        entry.push_ruleline(RuleLine::new(&part1, false));
+                        state = 2;
+                        self.set_disallow_list(&part1);
                     }
-                    ref x if x.to_lowercase() == "allow" => {
-                        if state != 0 {
-                            entry.push_ruleline(RuleLine::new(&part1, true));
-                            state = 2;
-                        }
+                } else if part0.eq_ignore_ascii_case("allow") {
+                    if state != 0 {
+                        entry.push_ruleline(RuleLine::new(&part1, true));
+                        state = 2;
                     }
-                    ref x if x.to_lowercase() == "crawl-delay" => {
-                        if state != 0 {
-                            if let Ok(delay) = part1.parse::<f64>() {
-                                let delay_seconds = delay.trunc();
-                                let delay_nanoseconds = delay.fract() * 10f64.powi(9);
-                                let delay =
-                                    Duration::new(delay_seconds as u64, delay_nanoseconds as u32);
-                                entry.set_crawl_delay(delay);
-                            }
-                            state = 2;
+                } else if part0.eq_ignore_ascii_case("crawl-delay") {
+                    if state != 0 {
+                        if let Ok(delay) = part1.parse::<f64>() {
+                            let delay_seconds = delay.trunc();
+                            let delay_nanoseconds = delay.fract() * 10f64.powi(9);
+                            let delay =
+                                Duration::new(delay_seconds as u64, delay_nanoseconds as u32);
+                            entry.set_crawl_delay(delay);
                         }
+                        state = 2;
                     }
-                    ref x if x.to_lowercase() == "sitemap" => {
-                        if state != 0 {
-                            state = 2;
+                } else if part0.eq_ignore_ascii_case("sitemap") {
+                    if state != 0 {
+                        state = 2;
+                    }
+                } else if part0.eq_ignore_ascii_case("request-rate") {
+                    if state != 0 {
+                        let numbers: Vec<Result<usize, _>> =
+                            part1.split('/').map(|x| x.parse::<usize>()).collect();
+                        if numbers.len() == 2 && numbers[0].is_ok() && numbers[1].is_ok() {
+                            let req_rate = RequestRate {
+                                requests: numbers[0].clone().unwrap(),
+                                seconds: numbers[1].clone().unwrap(),
+                            };
+                            entry.set_req_rate(req_rate);
                         }
+                        state = 2;
                     }
-                    ref x if x.to_lowercase() == "request-rate" => {
-                        if state != 0 {
-                            let numbers: Vec<Result<usize, _>> =
-                                part1.split('/').map(|x| x.parse::<usize>()).collect();
-                            if numbers.len() == 2 && numbers[0].is_ok() && numbers[1].is_ok() {
-                                let req_rate = RequestRate {
-                                    requests: numbers[0].clone().unwrap(),
-                                    seconds: numbers[1].clone().unwrap(),
-                                };
-                                entry.set_req_rate(req_rate);
-                            }
-                            state = 2;
-                        }
-                    }
-                    _ => {}
                 }
             }
         }
@@ -642,5 +638,209 @@ impl RobotFileParser {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_path_basic() {
+        assert_eq!(extract_path("https://example.com/foo/bar"), "/foo/bar");
+    }
+
+    #[test]
+    fn test_extract_path_with_query() {
+        assert_eq!(extract_path("https://example.com/foo?q=1"), "/foo");
+    }
+
+    #[test]
+    fn test_extract_path_no_path() {
+        assert_eq!(extract_path("https://example.com"), "/");
+    }
+
+    #[test]
+    fn test_extract_path_empty() {
+        assert_eq!(extract_path(""), "/");
+    }
+
+    #[test]
+    fn test_extract_path_http() {
+        assert_eq!(extract_path("http://example.com/page"), "/page");
+    }
+
+    #[test]
+    fn test_extract_path_no_scheme() {
+        assert_eq!(extract_path("example.com/page"), "/page");
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_rule_line_applies_wildcard() {
+        let rule = RuleLine::new("*", false);
+        assert!(rule.applies_to("/anything"));
+        assert!(rule.applies_to("/foo/bar"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_rule_line_applies_prefix() {
+        let rule = RuleLine::new("/foo*", false);
+        assert!(rule.applies_to("/foobar"));
+        assert!(rule.applies_to("/foo/baz"));
+        assert!(!rule.applies_to("/bar"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_rule_line_applies_exact() {
+        let rule = RuleLine::new("/exact", false);
+        assert!(rule.applies_to("/exact"));
+        assert!(!rule.applies_to("/exact/more"));
+        assert!(!rule.applies_to("/other"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_rule_line_applies_directory() {
+        let rule = RuleLine::new("/dir/", false);
+        assert!(rule.applies_to("/dir/page"));
+        assert!(rule.applies_to("/dir/sub/page"));
+        assert!(!rule.applies_to("/other/"));
+    }
+
+    #[test]
+    fn test_entry_applies_to_agent() {
+        let mut entry = Entry::new();
+        entry.push_useragent("googlebot");
+        assert!(entry.applies_to("Googlebot"));
+        assert!(entry.applies_to("Googlebot/2.1"));
+        assert!(!entry.applies_to("Bingbot"));
+    }
+
+    #[test]
+    fn test_entry_applies_to_wildcard_agent() {
+        let mut entry = Entry::new();
+        entry.push_useragent("*");
+        assert!(entry.applies_to("Googlebot"));
+        assert!(entry.applies_to("AnyAgent"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_entry_allowance() {
+        let mut entry = Entry::new();
+        entry.push_useragent("*");
+        entry.push_ruleline(RuleLine::new("/private", false));
+        entry.push_ruleline(RuleLine::new("/public", true));
+
+        assert!(!entry.allowance("/private"));
+        assert!(entry.allowance("/public"));
+        assert!(entry.allowance("/other"));
+    }
+
+    #[test]
+    fn test_parser_basic() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: *",
+            "Disallow: /private",
+            "Allow: /public",
+        ];
+        parser.parse(&lines);
+
+        assert!(parser.can_fetch("Googlebot", "https://example.com/public"));
+    }
+
+    #[test]
+    fn test_parser_multiple_agents() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: googlebot",
+            "Disallow: /nogoogle",
+            "",
+            "User-agent: bingbot",
+            "Disallow: /nobing",
+        ];
+        parser.parse(&lines);
+
+        let entries = parser.get_entries();
+        assert!(entries.len() >= 1);
+    }
+
+    #[test]
+    fn test_parser_crawl_delay() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: testbot",
+            "Crawl-delay: 5",
+            "Disallow: /test",
+        ];
+        parser.parse(&lines);
+
+        let entries = parser.get_entries();
+        assert!(!entries.is_empty());
+        let entry = &entries[0];
+        assert_eq!(entry.crawl_delay, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn test_parser_request_rate() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: testbot",
+            "Request-rate: 3/60",
+            "Disallow: /test",
+        ];
+        parser.parse(&lines);
+
+        let rate = parser.get_req_rate("testbot");
+        assert!(rate.is_some());
+        let rate = rate.unwrap();
+        assert_eq!(rate.requests, 3);
+        assert_eq!(rate.seconds, 60);
+    }
+
+    #[test]
+    fn test_parser_disallow_all() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        parser.disallow_all = true;
+        assert!(!parser.can_fetch("*", "https://example.com/any"));
+    }
+
+    #[test]
+    fn test_parser_allow_all() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        parser.allow_all = true;
+        assert!(parser.can_fetch("*", "https://example.com/any"));
+    }
+
+    #[test]
+    fn test_parser_comments() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "# This is a comment",
+            "User-agent: * # all bots",
+            "Disallow: /secret # hidden area",
+        ];
+        parser.parse(&lines);
+
+        let base = parser.get_base_entry();
+        assert!(base.has_useragent());
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_parser_empty_disallow() {
+        let rule = RuleLine::new("", false);
+        assert!(rule.allowance);
     }
 }
