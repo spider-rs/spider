@@ -153,6 +153,67 @@ impl ModelPolicy {
     }
 }
 
+/// A model endpoint override for dual-model routing.
+///
+/// When `api_url` or `api_key` is `None`, the parent
+/// [`RemoteMultimodalConfigs`] values are inherited at resolve time.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ModelEndpoint {
+    /// Model identifier for this endpoint (e.g. "gpt-4o-mini").
+    pub model_name: String,
+    /// Optional API URL override. `None` inherits from parent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+    /// Optional API key override. `None` inherits from parent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+impl ModelEndpoint {
+    /// Create a new model endpoint with just a model name.
+    pub fn new(model_name: impl Into<String>) -> Self {
+        Self {
+            model_name: model_name.into(),
+            api_url: None,
+            api_key: None,
+        }
+    }
+
+    /// Set the API URL override.
+    pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
+        self.api_url = Some(url.into());
+        self
+    }
+
+    /// Set the API key override.
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+}
+
+/// Routing mode that decides when to use the vision vs text model.
+///
+/// Only takes effect when [`RemoteMultimodalConfigs::has_dual_model_routing`]
+/// returns `true` (i.e. at least one of `vision_model` / `text_model` is set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum VisionRouteMode {
+    /// No routing – always use the primary model (current behaviour).
+    #[default]
+    AlwaysPrimary,
+    /// Text model by default; switch to vision on round 0, stagnation,
+    /// stuck ≥ 3, or an explicit `request_vision` memory-op.
+    TextFirst,
+    /// Vision model for the first 2 rounds and when stagnated/stuck,
+    /// then fall back to the text model for stable mid-rounds.
+    VisionFirst,
+    /// Text model always, vision ONLY on an explicit `request_vision`
+    /// memory-op from the agent.
+    AgentDriven,
+}
+
 /// HTML cleaning profile for content processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1073,6 +1134,17 @@ pub struct RemoteMultimodalConfigs {
     /// Optional concurrency limit for remote inference calls.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency_limit: Option<usize>,
+    /// Optional vision model endpoint for dual-model routing.
+    /// When set alongside `text_model`, the engine routes per-round
+    /// based on [`VisionRouteMode`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vision_model: Option<ModelEndpoint>,
+    /// Optional text-only model endpoint for dual-model routing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_model: Option<ModelEndpoint>,
+    /// Routing mode controlling when vision vs text model is used.
+    #[serde(default)]
+    pub vision_route_mode: VisionRouteMode,
     /// Optional skill registry for dynamic context injection.
     /// When set, matching skills are automatically injected into the system prompt
     /// based on current page state (URL, title, HTML) each round.
@@ -1095,7 +1167,10 @@ impl PartialEq for RemoteMultimodalConfigs {
             && self.cfg == other.cfg
             && self.prompt_url_gate == other.prompt_url_gate
             && self.concurrency_limit == other.concurrency_limit
-        // NOTE: intentionally ignoring `semaphore`
+            && self.vision_model == other.vision_model
+            && self.text_model == other.text_model
+            && self.vision_route_mode == other.vision_route_mode
+        // NOTE: intentionally ignoring `semaphore` and `skill_registry`
     }
 }
 
@@ -1113,6 +1188,9 @@ impl Default for RemoteMultimodalConfigs {
             cfg: RemoteMultimodalConfig::default(),
             prompt_url_gate: None,
             concurrency_limit: None,
+            vision_model: None,
+            text_model: None,
+            vision_route_mode: VisionRouteMode::default(),
             #[cfg(feature = "skills")]
             skill_registry: None,
             semaphore: Self::default_semaphore(),
@@ -1271,6 +1349,95 @@ impl RemoteMultimodalConfigs {
             screenshot
         } else {
             None
+        }
+    }
+
+    // ── dual-model routing ──────────────────────────────────────────
+
+    /// Set the vision model endpoint for dual-model routing.
+    pub fn with_vision_model(mut self, endpoint: ModelEndpoint) -> Self {
+        self.vision_model = Some(endpoint);
+        self
+    }
+
+    /// Set the text model endpoint for dual-model routing.
+    pub fn with_text_model(mut self, endpoint: ModelEndpoint) -> Self {
+        self.text_model = Some(endpoint);
+        self
+    }
+
+    /// Set the vision routing mode.
+    pub fn with_vision_route_mode(mut self, mode: VisionRouteMode) -> Self {
+        self.vision_route_mode = mode;
+        self
+    }
+
+    /// Convenience: set both vision and text model endpoints at once.
+    pub fn with_dual_models(mut self, vision: ModelEndpoint, text: ModelEndpoint) -> Self {
+        self.vision_model = Some(vision);
+        self.text_model = Some(text);
+        self
+    }
+
+    /// Whether dual-model routing is active
+    /// (at least one of `vision_model` / `text_model` is configured).
+    pub fn has_dual_model_routing(&self) -> bool {
+        self.vision_model.is_some() || self.text_model.is_some()
+    }
+
+    /// Resolve the (api_url, model_name, api_key) triple for the current round.
+    ///
+    /// * `use_vision == true`  → prefer `vision_model`, fall back to primary.
+    /// * `use_vision == false` → prefer `text_model`,   fall back to primary.
+    ///
+    /// Fields left as `None` on the chosen [`ModelEndpoint`] inherit from
+    /// the parent (`self.api_url` / `self.api_key`).
+    pub fn resolve_model_for_round(&self, use_vision: bool) -> (&str, &str, Option<&str>) {
+        let endpoint = if use_vision {
+            self.vision_model.as_ref()
+        } else {
+            self.text_model.as_ref()
+        };
+
+        match endpoint {
+            Some(ep) => {
+                let url = ep.api_url.as_deref().unwrap_or(&self.api_url);
+                let key = ep
+                    .api_key
+                    .as_deref()
+                    .or(self.api_key.as_deref());
+                (url, &ep.model_name, key)
+            }
+            None => (&self.api_url, &self.model_name, self.api_key.as_deref()),
+        }
+    }
+
+    /// Decide whether to use vision this round, based on the configured
+    /// [`VisionRouteMode`] and current loop state.
+    ///
+    /// `force_vision` is an explicit per-round override (e.g. from `request_vision`).
+    pub fn should_use_vision_this_round(
+        &self,
+        round_idx: usize,
+        stagnated: bool,
+        action_stuck_rounds: usize,
+        force_vision: bool,
+    ) -> bool {
+        if !self.has_dual_model_routing() {
+            return true; // no routing → always include screenshot (current behaviour)
+        }
+        if force_vision {
+            return true;
+        }
+        match self.vision_route_mode {
+            VisionRouteMode::AlwaysPrimary => true,
+            VisionRouteMode::TextFirst => {
+                round_idx == 0 || stagnated || action_stuck_rounds >= 3
+            }
+            VisionRouteMode::VisionFirst => {
+                round_idx < 2 || stagnated || action_stuck_rounds >= 3
+            }
+            VisionRouteMode::AgentDriven => false,
         }
     }
 }

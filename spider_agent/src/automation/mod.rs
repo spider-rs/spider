@@ -39,6 +39,8 @@ mod selector_cache;
 mod self_healing;
 #[cfg(feature = "skills")]
 pub mod skills;
+#[cfg(feature = "memvid")]
+pub mod long_term_memory;
 mod synthesis;
 mod tool_calling;
 
@@ -51,8 +53,9 @@ pub use chain::{ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainSt
 // Re-export config types
 pub use config::{
     is_url_allowed, merged_config, supports_vision, AutomationConfig, CaptureProfile,
-    CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelPolicy, RecoveryStrategy,
-    RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy,
+    CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelEndpoint, ModelPolicy,
+    RecoveryStrategy, RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy,
+    VisionRouteMode,
 };
 
 // Re-export content analysis
@@ -149,6 +152,13 @@ pub use tool_calling::{parse_tool_calls, tool_calls_to_steps};
 
 // Re-export concurrent chain execution
 pub use concurrent_chain::execute_graph;
+
+// Re-export long-term memory types (memvid feature)
+#[cfg(feature = "memvid")]
+pub use long_term_memory::{
+    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord,
+    MemoryStats, RecalledExperience,
+};
 
 // Re-export browser functions (chrome feature)
 #[cfg(feature = "chrome")]

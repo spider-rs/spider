@@ -230,6 +230,12 @@ pub use search::BingProvider;
 #[cfg(feature = "search_tavily")]
 pub use search::TavilyProvider;
 
+#[cfg(feature = "memvid")]
+pub use automation::{
+    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord,
+    MemoryStats as ExperienceMemoryStats, RecalledExperience,
+};
+
 #[cfg(feature = "chrome")]
 pub use browser::BrowserContext;
 

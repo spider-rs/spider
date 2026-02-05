@@ -65,11 +65,22 @@ pub struct RemoteMultimodalEngine {
     pub prompt_url_gate: Option<PromptUrlGate>,
     /// Optional semaphore used to limit concurrent in-flight LLM requests.
     pub semaphore: Option<Arc<Semaphore>>,
+    /// Optional vision model endpoint for dual-model routing.
+    pub vision_model: Option<super::config::ModelEndpoint>,
+    /// Optional text-only model endpoint for dual-model routing.
+    pub text_model: Option<super::config::ModelEndpoint>,
+    /// Routing mode controlling when vision vs text model is used.
+    pub vision_route_mode: super::config::VisionRouteMode,
     /// Optional skill registry for dynamic context injection.
     /// When set, matching skills are automatically injected into the system prompt
     /// based on current page state (URL, title, HTML) each round.
     #[cfg(feature = "skills")]
     pub skill_registry: Option<super::skills::SkillRegistry>,
+    /// Optional long-term experience memory for learning from past sessions.
+    /// When set, the engine recalls relevant past strategies before automation
+    /// and stores successful outcomes after completion.
+    #[cfg(feature = "memvid")]
+    pub experience_memory: Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
 }
 
 impl RemoteMultimodalEngine {
@@ -90,8 +101,13 @@ impl RemoteMultimodalEngine {
             cfg: RemoteMultimodalConfig::default(),
             prompt_url_gate: None,
             semaphore: None,
+            vision_model: None,
+            text_model: None,
+            vision_route_mode: super::config::VisionRouteMode::default(),
             #[cfg(feature = "skills")]
             skill_registry: None,
+            #[cfg(feature = "memvid")]
+            experience_memory: None,
         }
     }
 
@@ -154,6 +170,19 @@ impl RemoteMultimodalEngine {
         self
     }
 
+    /// Set a long-term experience memory for learning across sessions.
+    ///
+    /// When set, the engine will recall past successful strategies before
+    /// each automation run and store new experiences after successful runs.
+    #[cfg(feature = "memvid")]
+    pub fn with_experience_memory(
+        &mut self,
+        memory: Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
+    ) -> &mut Self {
+        self.experience_memory = memory;
+        self
+    }
+
     /// Set the full runtime configuration.
     pub fn with_remote_multimodal_config(&mut self, cfg: RemoteMultimodalConfig) -> &mut Self {
         self.cfg = cfg;
@@ -206,8 +235,13 @@ impl RemoteMultimodalEngine {
             cfg,
             prompt_url_gate: self.prompt_url_gate.clone(),
             semaphore: self.semaphore.clone(),
+            vision_model: self.vision_model.clone(),
+            text_model: self.text_model.clone(),
+            vision_route_mode: self.vision_route_mode,
             #[cfg(feature = "skills")]
             skill_registry: self.skill_registry.clone(),
+            #[cfg(feature = "memvid")]
+            experience_memory: self.experience_memory.clone(),
         }
     }
 
@@ -294,6 +328,78 @@ impl RemoteMultimodalEngine {
         ));
 
         s
+    }
+
+    // ── dual-model routing ──────────────────────────────────────────
+
+    /// Set the vision model endpoint for dual-model routing.
+    pub fn with_vision_model(&mut self, endpoint: Option<super::config::ModelEndpoint>) -> &mut Self {
+        self.vision_model = endpoint;
+        self
+    }
+
+    /// Set the text model endpoint for dual-model routing.
+    pub fn with_text_model(&mut self, endpoint: Option<super::config::ModelEndpoint>) -> &mut Self {
+        self.text_model = endpoint;
+        self
+    }
+
+    /// Set the vision routing mode.
+    pub fn with_vision_route_mode(&mut self, mode: super::config::VisionRouteMode) -> &mut Self {
+        self.vision_route_mode = mode;
+        self
+    }
+
+    /// Whether dual-model routing is active.
+    pub fn has_dual_model_routing(&self) -> bool {
+        self.vision_model.is_some() || self.text_model.is_some()
+    }
+
+    /// Resolve (api_url, model_name, api_key) for the current round.
+    ///
+    /// Delegates to the same logic as [`RemoteMultimodalConfigs::resolve_model_for_round`]
+    /// but uses the engine's own fields.
+    pub fn resolve_model_for_round(&self, use_vision: bool) -> (&str, &str, Option<&str>) {
+        let endpoint = if use_vision {
+            self.vision_model.as_ref()
+        } else {
+            self.text_model.as_ref()
+        };
+
+        match endpoint {
+            Some(ep) => {
+                let url = ep.api_url.as_deref().unwrap_or(&self.api_url);
+                let key = ep.api_key.as_deref().or(self.api_key.as_deref());
+                (url, &ep.model_name, key)
+            }
+            None => (&self.api_url, &self.model_name, self.api_key.as_deref()),
+        }
+    }
+
+    /// Decide whether to use vision this round.
+    pub fn should_use_vision_this_round(
+        &self,
+        round_idx: usize,
+        stagnated: bool,
+        action_stuck_rounds: usize,
+        force_vision: bool,
+    ) -> bool {
+        if !self.has_dual_model_routing() {
+            return true;
+        }
+        if force_vision {
+            return true;
+        }
+        match self.vision_route_mode {
+            super::config::VisionRouteMode::AlwaysPrimary => true,
+            super::config::VisionRouteMode::TextFirst => {
+                round_idx == 0 || stagnated || action_stuck_rounds >= 3
+            }
+            super::config::VisionRouteMode::VisionFirst => {
+                round_idx < 2 || stagnated || action_stuck_rounds >= 3
+            }
+            super::config::VisionRouteMode::AgentDriven => false,
+        }
     }
 
     /// Extract structured data from raw HTML content (no browser required).

@@ -399,6 +399,48 @@ impl RemoteMultimodalEngine {
         let mut recent_step_hashes: std::collections::VecDeque<u64> =
             std::collections::VecDeque::new();
         let mut action_stuck_rounds: usize = 0;
+        // Dual-model routing: set by `request_vision` memory_op to force vision next round
+        let mut force_vision_next_round: bool = false;
+
+        // Recall learned strategies from long-term experience memory
+        #[cfg(feature = "memvid")]
+        if let Some(ref exp_mem) = self.experience_memory {
+            // Clear cache for fresh results on each new run
+            {
+                let mem = exp_mem.read().await;
+                mem.clear_cache();
+            }
+            let mut mem = exp_mem.write().await;
+            let query = format!("{} {}", url_input, last_label);
+            let max_recall = mem.config.max_recall;
+            let max_context_chars = mem.config.max_context_chars;
+            match mem.recall(&query, max_recall).await {
+                Ok(experiences) if !experiences.is_empty() => {
+                    let learned_context = super::long_term_memory::ExperienceMemory::recall_to_context(
+                        &experiences,
+                        max_context_chars,
+                    );
+                    if !learned_context.is_empty() {
+                        // Prepend learned strategies to system_prompt_extra
+                        let existing = self.system_prompt_extra.clone().unwrap_or_default();
+                        self.system_prompt_extra = Some(if existing.is_empty() {
+                            learned_context
+                        } else {
+                            format!("{}\n\n{}", learned_context, existing)
+                        });
+                        log::info!(
+                            "Injected {} learned strategies into prompt ({} chars)",
+                            experiences.len(),
+                            self.system_prompt_extra.as_ref().map(|s| s.len()).unwrap_or(0),
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("Failed to recall experiences: {}", e);
+                }
+            }
+        }
 
         let rounds = base_effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
@@ -407,10 +449,18 @@ impl RemoteMultimodalEngine {
                 .get(round_idx)
                 .unwrap_or_else(|| capture_profiles.last().expect("non-empty capture_profiles"));
 
-            // Capture state
-            let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
-            let html_fut = self.html_context_with_profile(page, &base_effective_cfg, cap);
+            // Dual-model routing decision (before capture)
+            let use_vision = self.should_use_vision_this_round(
+                round_idx,
+                last_sig.as_ref().map(|_| false).unwrap_or(false), // stagnation not yet known; re-checked below
+                action_stuck_rounds,
+                force_vision_next_round,
+            );
+            // Reset per-round force flag
+            force_vision_next_round = false;
 
+            // Capture state – skip screenshot when text-only round
+            let html_fut = self.html_context_with_profile(page, &base_effective_cfg, cap);
             let url_fut = async {
                 Ok::<String, EngineError>(self.url_context(page, &base_effective_cfg).await)
             };
@@ -418,8 +468,15 @@ impl RemoteMultimodalEngine {
                 Ok::<String, EngineError>(self.title_context(page, &base_effective_cfg).await)
             };
 
-            let (screenshot, html, mut url_now, title_now) =
-                tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
+            let (screenshot, html, mut url_now, title_now) = if use_vision {
+                let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
+                let (s, h, u, t) =
+                    tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
+                (s, h, u, t)
+            } else {
+                let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
+                (String::new(), h, u, t)
+            };
 
             // Fallback to the input URL if page.url() is empty/unsupported.
             if url_now.is_empty() {
@@ -430,6 +487,29 @@ impl RemoteMultimodalEngine {
             let sig = StateSignature::new(&url_now, &title_now, &html);
             let stagnated = last_sig.as_ref().map(|p| p.eq_soft(&sig)).unwrap_or(false);
             last_sig = Some(sig);
+
+            // Re-evaluate vision decision now that stagnation is known.
+            // If stagnation/stuck upgraded us from text→vision, capture screenshot now.
+            let use_vision = if !use_vision
+                && self.has_dual_model_routing()
+                && self.should_use_vision_this_round(
+                    round_idx,
+                    stagnated,
+                    action_stuck_rounds,
+                    false,
+                )
+            {
+                true // upgraded to vision mid-round
+            } else {
+                use_vision
+            };
+
+            // Late screenshot capture when upgrading to vision after stagnation detected
+            let screenshot = if use_vision && screenshot.is_empty() {
+                self.screenshot_as_data_url_with_profile(page, cap).await?
+            } else {
+                screenshot
+            };
 
             // Ask model (with retry policy) - pass memory as immutable ref for context
             let plan = self
@@ -445,6 +525,7 @@ impl RemoteMultimodalEngine {
                     stagnated,
                     action_stuck_rounds,
                     memory.as_deref(),
+                    use_vision,
                 )
                 .await?;
 
@@ -494,6 +575,12 @@ impl RemoteMultimodalEngine {
                 for op in &plan.memory_ops {
                     match op {
                         MemoryOperation::Set { key, value } => {
+                            // Detect `request_vision` memory_op for dual-model routing
+                            if key == "request_vision" {
+                                force_vision_next_round = true;
+                                log::debug!("Agent requested vision for next round");
+                                continue; // don't persist this transient key
+                            }
                             mem.set(key.clone(), value.clone());
                         }
                         MemoryOperation::Delete { key } => {
@@ -576,6 +663,26 @@ impl RemoteMultimodalEngine {
 
             // Done condition (model-driven)
             if plan.done {
+                // Store successful experience in long-term memory
+                #[cfg(feature = "memvid")]
+                if total_steps_executed > 0 {
+                    if let Some(ref exp_mem) = self.experience_memory {
+                        if let Some(ref mem) = memory {
+                            let record = super::long_term_memory::ExperienceRecord::from_session(
+                                url_input,
+                                &plan.label,
+                                mem,
+                                total_steps_executed,
+                                (round_idx + 1) as u32,
+                            );
+                            let mut exp = exp_mem.write().await;
+                            if let Err(e) = exp.store_experience(&record).await {
+                                log::warn!("Failed to store experience: {}", e);
+                            }
+                        }
+                    }
+                }
+
                 // Capture final screenshot (enabled by default)
                 let final_screenshot = if base_effective_cfg.screenshot {
                     self.take_final_screenshot(page).await.ok()
@@ -601,6 +708,26 @@ impl RemoteMultimodalEngine {
                     base_effective_cfg.post_plan_wait_ms,
                 ))
                 .await;
+            }
+        }
+
+        // Store experience after all rounds complete
+        #[cfg(feature = "memvid")]
+        if total_steps_executed > 0 {
+            if let Some(ref exp_mem) = self.experience_memory {
+                if let Some(ref mem) = memory {
+                    let record = super::long_term_memory::ExperienceRecord::from_session(
+                        url_input,
+                        &last_label,
+                        mem,
+                        total_steps_executed,
+                        rounds as u32,
+                    );
+                    let mut exp = exp_mem.write().await;
+                    if let Err(e) = exp.store_experience(&record).await {
+                        log::warn!("Failed to store experience: {}", e);
+                    }
+                }
             }
         }
 
@@ -637,6 +764,7 @@ impl RemoteMultimodalEngine {
         stagnated: bool,
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
+        use_vision: bool,
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err = None;
@@ -655,6 +783,7 @@ impl RemoteMultimodalEngine {
                     stagnated,
                     action_stuck_rounds,
                     memory,
+                    use_vision,
                 )
                 .await
             {
@@ -688,6 +817,7 @@ impl RemoteMultimodalEngine {
         stagnated: bool,
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
+        use_vision: bool,
     ) -> EngineResult<AutomationPlan> {
         use super::{
             best_effort_parse_json_object, extract_assistant_content, extract_usage,
@@ -780,14 +910,29 @@ impl RemoteMultimodalEngine {
             memory,
         );
 
-        // Build user content with image
-        let user_content = serde_json::json!([
-            { "type": "text", "text": user_text },
-            {
-                "type": "image_url",
-                "image_url": { "url": screenshot }
-            }
-        ]);
+        // Inject text-only mode hint when dual routing skips screenshot
+        if self.has_dual_model_routing() && !use_vision {
+            system_msg.push_str("\n\n---\nMODE: TEXT-ONLY (no screenshot this round). Use HTML context and memory to decide actions. If you need visual information, set `{\"op\":\"set\",\"key\":\"request_vision\",\"value\":true}` in memory_ops to receive a screenshot next round.\n");
+        }
+
+        // Build user content – omit image_url block when text-only
+        let user_content = if use_vision && !screenshot.is_empty() {
+            serde_json::json!([
+                { "type": "text", "text": user_text },
+                {
+                    "type": "image_url",
+                    "image_url": { "url": screenshot }
+                }
+            ])
+        } else {
+            serde_json::json!([
+                { "type": "text", "text": user_text }
+            ])
+        };
+
+        // Resolve model endpoint for this round (dual-model routing)
+        let (resolved_api_url, resolved_model, resolved_api_key) =
+            self.resolve_model_for_round(use_vision);
 
         let messages = vec![
             Message {
@@ -807,7 +952,7 @@ impl RemoteMultimodalEngine {
         };
 
         let request = Request {
-            model: self.model_name.clone(),
+            model: resolved_model.to_string(),
             messages,
             temperature: Some(effective_cfg.temperature),
             max_tokens: Some(effective_cfg.max_tokens as u32),
@@ -826,8 +971,8 @@ impl RemoteMultimodalEngine {
                     .unwrap_or_else(|_| reqwest::Client::new())
             });
 
-        let mut req = CLIENT.post(&self.api_url).json(&request);
-        if let Some(ref key) = self.api_key {
+        let mut req = CLIENT.post(resolved_api_url).json(&request);
+        if let Some(key) = resolved_api_key {
             req = req.bearer_auth(key);
         }
 
@@ -1805,6 +1950,9 @@ pub async fn run_remote_multimodal_with_page(
     engine.with_remote_multimodal_config(cfgs.cfg.clone());
     engine.with_prompt_url_gate(cfgs.prompt_url_gate.clone());
     engine.with_semaphore(sem);
+    engine.with_vision_model(cfgs.vision_model.clone());
+    engine.with_text_model(cfgs.text_model.clone());
+    engine.with_vision_route_mode(cfgs.vision_route_mode);
     #[cfg(feature = "skills")]
     if let Some(ref registry) = cfgs.skill_registry {
         engine.with_skill_registry(Some(registry.clone()));
