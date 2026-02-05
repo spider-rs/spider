@@ -361,6 +361,9 @@ pub struct AutomationResults {
     /// Token usage for this automation result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::features::automation::AutomationUsage>,
+    /// Whether the page is relevant to crawl goals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relevant: Option<bool>,
 }
 
 /// Results from automation operations (extraction, observation, etc.).
@@ -377,6 +380,8 @@ pub struct AutomationResults {
     pub error: Option<String>,
     /// Token usage for this automation result.
     pub usage: Option<crate::features::automation::AutomationUsage>,
+    /// Whether the page is relevant to crawl goals.
+    pub relevant: Option<bool>,
 }
 
 /// Page-level metadata extracted from HTML.
@@ -5601,4 +5606,80 @@ fn test_blocked_crawl_field() {
     // Set blocked_crawl
     page.blocked_crawl = true;
     assert!(page.blocked_crawl, "blocked_crawl should be true");
+}
+
+/// Test extract_root_domain strips TLD correctly.
+#[test]
+fn test_extract_root_domain() {
+    assert_eq!(extract_root_domain("example.com"), "example");
+    assert_eq!(extract_root_domain("example.org"), "example");
+    assert_eq!(extract_root_domain("sub.example.com"), "example.com");
+    assert_eq!(extract_root_domain("deep.sub.example.co.uk"), "co.uk");
+    assert_eq!(extract_root_domain("localhost"), "localhost");
+}
+
+/// Test is_subdomain matches across different TLDs.
+#[test]
+fn test_is_subdomain_tld_matching() {
+    // Same root domain, different TLDs — should match (both 2-part → compare first part)
+    assert!(is_subdomain("example.com", "example.org"));
+    assert!(is_subdomain("example.net", "example.com"));
+
+    // Both 3-part with same last two parts — should match
+    assert!(is_subdomain("a.example.com", "b.example.com"));
+
+    // 3-part vs 2-part extracts differently (example.com vs example) — won't match
+    assert!(!is_subdomain("sub.example.com", "example.com"));
+
+    // Different root domains — should NOT match
+    assert!(!is_subdomain("example.com", "other.com"));
+    assert!(!is_subdomain("myexample.com", "example.com"));
+}
+
+/// Test get_page_selectors_base with tld=true produces a root-domain matcher.
+#[test]
+fn test_get_page_selectors_base_tld() {
+    let selectors = get_page_selectors_base("https://example.com/page", false, true);
+    // First element is the sub_matcher — should be the root domain without TLD
+    assert_eq!(selectors.0.as_str(), "example");
+
+    let selectors_no_tld = get_page_selectors_base("https://example.com/page", false, false);
+    // Without tld, sub_matcher should be empty
+    assert!(selectors_no_tld.0.is_empty());
+}
+
+/// Test parent_host_match allows different TLDs when sub_matcher is root domain.
+#[test]
+fn test_parent_host_match_tld() {
+    let parent_host = CompactString::from("example.com");
+    let base_host = CompactString::from("example.com");
+    // sub_matcher is "example" (what extract_root_domain returns for tld mode)
+    let sub_matcher = CompactString::from("example");
+
+    // Same host — always allowed
+    assert!(parent_host_match(
+        Some("example.com"),
+        "example",
+        &parent_host,
+        &base_host,
+        &sub_matcher,
+    ));
+
+    // Different TLD — allowed via is_subdomain through sub_matcher
+    assert!(parent_host_match(
+        Some("example.org"),
+        "example",
+        &parent_host,
+        &base_host,
+        &sub_matcher,
+    ));
+
+    // Completely different domain — NOT allowed
+    assert!(!parent_host_match(
+        Some("other.com"),
+        "example",
+        &parent_host,
+        &base_host,
+        &sub_matcher,
+    ));
 }

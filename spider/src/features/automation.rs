@@ -134,6 +134,8 @@ pub struct AutomationResult {
     pub screenshot: Option<String>,
     /// URLs to open in new pages concurrently.
     pub spawn_pages: Vec<String>,
+    /// Whether the page is relevant to crawl goals.
+    pub relevant: Option<bool>,
 }
 
 /// Engine error type (stub when agent feature not enabled).
@@ -450,6 +452,12 @@ pub async fn run_remote_multimodal_if_enabled(
     };
 
     let result = run_remote_multimodal_with_page(cfgs, page, url).await?;
+
+    // Increment relevance credits for irrelevant pages
+    if result.relevant == Some(false) {
+        cfgs.relevance_credits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     Ok(Some(result))
 }
 
@@ -488,6 +496,7 @@ pub async fn run_remote_multimodal_extraction(
                 extracted: None,
                 screenshot: None,
                 spawn_pages: Vec::new(),
+                relevant: None,
             }));
         }
     }
@@ -507,6 +516,12 @@ pub async fn run_remote_multimodal_extraction(
     engine.with_semaphore(sem);
 
     let result = engine.extract_from_html(html, url, title).await?;
+
+    // Increment relevance credits for irrelevant pages
+    if result.relevant == Some(false) {
+        cfgs.relevance_credits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     Ok(Some(result))
 }
 
@@ -530,6 +545,7 @@ impl AutomationResultExt for AutomationResult {
             screenshot_output: self.screenshot.clone(),
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
+            relevant: self.relevant,
         }
     }
 }
@@ -543,6 +559,7 @@ impl AutomationResultExt for AutomationResult {
             screenshot_output: self.screenshot.clone(),
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
+            relevant: self.relevant,
         }
     }
 }

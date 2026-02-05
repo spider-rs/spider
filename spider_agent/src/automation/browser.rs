@@ -66,6 +66,7 @@ pub(crate) struct AutomationPlan {
     pub extracted: Option<serde_json::Value>,
     pub memory_ops: Vec<MemoryOperation>,
     pub usage: AutomationUsage,
+    pub relevant: Option<bool>,
 }
 
 #[cfg(feature = "chrome")]
@@ -356,6 +357,7 @@ impl RemoteMultimodalEngine {
                     extracted: None,
                     screenshot: None,
                     spawn_pages: Vec::new(),
+                    relevant: None,
                 });
             }
         }
@@ -394,6 +396,7 @@ impl RemoteMultimodalEngine {
         let mut last_sig: Option<StateSignature> = None;
         let mut total_usage = AutomationUsage::default();
         let mut last_extracted: Option<serde_json::Value> = None;
+        let mut last_relevant: Option<bool> = None;
         let mut all_spawn_pages: Vec<String> = Vec::new();
         // Stuck-loop detection: track hashed step sequences across rounds
         let mut recent_step_hashes: std::collections::VecDeque<u64> =
@@ -643,6 +646,11 @@ impl RemoteMultimodalEngine {
                 mem.add_action(format!("Round {}: {}", round_idx + 1, &plan.label));
             }
 
+            // Save relevance flag if present
+            if plan.relevant.is_some() {
+                last_relevant = plan.relevant;
+            }
+
             // Save extracted data if present
             if plan.extracted.is_some() {
                 last_extracted = plan.extracted.clone();
@@ -730,6 +738,7 @@ impl RemoteMultimodalEngine {
                     extracted: last_extracted,
                     screenshot: final_screenshot,
                     spawn_pages: all_spawn_pages,
+                    relevant: last_relevant,
                 });
             }
 
@@ -778,6 +787,7 @@ impl RemoteMultimodalEngine {
             extracted: last_extracted,
             screenshot: final_screenshot,
             spawn_pages: all_spawn_pages,
+            relevant: last_relevant,
         })
     }
 
@@ -1049,6 +1059,13 @@ impl RemoteMultimodalEngine {
             .unwrap_or_default();
         log::debug!("Parsed plan - label: {}, done: {}, steps: {:?}", label, done, steps);
 
+        // Extract relevance field if gate is enabled
+        let relevant = if effective_cfg.relevance_gate {
+            Some(parsed.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+        } else {
+            None
+        };
+
         // Try to get extracted field, or fallback to the entire response when in extraction mode
         let extracted = parsed.get("extracted").cloned().or_else(|| {
             // If no explicit "extracted" field but response looks like extracted data
@@ -1068,7 +1085,7 @@ impl RemoteMultimodalEngine {
                         // Skip known automation fields
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted"
+                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -1102,6 +1119,7 @@ impl RemoteMultimodalEngine {
             extracted,
             memory_ops,
             usage,
+            relevant,
         })
     }
 

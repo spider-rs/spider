@@ -577,6 +577,10 @@ pub struct AutomationResult {
     /// automation on them concurrently.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spawn_pages: Vec<String>,
+    /// Whether the page is relevant to crawl goals.
+    /// None = relevance gate not enabled; Some(false) = irrelevant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relevant: Option<bool>,
 }
 
 impl AutomationResult {
@@ -633,6 +637,12 @@ impl AutomationResult {
     /// Check if there are pages to spawn.
     pub fn has_spawn_pages(&self) -> bool {
         !self.spawn_pages.is_empty()
+    }
+
+    /// Set relevance flag.
+    pub fn with_relevant(mut self, relevant: Option<bool>) -> Self {
+        self.relevant = relevant;
+        self
     }
 }
 

@@ -312,9 +312,26 @@ impl RemoteMultimodalEngine {
             s.push_str("{\n  \"label\": \"extract_products\",\n  \"done\": true,\n  \"steps\": [],\n  \"extracted\": {\"products\": [{\"name\": \"Product A\", \"price\": 19.99}]}\n}\n");
         }
 
+        // Add relevance gate instructions
+        if effective_cfg.relevance_gate {
+            s.push_str("\n\n---\nRELEVANCE GATE ENABLED:\n");
+            s.push_str("Include a \"relevant\": true|false field in your JSON response.\n");
+            s.push_str("Set true if the page content is relevant to the extraction/crawl goals.\n");
+            s.push_str("Set false if the page is off-topic, a 404, login wall, or otherwise not useful.\n");
+            if let Some(prompt) = &effective_cfg.relevance_prompt {
+                s.push_str("\nRelevance criteria: ");
+                s.push_str(prompt.trim());
+                s.push('\n');
+            } else if let Some(ep) = &effective_cfg.extraction_prompt {
+                s.push_str("\nJudge relevance against: ");
+                s.push_str(ep.trim());
+                s.push('\n');
+            }
+        }
+
         s.push_str("\n\n---\nRUNTIME CONFIG (read-only):\n");
         s.push_str(&format!(
-            "- include_url: {}\n- include_title: {}\n- include_html: {}\n- html_max_bytes: {}\n- temperature: {}\n- max_tokens: {}\n- request_json_object: {}\n- best_effort_json_extract: {}\n- max_rounds: {}\n- extra_ai_data: {}\n",
+            "- include_url: {}\n- include_title: {}\n- include_html: {}\n- html_max_bytes: {}\n- temperature: {}\n- max_tokens: {}\n- request_json_object: {}\n- best_effort_json_extract: {}\n- max_rounds: {}\n- extra_ai_data: {}\n- relevance_gate: {}\n",
             effective_cfg.include_url,
             effective_cfg.include_title,
             effective_cfg.include_html,
@@ -325,6 +342,7 @@ impl RemoteMultimodalEngine {
             effective_cfg.best_effort_json_extract,
             effective_cfg.max_rounds,
             effective_cfg.extra_ai_data,
+            effective_cfg.relevance_gate,
         ));
 
         s
@@ -478,6 +496,9 @@ impl RemoteMultimodalEngine {
         user_text.push_str("- \"done\": true\n");
         user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
         user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
+        if effective_cfg.relevance_gate {
+            user_text.push_str("- \"relevant\": true if page is relevant to the goal, false otherwise\n");
+        }
 
         if let Some(extra) = &self.user_message_extra {
             if !extra.trim().is_empty() {
@@ -563,6 +584,13 @@ impl RemoteMultimodalEngine {
             .unwrap_or("extraction")
             .to_string();
 
+        // Extract relevance field if gate is enabled
+        let relevant = if effective_cfg.relevance_gate {
+            Some(plan_value.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+        } else {
+            None
+        };
+
         // Try to get extracted field, or fallback to the entire response
         let extracted = plan_value.get("extracted").cloned().or_else(|| {
             // If no explicit "extracted" field but response looks like extracted data
@@ -582,7 +610,7 @@ impl RemoteMultimodalEngine {
                         // Skip known automation fields
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted"
+                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -605,6 +633,7 @@ impl RemoteMultimodalEngine {
             extracted,
             screenshot: None,
             spawn_pages: Vec::new(),
+            relevant,
         })
     }
 
@@ -692,6 +721,9 @@ impl RemoteMultimodalEngine {
         user_text.push_str("- \"done\": true\n");
         user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
         user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
+        if effective_cfg.relevance_gate {
+            user_text.push_str("- \"relevant\": true if page is relevant to the goal, false otherwise\n");
+        }
 
         if screenshot_base64.is_some() {
             user_text.push_str("\nIMPORTANT: The screenshot may contain visual information not present in the HTML (iframe content, videos, canvas drawings, dynamically rendered content). Examine the screenshot carefully.\n");
@@ -799,6 +831,13 @@ impl RemoteMultimodalEngine {
             .unwrap_or("extraction")
             .to_string();
 
+        // Extract relevance field if gate is enabled
+        let relevant = if effective_cfg.relevance_gate {
+            Some(plan_value.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+        } else {
+            None
+        };
+
         // Try to get extracted field, or fallback to the entire response
         let extracted = plan_value.get("extracted").cloned().or_else(|| {
             // If no explicit "extracted" field but response looks like extracted data
@@ -815,7 +854,7 @@ impl RemoteMultimodalEngine {
                     for (key, value) in obj {
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted"
+                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -838,6 +877,7 @@ impl RemoteMultimodalEngine {
             extracted,
             screenshot: None,
             spawn_pages: Vec::new(),
+            relevant,
         })
     }
 

@@ -877,6 +877,20 @@ pub struct RemoteMultimodalConfig {
     /// using `tokio::JoinSet`.
     #[serde(default)]
     pub concurrent_execution: bool,
+
+    // -----------------------------------------------------------------
+    // Relevance gating
+    // -----------------------------------------------------------------
+    /// Enable relevance gating for crawled pages.
+    /// When enabled, the LLM returns `"relevant": true|false` indicating
+    /// whether the page is relevant to the crawl/extraction goals.
+    /// Irrelevant pages can have their budget refunded.
+    #[serde(default)]
+    pub relevance_gate: bool,
+    /// Optional custom relevance criteria prompt.
+    /// When None, defaults to judging against extraction_prompt or general context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relevance_prompt: Option<String>,
 }
 
 impl Default for RemoteMultimodalConfig {
@@ -909,6 +923,8 @@ impl Default for RemoteMultimodalConfig {
             confidence_strategy: None,
             self_healing: None,
             concurrent_execution: false,
+            relevance_gate: false,
+            relevance_prompt: None,
             #[cfg(feature = "skills")]
             max_skills_per_round: default_max_skills_per_round(),
             #[cfg(feature = "skills")]
@@ -1096,6 +1112,13 @@ impl RemoteMultimodalConfig {
         self.concurrent_execution = enabled;
         self
     }
+
+    /// Enable relevance gating with optional custom criteria prompt.
+    pub fn with_relevance_gate(mut self, prompt: Option<String>) -> Self {
+        self.relevance_gate = true;
+        self.relevance_prompt = prompt;
+        self
+    }
 }
 
 /// Everything needed to configure RemoteMultimodalEngine.
@@ -1160,6 +1183,9 @@ pub struct RemoteMultimodalConfigs {
     /// Semaphore control for concurrency limiting.
     #[serde(skip, default = "RemoteMultimodalConfigs::default_semaphore")]
     pub semaphore: OnceLock<Arc<tokio::sync::Semaphore>>,
+    /// Counter for pages deemed irrelevant — each unit = one budget credit to restore.
+    #[serde(skip)]
+    pub relevance_credits: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl PartialEq for RemoteMultimodalConfigs {
@@ -1202,6 +1228,7 @@ impl Default for RemoteMultimodalConfigs {
             #[cfg(feature = "skills_s3")]
             s3_skill_source: None,
             semaphore: Self::default_semaphore(),
+            relevance_credits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 }
@@ -1396,6 +1423,13 @@ impl RemoteMultimodalConfigs {
         self
     }
 
+    /// Enable relevance gating with optional custom criteria prompt.
+    pub fn with_relevance_gate(mut self, prompt: Option<String>) -> Self {
+        self.cfg.relevance_gate = true;
+        self.cfg.relevance_prompt = prompt;
+        self
+    }
+
     /// Whether dual-model routing is active
     /// (at least one of `vision_model` / `text_model` is configured).
     pub fn has_dual_model_routing(&self) -> bool {
@@ -1500,6 +1534,10 @@ pub fn merged_config(
     out.extraction_prompt = override_cfg.extraction_prompt.clone();
     out.extraction_schema = override_cfg.extraction_schema.clone();
     out.screenshot = override_cfg.screenshot;
+
+    // Relevance gating
+    out.relevance_gate = override_cfg.relevance_gate;
+    out.relevance_prompt = override_cfg.relevance_prompt.clone();
 
     out
 }
