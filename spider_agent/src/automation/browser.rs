@@ -1195,17 +1195,15 @@ impl RemoteMultimodalEngine {
                 let selector = value.get("selector").and_then(|v| v.as_str());
                 let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
                 if let Some(sel) = selector {
-                    let _ = page.evaluate(format!(r#"
-                        (async () => {{
-                            const el = document.querySelector('{}');
-                            if (el) {{
-                                el.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true}}));
-                                await new Promise(r => setTimeout(r, {}));
-                                el.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true}}));
-                            }}
-                        }})()
-                    "#, sel, hold_ms)).await;
-                    return true;
+                    if let Ok(elem) = page.find_element(sel).await {
+                        if let Ok(sv) = elem.scroll_into_view().await {
+                            if let Ok(point) = sv.clickable_point().await {
+                                let _ = page.move_mouse_smooth(point).await;
+                                let _ = page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await;
+                                return true;
+                            }
+                        }
+                    }
                 }
                 false
             }
@@ -1220,11 +1218,15 @@ impl RemoteMultimodalEngine {
             }
             "DoubleClick" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
-                        "document.querySelector('{}')?.dispatchEvent(new MouseEvent('dblclick', {{bubbles: true}}))",
-                        selector
-                    )).await;
-                    return true;
+                    if let Ok(elem) = page.find_element(selector).await {
+                        if let Ok(sv) = elem.scroll_into_view().await {
+                            if let Ok(point) = sv.clickable_point().await {
+                                let _ = page.move_mouse_smooth(point).await;
+                                let _ = page.double_click(point).await;
+                                return true;
+                            }
+                        }
+                    }
                 }
                 false
             }
@@ -1238,11 +1240,15 @@ impl RemoteMultimodalEngine {
             }
             "RightClick" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
-                        "document.querySelector('{}')?.dispatchEvent(new MouseEvent('contextmenu', {{bubbles: true}}))",
-                        selector
-                    )).await;
-                    return true;
+                    if let Ok(elem) = page.find_element(selector).await {
+                        if let Ok(sv) = elem.scroll_into_view().await {
+                            if let Ok(point) = sv.clickable_point().await {
+                                let _ = page.move_mouse_smooth(point).await;
+                                let _ = page.right_click(point).await;
+                                return true;
+                            }
+                        }
+                    }
                 }
                 false
             }
@@ -1255,9 +1261,11 @@ impl RemoteMultimodalEngine {
                 true
             }
             "ClickAllClickable" => {
-                let _ = page.evaluate(r#"
-                    document.querySelectorAll('a, button, [onclick], [role="button"]').forEach(el => el.click())
-                "#).await;
+                if let Ok(elements) = page.find_elements(r#"a, button, [onclick], [role="button"]"#).await {
+                    for elem in elements {
+                        let _ = elem.click().await;
+                    }
+                }
                 true
             }
 
@@ -1266,20 +1274,20 @@ impl RemoteMultimodalEngine {
                 let from = value.get("from").and_then(|v| v.as_str());
                 let to = value.get("to").and_then(|v| v.as_str());
                 if let (Some(from_sel), Some(to_sel)) = (from, to) {
-                    let _ = page.evaluate(format!(r#"
-                        (async () => {{
-                            const from = document.querySelector('{}');
-                            const to = document.querySelector('{}');
-                            if (from && to) {{
-                                const fromRect = from.getBoundingClientRect();
-                                const toRect = to.getBoundingClientRect();
-                                from.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: fromRect.x + fromRect.width/2, clientY: fromRect.y + fromRect.height/2}}));
-                                to.dispatchEvent(new MouseEvent('mousemove', {{bubbles: true, clientX: toRect.x + toRect.width/2, clientY: toRect.y + toRect.height/2}}));
-                                to.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: toRect.x + toRect.width/2, clientY: toRect.y + toRect.height/2}}));
-                            }}
-                        }})()
-                    "#, from_sel, to_sel)).await;
-                    return true;
+                    if let Ok(from_elem) = page.find_element(from_sel).await {
+                        if let Ok(from_sv) = from_elem.scroll_into_view().await {
+                            if let Ok(from_point) = from_sv.clickable_point().await {
+                                if let Ok(to_elem) = page.find_element(to_sel).await {
+                                    if let Ok(to_sv) = to_elem.scroll_into_view().await {
+                                        if let Ok(to_point) = to_sv.clickable_point().await {
+                                            let _ = page.click_and_drag_smooth(from_point, to_point).await;
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 false
             }
