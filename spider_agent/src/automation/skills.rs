@@ -452,88 +452,129 @@ impl SkillRegistry {
 const IMAGE_GRID_SKILL: &str = r##"
 Strategy for image grid selection challenges (e.g., "select all stop signs"):
 
-**GOAL: Solve in 2 rounds max. Round 1: select + verify. Round 2: adjust if wrong.**
+**CRITICAL: Select correct tiles BEFORE clicking verify. Use REAL Click actions, NOT el.click() in Evaluate.**
 
-1. **Look at the screenshot** carefully. Identify which tiles contain the target object by position (row, column).
-2. **Use Evaluate to toggle tiles to the correct state in ONE step**:
+**GOAL: Solve in 3 rounds max.**
+
+Round 1 - Identify tiles using Evaluate AND the screenshot:
+1. **Run Evaluate to get each tile's image info** (alt text, filename):
    ```js
-   const items = [...document.querySelectorAll('[class*=grid-item], [class*=grid] > *')];
-   const correct = new Set([0, 1, 4, 5]); // replace with YOUR correct indices
-   items.forEach((el, i) => {
-     const sel = el.classList.contains('selected') || el.classList.contains('grid-item-selected');
-     if (correct.has(i) !== sel) el.click(); // only toggle tiles in wrong state
+   const items = [...document.querySelectorAll('.grid-item,[class*=grid] > *')];
+   const info = items.map((el,i) => {
+     const img = el.querySelector('img');
+     return {i, alt: img?.alt || '', src: (img?.src||'').split('/').pop(), text: el.textContent.trim()};
    });
-   document.title = 'DONE';
+   document.title = 'GRID:' + JSON.stringify(info);
    ```
-3. **Click Verify** in the same round after the Evaluate.
-4. **If wrong**: try DIFFERENT tile indices. Don't repeat the same selection.
+2. **Combine the Evaluate hints + screenshot** to determine which tiles match the target.
+
+Round 2 - Click correct tiles and verify:
+1. **Click each correct tile** using `.grid-item:nth-child(N)` (1-indexed) or ClickPoint:
+   ```json
+   "steps": [
+     {"Click": ".grid-item:nth-child(1)"},
+     {"Click": ".grid-item:nth-child(3)"},
+     {"Click": ".grid-item:nth-child(7)"},
+     {"Click": "#captcha-verify-button"}
+   ]
+   ```
+
+Round 3 (if needed) - Adjust:
+- Toggle tiles that need changing and verify again.
 
 Key rules:
-- Toggle only tiles that need changing, never deselect-all then reselect.
-- From the screenshot, map tile positions to grid indices (left-to-right, top-to-bottom, 0-indexed).
-- If stuck, use Evaluate to read alt text or image src hints: `items.map((el,i)=>({i, alt:el.querySelector('img')?.alt}))`
+- nth-child is 1-indexed: first tile = :nth-child(1).
+- If CSS selectors fail, use ClickPoint with tile center coordinates.
+- If 3+ attempts fail with different selections, use Evaluate to re-read image hints.
 "##;
 
-const ROTATION_SKILL: &str = r#"
+const ROTATION_SKILL: &str = r##"
 Strategy for rotation/orientation challenges:
 
-**GOAL: Solve in 1-2 rounds. Read rotation state, set correct value, submit.**
+**GOAL: Solve in 2-3 rounds. Read rotation states, then click tiles to rotate them upright.**
 
-Round 1 - Read and fix in one shot:
-1. **Use Evaluate to read current rotation AND set the correct value**:
+Round 1 - Read how many clicks each tile needs:
+1. **Use Evaluate to read each tile's rotation and calculate clicks needed (each click = 90 CW)**:
    ```js
-   const slider = document.querySelector('input[type=range], [class*=slider], [role=slider]');
-   const rotated = document.querySelector('[style*=rotate]');
-   const match = rotated?.style.cssText.match(/rotate\((-?\d+\.?\d*)deg\)/);
-   const currentDeg = match ? parseFloat(match[1]) : 0;
-   const targetSlider = slider ? Math.round((360 - (currentDeg % 360 + 360) % 360) % 360 / 360 * (slider.max - slider.min) + Number(slider.min)) : 0;
-   if (slider) { slider.value = targetSlider; slider.dispatchEvent(new Event('input',{bubbles:true})); slider.dispatchEvent(new Event('change',{bubbles:true})); }
-   document.title = 'ROT:' + currentDeg + ' TARGET_SLIDER:' + targetSlider;
+   const tiles = document.querySelectorAll('[class*=rotating], [class*=rotate], [class*=tile]');
+   const info = Array.from(tiles).map((t, i) => {
+     const cs = getComputedStyle(t);
+     const m = cs.transform;
+     let clicks = 0;
+     if (m === 'matrix(0, 1, -1, 0, 0, 0)') clicks = 3;
+     else if (m === 'matrix(-1, 0, 0, -1, 0, 0)') clicks = 2;
+     else if (m === 'matrix(0, -1, 1, 0, 0, 0)') clicks = 1;
+     return {i, clicks, m};
+   });
+   document.title = 'CLICKS:' + JSON.stringify(info);
    ```
-2. **Click Verify/Submit** in the same round.
-3. If the image doesn't look upright, use the screenshot to estimate degrees off and adjust.
+2. **In the SAME round, click each tile the needed number of times using real Click actions**:
+   ```json
+   "steps": [
+     {"Evaluate": "...read rotation..."},
+     {"Click": ".rotating-item:nth-child(2)"},
+     {"Click": ".rotating-item:nth-child(2)"},
+     {"Click": ".rotating-item:nth-child(5)"},
+     {"Click": "#captcha-verify-button"}
+   ]
+   ```
+   Repeat the same selector N times for N clicks needed.
 
 Key rules:
-- Read the rotation from `transform: rotate(Xdeg)` style.
-- For range sliders: set value programmatically via Evaluate with events.
-- For drag handles: use ClickDragPoint.
-- Don't spend rounds just reading - read and act together.
-"#;
+- Use REAL Click actions, NOT el.click() inside Evaluate. Evaluate el.click() does NOT work.
+- Each click rotates 90 degrees clockwise. 4 clicks = full rotation = no change.
+- nth-child is 1-indexed. Tile index 0 = :nth-child(1).
+- If CSS selectors fail, use ClickPoint with tile center coordinates from the screenshot.
+- For slider-based rotation: use Fill on the range input with the correct value.
+"##;
 
-const TIC_TAC_TOE_SKILL: &str = r#"
+const TIC_TAC_TOE_SKILL: &str = r##"
 Strategy for tic-tac-toe (XOXO) challenges:
 
-**GOAL: Play optimally with 1 Evaluate + 1 Click per move. Read board, decide, act - all in one round.**
+**GOAL: Win. Use THIS EXACT Evaluate code to compute the optimal move, then ClickPoint on the result.**
 
-Each round:
-1. **Read board + decide + click in one round**. Use Evaluate to read board state:
-   ```js
-   const cells = [...document.querySelectorAll('[class*=square], [class*=cell], [class*=tile], td')];
-   const board = cells.map(el => el.textContent.trim() || (el.querySelector('[class*=x]') ? 'X' : el.querySelector('[class*=o]') ? 'O' : ''));
-   document.title = 'BOARD:' + board.join(',');
-   ```
-2. **In the SAME round**, click the best empty cell immediately. Don't waste a round just reading.
-3. **Optimal play** (priority order): Win > Block > Center > Corner > Edge
-4. **After you win** (3 in a row), click Verify/Submit immediately in the same round.
-5. **After each move**, the opponent may respond. Next round: read updated board + click again.
+**Round 1 of each move** - Run THIS Evaluate (copy it exactly, do not modify):
+```js
+const cells=[...document.querySelectorAll('.grid-item,.tic-tac-toe-cell,[class*=cell]')].filter(el=>el.offsetWidth>20);
+const board=cells.map(el=>{const c=el.className+(el.firstElementChild?.className||'');return c.includes('-x')?'X':c.includes('-o')||c.includes('selected')?'O':el.textContent.trim()||'';});
+const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;
+const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';
+const won=s=>W.some(w=>w.every(i=>board[i]===s));
+let best=-1;
+if(!won(me)&&!won(opp)){
+  for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}
+  if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}
+  if(best<0&&!board[4])best=4;
+  if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}
+  if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}
+}
+const R=cells.map(el=>{const r=el.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
+document.title='TTT:'+JSON.stringify({me,board:board.join(''),best,click:best>=0?R[best]:null,won_me:won(me),won_opp:won(opp)});
+```
 
-Key rules:
-- 1 round = 1 Evaluate + 1 Click. Never spend a round only gathering data.
-- Win lines: [0,1,2], [3,4,5], [6,7,8], [0,3,6], [1,4,7], [2,5,8], [0,4,8], [2,4,6]
-- Center=4, Corners=0,2,6,8
-"#;
+**Round 2 of each move** - Read the title from the Evaluate result:
+- If `best >= 0`: ClickPoint on the `click` coordinates `{"x":..,"y":..}` from the title.
+- If `won_me: true`: Click Verify/Submit button.
+- If `won_opp: true`: Click the refresh ↻ button (class `.captcha-refresh` or ClickPoint on it). Do NOT click verify after a LOSS.
+
+**IMPORTANT:**
+- Copy the Evaluate code EXACTLY as shown above. Do NOT write your own board-reading code.
+- The algorithm computes the optimal move: Win > Block > Center > Corner > Edge.
+- You play as whichever piece has fewer on the board (X goes first).
+"##;
 
 const WORD_SEARCH_SKILL: &str = r#"
 Strategy for word search grid challenges:
 
-**GOAL: Extract grid + find ALL words in one Evaluate, then select each word quickly.**
+**GOAL: Extract grid + find ALL words in one Evaluate, then select words with real clicks or drag.**
 
-Round 1 - Extract and solve:
-1. **Use a single Evaluate to extract grid, find all words, and report positions**:
+Round 1 - Extract and solve algorithmically:
+1. **Use Evaluate to extract the grid, find all words, and report positions + coordinates**:
    ```js
    const cells = [...document.querySelectorAll('[class*=cell], [class*=letter], [class*=grid] > *')];
-   const rects = cells.map(c => c.getBoundingClientRect());
-   const uniqueTops = [...new Set(rects.map(r => Math.round(r.top)))].sort((a,b) => a-b);
+   const rects = cells.map(c => { const r = c.getBoundingClientRect(); return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)}; });
+   const uniqueTops = [...new Set(rects.map(r => r.y))].sort((a,b) => a-b);
    const rows = uniqueTops.length, cols = Math.round(cells.length / rows);
    const letters = cells.map(c => c.textContent.trim().toUpperCase());
    const grid = []; for (let r = 0; r < rows; r++) grid.push(letters.slice(r*cols,(r+1)*cols));
@@ -543,19 +584,20 @@ Round 1 - Extract and solve:
    words.forEach(w => { for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) for(const[dr,dc] of dirs) {
      let ok=true; const idxs=[]; for(let k=0;k<w.length;k++) { const nr=r+dr*k,nc=c+dc*k;
        if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;} idxs.push(nr*cols+nc); }
-     if(ok){found[w]=idxs;return;}
+     if(ok){found[w]=idxs.map(i=>rects[i]);return;}
    }});
    document.title = 'FOUND:' + JSON.stringify(found);
    ```
-2. **Select and submit each word** using cell indices from the result. For each word:
-   ```js
-   const cells = [...document.querySelectorAll('[class*=cell], [class*=letter], [class*=grid] > *')];
-   [i1, i2, i3, ...].forEach(i => cells[i]?.click());
+
+2. **Select each word using ClickDragPoint** from first letter to last letter coordinates:
+   ```json
+   {"ClickDragPoint": {"start_x": 100, "start_y": 200, "end_x": 300, "end_y": 200}}
    ```
-   Then click Submit. If drag-selection is needed, use ClickDragPoint from first to last cell.
+   Or click individual cells with real Click/ClickPoint actions.
 
 Key rules:
-- Solve the word search algorithmically in JS, don't search visually.
+- Solve algorithmically in JS, don't search visually.
+- Use REAL Click/ClickDragPoint, NOT el.click() in Evaluate.
 - Words go in 8 directions including diagonal and backwards.
 - Select one word at a time, submit, then next word.
 "#;
@@ -563,19 +605,14 @@ Key rules:
 const TEXT_CAPTCHA_SKILL: &str = r##"
 Strategy for distorted text / CAPTCHA challenges:
 
-**After 2 failed attempts, STOP guessing and click the refresh button to get new text.**
+**IMPORTANT: Read ONLY the distorted/wiggling characters in the CAPTCHA image area. Do NOT type page labels, headings, or instructional text like "HUMAN". The answer is the specific distorted letters shown.**
 
-1. Read the text from the screenshot. Common confusions: O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8, G↔6
-2. Fill the input and submit. Track attempts in memory: `{"op":"set","key":"captcha_attempts","value":1}`
-3. If wrong, try ONE alternative reading (swap most ambiguous character). Increment attempts.
-4. If 2+ attempts fail, refresh the CAPTCHA:
-   ```js
-   const r = document.querySelector('[class*=refresh], [class*=reload], button svg');
-   if (r) r.click(); else document.querySelectorAll('button').forEach(el => { if (el.innerHTML.includes('refresh') || el.innerHTML.includes('↻')) el.click(); });
-   document.title = 'REFRESHED';
-   ```
-   Or click the ↻ icon near the CAPTCHA image via ClickPoint. Then read the NEW text fresh.
-5. Never submit the same text twice.
+1. Focus on the distorted/animated text characters in the challenge area. They are usually 4-6 characters, often uppercase letters.
+2. Common visual confusions: O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8, G↔6, U↔V
+3. Fill the input and submit. Track attempts: `{"op":"set","key":"captcha_attempts","value":1}`
+4. If wrong, try ONE alternative reading (swap the most ambiguous character).
+5. **After 2 failed attempts**, refresh the CAPTCHA by clicking the refresh/↻ button via ClickPoint, then read the NEW text.
+6. Never submit the same text twice.
 "##;
 
 const SLIDER_DRAG_SKILL: &str = r#"
