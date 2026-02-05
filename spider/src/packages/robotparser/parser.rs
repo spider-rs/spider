@@ -167,21 +167,29 @@ impl Entry {
         }
     }
 
-    /// check if this entry applies to the specified agent
-    fn applies_to(&self, useragent: &str) -> bool {
-        let ua = useragent
+    /// Prepare the user-agent string: strip version suffix, lowercase once.
+    #[inline]
+    fn prepare_useragent(useragent: &str) -> String {
+        useragent
             .split('/')
-            .nth(0)
+            .next()
             .unwrap_or_default()
-            .to_lowercase();
+            .to_lowercase()
+    }
 
+    /// Check if this entry applies to a pre-prepared (lowercased, version-stripped) agent.
+    fn applies_to_prepared(&self, ua_lower: &str) -> bool {
         for agent in &self.useragents {
-            if agent == "*" || ua.contains(agent) {
+            if agent == "*" || ua_lower.contains(agent.as_str()) {
                 return true;
             }
         }
-
         false
+    }
+
+    /// check if this entry applies to the specified agent
+    fn applies_to(&self, useragent: &str) -> bool {
+        self.applies_to_prepared(&Self::prepare_useragent(useragent))
     }
 
     /// Preconditions:
@@ -576,8 +584,9 @@ impl RobotFileParser {
     /// Is the entry apply to the robots.txt?
     #[cfg(not(feature = "regex"))]
     pub fn entry_allowed<T: AsRef<str>>(&self, useragent: &T, url_str: &str) -> bool {
+        let ua_lower = Entry::prepare_useragent(useragent.as_ref());
         for entry in &self.entries {
-            if entry.applies_to(useragent.as_ref()) {
+            if entry.applies_to_prepared(&ua_lower) {
                 return entry.allowance(url_str);
             }
         }
@@ -599,11 +608,11 @@ impl RobotFileParser {
         if self.last_checked == 0 {
             None
         } else {
-            let useragent = useragent.as_ref();
-            let crawl_delay: Option<Duration> = match useragent {
+            let crawl_delay: Option<Duration> = match useragent.as_ref() {
                 Some(ua) => {
+                    let ua_lower = Entry::prepare_useragent(ua);
                     for entry in &self.entries {
-                        if entry.applies_to(ua) {
+                        if entry.applies_to_prepared(&ua_lower) {
                             return entry.get_crawl_delay();
                         }
                     }
@@ -628,12 +637,12 @@ impl RobotFileParser {
 
     /// Returns the request rate for this user agent as a `RequestRate`, or None if not request rate is defined
     pub fn get_req_rate<T: AsRef<str>>(&self, useragent: T) -> Option<RequestRate> {
-        let useragent = useragent.as_ref();
         if self.last_checked == 0 {
             return None;
         }
+        let ua_lower = Entry::prepare_useragent(useragent.as_ref());
         for entry in &self.entries {
-            if entry.applies_to(useragent) {
+            if entry.applies_to_prepared(&ua_lower) {
                 return entry.get_req_rate();
             }
         }
@@ -842,5 +851,124 @@ mod tests {
     fn test_parser_empty_disallow() {
         let rule = RuleLine::new("", false);
         assert!(rule.allowance);
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_can_fetch_case_insensitive() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: googlebot",
+            "Disallow: /private",
+        ];
+        parser.parse(&lines);
+
+        // entry_allowed correctly tests case-insensitive matching
+        assert!(!parser.entry_allowed(&"GoogleBot", "/private"));
+        assert!(!parser.entry_allowed(&"googlebot", "/private"));
+        assert!(!parser.entry_allowed(&"GOOGLEBOT", "/private"));
+        // Allowed path works for all cases too
+        assert!(parser.entry_allowed(&"GoogleBot", "/public"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_can_fetch_with_version() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: googlebot",
+            "Disallow: /secret",
+        ];
+        parser.parse(&lines);
+
+        // "Googlebot/2.1" should match "googlebot" entry (version stripped)
+        assert!(!parser.entry_allowed(&"Googlebot/2.1", "/secret"));
+        assert!(parser.entry_allowed(&"Googlebot/2.1", "/public"));
+    }
+
+    #[cfg(not(feature = "regex"))]
+    #[test]
+    fn test_can_fetch_multiple_entries() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: googlebot",
+            "Disallow: /nogoogle",
+            "",
+            "User-agent: bingbot",
+            "Disallow: /nobing",
+            "",
+            "User-agent: duckduckbot",
+            "Disallow: /noduck",
+        ];
+        parser.parse(&lines);
+
+        let entries = parser.get_entries();
+        // All 3 specific entries should be present
+        assert_eq!(entries.len(), 3);
+
+        // Verify correct entry is matched for each agent via entry_allowed
+        // (entry_allowed returns the allowance result directly)
+        assert!(!parser.entry_allowed(&"Googlebot", "/nogoogle"));
+        assert!(parser.entry_allowed(&"Googlebot", "/public"));
+        assert!(!parser.entry_allowed(&"Bingbot", "/nobing"));
+        assert!(parser.entry_allowed(&"Bingbot", "/public"));
+        assert!(!parser.entry_allowed(&"DuckDuckBot", "/noduck"));
+        assert!(parser.entry_allowed(&"DuckDuckBot", "/public"));
+        // Cross-agent: googlebot should not match bingbot's rules
+        assert!(parser.entry_allowed(&"Googlebot", "/nobing"));
+    }
+
+    #[test]
+    fn test_get_crawl_delay_case_insensitive() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: slowbot",
+            "Crawl-delay: 10",
+            "Disallow: /test",
+        ];
+        parser.parse(&lines);
+
+        let ua = Some(Box::new(CompactString::new("SlowBot/1.0")));
+        let delay = parser.get_crawl_delay(&ua);
+        assert_eq!(delay, Some(Duration::from_secs(10)));
+
+        let ua_upper = Some(Box::new(CompactString::new("SLOWBOT")));
+        let delay_upper = parser.get_crawl_delay(&ua_upper);
+        assert_eq!(delay_upper, Some(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn test_get_req_rate_agent_match() {
+        let mut parser = RobotFileParser::new();
+        parser.modified();
+        let lines = vec![
+            "User-agent: fastbot",
+            "Request-rate: 5/30",
+            "Disallow: /test",
+            "",
+            "User-agent: slowbot",
+            "Request-rate: 1/60",
+            "Disallow: /test",
+        ];
+        parser.parse(&lines);
+
+        let fast_rate = parser.get_req_rate("FastBot/2.0");
+        assert!(fast_rate.is_some());
+        let fr = fast_rate.unwrap();
+        assert_eq!(fr.requests, 5);
+        assert_eq!(fr.seconds, 30);
+
+        let slow_rate = parser.get_req_rate("SLOWBOT");
+        assert!(slow_rate.is_some());
+        let sr = slow_rate.unwrap();
+        assert_eq!(sr.requests, 1);
+        assert_eq!(sr.seconds, 60);
+
+        // Unknown agent should return None
+        assert!(parser.get_req_rate("unknownbot").is_none());
     }
 }

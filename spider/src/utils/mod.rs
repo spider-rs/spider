@@ -5986,15 +5986,21 @@ pub fn networking_capable(url: &str) -> bool {
 /// Prepare the url for parsing if it fails. Use this method if the url does not start with http or https.
 pub fn prepare_url(u: &str) -> String {
     if let Some(index) = u.find("://") {
-        let split_index = u
-            .char_indices()
-            .nth(index + 3)
-            .map(|(i, _)| i)
-            .unwrap_or(u.len());
-
-        format!("https://{}", &u[split_index..])
+        let split_index = index + 3;
+        let rest = if split_index < u.len() {
+            &u[split_index..]
+        } else {
+            ""
+        };
+        let mut s = String::with_capacity(8 + rest.len());
+        s.push_str("https://");
+        s.push_str(rest);
+        s
     } else {
-        format!("https://{}", u)
+        let mut s = String::with_capacity(8 + u.len());
+        s.push_str("https://");
+        s.push_str(u);
+        s
     }
 }
 
@@ -6375,9 +6381,53 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_url() {
-        let prepared = prepare_url("example.com");
-        assert!(prepared.starts_with("https://"));
+    fn test_prepare_url_no_scheme() {
+        assert_eq!(prepare_url("example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn test_prepare_url_http() {
+        assert_eq!(
+            prepare_url("http://example.com/path"),
+            "https://example.com/path"
+        );
+    }
+
+    #[test]
+    fn test_prepare_url_ftp() {
+        assert_eq!(
+            prepare_url("ftp://files.example.com/data"),
+            "https://files.example.com/data"
+        );
+    }
+
+    #[test]
+    fn test_prepare_url_https_passthrough() {
+        assert_eq!(
+            prepare_url("https://example.com"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn test_prepare_url_with_port() {
+        assert_eq!(
+            prepare_url("http://localhost:8080/api"),
+            "https://localhost:8080/api"
+        );
+    }
+
+    #[test]
+    fn test_prepare_url_empty() {
+        assert_eq!(prepare_url(""), "https://");
+    }
+
+    #[test]
+    fn test_prepare_url_bare_domain_with_path() {
+        assert_eq!(
+            prepare_url("example.com/page"),
+            "https://example.com/page"
+        );
     }
 
     #[test]

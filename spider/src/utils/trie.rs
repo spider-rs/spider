@@ -90,7 +90,7 @@ impl<V: Debug> Trie<V> {
         for segment in Self::path_segments(path) {
             node = node
                 .children
-                .entry(segment.to_string())
+                .entry_ref(segment)
                 .or_insert_with(TrieNode::new);
         }
 
@@ -218,5 +218,57 @@ mod tests {
         let trie: Trie<usize> = Trie::default();
         assert!(trie.root.children.is_empty());
         assert!(!trie.match_all);
+    }
+
+    #[test]
+    fn test_trie_shared_prefix_insert() {
+        let mut trie: Trie<usize> = Trie::new();
+        for i in 0..100 {
+            trie.insert(&format!("/api/v1/resource/{}", i), i);
+        }
+        for i in 0..100 {
+            assert_eq!(
+                trie.search(&format!("/api/v1/resource/{}", i)),
+                Some(&i),
+                "shared prefix path {} not found",
+                i
+            );
+        }
+        // Intermediate nodes should not have values
+        assert!(trie.search("/api").is_none());
+        assert!(trie.search("/api/v1").is_none());
+        assert!(trie.search("/api/v1/resource").is_none());
+    }
+
+    #[test]
+    fn test_trie_overwrite_preserves_others() {
+        let mut trie: Trie<usize> = Trie::new();
+        trie.insert("/a/b/c", 1);
+        trie.insert("/a/b/d", 2);
+        trie.insert("/a/b/e", 3);
+        // Overwrite /a/b/c
+        trie.insert("/a/b/c", 99);
+
+        assert_eq!(trie.search("/a/b/c"), Some(&99));
+        assert_eq!(trie.search("/a/b/d"), Some(&2));
+        assert_eq!(trie.search("/a/b/e"), Some(&3));
+    }
+
+    #[test]
+    fn test_trie_insert_search_full_urls() {
+        let mut trie: Trie<&str> = Trie::new();
+        // Different leaf segments so they don't overwrite each other
+        trie.insert("https://example.com/users/profile", "profile");
+        trie.insert("/users/settings", "settings");
+        trie.insert("http://other.com/api/data", "data");
+
+        // Full URL and bare path resolve to same trie node (host stripped)
+        assert_eq!(trie.search("https://example.com/users/profile"), Some(&"profile"));
+        assert_eq!(trie.search("/users/profile"), Some(&"profile"));
+        assert_eq!(trie.search("https://any.com/users/settings"), Some(&"settings"));
+        assert_eq!(trie.search("/api/data"), Some(&"data"));
+        assert_eq!(trie.search("http://cdn.example.com/api/data"), Some(&"data"));
+        // Non-existent path
+        assert!(trie.search("/users/unknown").is_none());
     }
 }

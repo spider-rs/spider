@@ -716,39 +716,28 @@ impl SkillRegistry {
 // ─── Built-in skill content ──────────────────────────────────────────────
 
 const IMAGE_GRID_SKILL: &str = r##"
-Strategy for image grid selection challenges (e.g., "select all stop signs"):
-**(Skip this skill if the page is tic-tac-toe/XOXO or a Word Search puzzle — use those specific skills instead.)**
+Image grid selection (e.g., "select all stop signs"):
+**(Skip if tic-tac-toe/XOXO or Word Search — use those skills instead.)**
 
-**Use REAL Click actions ONLY. NEVER use el.click() in Evaluate — not even to clear/deselect tiles.**
-**Clicking a tile toggles its selection (click selected tile = deselect it).**
+**RULES:**
+- Use REAL Click actions ONLY (never el.click() in Evaluate)
+- Clicking toggles selection. nth-child is 1-indexed.
+- **SOLVE IN 2 ROUNDS MAX. If verify fails twice → REFRESH and retry:**
+  `[{"Click":".captcha-refresh"},{"Wait":1000}]`
 
-**GOAL: Solve in 2-3 rounds max.**
-
-Round 1 - Read tile info with Evaluate, THEN click tiles you're confident about:
-```js
-const items = [...document.querySelectorAll('.grid-item,[class*=grid] > *')];
-const info = items.map((el,i) => {
-  const img = el.querySelector('img');
-  return {i:i+1, alt: img?.alt||'', src: (img?.src||'').split('/').pop(), sel: el.classList.contains('selected')||el.classList.contains('grid-item-selected')};
-});
-document.title = 'GRID:' + JSON.stringify(info);
-```
-Then use screenshot + alt/src hints to Click correct tiles and verify:
+**Round 1:** Look at screenshot carefully. Click ALL matching tiles + verify in ONE step list:
 ```json
 "steps": [
-  {"Evaluate": "...the JS above..."},
-  {"Click": ".grid-item:nth-child(3)"},
-  {"Click": ".grid-item:nth-child(7)"},
-  {"Click": "#captcha-verify-button"}
+  {"Click":".grid-item:nth-child(3)"},
+  {"Click":".grid-item:nth-child(7)"},
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
 ]
 ```
 
-Round 2 (if wrong) - Toggle tiles and verify again. Click selected wrong tiles to deselect, click missing correct tiles to select.
+**Round 2 (if still same level):** Toggle wrong tiles (deselect non-matches, select missed ones), then verify.
 
-Key rules:
-- nth-child is 1-indexed. If selectors fail, use ClickPoint.
-- NEVER use el.click() in Evaluate. ALL selections via real Click actions.
-- After 3 failures, re-read with Evaluate and try completely different selection.
+**Round 3+:** Refresh the captcha: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
 "##;
 
 /// JS executed by the engine before the LLM sees the rotation page.
@@ -847,16 +836,24 @@ Title formats:
 "##;
 
 const TEXT_CAPTCHA_SKILL: &str = r##"
-Strategy for distorted text / CAPTCHA challenges:
+Distorted text CAPTCHA: Read the wiggling/wavy text from the SCREENSHOT and type it.
 
-**IMPORTANT: Read ONLY the distorted/wiggling characters in the CAPTCHA image area. Do NOT type page labels, headings, or instructional text like "HUMAN". The answer is the specific distorted letters shown.**
+**DO NOT analyze canvas pixels or write pixel-scanning JS. Just READ the text visually from the screenshot.**
+The answer is 4-8 uppercase letters shown in a wavy/distorted style. Do NOT type labels like "HUMAN".
 
-1. Focus on the distorted/animated text characters in the challenge area. They are usually 4-6 characters, often uppercase letters.
-2. Common visual confusions: O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8, G↔6, U↔V
-3. Fill the input and submit. Track attempts: `{"op":"set","key":"captcha_attempts","value":1}`
-4. If wrong, try ONE alternative reading (swap the most ambiguous character).
-5. **After 2 failed attempts**, refresh the CAPTCHA by clicking the refresh/↻ button via ClickPoint, then read the NEW text.
-6. Never submit the same text twice.
+**Steps (solve in 1 round):**
+```json
+"steps": [
+  {"Clear":".captcha-input-text"},
+  {"Fill":{"selector":".captcha-input-text","value":"YOURTEXT"}},
+  {"Click":".captcha-button"}
+]
+```
+
+If wrong: swap most ambiguous char (O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8).
+**After 2 fails → refresh:** `[{"Click":"img.captcha-refresh"},{"Wait":1500}]`
+If `img.captcha-refresh` fails, use ClickPoint on the small refresh icon near the captcha.
+Never submit same text twice.
 "##;
 
 const CHECKBOX_SKILL: &str = r##"
