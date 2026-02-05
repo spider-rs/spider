@@ -213,6 +213,7 @@ impl RemoteMultimodalEngine {
         html: &str,
         round_idx: usize,
         stagnated: bool,
+        action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
     ) -> String {
         let mut out = String::with_capacity(
@@ -261,6 +262,30 @@ impl RemoteMultimodalEngine {
             out.push_str("HTML CONTEXT:\n");
             out.push_str(html);
             out.push_str("\n\n");
+        }
+
+        // Include user instructions if provided
+        if let Some(extra) = &self.user_message_extra {
+            if !extra.trim().is_empty() {
+                out.push_str("---\nUSER INSTRUCTIONS:\n");
+                out.push_str(extra.trim());
+                out.push_str("\n\n");
+            }
+        }
+
+        // Stuck-loop warning: inject when model repeats identical actions
+        if action_stuck_rounds >= 3 {
+            out.push_str("--- ACTION LOOP DETECTED ---\n");
+            out.push_str(&format!(
+                "You have repeated the EXACT same actions {} consecutive rounds with ZERO progress.\n",
+                action_stuck_rounds
+            ));
+            out.push_str("Your current approach is NOT WORKING. You MUST change strategy NOW:\n");
+            out.push_str("1. Use Evaluate to inspect DOM state - read element text, check CSS classes, find the actual button/element state\n");
+            out.push_str("2. Try completely different selectors or use ClickPoint at exact pixel coordinates\n");
+            out.push_str("3. If clicking a button repeatedly does nothing, the task may have FAILED - look for error messages, try refreshing the page\n");
+            out.push_str("4. If you think you won/completed something but Verify does not advance, you likely LOST or the answer was wrong - retry\n");
+            out.push_str("5. Do NOT repeat the same steps again. Your next response MUST contain different actions.\n\n");
         }
 
         out.push_str(
@@ -372,6 +397,10 @@ impl RemoteMultimodalEngine {
         let mut total_usage = AutomationUsage::default();
         let mut last_extracted: Option<serde_json::Value> = None;
         let mut all_spawn_pages: Vec<String> = Vec::new();
+        // Stuck-loop detection: track hashed step sequences across rounds
+        let mut recent_step_hashes: std::collections::VecDeque<u64> =
+            std::collections::VecDeque::new();
+        let mut action_stuck_rounds: usize = 0;
 
         let rounds = base_effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
@@ -416,6 +445,7 @@ impl RemoteMultimodalEngine {
                     &screenshot,
                     round_idx,
                     stagnated,
+                    action_stuck_rounds,
                     memory.as_deref(),
                 )
                 .await?;
@@ -423,6 +453,43 @@ impl RemoteMultimodalEngine {
             // Accumulate token usage from this round
             total_usage.accumulate(&plan.usage);
             last_label = plan.label.clone();
+
+            // Stuck-loop detection: hash step structure (ignoring Evaluate code content
+            // which LLMs often vary slightly while functionally repeating the same approach)
+            {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                for step in &plan.steps {
+                    if let Some(obj) = step.as_object() {
+                        for (key, val) in obj {
+                            key.hash(&mut hasher);
+                            // Hash Evaluate as just the action name, not the JS code
+                            if key != "Evaluate" {
+                                val.to_string().hash(&mut hasher);
+                            }
+                        }
+                    }
+                }
+                let step_hash = hasher.finish();
+
+                recent_step_hashes.push_back(step_hash);
+                if recent_step_hashes.len() > 10 {
+                    recent_step_hashes.pop_front();
+                }
+
+                action_stuck_rounds = recent_step_hashes
+                    .iter()
+                    .rev()
+                    .take_while(|h| **h == step_hash)
+                    .count();
+
+                if action_stuck_rounds >= 3 {
+                    log::warn!(
+                        "Action loop detected: {} consecutive identical step sequences",
+                        action_stuck_rounds
+                    );
+                }
+            }
 
             // Process memory operations from the plan
             if let Some(ref mut mem) = memory {
@@ -436,6 +503,22 @@ impl RemoteMultimodalEngine {
                         }
                         MemoryOperation::Clear => {
                             mem.clear_store();
+                        }
+                    }
+                }
+                // Handle skill requests via memory_ops
+                #[cfg(feature = "skills")]
+                if let Some(ref registry) = self.skill_registry {
+                    for op in &plan.memory_ops {
+                        if let MemoryOperation::Set { key, value } = op {
+                            if key == "request_skill" {
+                                if let Some(skill_name) = value.as_str() {
+                                    if registry.get(skill_name).is_some() {
+                                        log::info!("Agent requested skill: {}", skill_name);
+                                        mem.set("_active_skill".to_string(), serde_json::json!(skill_name));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -453,8 +536,39 @@ impl RemoteMultimodalEngine {
                 }
             }
 
-            // Execute steps first (even if done=true, we need to process OpenPage actions)
-            if !plan.steps.is_empty() {
+            // Execute steps (even if done=true, we need to process OpenPage actions).
+            // When stuck in a loop for 5+ rounds, skip repeated steps and auto-inspect DOM.
+            if action_stuck_rounds >= 5 {
+                log::warn!(
+                    "Skipping {} repeated steps - auto-inspecting DOM (stuck {} rounds)",
+                    plan.steps.len(),
+                    action_stuck_rounds
+                );
+                // Inject DOM inspection so the model gets real state data next round
+                let _ = page
+                    .evaluate(
+                        r#"document.title = 'AUTO_DOM_INSPECT:' + JSON.stringify({
+                        els: [...document.querySelectorAll(
+                            'button, [onclick], [class*=item], [class*=cell], [class*=grid] > *, input, select, [class*=square], [class*=piece], [class*=tile]'
+                        )].slice(0, 30).map((el, i) => ({
+                            n: i,
+                            tag: el.tagName,
+                            cls: el.className.split(' ').slice(0, 4).join(' '),
+                            text: el.textContent.trim().slice(0, 50),
+                            sel: el.classList.contains('selected') || el.classList.contains('active') || el.getAttribute('aria-checked') === 'true',
+                            dis: el.disabled || el.classList.contains('disabled')
+                        }))
+                    })"#,
+                    )
+                    .await;
+                // Record in memory that DOM was auto-inspected
+                if let Some(ref mut mem) = memory {
+                    mem.add_action(format!(
+                        "SYSTEM: Skipped repeated steps (stuck {}x). DOM auto-inspected - check page title for element states.",
+                        action_stuck_rounds
+                    ));
+                }
+            } else if !plan.steps.is_empty() {
                 let (steps_executed, spawn_pages) = self
                     .execute_steps(page, &plan.steps, &base_effective_cfg)
                     .await?;
@@ -523,6 +637,7 @@ impl RemoteMultimodalEngine {
         screenshot: &str,
         round_idx: usize,
         stagnated: bool,
+        action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
@@ -540,6 +655,7 @@ impl RemoteMultimodalEngine {
                     screenshot,
                     round_idx,
                     stagnated,
+                    action_stuck_rounds,
                     memory,
                 )
                 .await
@@ -572,6 +688,7 @@ impl RemoteMultimodalEngine {
         screenshot: &str,
         round_idx: usize,
         stagnated: bool,
+        action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
@@ -605,6 +722,46 @@ impl RemoteMultimodalEngine {
             system_msg.push_str("\n\n");
             system_msg.push_str(extra);
         }
+        // Inject matching skills from the skill registry (limited by config)
+        #[cfg(feature = "skills")]
+        if let Some(ref registry) = self.skill_registry {
+            let mut skill_ctx = registry.match_context_limited(
+                url_now,
+                title_now,
+                html,
+                effective_cfg.max_skills_per_round,
+                effective_cfg.max_skill_context_chars,
+            );
+            // Also inject agent-requested skills from memory
+            if let Some(ref mem) = memory {
+                if let Some(active) = mem.get("_active_skill") {
+                    if let Some(name) = active.as_str() {
+                        if let Some(skill) = registry.get(name) {
+                            if !skill_ctx.contains(&skill.name) {
+                                if !skill_ctx.is_empty() {
+                                    skill_ctx.push_str("\n\n");
+                                }
+                                skill_ctx.push_str("## Skill: ");
+                                skill_ctx.push_str(&skill.name);
+                                skill_ctx.push('\n');
+                                skill_ctx.push_str(&skill.content);
+                            }
+                        }
+                    }
+                }
+            }
+            if !skill_ctx.is_empty() {
+                system_msg.push_str("\n\n---\nACTIVATED SKILLS:\n");
+                system_msg.push_str(&skill_ctx);
+            } else if !registry.is_empty() {
+                // No skills matched, but skills are available. Show catalog.
+                let catalog: Vec<&str> = registry.skill_names().collect();
+                if !catalog.is_empty() {
+                    system_msg.push_str("\n\nAvailable skills (request via memory_ops `request_skill`): ");
+                    system_msg.push_str(&catalog.join(", "));
+                }
+            }
+        }
 
         // Build user prompt
         let user_text = self.build_user_prompt(
@@ -616,6 +773,7 @@ impl RemoteMultimodalEngine {
             html,
             round_idx,
             stagnated,
+            action_stuck_rounds,
             memory,
         );
 
@@ -1051,6 +1209,11 @@ impl RemoteMultimodalEngine {
                 if let (Some(sel), Some(txt)) = (selector, text) {
                     if let Ok(elem) = page.find_element(sel).await {
                         let _ = elem.click().await;
+                        // Clear existing value before typing
+                        let _ = page.evaluate(format!(
+                            "document.querySelector('{}').value = ''",
+                            sel.replace('\'', "\\'")
+                        )).await;
                         let _ = elem.type_str(txt).await;
                         return true;
                     }
@@ -1292,6 +1455,39 @@ impl RemoteMultimodalEngine {
             "Screenshot" => {
                 // Screenshot is handled separately - just mark as executed
                 true
+            }
+
+            // === Viewport / Device Metrics ===
+            "SetViewport" => {
+                if let Some(obj) = value.as_object() {
+                    let width = obj.get("width").and_then(|v| v.as_i64()).unwrap_or(1280);
+                    let height = obj.get("height").and_then(|v| v.as_i64()).unwrap_or(960);
+                    let device_scale_factor = obj
+                        .get("device_scale_factor")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(2.0);
+                    let mobile = obj
+                        .get("mobile")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+                    let params = SetDeviceMetricsOverrideParams::new(
+                        width,
+                        height,
+                        device_scale_factor,
+                        mobile,
+                    );
+                    let _ = page.execute(params).await;
+                    log::debug!(
+                        "SetViewport: {}x{} @ {}x DPR",
+                        width,
+                        height,
+                        device_scale_factor
+                    );
+                    return true;
+                }
+                false
             }
 
             // === Validation ===
@@ -1695,6 +1891,10 @@ pub async fn run_remote_multimodal_with_page(
     engine.with_remote_multimodal_config(cfgs.cfg.clone());
     engine.with_prompt_url_gate(cfgs.prompt_url_gate.clone());
     engine.with_semaphore(sem);
+    #[cfg(feature = "skills")]
+    if let Some(ref registry) = cfgs.skill_registry {
+        engine.with_skill_registry(Some(registry.clone()));
+    }
 
     engine.run(page, url).await
 }

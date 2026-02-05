@@ -11,6 +11,7 @@
 
 extern crate spider;
 
+use spider::features::automation::skills::SkillRegistry;
 use spider::features::automation::RemoteMultimodalConfigs;
 use spider::tokio;
 use spider::website::Website;
@@ -36,18 +37,19 @@ async fn main() {
     // Target URL - the "I'm Not A Robot" challenge
     let url = "https://neal.fun/not-a-robot/";
 
-    // Configure remote multimodal with OpenRouter - using Claude for better vision
+    // Configure remote multimodal with OpenRouter
+    let model = std::env::var("MODEL").unwrap_or_else(|_| "anthropic/claude-opus-4.5".to_string());
     let mut mm_config = RemoteMultimodalConfigs::new(
         "https://openrouter.ai/api/v1/chat/completions",
-        "anthropic/claude-opus-4.5", // Best vision accuracy for image grids
+        &model,
     );
 
     // Set the API key
     mm_config.api_key = Some(api_key);
 
-    // Minimal task - system prompt handles challenge types
+    // Minimal task - the default system prompt handles challenge types
     mm_config.user_message_extra = Some(
-        "Complete ALL levels of this challenge.".to_string(),
+        "Complete ALL levels of this challenge. Track your progress using memory_ops and extracted fields. Report current_level number and level_name in extracted.".to_string(),
     );
 
     // Configure for interactive challenge completion
@@ -55,25 +57,32 @@ async fn main() {
     mm_config.cfg.include_html = true;
     mm_config.cfg.include_title = true;
     mm_config.cfg.include_url = true;
-    mm_config.cfg.max_rounds = 30; // Allow many rounds for multiple challenge levels
+    mm_config.cfg.max_rounds = 200; // Allow many rounds for multiple challenge levels
     mm_config.cfg.request_json_object = true;
-    mm_config.cfg.post_plan_wait_ms = 1000; // Brief wait between rounds
-    mm_config.cfg.screenshot = true; // Capture screenshots
+    mm_config.cfg.post_plan_wait_ms = 1500; // Wait between rounds for UI transitions
+    mm_config.cfg.screenshot = true;
     mm_config.cfg.best_effort_json_extract = true;
+    mm_config.cfg.max_tokens = 4096; // Enough for detailed responses with coordinates
+    mm_config.cfg.temperature = 0.1;
 
-    // Create a viewport with higher device scale factor for better screenshot quality
-    let mut viewport = spider::configuration::Viewport::new(1280, 960);
-    viewport.set_scale_factor(Some(3.0)); // 3x resolution for better text detail
+    // Load built-in web challenge skills (image grids, tic-tac-toe, word search, etc.)
+    // Skills are matched per-round against page state and injected into the system prompt.
+    mm_config.skill_registry = Some(SkillRegistry::with_builtin_web_challenges());
+
+    // Create a viewport with 2x device scale factor - larger viewport for better grid/text visibility
+    let mut viewport = spider::configuration::Viewport::new(1440, 1080);
+    viewport.set_scale_factor(Some(2.0));
 
     // Create website with Chrome in headed mode
     let mut website: Website = Website::new(url)
         .with_viewport(Some(viewport))
         .with_limit(1)
+        .with_request_timeout(None) // Disable request timeout - automation has its own max_rounds
         .with_chrome_intercept(
             spider::features::chrome_common::RequestInterceptConfiguration::new(true),
         )
         .with_wait_for_idle_network(Some(spider::configuration::WaitForIdleNetwork::new(Some(
-            Duration::from_secs(5),
+            Duration::from_secs(30),
         ))))
         .with_remote_multimodal(Some(mm_config))
         .build()
@@ -103,8 +112,6 @@ async fn main() {
                     println!("\nRound {}:", i + 1);
                     println!("  Label: {}", result.input);
 
-                    // Parse the extracted data to track level progression
-                    // content_output is serde_json::Value when serde feature is enabled
                     let parsed = &result.content_output;
                     if !parsed.is_null() {
                         if let Some(extracted) = parsed.get("extracted") {
@@ -130,11 +137,10 @@ async fn main() {
 
                             println!("  Current Level: {} - {}", current_level, level_name);
 
-                            // Detect level progression
                             if current_level > highest_level_seen {
                                 if highest_level_seen > 0 {
                                     println!(
-                                        "  ✓ LEVEL {} COMPLETED! Advanced to Level {}",
+                                        "  LEVEL {} COMPLETED! Advanced to Level {}",
                                         highest_level_seen, current_level
                                     );
                                     levels_completed.push(highest_level_seen);
@@ -143,15 +149,14 @@ async fn main() {
                             }
 
                             if level_completed {
-                                println!("  ✓ Level marked as completed");
+                                println!("  Level marked as completed");
                             }
 
                             if challenge_complete {
-                                println!("  🎉 CHALLENGE COMPLETE!");
+                                println!("  CHALLENGE COMPLETE!");
                             }
                         }
 
-                        // Show the steps taken
                         if let Some(steps) = parsed.get("steps") {
                             println!("  Steps: {}", steps);
                         }
@@ -171,19 +176,13 @@ async fn main() {
             }
 
             // Save final screenshot
-            if let Some(ref ai_data) = page.extra_remote_multimodal_data {
-                // Get the last result which should have the final screenshot
-                if let Some(last_result) = ai_data.last() {
-                    if let Some(ref _usage) = last_result.usage {
-                        // The screenshot is stored in the page's automation result
-                        // We'll save it based on the highest level reached
-                        let screenshot_path = output_dir_clone
-                            .join(format!("final_level_{}.png", highest_level_seen));
-                        println!(
-                            "\nScreenshot would be saved to: {}",
-                            screenshot_path.display()
-                        );
-                    }
+            if let Some(ref screenshot_b64) = page.screenshot_bytes {
+                let screenshot_path = output_dir_clone.join("final_screenshot.png");
+                if fs::write(&screenshot_path, screenshot_b64).is_ok() {
+                    println!(
+                        "\nFinal screenshot saved to: {}",
+                        screenshot_path.display()
+                    );
                 }
             }
 
@@ -192,7 +191,6 @@ async fn main() {
             println!("Highest level reached: {}", highest_level_seen);
             println!("Levels completed: {:?}", levels_completed);
 
-            // Check for usage statistics
             if let Some(ref usage) = page.remote_multimodal_usage {
                 println!("\n=== Total Usage ===");
                 let mut total_prompt = 0u32;
@@ -210,7 +208,6 @@ async fn main() {
             }
         }
 
-        // Return the levels completed for verification
         levels_completed
     });
 
@@ -219,8 +216,8 @@ async fn main() {
     println!("   'I'm Not A Robot' Challenge Test");
     println!("==========================================");
     println!("URL: {}", url);
-    println!("Model: anthropic/claude-sonnet-4");
-    println!("Max rounds: 30");
+    println!("Model: {}", model);
+    println!("Max rounds: 50");
     println!("Output dir: {}", output_dir.display());
     println!("==========================================\n");
 
@@ -240,7 +237,7 @@ async fn main() {
             println!("Total time: {:?}", duration);
             println!("Levels completed: {}", levels_completed.len());
             for level in &levels_completed {
-                println!("  ✓ Level {} completed", level);
+                println!("  Level {} completed", level);
             }
             if levels_completed.is_empty() {
                 println!("  No levels were completed");

@@ -37,6 +37,8 @@ pub mod router;
 mod schema_gen;
 mod selector_cache;
 mod self_healing;
+#[cfg(feature = "skills")]
+pub mod skills;
 mod synthesis;
 mod tool_calling;
 

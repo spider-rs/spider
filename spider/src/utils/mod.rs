@@ -2252,9 +2252,11 @@ pub async fn fetch_page_html_chrome_base(
     let mut block_bytes = false;
 
     // the base networking timeout to prevent any hard hangs.
+    // When request_timeout is None (user disabled it), use a generous 30-minute timeout
+    // to allow long-running automation tasks while still preventing infinite hangs.
     let mut base_timeout = match request_timeout {
         Some(timeout) => **timeout.min(&Box::new(MAX_PAGE_TIMEOUT)),
-        _ => MAX_PAGE_TIMEOUT,
+        _ => tokio::time::Duration::from_secs(1800),
     };
 
     // track the initial base without modifying.
@@ -2946,8 +2948,14 @@ pub async fn fetch_page_html_chrome_base(
                             success
                         }
                         Ok(Ok(None)) => false,
-                        Ok(Err(_e)) => false,
-                        Err(_elapsed) => false,
+                        Ok(Err(_e)) => {
+                            log::warn!("Remote multimodal automation error: {:?}", _e);
+                            false
+                        }
+                        Err(_elapsed) => {
+                            log::warn!("Remote multimodal automation timed out");
+                            false
+                        }
                     };
 
                 if multimodal_success {

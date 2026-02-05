@@ -65,6 +65,11 @@ pub struct RemoteMultimodalEngine {
     pub prompt_url_gate: Option<PromptUrlGate>,
     /// Optional semaphore used to limit concurrent in-flight LLM requests.
     pub semaphore: Option<Arc<Semaphore>>,
+    /// Optional skill registry for dynamic context injection.
+    /// When set, matching skills are automatically injected into the system prompt
+    /// based on current page state (URL, title, HTML) each round.
+    #[cfg(feature = "skills")]
+    pub skill_registry: Option<super::skills::SkillRegistry>,
 }
 
 impl RemoteMultimodalEngine {
@@ -85,6 +90,8 @@ impl RemoteMultimodalEngine {
             cfg: RemoteMultimodalConfig::default(),
             prompt_url_gate: None,
             semaphore: None,
+            #[cfg(feature = "skills")]
+            skill_registry: None,
         }
     }
 
@@ -131,6 +138,19 @@ impl RemoteMultimodalEngine {
     /// Set URL-based gating.
     pub fn with_prompt_url_gate(&mut self, gate: Option<PromptUrlGate>) -> &mut Self {
         self.prompt_url_gate = gate;
+        self
+    }
+
+    /// Set a skill registry for dynamic context injection.
+    ///
+    /// When set, matching skills are automatically injected into the system prompt
+    /// each round based on the current page state (URL, title, HTML).
+    #[cfg(feature = "skills")]
+    pub fn with_skill_registry(
+        &mut self,
+        registry: Option<super::skills::SkillRegistry>,
+    ) -> &mut Self {
+        self.skill_registry = registry;
         self
     }
 
@@ -186,6 +206,8 @@ impl RemoteMultimodalEngine {
             cfg,
             prompt_url_gate: self.prompt_url_gate.clone(),
             semaphore: self.semaphore.clone(),
+            #[cfg(feature = "skills")]
+            skill_registry: self.skill_registry.clone(),
         }
     }
 

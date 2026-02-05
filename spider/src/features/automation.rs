@@ -65,7 +65,12 @@ pub use spider_agent::automation::{
     SelectorCache, SelectorCacheEntry,
     // Config helpers
     is_url_allowed, merged_config,
+    // Selector cache (already exported above - SelectorCache, SelectorCacheEntry)
 };
+
+// Skills module for dynamic context injection
+#[cfg(feature = "agent_skills")]
+pub use spider_agent::automation::skills;
 
 // Performance types
 #[cfg(feature = "agent")]

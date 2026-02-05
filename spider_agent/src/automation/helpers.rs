@@ -243,9 +243,23 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
 
     let trimmed = s.trim();
 
+    // 0. Repair common LLM JSON errors: duplicate closing braces after strings in arrays.
+    // LLMs often output `"}},` instead of `"},` when JS code with braces is inside a JSON string.
+    // This happens because the model confuses JS braces with JSON structure braces.
+    let repaired = repair_json_braces(trimmed);
+    if let Ok(v) = serde_json::from_str::<Value>(&repaired) {
+        return Ok(v);
+    }
+
     // 1. Try to extract the LAST code block (thinking models refine their answer)
     if let Some(block) = extract_last_code_block(trimmed) {
         if let Ok(v) = serde_json::from_str::<Value>(block) {
+            return Ok(v);
+        }
+
+        // Try repair on the code block too
+        let repaired_block = repair_json_braces(block);
+        if let Ok(v) = serde_json::from_str::<Value>(&repaired_block) {
             return Ok(v);
         }
 
@@ -272,6 +286,12 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         return Ok(v);
     }
 
+    // Try repair on unfenced content
+    let repaired_unfenced = repair_json_braces(unfenced);
+    if let Ok(v) = serde_json::from_str::<Value>(&repaired_unfenced) {
+        return Ok(v);
+    }
+
     // 3. Extract last JSON object with proper brace matching
     if let Some(obj) = extract_last_json_object(unfenced) {
         if let Ok(v) = serde_json::from_str::<Value>(obj) {
@@ -286,9 +306,81 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         }
     }
 
+    log::warn!(
+        "best_effort_parse_json_object failed on content (first 300 chars): {}",
+        &s[..s.len().min(300)]
+    );
+
     Err(EngineError::InvalidField(
         "assistant content was not a JSON object",
     ))
+}
+
+/// Repair common JSON brace errors produced by LLMs.
+///
+/// When LLMs embed JavaScript code (with curly braces) inside JSON strings,
+/// they often add extra closing braces, producing patterns like `"}}` instead of `"}`.
+/// This function attempts to fix these by removing duplicate braces that break JSON structure.
+fn repair_json_braces(s: &str) -> String {
+    // Strategy: walk the string tracking JSON structure (respecting string boundaries).
+    // When we see `"}}"` followed by `,` or `]`, the inner `}}` likely has one extra `}`.
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut result = Vec::with_capacity(len);
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    while i < len {
+        let b = bytes[i];
+
+        if escape_next {
+            escape_next = false;
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        if b == b'\\' && in_string {
+            escape_next = true;
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' {
+            in_string = !in_string;
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        // Outside a string: look for `}}` patterns that are likely errors.
+        // Pattern: `}` followed by `}` then `,` or `]` or `}`
+        // If the original string doesn't parse but removing one `}` would fix it,
+        // skip one `}`.
+        if b == b'}' && i + 1 < len && bytes[i + 1] == b'}' {
+            // Look ahead past the `}}` for `,` or `]`
+            let after = if i + 2 < len { bytes[i + 2] } else { 0 };
+            if after == b',' || after == b']' || after == b'}' {
+                // Skip one `}` - keep only one
+                result.push(b'}');
+                i += 2; // skip both `}`, but only emit one
+                continue;
+            }
+        }
+
+        result.push(b);
+        i += 1;
+    }
+
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
 /// Take the last `max_bytes` of a UTF-8 string without splitting code points.
@@ -373,6 +465,30 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn test_repair_json_braces_evaluate() {
+        // LLM outputs `}}` instead of `}` after Evaluate strings containing JS code with braces
+        let broken = r#"{"label":"test","done":false,"steps":[{"Evaluate":"document.title = JSON.stringify({a:1});"}},{"Wait":300}],"extracted":{"level":7}}"#;
+        let result = best_effort_parse_json_object(broken);
+        assert!(result.is_ok(), "Should repair double-brace error: {:?}", result.err());
+        let val = result.unwrap();
+        assert_eq!(val["label"], "test");
+        let steps = val["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert!(steps[0].get("Evaluate").is_some());
+        assert!(steps[1].get("Wait").is_some());
+    }
+
+    #[test]
+    fn test_repair_json_braces_valid_not_broken() {
+        // Valid JSON with nested objects should NOT be broken by repair
+        let valid = r#"{"a":{"b":{"c":1}},"d":[1,2]}"#;
+        let result = best_effort_parse_json_object(valid);
+        assert!(result.is_ok());
+        let val = result.unwrap();
+        assert_eq!(val["a"]["b"]["c"], 1);
     }
 
     #[test]

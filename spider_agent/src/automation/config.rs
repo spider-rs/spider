@@ -497,7 +497,7 @@ impl Default for AutomationConfig {
         Self {
             goal: String::new(),
             max_steps: 20,
-            timeout_ms: 120_000, // 2 minutes
+            timeout_ms: 600_000, // 10 minutes
             recovery_strategy: RecoveryStrategy::Retry,
             max_retries: 3,
             use_cache: true,
@@ -690,6 +690,20 @@ pub struct RemoteMultimodalConfig {
     pub best_effort_json_extract: bool,
 
     // -----------------------------------------------------------------
+    // Skills injection limits
+    // -----------------------------------------------------------------
+    /// Maximum number of skills to inject per round (default 3).
+    /// Only the highest-priority matching skills are included.
+    #[cfg(feature = "skills")]
+    #[serde(default = "default_max_skills_per_round")]
+    pub max_skills_per_round: usize,
+    /// Maximum characters for skill context injection per round (default 4000).
+    /// Prevents large skill collections from bloating the system prompt.
+    #[cfg(feature = "skills")]
+    #[serde(default = "default_max_skill_context_chars")]
+    pub max_skill_context_chars: usize,
+
+    // -----------------------------------------------------------------
     // Loop + retry
     // -----------------------------------------------------------------
     /// Maximum number of plan/execute/re-capture rounds before giving up.
@@ -834,8 +848,22 @@ impl Default for RemoteMultimodalConfig {
             confidence_strategy: None,
             self_healing: None,
             concurrent_execution: false,
+            #[cfg(feature = "skills")]
+            max_skills_per_round: default_max_skills_per_round(),
+            #[cfg(feature = "skills")]
+            max_skill_context_chars: default_max_skill_context_chars(),
         }
     }
+}
+
+#[cfg(feature = "skills")]
+fn default_max_skills_per_round() -> usize {
+    3
+}
+
+#[cfg(feature = "skills")]
+fn default_max_skill_context_chars() -> usize {
+    4000
 }
 
 impl RemoteMultimodalConfig {
@@ -1045,6 +1073,12 @@ pub struct RemoteMultimodalConfigs {
     /// Optional concurrency limit for remote inference calls.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency_limit: Option<usize>,
+    /// Optional skill registry for dynamic context injection.
+    /// When set, matching skills are automatically injected into the system prompt
+    /// based on current page state (URL, title, HTML) each round.
+    #[cfg(feature = "skills")]
+    #[serde(skip)]
+    pub skill_registry: Option<super::skills::SkillRegistry>,
     /// Semaphore control for concurrency limiting.
     #[serde(skip, default = "RemoteMultimodalConfigs::default_semaphore")]
     pub semaphore: OnceLock<Arc<tokio::sync::Semaphore>>,
@@ -1079,6 +1113,8 @@ impl Default for RemoteMultimodalConfigs {
             cfg: RemoteMultimodalConfig::default(),
             prompt_url_gate: None,
             concurrency_limit: None,
+            #[cfg(feature = "skills")]
+            skill_registry: None,
             semaphore: Self::default_semaphore(),
         }
     }

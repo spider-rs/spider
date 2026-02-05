@@ -74,6 +74,9 @@ webdriver = ["dep:thirtyfour"]
 # Temp filesystem support
 fs = ["dep:tempfile"]
 
+# Skills - dynamic skill loading for web challenge solving
+skills = []
+
 # Search providers
 search = []
 search_serper = ["search"]
@@ -82,7 +85,7 @@ search_bing = ["search"]
 search_tavily = ["search"]
 
 # Full feature set
-full = ["openai", "chrome", "webdriver", "fs", "search_serper", "search_brave", "search_bing", "search_tavily"]
+full = ["openai", "chrome", "webdriver", "fs", "skills", "search_serper", "search_brave", "search_bing", "search_tavily"]
 
 [[example]]
 name = "basic_search"

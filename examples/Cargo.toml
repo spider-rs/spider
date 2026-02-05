@@ -303,4 +303,4 @@ required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 [[example]]
 name = "not_a_robot"
 path = "not_a_robot.rs"
-required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "spider/agent_chrome"]
+required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "spider/agent_chrome", "spider/agent_skills"]
