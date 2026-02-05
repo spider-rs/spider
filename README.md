@@ -11,13 +11,11 @@
 [API Docs](https://docs.rs/spider/latest/spider) |
 [Chat](https://discord.spider.cloud)
 
-The fastest web crawler written in Rust. Primitives for data curation workloads at scale.
+A web crawler and scraper written in Rust.
 
-## Why Spider?
-
-- **Fast by Design**: Concurrent crawling with streaming responses at scale
-- **Flexible Rendering**: HTTP, Chrome DevTools Protocol (CDP), or WebDriver (Selenium/remote browsers)
-- **Production Ready**: Battle-tested with anti-bot mitigation, caching, and distributed crawling
+- Concurrent crawling with streaming
+- HTTP, Chrome (CDP), or WebDriver rendering
+- Caching, proxies, and distributed crawling
 
 ## Features
 
@@ -54,9 +52,7 @@ The fastest web crawler written in Rust. Primitives for data curation workloads 
 
 ## Quick Start
 
-The fastest way to get started is with [Spider Cloud](https://spider.cloud) - no infrastructure to manage. Pay-per-use at $1/GB data transfer, designed to keep crawling costs low.
-
-For local development:
+Add spider to your project:
 
 ```toml
 [dependencies]
