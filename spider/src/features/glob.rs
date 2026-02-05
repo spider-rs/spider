@@ -19,7 +19,6 @@ lazy_static! {
 /// expand a website url to a glob pattern set
 pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
-    use regex::Regex;
 
     let mut matches = Vec::new();
 
@@ -93,6 +92,10 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
             }
             _ => {}
         }
+    }
+
+    if matches.is_empty() {
+        return Vec::new();
     }
 
     matches

@@ -2930,6 +2930,7 @@ impl Website {
     }
 
     /// Build a page from a seed.
+    #[allow(dead_code)]
     fn build_seed_page(&self) -> Option<Page> {
         if let Some(seeded_html) = self.get_seeded_html() {
             let mut page_response = PageResponse::default();
@@ -3689,8 +3690,12 @@ impl Website {
         self.configuration.configure_allowlist();
 
         for url in expanded {
+            #[cfg(feature = "regex")]
+            let url_ref: &CaseInsensitiveString = &url;
+            #[cfg(not(feature = "regex"))]
+            let url_ref: &CompactString = url.inner();
             if self
-                .is_allowed_default(url.inner())
+                .is_allowed_default(url_ref)
                 .eq(&ProcessLinkStatus::Allowed)
             {
                 let mut links_ssg = HashSet::new();
@@ -3799,7 +3804,7 @@ impl Website {
                     self.on_link_find_callback
                         .as_ref()
                         .map(|cb| cb(*self.url.clone(), None).0)
-                        .unwrap_or_else(|| self.url.clone()),
+                        .unwrap_or_else(|| *self.url.clone()),
                 )
                 .await;
 
@@ -3833,11 +3838,7 @@ impl Website {
     }
 
     /// Expand links for crawl.
-    #[cfg(all(
-        not(feature = "glob"),
-        not(feature = "decentralized"),
-        feature = "smart"
-    ))]
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     pub async fn crawl_establish_smart(
         &mut self,
         client: &Client,
@@ -3986,11 +3987,7 @@ impl Website {
     }
 
     /// fetch the page with chrome
-    #[cfg(all(
-        not(feature = "glob"),
-        not(feature = "decentralized"),
-        feature = "smart"
-    ))]
+    #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     pub async fn render_chrome_page(
         config: &Configuration,
         client: &Client,

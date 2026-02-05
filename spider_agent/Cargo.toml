@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.44.10"
+version = "2.44.11"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -53,6 +53,9 @@ tempfile = { version = "3", optional = true }
 # Stream utilities for event handling
 futures = { version = "0.3", optional = true }
 
+# Long-term experience memory via semantic search
+memvid-rs = { version = "1.2", optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"
@@ -77,6 +80,9 @@ fs = ["dep:tempfile"]
 # Skills - dynamic skill loading for web challenge solving
 skills = []
 
+# Long-term experience memory
+memvid = ["dep:memvid-rs"]
+
 # Search providers
 search = []
 search_serper = ["search"]
@@ -85,7 +91,7 @@ search_bing = ["search"]
 search_tavily = ["search"]
 
 # Full feature set
-full = ["openai", "chrome", "webdriver", "fs", "skills", "search_serper", "search_brave", "search_bing", "search_tavily"]
+full = ["openai", "chrome", "webdriver", "fs", "skills", "memvid", "search_serper", "search_brave", "search_bing", "search_tavily"]
 
 [[example]]
 name = "basic_search"
