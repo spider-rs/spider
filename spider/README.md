@@ -139,6 +139,7 @@ This is needed if `headers` is set in both [spider](../spider/README.md) and [sp
 1. `string_interner_buffer_backend`: Enables the String interning using the buffer backend [default].
 1. `string_interner_string_backend`: Enables the String interning using the string backend.
 1. `string_interner_bucket_backend`: Enables the String interning using the bucket backend.
+1. `spider_cloud`: Use [spider.cloud](https://spider.cloud) for anti-bot bypass and proxy rotation.
 
 ### Decentralization
 
@@ -559,3 +560,28 @@ async fn main() -> Result<(), Error> {
 ### Blocking
 
 If you need a blocking sync implementation use a version prior to `v1.12.0`.
+
+### Spider Cloud
+
+Use [spider.cloud](https://spider.cloud) to help with hard-to-crawl pages.
+
+```toml
+[dependencies]
+spider = { version = "2", features = ["spider_cloud"] }
+```
+
+```rust,no_run
+extern crate spider;
+
+use spider::website::Website;
+use spider::tokio;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://example.com");
+    website.with_spider_cloud("your-api-key");
+    website.crawl().await;
+}
+```
+
+Modes: **Proxy** (default), **Api**, **Unblocker**, **Fallback**, **Smart** (proxy + auto-fallback on bot protection).

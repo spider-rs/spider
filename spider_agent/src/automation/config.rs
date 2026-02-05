@@ -1151,6 +1151,12 @@ pub struct RemoteMultimodalConfigs {
     #[cfg(feature = "skills")]
     #[serde(skip)]
     pub skill_registry: Option<super::skills::SkillRegistry>,
+    /// S3 source for loading skills at startup.
+    /// When set, skills are fetched from the S3 bucket and merged with any
+    /// built-in or manually registered skills.
+    #[cfg(feature = "skills_s3")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub s3_skill_source: Option<super::skills::S3SkillSource>,
     /// Semaphore control for concurrency limiting.
     #[serde(skip, default = "RemoteMultimodalConfigs::default_semaphore")]
     pub semaphore: OnceLock<Arc<tokio::sync::Semaphore>>,
@@ -1193,6 +1199,8 @@ impl Default for RemoteMultimodalConfigs {
             vision_route_mode: VisionRouteMode::default(),
             #[cfg(feature = "skills")]
             skill_registry: None,
+            #[cfg(feature = "skills_s3")]
+            s3_skill_source: None,
             semaphore: Self::default_semaphore(),
         }
     }
@@ -1376,6 +1384,15 @@ impl RemoteMultimodalConfigs {
     pub fn with_dual_models(mut self, vision: ModelEndpoint, text: ModelEndpoint) -> Self {
         self.vision_model = Some(vision);
         self.text_model = Some(text);
+        self
+    }
+
+    // ── S3 skill source ─────────────────────────────────────────────
+
+    /// Set an S3 source for loading skills at startup.
+    #[cfg(feature = "skills_s3")]
+    pub fn with_s3_skill_source(mut self, source: super::skills::S3SkillSource) -> Self {
+        self.s3_skill_source = Some(source);
         self
     }
 

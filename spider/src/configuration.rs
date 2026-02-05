@@ -337,6 +337,9 @@ pub struct Configuration {
     #[cfg(feature = "search")]
     /// Search provider configuration for web search integration. This does nothing without the `search` flag enabled.
     pub search_config: Option<Box<SearchConfig>>,
+    #[cfg(feature = "spider_cloud")]
+    /// Spider Cloud config. See <https://spider.cloud>.
+    pub spider_cloud: Option<Box<SpiderCloudConfig>>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1701,6 +1704,32 @@ impl Configuration {
     pub fn with_search_config(&mut self, _search_config: Option<()>) -> &mut Self {
         self
     }
+
+    /// Set a [spider.cloud](https://spider.cloud) API key (Proxy mode).
+    #[cfg(feature = "spider_cloud")]
+    pub fn with_spider_cloud(&mut self, api_key: &str) -> &mut Self {
+        self.spider_cloud = Some(Box::new(SpiderCloudConfig::new(api_key)));
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) API key (no-op without `spider_cloud` feature).
+    #[cfg(not(feature = "spider_cloud"))]
+    pub fn with_spider_cloud(&mut self, _api_key: &str) -> &mut Self {
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) config.
+    #[cfg(feature = "spider_cloud")]
+    pub fn with_spider_cloud_config(&mut self, config: SpiderCloudConfig) -> &mut Self {
+        self.spider_cloud = Some(Box::new(config));
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) config (no-op without `spider_cloud` feature).
+    #[cfg(not(feature = "spider_cloud"))]
+    pub fn with_spider_cloud_config(&mut self, _config: ()) -> &mut Self {
+        self
+    }
 }
 
 /// Search provider configuration for web search integration.
@@ -1764,4 +1793,220 @@ pub enum SearchProviderType {
     Bing,
     /// Tavily AI Search (optimized for LLMs).
     Tavily,
+}
+
+// ─── Spider Cloud ───────────────────────────────────────────────────────────
+
+/// Integration mode for [spider.cloud](https://spider.cloud).
+#[cfg(feature = "spider_cloud")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SpiderCloudMode {
+    /// Route all HTTP requests through `proxy.spider.cloud`.
+    /// This is the simplest mode — the existing fetch pipeline works
+    /// unmodified, traffic goes through the proxy transparently.
+    #[default]
+    Proxy,
+    /// Use the spider.cloud `POST /crawl` API (with `limit: 1`) for each page.
+    /// Best for simple scraping needs.
+    Api,
+    /// Use the spider.cloud `POST /unblocker` API for anti-bot bypass.
+    /// Best for hard-to-get pages behind advanced bot protection.
+    Unblocker,
+    /// Direct fetch first; fall back to spider.cloud API on
+    /// 403 / 429 / 503 or connection errors.
+    Fallback,
+    /// Intelligent mode: proxy by default, automatically falls back to
+    /// `/unblocker` when it detects bot protection (403, 429, 503, CAPTCHA
+    /// pages, Cloudflare challenges, empty bodies on HTML pages, etc.).
+    /// This is the recommended mode for production use.
+    Smart,
+}
+
+/// Configuration for spider.cloud integration.
+///
+/// Spider Cloud provides anti-bot bypass, proxy rotation, and high-throughput
+/// data collection. Sign up at <https://spider.cloud> to obtain an API key.
+#[cfg(feature = "spider_cloud")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SpiderCloudConfig {
+    /// API key / secret. Sign up at <https://spider.cloud> to get one.
+    pub api_key: String,
+    /// Integration mode.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub mode: SpiderCloudMode,
+    /// API base URL (default: `https://api.spider.cloud`).
+    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_api_url"))]
+    pub api_url: String,
+    /// Proxy URL (default: `https://proxy.spider.cloud`).
+    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_proxy_url"))]
+    pub proxy_url: String,
+    /// Return format for API mode (default: `"raw"` to get original HTML).
+    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_return_format"))]
+    pub return_format: String,
+    /// Extra params forwarded in API mode (e.g. `stealth`, `fingerprint`, `cache`).
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub extra_params: Option<hashbrown::HashMap<String, serde_json::Value>>,
+}
+
+#[cfg(feature = "spider_cloud")]
+impl Default for SpiderCloudConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            mode: SpiderCloudMode::default(),
+            api_url: Self::default_api_url(),
+            proxy_url: Self::default_proxy_url(),
+            return_format: Self::default_return_format(),
+            extra_params: None,
+        }
+    }
+}
+
+#[cfg(feature = "spider_cloud")]
+impl SpiderCloudConfig {
+    /// Create a new config with defaults (Proxy mode).
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Set the integration mode.
+    pub fn with_mode(mut self, mode: SpiderCloudMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Set a custom API base URL.
+    pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
+        self.api_url = url.into();
+        self
+    }
+
+    /// Set a custom proxy URL.
+    pub fn with_proxy_url(mut self, url: impl Into<String>) -> Self {
+        self.proxy_url = url.into();
+        self
+    }
+
+    /// Set the return format for API mode.
+    pub fn with_return_format(mut self, fmt: impl Into<String>) -> Self {
+        self.return_format = fmt.into();
+        self
+    }
+
+    /// Set extra params for API mode.
+    pub fn with_extra_params(mut self, params: hashbrown::HashMap<String, serde_json::Value>) -> Self {
+        self.extra_params = Some(params);
+        self
+    }
+
+    /// Determine if a response should trigger a spider.cloud API fallback.
+    ///
+    /// This encapsulates the intelligence about which status codes and
+    /// content patterns indicate the page needs spider.cloud's help.
+    ///
+    /// Checks for:
+    /// - HTTP 403 (Forbidden) — typically bot protection
+    /// - HTTP 429 (Too Many Requests) — rate limiting
+    /// - HTTP 503 (Service Unavailable) — often Cloudflare/DDoS protection
+    /// - HTTP 520-530 (Cloudflare error range)
+    /// - HTTP 5xx (server errors)
+    /// - Empty body on what should be an HTML page
+    /// - Known CAPTCHA / challenge page markers in the response body
+    pub fn should_fallback(&self, status_code: u16, body: Option<&[u8]>) -> bool {
+        match self.mode {
+            SpiderCloudMode::Api | SpiderCloudMode::Unblocker => false, // already using API
+            SpiderCloudMode::Proxy => false, // proxy-only, no fallback
+            SpiderCloudMode::Fallback | SpiderCloudMode::Smart => {
+                // Status code triggers
+                if matches!(status_code, 403 | 429 | 503 | 520..=530) {
+                    return true;
+                }
+                if status_code >= 500 {
+                    return true;
+                }
+
+                // Content-based triggers (Smart mode only)
+                if self.mode == SpiderCloudMode::Smart {
+                    if let Some(body) = body {
+                        // Empty body when we expected HTML
+                        if body.is_empty() {
+                            return true;
+                        }
+
+                        // Check for bot protection / CAPTCHA markers in the body
+                        // (only check first 4KB for performance)
+                        let check_len = body.len().min(4096);
+                        let snippet = String::from_utf8_lossy(&body[..check_len]);
+                        let lower = snippet.to_lowercase();
+
+                        // Cloudflare challenge
+                        if lower.contains("cf-browser-verification")
+                            || lower.contains("cloudflare")
+                                && lower.contains("challenge-platform")
+                        {
+                            return true;
+                        }
+
+                        // Generic CAPTCHA / bot detection markers
+                        if lower.contains("captcha") && lower.contains("challenge")
+                            || lower.contains("please verify you are a human")
+                            || lower.contains("access denied")
+                                && lower.contains("automated")
+                            || lower.contains("bot detection")
+                        {
+                            return true;
+                        }
+
+                        // Distil Networks / Imperva / Akamai patterns
+                        if lower.contains("distil_r_captcha")
+                            || lower.contains("_imperva")
+                            || lower.contains("akamai")
+                                && lower.contains("bot manager")
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                false
+            }
+        }
+    }
+
+    /// Get the fallback API route for this config.
+    ///
+    /// - `Smart` mode → `/unblocker` (best for bot-protected pages)
+    /// - `Fallback` mode → `/crawl` (general purpose)
+    /// - Other modes → `/crawl` (default)
+    pub fn fallback_route(&self) -> &'static str {
+        match self.mode {
+            SpiderCloudMode::Smart | SpiderCloudMode::Unblocker => "unblocker",
+            _ => "crawl",
+        }
+    }
+
+    /// Whether this mode uses the proxy transport layer.
+    pub fn uses_proxy(&self) -> bool {
+        matches!(
+            self.mode,
+            SpiderCloudMode::Proxy | SpiderCloudMode::Fallback | SpiderCloudMode::Smart
+        )
+    }
+
+    fn default_api_url() -> String {
+        "https://api.spider.cloud".to_string()
+    }
+
+    fn default_proxy_url() -> String {
+        "https://proxy.spider.cloud".to_string()
+    }
+
+    fn default_return_format() -> String {
+        "raw".to_string()
+    }
 }

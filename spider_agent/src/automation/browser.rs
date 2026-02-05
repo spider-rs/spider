@@ -468,7 +468,7 @@ impl RemoteMultimodalEngine {
                 Ok::<String, EngineError>(self.title_context(page, &base_effective_cfg).await)
             };
 
-            let (screenshot, html, mut url_now, title_now) = if use_vision {
+            let (screenshot, html, mut url_now, mut title_now) = if use_vision {
                 let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
                 let (s, h, u, t) =
                     tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
@@ -487,6 +487,37 @@ impl RemoteMultimodalEngine {
             let sig = StateSignature::new(&url_now, &title_now, &html);
             let stagnated = last_sig.as_ref().map(|p| p.eq_soft(&sig)).unwrap_or(false);
             last_sig = Some(sig);
+
+            // Run pre_evaluate JS from matching skills BEFORE the LLM sees the page.
+            // This lets the engine execute critical JS (board solvers, grid extractors)
+            // so the model only reads results from document.title and emits click actions.
+            #[cfg(feature = "skills")]
+            {
+                if let Some(ref registry) = self.skill_registry {
+                    let pre_evals = registry.find_pre_evaluates(&url_now, &title_now, &html);
+                    if !pre_evals.is_empty() {
+                        for (skill_name, js) in &pre_evals {
+                            log::debug!(
+                                "Running pre_evaluate for skill '{}' ({} bytes)",
+                                skill_name,
+                                js.len()
+                            );
+                            let _ = page.evaluate(*js).await;
+                        }
+                        // Re-capture title after pre_evaluate (JS sets document.title)
+                        let new_title =
+                            self.title_context(page, &base_effective_cfg).await;
+                        if !new_title.is_empty() && new_title != title_now {
+                            log::debug!(
+                                "Pre-evaluate updated title: '{}' -> '{}'",
+                                &title_now[..title_now.len().min(80)],
+                                &new_title[..new_title.len().min(80)]
+                            );
+                            title_now = new_title;
+                        }
+                    }
+                }
+            }
 
             // Re-evaluate vision decision now that stagnation is known.
             // If stagnation/stuck upgraded us from text→vision, capture screenshot now.

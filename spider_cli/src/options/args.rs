@@ -60,4 +60,10 @@ pub struct Cli {
     /// The proxy url to use.
     #[clap(short, long)]
     pub proxy_url: Option<String>,
+    /// Spider Cloud API key. Sign up at https://spider.cloud for an API key.
+    #[clap(long)]
+    pub spider_cloud_key: Option<String>,
+    /// Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart.
+    #[clap(long, default_value = "proxy")]
+    pub spider_cloud_mode: Option<String>,
 }

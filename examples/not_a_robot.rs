@@ -6,8 +6,10 @@
 //!
 //! Run with:
 //! ```bash
-//! OPEN_ROUTER=your-api-key cargo run --example not_a_robot --features "spider/sync spider/chrome spider/chrome_headed spider/agent_chrome"
+//! cargo run --example not_a_robot --features "spider/sync spider/chrome spider/chrome_headed spider/agent_chrome spider/agent_skills"
 //! ```
+//!
+//! The API key is read from `.env` file (OPEN_ROUTER=...) or the environment.
 
 extern crate spider;
 
@@ -19,14 +21,41 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+/// Load environment variables from a `.env` file if present.
+fn load_dotenv() {
+    let paths = [".env", "../.env"];
+    for path in &paths {
+        if let Ok(contents) = fs::read_to_string(path) {
+            for line in contents.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some((key, value)) = line.split_once('=') {
+                    let key = key.trim();
+                    let value = value.trim();
+                    // Only set if not already present in environment
+                    if std::env::var(key).is_err() {
+                        std::env::set_var(key, value);
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    // Load .env file first, then init logging
+    load_dotenv();
+
     // Enable debug logging to see model responses and actions
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-    // Get API key from environment variable
+    // Get API key from environment variable (loaded from .env or shell)
     let api_key =
-        std::env::var("OPEN_ROUTER").expect("OPEN_ROUTER environment variable must be set");
+        std::env::var("OPEN_ROUTER").expect("OPEN_ROUTER environment variable must be set (set in .env or shell)");
 
     // Create output directory for screenshots
     let output_dir = Path::new("not_a_robot_results");
@@ -38,7 +67,9 @@ async fn main() {
     let url = "https://neal.fun/not-a-robot/";
 
     // Configure remote multimodal with OpenRouter
-    let model = std::env::var("MODEL").unwrap_or_else(|_| "anthropic/claude-opus-4.5".to_string());
+    // Default to Claude Opus 4.6 (frontier model, excellent vision + reasoning).
+    // Override with MODEL env var for other models.
+    let model = std::env::var("MODEL").unwrap_or_else(|_| "anthropic/claude-opus-4.6".to_string());
     let mut mm_config = RemoteMultimodalConfigs::new(
         "https://openrouter.ai/api/v1/chat/completions",
         &model,

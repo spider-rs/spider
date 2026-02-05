@@ -306,6 +306,40 @@ impl OnShouldCrawlCallback {
     }
 }
 
+/// Round-robin client rotator for proxy rotation.
+/// Each client is built with a single proxy, and `next()` cycles through them.
+#[derive(Clone)]
+pub struct ClientRotator {
+    clients: Vec<Client>,
+    index: Arc<AtomicUsize>,
+}
+
+impl ClientRotator {
+    /// Create a new rotator from a list of clients.
+    pub fn new(clients: Vec<Client>) -> Self {
+        Self {
+            clients,
+            index: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Get the next client in round-robin order.
+    pub fn next(&self) -> &Client {
+        let idx = self.index.fetch_add(1, Ordering::Relaxed) % self.clients.len();
+        &self.clients[idx]
+    }
+
+    /// Number of clients in the rotator.
+    pub fn len(&self) -> usize {
+        self.clients.len()
+    }
+
+    /// Whether the rotator is empty.
+    pub fn is_empty(&self) -> bool {
+        self.clients.is_empty()
+    }
+}
+
 /// Represents a website to crawl and gather all links or page content.
 /// ```rust
 /// use spider::website::Website;
@@ -368,6 +402,8 @@ pub struct Website {
     shutdown: bool,
     /// The request client. Stored for re-use between runs.
     client: Option<Client>,
+    /// Round-robin client rotator for proxy rotation. Built when 2+ proxies are configured.
+    client_rotator: Option<Arc<ClientRotator>>,
     /// The disk handler to use.
     #[cfg(feature = "disk")]
     sqlite: Option<Box<DatabaseHandler>>,
@@ -1709,6 +1745,21 @@ impl Website {
             _ => client,
         };
 
+        // Spider Cloud proxy injection (modes that use proxy transport)
+        #[cfg(feature = "spider_cloud")]
+        let client = if let Some(ref sc) = self.configuration.spider_cloud {
+            if sc.uses_proxy() {
+                match (crate::client::Proxy::all(&sc.proxy_url), reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key))) {
+                    (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
+                    _ => client,
+                }
+            } else {
+                client
+            }
+        } else {
+            client
+        };
+
         let client = if crate::utils::connect::background_connect_threading() {
             client.connector_layer(crate::utils::connect::BackgroundProcessorLayer::new())
         } else {
@@ -1772,6 +1823,21 @@ impl Website {
                 client
             }
             _ => client,
+        };
+
+        // Spider Cloud proxy injection (modes that use proxy transport)
+        #[cfg(feature = "spider_cloud")]
+        let client = if let Some(ref sc) = self.configuration.spider_cloud {
+            if sc.uses_proxy() {
+                match (crate::client::Proxy::all(&sc.proxy_url), reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key))) {
+                    (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
+                    _ => client,
+                }
+            } else {
+                client
+            }
+        } else {
+            client
         };
 
         let client = self.configure_http_client_cookies(client);
@@ -1847,6 +1913,191 @@ impl Website {
     pub fn set_http_client(&mut self, client: Client) -> &Option<Client> {
         self.client = Some(client);
         &self.client
+    }
+
+    /// Build a client configured with a single proxy for use in rotation.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    fn build_single_proxy_client(
+        &self,
+        proxy: &crate::configuration::RequestProxy,
+    ) -> Option<Client> {
+        if proxy.ignore == crate::configuration::ProxyIgnore::Http {
+            return None;
+        }
+
+        let client = self.configure_base_client();
+
+        let client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
+            _ => client,
+        };
+
+        let addr = &proxy.addr;
+        let linux = cfg!(target_os = "linux");
+        let socks = addr.starts_with("socks://");
+
+        let client = if socks && linux {
+            match crate::client::Proxy::all(&addr.replacen("socks://", "http://", 1)) {
+                Ok(p) => client.proxy(p),
+                Err(_) => return None,
+            }
+        } else {
+            match crate::client::Proxy::all(addr) {
+                Ok(p) => client.proxy(p),
+                Err(_) => return None,
+            }
+        };
+
+        #[cfg(feature = "spider_cloud")]
+        let client = if let Some(ref sc) = self.configuration.spider_cloud {
+            if sc.uses_proxy() {
+                match (
+                    crate::client::Proxy::all(&sc.proxy_url),
+                    reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
+                ) {
+                    (Ok(proxy), Ok(auth_value)) => {
+                        client.proxy(proxy.custom_http_auth(auth_value))
+                    }
+                    _ => client,
+                }
+            } else {
+                client
+            }
+        } else {
+            client
+        };
+
+        let client = if crate::utils::connect::background_connect_threading() {
+            client.connector_layer(crate::utils::connect::BackgroundProcessorLayer::new())
+        } else {
+            client
+        };
+
+        let client = match self.configuration.concurrency_limit {
+            Some(limit) => client
+                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit)),
+            _ => client,
+        };
+
+        let client = self.configure_http_client_cookies(client);
+        unsafe { Some(client.build().unwrap_unchecked()) }
+    }
+
+    /// Build a client configured with a single proxy for use in rotation (cache_request variant).
+    #[cfg(all(not(feature = "decentralized"), feature = "cache_request"))]
+    fn build_single_proxy_client(
+        &self,
+        proxy: &crate::configuration::RequestProxy,
+    ) -> Option<Client> {
+        use crate::utils::create_cache_key;
+
+        if proxy.ignore == crate::configuration::ProxyIgnore::Http {
+            return None;
+        }
+
+        let client = self.configure_base_client();
+
+        let client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(**t),
+            _ => client,
+        };
+
+        let addr = &proxy.addr;
+        let linux = cfg!(target_os = "linux");
+        let socks = addr.starts_with("socks://");
+
+        let client = if socks && linux {
+            match crate::client::Proxy::all(&addr.replacen("socks://", "http://", 1)) {
+                Ok(p) => client.proxy(p),
+                Err(_) => return None,
+            }
+        } else {
+            match crate::client::Proxy::all(addr) {
+                Ok(p) => client.proxy(p),
+                Err(_) => return None,
+            }
+        };
+
+        #[cfg(feature = "spider_cloud")]
+        let client = if let Some(ref sc) = self.configuration.spider_cloud {
+            if sc.uses_proxy() {
+                match (
+                    crate::client::Proxy::all(&sc.proxy_url),
+                    reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
+                ) {
+                    (Ok(proxy), Ok(auth_value)) => {
+                        client.proxy(proxy.custom_http_auth(auth_value))
+                    }
+                    _ => client,
+                }
+            } else {
+                client
+            }
+        } else {
+            client
+        };
+
+        let client = self.configure_http_client_cookies(client);
+
+        let client = if crate::utils::connect::background_connect_threading() {
+            client.connector_layer(crate::utils::connect::BackgroundProcessorLayer::new())
+        } else {
+            client
+        };
+
+        let client = match self.configuration.concurrency_limit {
+            Some(limit) => client
+                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit)),
+            _ => client,
+        };
+
+        let client =
+            reqwest_middleware::ClientBuilder::new(unsafe { client.build().unwrap_unchecked() });
+
+        if self.configuration.cache {
+            let mut cache_options = HttpCacheOptions::default();
+
+            cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+                let mut auth_token = None;
+                if let Some(auth) = req.headers.get("authorization") {
+                    if let Ok(token) = auth.to_str() {
+                        if !token.is_empty() {
+                            auth_token = Some(token);
+                        }
+                    }
+                }
+                create_cache_key(req, Some(req.method.as_str()), auth_token)
+            }));
+
+            Some(
+                client
+                    .with(Cache(HttpCache {
+                        mode: CacheMode::Default,
+                        manager: CACACHE_MANAGER.clone(),
+                        options: cache_options,
+                    }))
+                    .build(),
+            )
+        } else {
+            Some(client.build())
+        }
+    }
+
+    /// Build rotated clients from the proxy list. Returns None if fewer than 2 proxies.
+    #[cfg(not(feature = "decentralized"))]
+    fn build_rotated_clients(&self) -> Option<Arc<ClientRotator>> {
+        let proxies = self.configuration.proxies.as_ref()?;
+        if proxies.len() < 2 {
+            return None;
+        }
+        let clients: Vec<Client> = proxies
+            .iter()
+            .filter_map(|proxy| self.build_single_proxy_client(proxy))
+            .collect();
+        if clients.len() < 2 {
+            return None;
+        }
+        Some(Arc::new(ClientRotator::new(clients)))
     }
 
     /// Configure http client.
@@ -2132,6 +2383,11 @@ impl Website {
             Some(client) => client,
             _ => self.configure_http_client(),
         };
+
+        #[cfg(not(feature = "decentralized"))]
+        {
+            self.client_rotator = self.build_rotated_clients();
+        }
 
         (client, self.configure_handler())
     }
@@ -4529,6 +4785,7 @@ impl Website {
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
         self.status = CrawlStatus::Active;
+        let client_rotator = self.client_rotator.clone();
         let mut selector: (
             CompactString,
             smallvec::SmallVec<[CompactString; 2]>,
@@ -4635,6 +4892,7 @@ impl Website {
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                let rotator = client_rotator.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -4652,7 +4910,10 @@ impl Website {
                                     r_settings.ssg_build = true;
                                     let target_url = link_result.0.as_ref();
                                     let external_domains_caseless = &shared.3;
-                                    let client = &shared.0;
+                                    let client = match &rotator {
+                                        Some(r) => r.next(),
+                                        None => &shared.0,
+                                    };
 
                                     let mut domain_parsed = None;
 
@@ -4677,12 +4938,17 @@ impl Website {
                                             tokio::time::sleep(timeout).await;
                                         }
 
+                                        let retry_client = match &rotator {
+                                            Some(r) => r.next(),
+                                            None => &shared.0,
+                                        };
+
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                             if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                 let mut domain_parsed = None;
                                                 let next_page = Page::new_page_streaming(
                                                     target_url,
-                                                    client, only_html,
+                                                    retry_client, only_html,
                                                     &mut relative_selectors.clone(),
                                                     external_domains_caseless,
                                                     &r_settings,
@@ -4702,7 +4968,7 @@ impl Website {
                                         } else {
                                             page.clone_from(&Page::new_page_streaming(
                                                 target_url,
-                                                client,
+                                                retry_client,
                                                 only_html,
                                                 &mut relative_selectors.clone(),
                                                 external_domains_caseless,
@@ -5216,6 +5482,7 @@ impl Website {
             website._crawl_establish(client, &mut selector, false).await;
             website
         } else {
+            let client_rotator = self.client_rotator.clone();
             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
@@ -5311,6 +5578,7 @@ impl Website {
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                let rotator = client_rotator.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5328,7 +5596,10 @@ impl Website {
                                     r_settings.ssg_build = true;
                                     let target_url = link_result.0.as_ref();
                                     let external_domains_caseless = &shared.3;
-                                    let client = &shared.0;
+                                    let client = match &rotator {
+                                        Some(r) => r.next(),
+                                        None => &shared.0,
+                                    };
 
                                     let mut domain_parsed = None;
 
@@ -5353,12 +5624,17 @@ impl Website {
                                             tokio::time::sleep(timeout).await;
                                         }
 
+                                        let retry_client = match &rotator {
+                                            Some(r) => r.next(),
+                                            None => &shared.0,
+                                        };
+
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                             if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                 let mut domain_parsed = None;
                                                 let next_page = Page::new_page_streaming(
                                                     target_url,
-                                                    client, only_html,
+                                                    retry_client, only_html,
                                                     &mut relative_selectors.clone(),
                                                     external_domains_caseless,
                                                     &r_settings,
@@ -5378,7 +5654,7 @@ impl Website {
                                         } else {
                                             page.clone_from(&Page::new_page_streaming(
                                                 target_url,
-                                                client,
+                                                retry_client,
                                                 only_html,
                                                 &mut relative_selectors.clone(),
                                                 external_domains_caseless,
@@ -8477,6 +8753,35 @@ impl Website {
         self
     }
 
+    /// Set a [spider.cloud](https://spider.cloud) API key (Proxy mode).
+    #[cfg(feature = "spider_cloud")]
+    pub fn with_spider_cloud(&mut self, api_key: &str) -> &mut Self {
+        self.configuration.with_spider_cloud(api_key);
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) API key (no-op without `spider_cloud` feature).
+    #[cfg(not(feature = "spider_cloud"))]
+    pub fn with_spider_cloud(&mut self, _api_key: &str) -> &mut Self {
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) config.
+    #[cfg(feature = "spider_cloud")]
+    pub fn with_spider_cloud_config(
+        &mut self,
+        config: crate::configuration::SpiderCloudConfig,
+    ) -> &mut Self {
+        self.configuration.with_spider_cloud_config(config);
+        self
+    }
+
+    /// Set a [spider.cloud](https://spider.cloud) config (no-op without `spider_cloud` feature).
+    #[cfg(not(feature = "spider_cloud"))]
+    pub fn with_spider_cloud_config(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
     /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Result<Self, Self> {
         if self.domain_parsed.is_none() {
@@ -9527,4 +9832,87 @@ async fn test_cache() {
         "{:?}",
         cached_duration
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(feature = "decentralized"))]
+    #[test]
+    fn test_client_rotator_round_robin() {
+        // Build 3 simple clients to verify round-robin cycling.
+        let clients: Vec<Client> = (0..3)
+            .map(|_| {
+                #[cfg(not(feature = "cache_request"))]
+                {
+                    unsafe { crate::ClientBuilder::new().build().unwrap_unchecked() }
+                }
+                #[cfg(feature = "cache_request")]
+                {
+                    reqwest_middleware::ClientBuilder::new(unsafe {
+                        reqwest::ClientBuilder::new().build().unwrap_unchecked()
+                    })
+                    .build()
+                }
+            })
+            .collect();
+
+        let rotator = ClientRotator::new(clients);
+        assert_eq!(rotator.len(), 3);
+        assert!(!rotator.is_empty());
+
+        // Each call to next() should advance the index.
+        // We verify the pattern cycles by checking the internal index.
+        let _ = rotator.next(); // index 0
+        let _ = rotator.next(); // index 1
+        let _ = rotator.next(); // index 2
+        let _ = rotator.next(); // index 3 -> wraps to 0
+
+        // After 4 calls, the atomic index should be 4.
+        let current_idx = rotator.index.load(Ordering::Relaxed);
+        assert_eq!(current_idx, 4);
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    #[test]
+    fn test_build_rotated_clients_with_multiple_proxies() {
+        let mut website = Website::new("http://example.com");
+        website.configuration.with_proxies(Some(vec![
+            "http://proxy1.example.com:8080".to_string(),
+            "http://proxy2.example.com:8080".to_string(),
+            "http://proxy3.example.com:8080".to_string(),
+        ]));
+
+        let rotator = website.build_rotated_clients();
+        assert!(rotator.is_some(), "Should build rotator with 3 proxies");
+        let rotator = rotator.unwrap();
+        assert_eq!(rotator.len(), 3);
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    #[test]
+    fn test_build_rotated_clients_single_proxy_returns_none() {
+        let mut website = Website::new("http://example.com");
+        website.configuration.with_proxies(Some(vec![
+            "http://proxy1.example.com:8080".to_string(),
+        ]));
+
+        let rotator = website.build_rotated_clients();
+        assert!(
+            rotator.is_none(),
+            "Should not build rotator with only 1 proxy"
+        );
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    #[test]
+    fn test_build_rotated_clients_no_proxies_returns_none() {
+        let website = Website::new("http://example.com");
+        let rotator = website.build_rotated_clients();
+        assert!(
+            rotator.is_none(),
+            "Should not build rotator with no proxies"
+        );
+    }
 }

@@ -113,9 +113,9 @@ pub use automation::{
     ActionRecord, ActionResult, ActionType, ActResult, AutomationConfig, AutomationResult, AutomationUsage,
     CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep,
     ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier, ExtractionSchema,
-    FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelPolicy, NavigationOption,
-    PageObservation, PromptUrlGate, RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry,
-    StructuredOutputConfig,
+    FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelEndpoint, ModelPolicy,
+    NavigationOption, PageObservation, PromptUrlGate, RecoveryStrategy, RetryPolicy,
+    SelectorCache, SelectorCacheEntry, StructuredOutputConfig, VisionRouteMode,
 };
 
 // Automation re-exports - engine and configuration

@@ -3919,6 +3919,134 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
     fetch_page_html_raw_base(target_url, client, false).await
 }
 
+/// Fetch a single page via the spider.cloud REST API.
+///
+/// Picks the right endpoint based on [`SpiderCloudMode`]:
+/// - `Api` / `Fallback` → `POST /crawl` with `limit: 1`
+/// - `Unblocker` → `POST /unblocker` (anti-bot bypass)
+/// - `Proxy` → not used (proxy is handled at the HTTP client level)
+///
+/// Returns the HTML content as a [`PageResponse`].
+#[cfg(feature = "spider_cloud")]
+pub async fn fetch_page_html_spider_cloud(
+    target_url: &str,
+    config: &crate::configuration::SpiderCloudConfig,
+    client: &Client,
+) -> PageResponse {
+    let route = config.fallback_route();
+
+    let mut body = serde_json::json!({
+        "url": target_url,
+        "return_format": config.return_format,
+    });
+
+    // /crawl needs limit: 1 to fetch a single page
+    if route == "crawl" {
+        body["limit"] = serde_json::json!(1);
+    }
+
+    // Merge extra_params into the body
+    if let Some(ref extra) = config.extra_params {
+        if let serde_json::Value::Object(ref mut map) = body {
+            for (k, v) in extra {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    let api_endpoint = format!("{}/{}", config.api_url, route);
+
+    let result = client
+        .post(&api_endpoint)
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+
+    match result {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.bytes().await {
+                Ok(bytes) => {
+                    // spider.cloud returns JSON array: [{"content": "...", "status": 200, "url": "..."}]
+                    if let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
+                        if let Some(first) = arr.into_iter().next() {
+                            let content = first
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+
+                            let item_status = first
+                                .get("status")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(200) as u16;
+
+                            let final_url = first
+                                .get("url")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+
+                            return PageResponse {
+                                content: Some(Box::new(content.as_bytes().to_vec())),
+                                status_code: StatusCode::from_u16(item_status)
+                                    .unwrap_or(StatusCode::OK),
+                                final_url,
+                                ..Default::default()
+                            };
+                        }
+                    }
+
+                    // Fallback: treat entire body as content
+                    PageResponse {
+                        content: Some(Box::new(bytes.to_vec())),
+                        status_code: status,
+                        ..Default::default()
+                    }
+                }
+                Err(_) => PageResponse {
+                    status_code: status,
+                    ..Default::default()
+                },
+            }
+        }
+        Err(_) => PageResponse {
+            status_code: StatusCode::BAD_GATEWAY,
+            ..Default::default()
+        },
+    }
+}
+
+/// Fetch with spider.cloud fallback.
+///
+/// Tries a direct fetch first. Uses [`SpiderCloudConfig::should_fallback`] to
+/// intelligently detect when to retry via the spider.cloud API — checking status
+/// codes, bot protection markers, CAPTCHA challenges, and empty responses.
+/// The fallback route (`/crawl` or `/unblocker`) is chosen by [`SpiderCloudConfig::fallback_route`].
+#[cfg(feature = "spider_cloud")]
+pub async fn fetch_page_html_with_fallback(
+    target_url: &str,
+    client: &Client,
+    spider_cloud: &crate::configuration::SpiderCloudConfig,
+    only_html: bool,
+) -> PageResponse {
+    let resp = fetch_page_html_raw_base(target_url, client, only_html).await;
+
+    let body_bytes = resp.content.as_deref().map(|b| b.as_slice());
+    let should_fallback = spider_cloud.should_fallback(resp.status_code.as_u16(), body_bytes);
+
+    if should_fallback {
+        log::info!(
+            "spider_cloud fallback triggered for {} (status {})",
+            target_url,
+            resp.status_code
+        );
+        fetch_page_html_spider_cloud(target_url, spider_cloud, client).await
+    } else {
+        resp
+    }
+}
+
 /// Perform a network request to a resource extracting all content as text.
 #[cfg(feature = "decentralized")]
 pub async fn fetch_page(target_url: &str, client: &Client) -> Option<Vec<u8>> {

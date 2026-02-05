@@ -56,6 +56,10 @@ futures = { version = "0.3", optional = true }
 # Long-term experience memory via semantic search
 memvid-rs = { version = "1.2", optional = true }
 
+# S3 skill loading (optional)
+aws-sdk-s3 = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"
@@ -83,6 +87,9 @@ skills = []
 # Long-term experience memory
 memvid = ["dep:memvid-rs"]
 
+# S3 skill loading
+skills_s3 = ["skills", "dep:aws-sdk-s3", "dep:aws-config"]
+
 # Search providers
 search = []
 search_serper = ["search"]
@@ -91,7 +98,7 @@ search_bing = ["search"]
 search_tavily = ["search"]
 
 # Full feature set
-full = ["openai", "chrome", "webdriver", "fs", "skills", "memvid", "search_serper", "search_brave", "search_bing", "search_tavily"]
+full = ["openai", "chrome", "webdriver", "fs", "skills", "memvid", "search_serper", "search_brave", "search_bing", "search_tavily", "skills_s3"]
 
 [[example]]
 name = "basic_search"

@@ -48,6 +48,99 @@
 
 use std::collections::HashMap;
 
+// ─── S3 skill loading types ────────────────────────────────────────────────
+
+/// Configuration for loading skills from an S3-compatible bucket.
+#[cfg(feature = "skills_s3")]
+#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct S3SkillSource {
+    /// S3 bucket name.
+    pub bucket: String,
+    /// Folder prefix within the bucket, e.g. "tactics/".
+    #[serde(default)]
+    pub prefix: String,
+    /// AWS region override. Defaults to SDK environment resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Custom endpoint URL for S3-compatible stores (MinIO, R2, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_url: Option<String>,
+    /// File extensions to load. Defaults to `["md"]`.
+    #[serde(default = "default_s3_extensions")]
+    pub extensions: Vec<String>,
+}
+
+#[cfg(feature = "skills_s3")]
+fn default_s3_extensions() -> Vec<String> {
+    vec!["md".to_string()]
+}
+
+#[cfg(feature = "skills_s3")]
+impl S3SkillSource {
+    /// Create a new S3 skill source with bucket and prefix.
+    pub fn new(bucket: impl Into<String>, prefix: impl Into<String>) -> Self {
+        Self {
+            bucket: bucket.into(),
+            prefix: prefix.into(),
+            region: None,
+            endpoint_url: None,
+            extensions: default_s3_extensions(),
+        }
+    }
+
+    /// Set the AWS region.
+    pub fn with_region(mut self, region: impl Into<String>) -> Self {
+        self.region = Some(region.into());
+        self
+    }
+
+    /// Set a custom endpoint URL (for MinIO, R2, etc.).
+    pub fn with_endpoint_url(mut self, url: impl Into<String>) -> Self {
+        self.endpoint_url = Some(url.into());
+        self
+    }
+
+    /// Set file extensions to load (e.g. `["md", "json"]`).
+    pub fn with_extensions(mut self, exts: Vec<String>) -> Self {
+        self.extensions = exts;
+        self
+    }
+}
+
+/// Errors from S3 skill loading.
+#[cfg(feature = "skills_s3")]
+#[derive(Debug)]
+pub enum S3SkillError {
+    /// AWS SDK error.
+    Aws(String),
+    /// No skills found in the specified bucket/prefix.
+    NoSkillsFound,
+    /// Failed to parse a skill file.
+    ParseError {
+        /// S3 object key that failed to parse.
+        key: String,
+        /// Reason for the parse failure.
+        reason: String,
+    },
+}
+
+#[cfg(feature = "skills_s3")]
+impl std::fmt::Display for S3SkillError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Aws(e) => write!(f, "AWS S3 error: {}", e),
+            Self::NoSkillsFound => write!(f, "no skills found in S3 bucket"),
+            Self::ParseError { key, reason } => {
+                write!(f, "failed to parse skill '{}': {}", key, reason)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "skills_s3")]
+impl std::error::Error for S3SkillError {}
+
 /// A skill provides specialized context for solving specific challenge types.
 ///
 /// Skills follow the [Agent Skills](https://github.com/anthropics/skills) pattern:
@@ -65,6 +158,11 @@ pub struct Skill {
     /// The prompt content to inject when this skill is active.
     /// This gets appended to system_prompt_extra.
     pub content: String,
+    /// Optional JavaScript to execute via `page.evaluate()` BEFORE the LLM
+    /// sees the page. The JS should write results into `document.title` so the
+    /// model can read them. This prevents the LLM from rewriting critical JS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_evaluate: Option<String>,
     /// Optional JavaScript code snippets the LLM can use.
     /// Keys are descriptive names, values are JS code strings.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -82,6 +180,7 @@ impl Skill {
             description: description.into(),
             triggers: Vec::new(),
             content: String::new(),
+            pre_evaluate: None,
             code_snippets: HashMap::new(),
             priority: 0,
         }
@@ -96,6 +195,13 @@ impl Skill {
     /// Set the prompt content.
     pub fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = content.into();
+        self
+    }
+
+    /// Set JavaScript to execute before the LLM sees the page.
+    /// The JS should write results into `document.title`.
+    pub fn with_pre_evaluate(mut self, js: impl Into<String>) -> Self {
+        self.pre_evaluate = Some(js.into());
         self
     }
 
@@ -187,6 +293,7 @@ impl Skill {
             description,
             triggers,
             content: content.to_string(),
+            pre_evaluate: None,
             code_snippets: HashMap::new(),
             priority,
         })
@@ -356,6 +463,19 @@ impl SkillRegistry {
         ctx
     }
 
+    /// Find all matching skills that have a `pre_evaluate` JS payload.
+    /// Returns `(skill_name, js_code)` pairs sorted by priority.
+    pub fn find_pre_evaluates(&self, url: &str, title: &str, html: &str) -> Vec<(&str, &str)> {
+        self.find_matching(url, title, html)
+            .into_iter()
+            .filter_map(|s| {
+                s.pre_evaluate
+                    .as_deref()
+                    .map(|js| (s.name.as_str(), js))
+            })
+            .collect()
+    }
+
     /// Get a skill by name.
     pub fn get(&self, name: &str) -> Option<&Skill> {
         self.skills.iter().find(|s| s.name == name)
@@ -402,19 +522,24 @@ impl SkillRegistry {
         );
 
         // Tic-tac-toe / XOXO — high priority to override image-grid when both match
+        // Uses pre_evaluate to run board-reading + solver JS before the LLM sees
+        // the page. The model only sees the result in document.title and clicks.
         registry.add(
             Skill::new("tic-tac-toe", "Play tic-tac-toe (noughts and crosses) game")
                 .with_trigger(SkillTrigger::title_contains("xoxo"))
                 .with_trigger(SkillTrigger::title_contains("tic-tac"))
                 .with_trigger(SkillTrigger::title_contains("tic tac"))
                 .with_trigger(SkillTrigger::html_contains("tic-tac"))
-                .with_trigger(SkillTrigger::html_contains("cell-x"))
-                .with_trigger(SkillTrigger::html_contains("cell-o"))
+                .with_trigger(SkillTrigger::html_contains("cell-selected"))
+                .with_trigger(SkillTrigger::html_contains("cell-disabled"))
                 .with_priority(10)
-                .with_content(TIC_TAC_TOE_SKILL)
+                .with_pre_evaluate(TTT_PRE_EVALUATE_JS)
+                .with_content(TTT_SKILL_SIMPLIFIED)
         );
 
         // Word search — higher priority than image-grid since word-search pages also have grid-item
+        // Uses pre_evaluate to run grid extraction + solver JS before the LLM sees
+        // the page. The model only sees found word coordinates in document.title.
         registry.add(
             Skill::new("word-search", "Find and select words in a letter grid")
                 .with_trigger(SkillTrigger::title_contains("word search"))
@@ -422,7 +547,8 @@ impl SkillRegistry {
                 .with_trigger(SkillTrigger::html_contains("word-search-grid-item"))
                 .with_trigger(SkillTrigger::html_contains("word-search"))
                 .with_priority(8)
-                .with_content(WORD_SEARCH_SKILL)
+                .with_pre_evaluate(WORD_SEARCH_PRE_EVALUATE_JS)
+                .with_content(WORD_SEARCH_SKILL_SIMPLIFIED)
         );
 
         // Text CAPTCHA / math challenges / distorted text
@@ -447,7 +573,142 @@ impl SkillRegistry {
                 .with_content(SLIDER_DRAG_SKILL)
         );
 
+        // Checkbox / simple click challenges (L1 of not-a-robot)
+        registry.add(
+            Skill::new("checkbox-click", "Click a checkbox to prove you are human")
+                .with_trigger(SkillTrigger::html_contains("captcha-checkbox"))
+                .with_trigger(SkillTrigger::html_contains("checkbox-label"))
+                .with_priority(2)
+                .with_content(CHECKBOX_SKILL)
+        );
+
         registry
+    }
+}
+
+// ─── S3 skill loading impl ─────────────────────────────────────────────────
+
+#[cfg(feature = "skills_s3")]
+impl SkillRegistry {
+    /// Load skills from an S3-compatible bucket.
+    ///
+    /// Lists objects under `source.prefix`, filters by `source.extensions`,
+    /// downloads each, and parses via `Skill::from_markdown()` for `.md` files
+    /// or `serde_json::from_str` for `.json` files.
+    ///
+    /// Name conflicts: S3 skills replace any existing skill with the same name.
+    ///
+    /// Returns the count of successfully loaded skills.
+    pub async fn load_from_s3(&mut self, source: &S3SkillSource) -> Result<usize, S3SkillError> {
+        let sdk_config = {
+            let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+            if let Some(ref region) = source.region {
+                loader = loader.region(aws_config::Region::new(region.clone()));
+            }
+            if let Some(ref endpoint) = source.endpoint_url {
+                loader = loader.endpoint_url(endpoint);
+            }
+            loader.load().await
+        };
+
+        let client = aws_sdk_s3::Client::new(&sdk_config);
+
+        let mut continuation_token: Option<String> = None;
+        let mut loaded = 0usize;
+        let exts: Vec<&str> = source.extensions.iter().map(|s| s.as_str()).collect();
+
+        loop {
+            let mut req = client
+                .list_objects_v2()
+                .bucket(&source.bucket)
+                .prefix(&source.prefix);
+
+            if let Some(ref token) = continuation_token {
+                req = req.continuation_token(token);
+            }
+
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| S3SkillError::Aws(e.to_string()))?;
+
+            let contents = resp.contents();
+            {
+                for obj in contents {
+                    let key = match obj.key() {
+                        Some(k) => k,
+                        None => continue,
+                    };
+
+                    // Filter by extension
+                    let matches_ext = exts.iter().any(|ext| {
+                        key.ends_with(&format!(".{}", ext))
+                    });
+                    if !matches_ext {
+                        continue;
+                    }
+
+                    // Download the object
+                    let get_resp = client
+                        .get_object()
+                        .bucket(&source.bucket)
+                        .key(key)
+                        .send()
+                        .await
+                        .map_err(|e| S3SkillError::Aws(e.to_string()))?;
+
+                    let body = get_resp
+                        .body
+                        .collect()
+                        .await
+                        .map_err(|e| S3SkillError::Aws(e.to_string()))?;
+
+                    let text = String::from_utf8_lossy(&body.into_bytes()).into_owned();
+
+                    // Parse based on extension
+                    let skill = if key.ends_with(".json") {
+                        serde_json::from_str::<Skill>(&text).map_err(|e| {
+                            S3SkillError::ParseError {
+                                key: key.to_string(),
+                                reason: e.to_string(),
+                            }
+                        })?
+                    } else {
+                        // Markdown
+                        Skill::from_markdown(&text).ok_or_else(|| S3SkillError::ParseError {
+                            key: key.to_string(),
+                            reason: "invalid markdown frontmatter".to_string(),
+                        })?
+                    };
+
+                    // Replace existing skill with same name
+                    self.remove(&skill.name);
+                    self.add(skill);
+                    loaded += 1;
+                }
+            }
+
+            if resp.is_truncated() == Some(true) {
+                continuation_token = resp.next_continuation_token().map(|s| s.to_string());
+            } else {
+                break;
+            }
+        }
+
+        if loaded == 0 {
+            return Err(S3SkillError::NoSkillsFound);
+        }
+
+        Ok(loaded)
+    }
+
+    /// Create a registry with built-in web challenge skills merged with S3 skills.
+    ///
+    /// S3 skills override built-in skills with the same name.
+    pub async fn with_builtin_and_s3(source: &S3SkillSource) -> Result<Self, S3SkillError> {
+        let mut registry = Self::with_builtin_web_challenges();
+        registry.load_from_s3(source).await?;
+        Ok(registry)
     }
 }
 
@@ -507,63 +768,46 @@ If verify fails (title shows ROTATED but tiles look wrong), fall back to manual 
 - 90° → 3 clicks, 180° → 2 clicks, 270° → 1 click
 "##;
 
-const TIC_TAC_TOE_SKILL: &str = r##"
-Tic-tac-toe (XOXO): play using ClickPoint for moves (dispatchEvent does NOT work on TTT cells).
+/// JS executed by the engine before the LLM sees the TTT page.
+/// Reads board state, computes optimal move, writes result to document.title.
+/// Includes `n` (cells found) for diagnostics - should be 9 for a valid board.
+const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const board=cells.map(el=>{const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(n===9&&!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clickXY=null;if(best>=0&&cells[best]){const r=cells[best].getBoundingClientRect();clickXY={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};}document.title='TTT:'+JSON.stringify({n,me,board:board.join(''),best,clickXY,won_me:won(me),won_opp:won(opp)});}catch(e){document.title='TTT_ERR:'+e.message;}";
+
+/// Simplified TTT skill content — model just reads the pre-computed title and clicks.
+const TTT_SKILL_SIMPLIFIED: &str = r##"
+Tic-tac-toe (XOXO): The board is auto-analyzed each round. Read `document.title` for the result.
 
 **Ignore image-grid-selection skill — this is NOT an image grid.**
 
-**EVERY round, check the title first:**
+Title format: `TTT:{"n":9,"me":"X","board":"XO..X..O.","best":4,"clickXY":{"x":371,"y":403},"won_me":false,"won_opp":false}`
 
-**A) Title has `clickXY` (e.g. `TTT:{"clickXY":{"x":371,"y":403},...}`):**
-Your move was computed last round. Click it NOW, then re-read board:
-```json
-"steps": [{"ClickPoint":{"x":371,"y":403}}, {"Wait":600}, {"Evaluate":"BOARD_READ_JS"}]
-```
+**Rules (check title EVERY round):**
+- **n != 9** → board not ready yet, wait: `[{"Wait":1000}]`
+- **clickXY present** → click that point, then wait: `[{"ClickPoint":{"x":371,"y":403}},{"Wait":600}]`
+- **won_me is true** → click verify: `[{"Click":"#captcha-verify-button"}]`
+- **won_opp is true** → refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **best is -1, no winner** → board is full draw, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+- **TTT_ERR in title** → board reading failed, wait and retry: `[{"Wait":1000}]`
 
-**B) Title does NOT have clickXY, OR this is the first round on TTT:**
-Just read the board:
-```json
-"steps": [{"Evaluate":"BOARD_READ_JS"}]
-```
-
-**C) Title has `won_me:true`:** `[{"Click":"#captcha-verify-button"}]`
-**D) Title has `won_opp:true`:** `[{"Click":".captcha-refresh"},{"Wait":800}]`
-
-**BOARD_READ_JS** (copy exactly):
-```js
-const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const board=cells.map(el=>{const h=el.innerHTML||'';const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clickXY=null;if(best>=0){const r=cells[best].getBoundingClientRect();clickXY={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};}document.title='TTT:'+JSON.stringify({me,board:board.join(''),best,clickXY,won_me:won(me),won_opp:won(opp)});
-```
+**Do NOT write any Evaluate JS. The board is read automatically each round.**
 "##;
 
-const WORD_SEARCH_SKILL: &str = r##"
-Word search puzzle: find words in a letter grid. **Solve in 2 rounds max.**
+/// JS executed by the engine before the LLM sees the Word Search page.
+/// Extracts grid, finds all words algorithmically, writes coordinates to document.title.
+/// Includes `n` (cells found) for diagnostics. Tries multiple selector strategies.
+const WORD_SEARCH_PRE_EVALUATE_JS: &str = "try{let cells=[...document.querySelectorAll('.word-search-grid-item')];if(!cells.length)cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.textContent.trim().length===1);if(!cells.length)cells=[...document.querySelectorAll('[class*=letter]')].filter(el=>el.textContent.trim().length===1);const n=cells.length;const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});const letters=cells.map(c=>c.textContent.trim().toUpperCase());const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);const rows=tops.length||1,cols=Math.round(cells.length/rows)||1;const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));let wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word')];if(!wordEls.length)wordEls=[...document.querySelectorAll('[class*=word-item],[class*=clue]')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.word-search-words li,.words li')];const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\\s+/g,'')).filter(w=>w.length>1&&w.match(/^[A-Z]+$/));const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];const found={};words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));found[w]={from:rects[si],to:rects[ei]};return;}}});document.title='WS:'+JSON.stringify({n,rows,cols,words,found});}catch(e){document.title='WS_ERR:'+e.message;}";
 
-**(Skip image-grid-selection skill if also shown — this is a word search, NOT an image grid.)**
+/// Simplified Word Search skill content — model reads pre-computed title and drags.
+const WORD_SEARCH_SKILL_SIMPLIFIED: &str = r##"
+Word search puzzle: The grid is auto-analyzed each round. Read `document.title` for the result.
 
-**Round 1 — Extract grid + solve algorithmically + get drag coordinates (Evaluate ONLY):**
-```js
-const cells=[...document.querySelectorAll('.word-search-grid-item,.grid-item.letter,[class*=letter]')];
-const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
-const letters=cells.map(c=>c.textContent.trim().toUpperCase());
-const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);
-const rows=tops.length,cols=Math.round(cells.length/rows);
-const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));
-const wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word,[class*=word-item],[class*=clue],li')];
-const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\s+/g,'')).filter(w=>w.length>1&&w.match(/^[A-Z]+$/));
-const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
-const found={};
-words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){
-  let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;
-    if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}
-  if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));
-    found[w]={from:rects[si],to:rects[ei]};return;}}});
-document.title='WS:'+JSON.stringify({rows,cols,words,found,gridPreview:grid.slice(0,3).map(r=>r.join(''))});
-```
-Steps: `[{"Evaluate":"...above..."}]`
+**(Skip image-grid-selection skill — this is a word search, NOT an image grid.)**
 
-**Round 2 — Drag each word using coordinates from title:**
-Read title `WS:{...found:{"STOPSIGN":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}},...}}`.
-For EACH found word, use ClickDragPoint:
+Title format: `WS:{"n":100,"rows":10,"cols":10,"words":["STOP","ROBOT",...],"found":{"STOP":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}},...}}`
+
+**Rules:**
+1. If `n` is 0 or `WS_ERR` in title → grid not loaded, wait: `[{"Wait":1000}]`
+2. For EACH word in `found`, use ClickDragPoint with the coordinates:
 ```json
 "steps": [
   {"ClickDragPoint":{"from_x":100,"from_y":200,"to_x":300,"to_y":200}},
@@ -573,12 +817,10 @@ For EACH found word, use ClickDragPoint:
   {"Click":"#captcha-verify-button"}
 ]
 ```
+3. Include ALL found words as ClickDragPoint actions in a single step list.
+4. End with `{"Click":"#captcha-verify-button"}`.
 
-Key rules:
-- Use `.word-search-grid-item` or `.grid-item.letter` selectors (NOT bare `.grid-item`)
-- Words can go in 8 directions (horizontal, vertical, diagonal, backwards)
-- NEVER use el.click() in Evaluate — use real ClickDragPoint
-- If verify fails, re-run Evaluate to check which words are still unselected
+**Do NOT write any Evaluate JS. The grid is solved automatically each round.**
 "##;
 
 const TEXT_CAPTCHA_SKILL: &str = r##"
@@ -592,6 +834,17 @@ Strategy for distorted text / CAPTCHA challenges:
 4. If wrong, try ONE alternative reading (swap the most ambiguous character).
 5. **After 2 failed attempts**, refresh the CAPTCHA by clicking the refresh/↻ button via ClickPoint, then read the NEW text.
 6. Never submit the same text twice.
+"##;
+
+const CHECKBOX_SKILL: &str = r##"
+Simple checkbox challenge: Click the checkbox to pass.
+
+**Steps:**
+```json
+"steps": [{"Click":".captcha-checkbox"},{"Wait":500},{"Click":"#captcha-verify-button"}]
+```
+If `.captcha-checkbox` fails, try ClickPoint on the checkbox visible in the screenshot.
+Solve in 1 round.
 "##;
 
 const SLIDER_DRAG_SKILL: &str = r#"
@@ -717,7 +970,7 @@ Use Evaluate to click found cells programmatically."#;
     #[test]
     fn test_builtin_web_challenges() {
         let registry = SkillRegistry::with_builtin_web_challenges();
-        assert!(registry.len() >= 6);
+        assert!(registry.len() >= 7);
 
         // Image grid should match on grid-item class
         let ctx = registry.match_context("", "", "<div class='grid-item'>img</div>");
@@ -738,5 +991,120 @@ Use Evaluate to click found cells programmatically."#;
         // No match on unrelated page
         let ctx = registry.match_context("https://example.com", "Home", "<div>hello</div>");
         assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn test_pre_evaluate_field() {
+        // Default is None
+        let skill = Skill::new("test", "test skill");
+        assert!(skill.pre_evaluate.is_none());
+
+        // Builder sets it
+        let skill = Skill::new("test", "test skill")
+            .with_pre_evaluate("document.title='HELLO'");
+        assert_eq!(skill.pre_evaluate.as_deref(), Some("document.title='HELLO'"));
+
+        // from_markdown leaves it None
+        let md = "---\nname: foo\n---\ncontent";
+        let skill = Skill::from_markdown(md).unwrap();
+        assert!(skill.pre_evaluate.is_none());
+    }
+
+    #[test]
+    fn test_find_pre_evaluates() {
+        let mut registry = SkillRegistry::new();
+
+        // Skill with pre_evaluate
+        registry.add(
+            Skill::new("solver", "Auto-solver")
+                .with_trigger(SkillTrigger::title_contains("game"))
+                .with_pre_evaluate("document.title='SOLVED'")
+                .with_content("Read the title.")
+                .with_priority(5),
+        );
+
+        // Skill without pre_evaluate
+        registry.add(
+            Skill::new("helper", "Manual helper")
+                .with_trigger(SkillTrigger::title_contains("game"))
+                .with_content("Use Evaluate to read...")
+                .with_priority(3),
+        );
+
+        // Both match, but only one has pre_evaluate
+        let pre_evals = registry.find_pre_evaluates("", "game level", "");
+        assert_eq!(pre_evals.len(), 1);
+        assert_eq!(pre_evals[0].0, "solver");
+        assert_eq!(pre_evals[0].1, "document.title='SOLVED'");
+
+        // No match
+        let pre_evals = registry.find_pre_evaluates("", "home", "");
+        assert!(pre_evals.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_ttt_has_pre_evaluate() {
+        let registry = SkillRegistry::with_builtin_web_challenges();
+        let ttt = registry.get("tic-tac-toe").expect("tic-tac-toe skill missing");
+        assert!(ttt.pre_evaluate.is_some(), "TTT should have pre_evaluate JS");
+        let js = ttt.pre_evaluate.as_deref().unwrap();
+        assert!(js.contains("TTT:"), "TTT pre_evaluate should set title with TTT: prefix");
+        assert!(js.contains("cell-selected"), "TTT pre_evaluate should use cell-selected selector");
+        assert!(js.contains("cell-disabled"), "TTT pre_evaluate should use cell-disabled selector");
+        assert!(js.contains("TTT_ERR"), "TTT pre_evaluate should have error handling");
+    }
+
+    #[test]
+    fn test_builtin_word_search_has_pre_evaluate() {
+        let registry = SkillRegistry::with_builtin_web_challenges();
+        let ws = registry.get("word-search").expect("word-search skill missing");
+        assert!(ws.pre_evaluate.is_some(), "Word search should have pre_evaluate JS");
+        let js = ws.pre_evaluate.as_deref().unwrap();
+        assert!(js.contains("WS:"), "WS pre_evaluate should set title with WS: prefix");
+        assert!(js.contains("word-search-grid-item"), "WS pre_evaluate should use word-search-grid-item selector");
+        assert!(js.contains("WS_ERR"), "WS pre_evaluate should have error handling");
+    }
+
+    #[test]
+    fn test_builtin_ttt_triggers_fixed() {
+        let registry = SkillRegistry::with_builtin_web_challenges();
+        let ttt = registry.get("tic-tac-toe").unwrap();
+
+        // Should match on cell-selected (the correct DOM class)
+        assert!(ttt.matches("", "", "<div class='cell-selected'>"));
+        // Should match on cell-disabled (the correct DOM class)
+        assert!(ttt.matches("", "", "<div class='cell-disabled'>"));
+        // Should match on XOXO title
+        assert!(ttt.matches("", "XOXO", ""));
+    }
+
+    #[test]
+    fn test_simplified_skills_no_evaluate_js() {
+        let registry = SkillRegistry::with_builtin_web_challenges();
+
+        // TTT simplified content should NOT contain Evaluate JS
+        let ttt = registry.get("tic-tac-toe").unwrap();
+        assert!(ttt.content.contains("Do NOT write any Evaluate JS"));
+        assert!(!ttt.content.contains("querySelectorAll"));
+
+        // Word search simplified content should NOT contain Evaluate JS
+        let ws = registry.get("word-search").unwrap();
+        assert!(ws.content.contains("Do NOT write any Evaluate JS"));
+        assert!(!ws.content.contains("querySelectorAll"));
+    }
+
+    #[test]
+    fn test_skills_without_pre_evaluate_unchanged() {
+        let registry = SkillRegistry::with_builtin_web_challenges();
+
+        // Image grid, rotation, text-captcha, slider should NOT have pre_evaluate
+        for name in &["image-grid-selection", "rotation-puzzle", "text-captcha", "slider-drag", "checkbox-click"] {
+            let skill = registry.get(name).unwrap_or_else(|| panic!("{} missing", name));
+            assert!(
+                skill.pre_evaluate.is_none(),
+                "{} should NOT have pre_evaluate",
+                name
+            );
+        }
     }
 }
