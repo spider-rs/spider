@@ -114,111 +114,28 @@ impl BrowserContext {
         Ok(count)
     }
 
-    /// Click at specific x,y coordinates.
+    /// Click at specific x,y coordinates with smooth human-like mouse movement.
     pub async fn click_point(&self, x: f64, y: f64) -> Result<(), CdpError> {
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
-        };
-
-        // Mouse down
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(x)
-                .y(y)
-                .r#type(DispatchMouseEventType::MousePressed)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
-        // Mouse up
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(x)
-                .y(y)
-                .r#type(DispatchMouseEventType::MouseReleased)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
+        use chromiumoxide::layout::Point;
+        self.page.click_smooth(Point::new(x, y)).await?;
         Ok(())
     }
 
-    /// Click and hold on an element.
+    /// Click and hold on an element with smooth mouse movement.
     pub async fn click_hold(&self, selector: &str, hold_ms: u64) -> Result<(), CdpError> {
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
-        };
-
         let element = self.page.find_element(selector).await?;
         let point = element.clickable_point().await?;
-
-        // Mouse down
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(point.x)
-                .y(point.y)
-                .r#type(DispatchMouseEventType::MousePressed)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
-        // Hold
-        tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
-
-        // Mouse up
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(point.x)
-                .y(point.y)
-                .r#type(DispatchMouseEventType::MouseReleased)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
+        self.page.move_mouse_smooth(point).await?;
+        self.page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await?;
         Ok(())
     }
 
-    /// Click and hold at a specific point.
+    /// Click and hold at a specific point with smooth mouse movement.
     pub async fn click_hold_point(&self, x: f64, y: f64, hold_ms: u64) -> Result<(), CdpError> {
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
-        };
-
-        // Mouse down
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(x)
-                .y(y)
-                .r#type(DispatchMouseEventType::MousePressed)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
-        // Hold
-        tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
-
-        // Mouse up
-        self.page.execute(
-            DispatchMouseEventParams::builder()
-                .x(x)
-                .y(y)
-                .r#type(DispatchMouseEventType::MouseReleased)
-                .button(MouseButton::Left)
-                .click_count(1)
-                .build()
-                .unwrap()
-        ).await?;
-
+        use chromiumoxide::layout::Point;
+        let point = Point::new(x, y);
+        self.page.move_mouse_smooth(point).await?;
+        self.page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await?;
         Ok(())
     }
 
@@ -233,55 +150,15 @@ impl BrowserContext {
         self.click_drag_point((from_point.x, from_point.y), (to_point.x, to_point.y), modifier).await
     }
 
-    /// Click and drag from one point to another.
+    /// Click and drag from one point to another with smooth bezier movement.
     pub async fn click_drag_point(&self, from: (f64, f64), to: (f64, f64), modifier: Option<i64>) -> Result<(), CdpError> {
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+        use chromiumoxide::layout::Point;
+        let from_point = Point::new(from.0, from.1);
+        let to_point = Point::new(to.0, to.1);
+        match modifier {
+            Some(m) => self.page.click_and_drag_smooth_with_modifier(from_point, to_point, m).await?,
+            None => self.page.click_and_drag_smooth(from_point, to_point).await?,
         };
-
-        let modifiers = modifier.map(|m| m as i64);
-
-        // Mouse down at start
-        let mut down_params = DispatchMouseEventParams::builder()
-            .x(from.0)
-            .y(from.1)
-            .r#type(DispatchMouseEventType::MousePressed)
-            .button(MouseButton::Left)
-            .click_count(1);
-
-        if let Some(m) = modifiers {
-            down_params = down_params.modifiers(m);
-        }
-
-        self.page.execute(down_params.build().unwrap()).await?;
-
-        // Move to destination
-        let mut move_params = DispatchMouseEventParams::builder()
-            .x(to.0)
-            .y(to.1)
-            .r#type(DispatchMouseEventType::MouseMoved)
-            .button(MouseButton::Left);
-
-        if let Some(m) = modifiers {
-            move_params = move_params.modifiers(m);
-        }
-
-        self.page.execute(move_params.build().unwrap()).await?;
-
-        // Mouse up at destination
-        let mut up_params = DispatchMouseEventParams::builder()
-            .x(to.0)
-            .y(to.1)
-            .r#type(DispatchMouseEventType::MouseReleased)
-            .button(MouseButton::Left)
-            .click_count(1);
-
-        if let Some(m) = modifiers {
-            up_params = up_params.modifiers(m);
-        }
-
-        self.page.execute(up_params.build().unwrap()).await?;
-
         Ok(())
     }
 

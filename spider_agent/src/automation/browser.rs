@@ -7,10 +7,8 @@
 use base64::{engine::general_purpose, Engine as _};
 #[cfg(feature = "chrome")]
 use chromiumoxide::{
-    cdp::browser_protocol::{
-        input::{DispatchMouseEventParams, DispatchMouseEventType, MouseButton},
-        page::CaptureScreenshotFormat,
-    },
+    cdp::browser_protocol::page::CaptureScreenshotFormat,
+    layout::Point,
     page::ScreenshotParams,
     Page,
 };
@@ -725,6 +723,7 @@ impl RemoteMultimodalEngine {
         // Inject matching skills from the skill registry (limited by config)
         #[cfg(feature = "skills")]
         if let Some(ref registry) = self.skill_registry {
+            log::debug!("Skill registry: {} skills, checking url={} title={} html_len={}", registry.len(), url_now, title_now, html.len());
             let mut skill_ctx = registry.match_context_limited(
                 url_now,
                 title_now,
@@ -751,9 +750,13 @@ impl RemoteMultimodalEngine {
                 }
             }
             if !skill_ctx.is_empty() {
+                // Log which skills matched
+                let matched: Vec<_> = registry.find_matching(url_now, title_now, html).iter().map(|s| s.name.as_str()).collect();
+                log::debug!("Injecting {} skills ({} chars): {:?}", matched.len(), skill_ctx.len(), matched);
                 system_msg.push_str("\n\n---\nACTIVATED SKILLS:\n");
                 system_msg.push_str(&skill_ctx);
             } else if !registry.is_empty() {
+                log::debug!("No skills matched for url={} title={} html_len={}", url_now, title_now, html.len());
                 // No skills matched, but skills are available. Show catalog.
                 let catalog: Vec<&str> = registry.skill_names().collect();
                 if !catalog.is_empty() {
@@ -1006,25 +1009,10 @@ impl RemoteMultimodalEngine {
             "ClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                // Use CDP mouse events for trusted clicks (important for CAPTCHAs)
-                let down = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                let up = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MouseReleased)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                if let (Ok(d), Ok(u)) = (down, up) {
-                    let _ = page.execute(d).await;
-                    let _ = page.execute(u).await;
-                }
+                // Move mouse first to set hover target, then click
+                let point = Point::new(x, y);
+                let _ = page.move_mouse_smooth(point).await;
+                let _ = page.click(point).await;
                 true
             }
             "ClickHold" => {
@@ -1049,26 +1037,9 @@ impl RemoteMultimodalEngine {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
-                // Use CDP for trusted clicks
-                let down = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                let up = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MouseReleased)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                if let (Ok(d), Ok(u)) = (down, up) {
-                    let _ = page.execute(d).await;
-                    tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
-                    let _ = page.execute(u).await;
-                }
+                let point = Point::new(x, y);
+                let _ = page.move_mouse_smooth(point).await;
+                let _ = page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await;
                 true
             }
             "DoubleClick" => {
@@ -1084,25 +1055,9 @@ impl RemoteMultimodalEngine {
             "DoubleClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                // CDP double click with click_count=2
-                let down = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .button(MouseButton::Left)
-                    .click_count(2)
-                    .build();
-                let up = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MouseReleased)
-                    .button(MouseButton::Left)
-                    .click_count(2)
-                    .build();
-                if let (Ok(d), Ok(u)) = (down, up) {
-                    let _ = page.execute(d).await;
-                    let _ = page.execute(u).await;
-                }
+                let point = Point::new(x, y);
+                let _ = page.move_mouse_smooth(point).await;
+                let _ = page.double_click(point).await;
                 true
             }
             "RightClick" => {
@@ -1118,25 +1073,9 @@ impl RemoteMultimodalEngine {
             "RightClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                // CDP right click
-                let down = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .button(MouseButton::Right)
-                    .click_count(1)
-                    .build();
-                let up = DispatchMouseEventParams::builder()
-                    .x(x)
-                    .y(y)
-                    .r#type(DispatchMouseEventType::MouseReleased)
-                    .button(MouseButton::Right)
-                    .click_count(1)
-                    .build();
-                if let (Ok(d), Ok(u)) = (down, up) {
-                    let _ = page.execute(d).await;
-                    let _ = page.execute(u).await;
-                }
+                let point = Point::new(x, y);
+                let _ = page.move_mouse_smooth(point).await;
+                let _ = page.right_click(point).await;
                 true
             }
             "ClickAllClickable" => {
@@ -1173,32 +1112,10 @@ impl RemoteMultimodalEngine {
                 let from_y = value.get("from_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_x = value.get("to_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_y = value.get("to_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                // CDP drag: mouse down at start, move to end, mouse up
-                let down = DispatchMouseEventParams::builder()
-                    .x(from_x)
-                    .y(from_y)
-                    .r#type(DispatchMouseEventType::MousePressed)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                let mv = DispatchMouseEventParams::builder()
-                    .x(to_x)
-                    .y(to_y)
-                    .r#type(DispatchMouseEventType::MouseMoved)
-                    .button(MouseButton::Left)
-                    .build();
-                let up = DispatchMouseEventParams::builder()
-                    .x(to_x)
-                    .y(to_y)
-                    .r#type(DispatchMouseEventType::MouseReleased)
-                    .button(MouseButton::Left)
-                    .click_count(1)
-                    .build();
-                if let (Ok(d), Ok(m), Ok(u)) = (down, mv, up) {
-                    let _ = page.execute(d).await;
-                    let _ = page.execute(m).await;
-                    let _ = page.execute(u).await;
-                }
+                let _ = page.click_and_drag_smooth(
+                    Point::new(from_x, from_y),
+                    Point::new(to_x, to_y),
+                ).await;
                 true
             }
 
@@ -1401,10 +1318,7 @@ impl RemoteMultimodalEngine {
             "HoverPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.evaluate(format!(
-                    "document.elementFromPoint({}, {})?.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}))",
-                    x, y
-                )).await;
+                let _ = page.move_mouse_smooth(Point::new(x, y)).await;
                 true
             }
 

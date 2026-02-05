@@ -396,39 +396,43 @@ impl SkillRegistry {
         registry.add(
             Skill::new("rotation-puzzle", "Rotate an image or element to the correct orientation")
                 .with_trigger(SkillTrigger::title_contains("rotat"))
-                .with_trigger(SkillTrigger::html_contains("rotate"))
-                .with_trigger(SkillTrigger::html_contains("slider"))
+                .with_trigger(SkillTrigger::html_contains("rotating-item"))
                 .with_priority(5)
                 .with_content(ROTATION_SKILL)
         );
 
-        // Tic-tac-toe / XOXO
+        // Tic-tac-toe / XOXO — high priority to override image-grid when both match
         registry.add(
             Skill::new("tic-tac-toe", "Play tic-tac-toe (noughts and crosses) game")
                 .with_trigger(SkillTrigger::title_contains("xoxo"))
                 .with_trigger(SkillTrigger::title_contains("tic-tac"))
                 .with_trigger(SkillTrigger::title_contains("tic tac"))
                 .with_trigger(SkillTrigger::html_contains("tic-tac"))
-                .with_priority(5)
+                .with_trigger(SkillTrigger::html_contains("cell-x"))
+                .with_trigger(SkillTrigger::html_contains("cell-o"))
+                .with_priority(10)
                 .with_content(TIC_TAC_TOE_SKILL)
         );
 
-        // Word search
+        // Word search — higher priority than image-grid since word-search pages also have grid-item
         registry.add(
             Skill::new("word-search", "Find and select words in a letter grid")
                 .with_trigger(SkillTrigger::title_contains("word search"))
                 .with_trigger(SkillTrigger::title_contains("wordsearch"))
-                .with_priority(5)
+                .with_trigger(SkillTrigger::html_contains("word-search-grid-item"))
+                .with_trigger(SkillTrigger::html_contains("word-search"))
+                .with_priority(8)
                 .with_content(WORD_SEARCH_SKILL)
         );
 
         // Text CAPTCHA / math challenges / distorted text
+        // Triggers are specific to text-input captchas to avoid matching on grid/rotation levels
+        // that also have "captcha" in class names (e.g., #captcha-verify-button).
         registry.add(
             Skill::new("text-captcha", "Solve text-based CAPTCHAs, distorted text, and math challenges")
-                .with_trigger(SkillTrigger::html_contains("captcha"))
-                .with_trigger(SkillTrigger::title_contains("captcha"))
+                .with_trigger(SkillTrigger::html_contains("captcha-input"))
+                .with_trigger(SkillTrigger::html_contains("captcha-text"))
                 .with_trigger(SkillTrigger::title_contains("wiggles"))
-                .with_trigger(SkillTrigger::title_contains("verify"))
                 .with_priority(3)
                 .with_content(TEXT_CAPTCHA_SKILL)
         );
@@ -451,156 +455,131 @@ impl SkillRegistry {
 
 const IMAGE_GRID_SKILL: &str = r##"
 Strategy for image grid selection challenges (e.g., "select all stop signs"):
+**(Skip this skill if the page is tic-tac-toe/XOXO or a Word Search puzzle — use those specific skills instead.)**
 
-**CRITICAL: Select correct tiles BEFORE clicking verify. Use REAL Click actions, NOT el.click() in Evaluate.**
+**Use REAL Click actions ONLY. NEVER use el.click() in Evaluate — not even to clear/deselect tiles.**
+**Clicking a tile toggles its selection (click selected tile = deselect it).**
 
-**GOAL: Solve in 3 rounds max.**
+**GOAL: Solve in 2-3 rounds max.**
 
-Round 1 - Identify tiles using Evaluate AND the screenshot:
-1. **Run Evaluate to get each tile's image info** (alt text, filename):
-   ```js
-   const items = [...document.querySelectorAll('.grid-item,[class*=grid] > *')];
-   const info = items.map((el,i) => {
-     const img = el.querySelector('img');
-     return {i, alt: img?.alt || '', src: (img?.src||'').split('/').pop(), text: el.textContent.trim()};
-   });
-   document.title = 'GRID:' + JSON.stringify(info);
-   ```
-2. **Combine the Evaluate hints + screenshot** to determine which tiles match the target.
+Round 1 - Read tile info with Evaluate, THEN click tiles you're confident about:
+```js
+const items = [...document.querySelectorAll('.grid-item,[class*=grid] > *')];
+const info = items.map((el,i) => {
+  const img = el.querySelector('img');
+  return {i:i+1, alt: img?.alt||'', src: (img?.src||'').split('/').pop(), sel: el.classList.contains('selected')||el.classList.contains('grid-item-selected')};
+});
+document.title = 'GRID:' + JSON.stringify(info);
+```
+Then use screenshot + alt/src hints to Click correct tiles and verify:
+```json
+"steps": [
+  {"Evaluate": "...the JS above..."},
+  {"Click": ".grid-item:nth-child(3)"},
+  {"Click": ".grid-item:nth-child(7)"},
+  {"Click": "#captcha-verify-button"}
+]
+```
 
-Round 2 - Click correct tiles and verify:
-1. **Click each correct tile** using `.grid-item:nth-child(N)` (1-indexed) or ClickPoint:
-   ```json
-   "steps": [
-     {"Click": ".grid-item:nth-child(1)"},
-     {"Click": ".grid-item:nth-child(3)"},
-     {"Click": ".grid-item:nth-child(7)"},
-     {"Click": "#captcha-verify-button"}
-   ]
-   ```
-
-Round 3 (if needed) - Adjust:
-- Toggle tiles that need changing and verify again.
+Round 2 (if wrong) - Toggle tiles and verify again. Click selected wrong tiles to deselect, click missing correct tiles to select.
 
 Key rules:
-- nth-child is 1-indexed: first tile = :nth-child(1).
-- If CSS selectors fail, use ClickPoint with tile center coordinates.
-- If 3+ attempts fail with different selections, use Evaluate to re-read image hints.
+- nth-child is 1-indexed. If selectors fail, use ClickPoint.
+- NEVER use el.click() in Evaluate. ALL selections via real Click actions.
+- After 3 failures, re-read with Evaluate and try completely different selection.
 "##;
 
 const ROTATION_SKILL: &str = r##"
-Strategy for rotation/orientation challenges:
+Rotation puzzle: tiles form a larger image, some rotated. Each click = +90° clockwise.
 
-**GOAL: Solve in 2-3 rounds. Read rotation states, then click tiles to rotate them upright.**
+**Use this Evaluate to auto-solve ALL rotations in one step, then click verify:**
+```js
+const t=[...document.querySelectorAll('.rotating-item')];const log=[];t.forEach((e,i)=>{const m=getComputedStyle(e).transform;let c=0;if(m&&m!=='none'){const v=m.match(/matrix\(([^)]+)\)/);if(v){const n=v[1].split(',').map(Number);const a=Math.round(Math.atan2(n[1],n[0])*180/Math.PI);c=a>45&&a<135?3:Math.abs(a)>135?2:a<-45&&a>-135?1:0;}}log.push(i+':'+c);const r=e.getBoundingClientRect();for(let j=0;j<c;j++){const o={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};e.dispatchEvent(new PointerEvent('pointerdown',o));e.dispatchEvent(new MouseEvent('mousedown',o));e.dispatchEvent(new PointerEvent('pointerup',o));e.dispatchEvent(new MouseEvent('mouseup',o));e.dispatchEvent(new MouseEvent('click',o));}});document.title='ROTATED:'+log.join(',');
+```
 
-Round 1 - Read how many clicks each tile needs:
-1. **Use Evaluate to read each tile's rotation and calculate clicks needed (each click = 90 CW)**:
-   ```js
-   const tiles = document.querySelectorAll('[class*=rotating], [class*=rotate], [class*=tile]');
-   const info = Array.from(tiles).map((t, i) => {
-     const cs = getComputedStyle(t);
-     const m = cs.transform;
-     let clicks = 0;
-     if (m === 'matrix(0, 1, -1, 0, 0, 0)') clicks = 3;
-     else if (m === 'matrix(-1, 0, 0, -1, 0, 0)') clicks = 2;
-     else if (m === 'matrix(0, -1, 1, 0, 0, 0)') clicks = 1;
-     return {i, clicks, m};
-   });
-   document.title = 'CLICKS:' + JSON.stringify(info);
-   ```
-2. **In the SAME round, click each tile the needed number of times using real Click actions**:
-   ```json
-   "steps": [
-     {"Evaluate": "...read rotation..."},
-     {"Click": ".rotating-item:nth-child(2)"},
-     {"Click": ".rotating-item:nth-child(2)"},
-     {"Click": ".rotating-item:nth-child(5)"},
-     {"Click": "#captcha-verify-button"}
-   ]
-   ```
-   Repeat the same selector N times for N clicks needed.
+Your steps this round:
+```json
+"steps": [{"Evaluate":"...the JS above..."}, {"Wait":500}, {"Click":"#captcha-verify-button"}]
+```
 
-Key rules:
-- Use REAL Click actions, NOT el.click() inside Evaluate. Evaluate el.click() does NOT work.
-- Each click rotates 90 degrees clockwise. 4 clicks = full rotation = no change.
-- nth-child is 1-indexed. Tile index 0 = :nth-child(1).
-- If CSS selectors fail, use ClickPoint with tile center coordinates from the screenshot.
-- For slider-based rotation: use Fill on the range input with the correct value.
+If verify fails (title shows ROTATED but tiles look wrong), fall back to manual clicks:
+- Use `.rotating-item:nth-child(N)` (1-indexed), click N times per tile
+- 90° → 3 clicks, 180° → 2 clicks, 270° → 1 click
 "##;
 
 const TIC_TAC_TOE_SKILL: &str = r##"
-Strategy for tic-tac-toe (XOXO) challenges:
+Tic-tac-toe (XOXO): play using ClickPoint for moves (dispatchEvent does NOT work on TTT cells).
 
-**GOAL: Win. Use THIS EXACT Evaluate code to compute the optimal move, then ClickPoint on the result.**
+**Ignore image-grid-selection skill — this is NOT an image grid.**
 
-**Round 1 of each move** - Run THIS Evaluate (copy it exactly, do not modify):
-```js
-const cells=[...document.querySelectorAll('.grid-item,.tic-tac-toe-cell,[class*=cell]')].filter(el=>el.offsetWidth>20);
-const board=cells.map(el=>{const c=el.className+(el.firstElementChild?.className||'');return c.includes('-x')?'X':c.includes('-o')||c.includes('selected')?'O':el.textContent.trim()||'';});
-const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;
-const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';
-const won=s=>W.some(w=>w.every(i=>board[i]===s));
-let best=-1;
-if(!won(me)&&!won(opp)){
-  for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}
-  if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}
-  if(best<0&&!board[4])best=4;
-  if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}
-  if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}
-}
-const R=cells.map(el=>{const r=el.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
-document.title='TTT:'+JSON.stringify({me,board:board.join(''),best,click:best>=0?R[best]:null,won_me:won(me),won_opp:won(opp)});
+**EVERY round, check the title first:**
+
+**A) Title has `clickXY` (e.g. `TTT:{"clickXY":{"x":371,"y":403},...}`):**
+Your move was computed last round. Click it NOW, then re-read board:
+```json
+"steps": [{"ClickPoint":{"x":371,"y":403}}, {"Wait":600}, {"Evaluate":"BOARD_READ_JS"}]
 ```
 
-**Round 2 of each move** - Read the title from the Evaluate result:
-- If `best >= 0`: ClickPoint on the `click` coordinates `{"x":..,"y":..}` from the title.
-- If `won_me: true`: Click Verify/Submit button.
-- If `won_opp: true`: Click the refresh ↻ button (class `.captcha-refresh` or ClickPoint on it). Do NOT click verify after a LOSS.
+**B) Title does NOT have clickXY, OR this is the first round on TTT:**
+Just read the board:
+```json
+"steps": [{"Evaluate":"BOARD_READ_JS"}]
+```
 
-**IMPORTANT:**
-- Copy the Evaluate code EXACTLY as shown above. Do NOT write your own board-reading code.
-- The algorithm computes the optimal move: Win > Block > Center > Corner > Edge.
-- You play as whichever piece has fewer on the board (X goes first).
+**C) Title has `won_me:true`:** `[{"Click":"#captcha-verify-button"}]`
+**D) Title has `won_opp:true`:** `[{"Click":".captcha-refresh"},{"Wait":800}]`
+
+**BOARD_READ_JS** (copy exactly):
+```js
+const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const board=cells.map(el=>{const h=el.innerHTML||'';const inner=el.querySelector('.tic-tac-toe-cell');if(!inner)return'';const ic=inner.className;if(ic.includes('cell-selected'))return'O';if(ic.includes('cell-disabled'))return'X';return'';});const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];const xc=board.filter(c=>c==='X').length,oc=board.filter(c=>c==='O').length;const me=xc<=oc?'X':'O',opp=me==='X'?'O':'X';const won=s=>W.some(w=>w.every(i=>board[i]===s));let best=-1;if(!won(me)&&!won(opp)){for(const w of W){const f=w.filter(i=>board[i]===me),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const f=w.filter(i=>board[i]===opp),e=w.filter(i=>!board[i]);if(f.length===2&&e.length===1){best=e[0];break;}}if(best<0&&!board[4])best=4;if(best<0)for(const c of[0,2,6,8])if(!board[c]){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(!board[c]){best=c;break;}}let clickXY=null;if(best>=0){const r=cells[best].getBoundingClientRect();clickXY={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};}document.title='TTT:'+JSON.stringify({me,board:board.join(''),best,clickXY,won_me:won(me),won_opp:won(opp)});
+```
 "##;
 
-const WORD_SEARCH_SKILL: &str = r#"
-Strategy for word search grid challenges:
+const WORD_SEARCH_SKILL: &str = r##"
+Word search puzzle: find words in a letter grid. **Solve in 2 rounds max.**
 
-**GOAL: Extract grid + find ALL words in one Evaluate, then select words with real clicks or drag.**
+**(Skip image-grid-selection skill if also shown — this is a word search, NOT an image grid.)**
 
-Round 1 - Extract and solve algorithmically:
-1. **Use Evaluate to extract the grid, find all words, and report positions + coordinates**:
-   ```js
-   const cells = [...document.querySelectorAll('[class*=cell], [class*=letter], [class*=grid] > *')];
-   const rects = cells.map(c => { const r = c.getBoundingClientRect(); return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)}; });
-   const uniqueTops = [...new Set(rects.map(r => r.y))].sort((a,b) => a-b);
-   const rows = uniqueTops.length, cols = Math.round(cells.length / rows);
-   const letters = cells.map(c => c.textContent.trim().toUpperCase());
-   const grid = []; for (let r = 0; r < rows; r++) grid.push(letters.slice(r*cols,(r+1)*cols));
-   const words = [...document.querySelectorAll('[class*=word], [class*=clue], li')].map(el => el.textContent.trim().toUpperCase()).filter(w => w.length > 1);
-   const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
-   const found = {};
-   words.forEach(w => { for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) for(const[dr,dc] of dirs) {
-     let ok=true; const idxs=[]; for(let k=0;k<w.length;k++) { const nr=r+dr*k,nc=c+dc*k;
-       if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;} idxs.push(nr*cols+nc); }
-     if(ok){found[w]=idxs.map(i=>rects[i]);return;}
-   }});
-   document.title = 'FOUND:' + JSON.stringify(found);
-   ```
+**Round 1 — Extract grid + solve algorithmically + get drag coordinates (Evaluate ONLY):**
+```js
+const cells=[...document.querySelectorAll('.word-search-grid-item,.grid-item.letter,[class*=letter]')];
+const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
+const letters=cells.map(c=>c.textContent.trim().toUpperCase());
+const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);
+const rows=tops.length,cols=Math.round(cells.length/rows);
+const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));
+const wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word,[class*=word-item],[class*=clue],li')];
+const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\s+/g,'')).filter(w=>w.length>1&&w.match(/^[A-Z]+$/));
+const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+const found={};
+words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){
+  let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;
+    if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}
+  if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));
+    found[w]={from:rects[si],to:rects[ei]};return;}}});
+document.title='WS:'+JSON.stringify({rows,cols,words,found,gridPreview:grid.slice(0,3).map(r=>r.join(''))});
+```
+Steps: `[{"Evaluate":"...above..."}]`
 
-2. **Select each word using ClickDragPoint** from first letter to last letter coordinates:
-   ```json
-   {"ClickDragPoint": {"start_x": 100, "start_y": 200, "end_x": 300, "end_y": 200}}
-   ```
-   Or click individual cells with real Click/ClickPoint actions.
+**Round 2 — Drag each word using coordinates from title:**
+Read title `WS:{...found:{"STOPSIGN":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}},...}}`.
+For EACH found word, use ClickDragPoint:
+```json
+"steps": [
+  {"ClickDragPoint":{"from_x":100,"from_y":200,"to_x":300,"to_y":200}},
+  {"Wait":300},
+  {"ClickDragPoint":{"from_x":150,"from_y":300,"to_x":150,"to_y":500}},
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
 
 Key rules:
-- Solve algorithmically in JS, don't search visually.
-- Use REAL Click/ClickDragPoint, NOT el.click() in Evaluate.
-- Words go in 8 directions including diagonal and backwards.
-- Select one word at a time, submit, then next word.
-"#;
+- Use `.word-search-grid-item` or `.grid-item.letter` selectors (NOT bare `.grid-item`)
+- Words can go in 8 directions (horizontal, vertical, diagonal, backwards)
+- NEVER use el.click() in Evaluate — use real ClickDragPoint
+- If verify fails, re-run Evaluate to check which words are still unselected
+"##;
 
 const TEXT_CAPTCHA_SKILL: &str = r##"
 Strategy for distorted text / CAPTCHA challenges:
@@ -752,8 +731,8 @@ Use Evaluate to click found cells programmatically."#;
         let ctx = registry.match_context("", "Word Search Puzzle", "");
         assert!(ctx.contains("word-search"));
 
-        // Rotation should match on rotate class
-        let ctx = registry.match_context("", "", "<div class='rotate-container'>");
+        // Rotation should match on rotating-item class
+        let ctx = registry.match_context("", "", "<div class='rotating-item'>");
         assert!(ctx.contains("rotation-puzzle"));
 
         // No match on unrelated page
