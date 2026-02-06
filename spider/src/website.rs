@@ -418,7 +418,7 @@ pub struct Website {
     skip_initial: bool,
     #[cfg(feature = "cookies")]
     /// Cookie jar between request.
-    pub cookie_jar: Arc<reqwest::cookie::Jar>,
+    pub cookie_jar: Arc<crate::client::cookie::Jar>,
 }
 
 impl fmt::Debug for Website {
@@ -8003,7 +8003,7 @@ impl Website {
     pub async fn setup_browser_base(
         config: &Configuration,
         url_parsed: &Option<Box<Url>>,
-        jar: Option<&Arc<reqwest::cookie::Jar>>,
+        jar: Option<&Arc<crate::client::cookie::Jar>>,
     ) -> Option<crate::features::chrome::BrowserController> {
         match crate::features::chrome::launch_browser_cookies(&config, url_parsed, jar).await {
             Some((browser, browser_handle, context_id)) => {

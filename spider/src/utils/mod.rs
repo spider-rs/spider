@@ -2231,7 +2231,7 @@ pub async fn fetch_page_html_chrome_base(
     cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
@@ -3421,7 +3421,7 @@ fn set_page_response_headers_raw(
 async fn set_page_response_cookies(
     page_response: &mut PageResponse,
     page: &chromiumoxide::Page,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     scope_url: Option<&url::Url>,
 ) {
     if let Ok(mut cookies) = page.get_cookies().await {
@@ -4277,7 +4277,7 @@ pub async fn fetch_page_html(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
-    #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
 ) -> PageResponse {
     use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -4679,7 +4679,7 @@ pub async fn fetch_page_html_base(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     let skip_browser = cache_skip_browser(&cache_options);
@@ -4805,7 +4805,7 @@ pub async fn fetch_page_html_seeded(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     fetch_page_html_base(
@@ -4852,7 +4852,7 @@ async fn _fetch_page_html_chrome(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
@@ -5004,7 +5004,7 @@ pub async fn fetch_page_html_chrome(
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
@@ -5051,7 +5051,7 @@ pub async fn fetch_page_html_chrome_seeded(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(

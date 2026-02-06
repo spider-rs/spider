@@ -132,14 +132,28 @@ lazy_static! {
         .expect("valid tile‑class pattern");
 }
 
+#[cfg(not(feature = "wreq"))]
 lazy_static! {
-    /// Gemini client – plain `reqwest` or `wreq` client (no middleware).
+    /// Gemini client – plain reqwest client (no middleware).
     static ref GEMINI_CLIENT: reqwest::Client = {
-        crate::ClientBuilder::new()
+        reqwest::ClientBuilder::new()
             .timeout(Duration::from_millis(20_000))
             .build()
             .expect("failed to build Gemini client")
     };
+}
+#[cfg(feature = "wreq")]
+lazy_static! {
+    /// Gemini client – plain wreq client (no middleware).
+    static ref GEMINI_CLIENT: wreq::Client = {
+        wreq::ClientBuilder::new()
+            .timeout(Duration::from_millis(20_000))
+            .build()
+            .expect("failed to build Gemini client")
+    };
+}
+
+lazy_static! {
     /// Imperva check
     static ref AC_IMPERVA_IFRAME: aho_corasick::AhoCorasick = aho_corasick::AhoCorasickBuilder::new()
         .ascii_case_insensitive(true)

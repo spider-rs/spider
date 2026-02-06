@@ -405,43 +405,58 @@ impl RemoteMultimodalEngine {
         // Dual-model routing: set by `request_vision` memory_op to force vision next round
         let mut force_vision_next_round: bool = false;
 
-        // Recall learned strategies from long-term experience memory
+        // Effective system_prompt_extra — may be augmented with recalled experience context.
+        let mut effective_system_prompt_extra = self.system_prompt_extra.clone();
+
+        // Recall learned strategies from long-term experience memory.
+        // Uses spawn_blocking to contain !Send ffmpeg temporaries from memvid-rs.
         #[cfg(feature = "memvid")]
         if let Some(ref exp_mem) = self.experience_memory {
-            // Clear cache for fresh results on each new run
-            {
-                let mem = exp_mem.read().await;
-                mem.clear_cache();
-            }
-            let mut mem = exp_mem.write().await;
+            let exp_mem = exp_mem.clone();
             let query = format!("{} {}", url_input, last_label);
-            let max_recall = mem.config.max_recall;
-            let max_context_chars = mem.config.max_context_chars;
-            match mem.recall(&query, max_recall).await {
-                Ok(experiences) if !experiences.is_empty() => {
-                    let learned_context = super::long_term_memory::ExperienceMemory::recall_to_context(
-                        &experiences,
-                        max_context_chars,
-                    );
-                    if !learned_context.is_empty() {
-                        // Prepend learned strategies to system_prompt_extra
-                        let existing = self.system_prompt_extra.clone().unwrap_or_default();
-                        self.system_prompt_extra = Some(if existing.is_empty() {
-                            learned_context
-                        } else {
-                            format!("{}\n\n{}", learned_context, existing)
-                        });
-                        log::info!(
-                            "Injected {} learned strategies into prompt ({} chars)",
-                            experiences.len(),
-                            self.system_prompt_extra.as_ref().map(|s| s.len()).unwrap_or(0),
-                        );
+            let handle = tokio::runtime::Handle::current();
+            let recalled = tokio::task::spawn_blocking(move || {
+                handle.block_on(async move {
+                    {
+                        let mem = exp_mem.read().await;
+                        mem.clear_cache();
                     }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    log::warn!("Failed to recall experiences: {}", e);
-                }
+                    let mut mem = exp_mem.write().await;
+                    let max_recall = mem.config.max_recall;
+                    let max_context_chars = mem.config.max_context_chars;
+                    match mem.recall(&query, max_recall).await {
+                        Ok(experiences) if !experiences.is_empty() => {
+                            let ctx = super::long_term_memory::ExperienceMemory::recall_to_context(
+                                &experiences,
+                                max_context_chars,
+                            );
+                            if ctx.is_empty() { None } else {
+                                log::info!(
+                                    "Recalled {} strategies ({} chars)",
+                                    experiences.len(), ctx.len(),
+                                );
+                                Some(ctx)
+                            }
+                        }
+                        Ok(_) => None,
+                        Err(e) => {
+                            log::warn!("Failed to recall experiences: {}", e);
+                            None
+                        }
+                    }
+                })
+            })
+            .await
+            .ok()
+            .flatten();
+
+            if let Some(learned_context) = recalled {
+                let existing = effective_system_prompt_extra.take().unwrap_or_default();
+                effective_system_prompt_extra = Some(if existing.is_empty() {
+                    learned_context
+                } else {
+                    format!("{}\n\n{}", learned_context, existing)
+                });
             }
         }
 
@@ -560,6 +575,7 @@ impl RemoteMultimodalEngine {
                     action_stuck_rounds,
                     memory.as_deref(),
                     use_vision,
+                    effective_system_prompt_extra.as_deref(),
                 )
                 .await?;
 
@@ -714,10 +730,17 @@ impl RemoteMultimodalEngine {
                                 total_steps_executed,
                                 (round_idx + 1) as u32,
                             );
-                            let mut exp = exp_mem.write().await;
-                            if let Err(e) = exp.store_experience(&record).await {
-                                log::warn!("Failed to store experience: {}", e);
-                            }
+                            let exp_mem = exp_mem.clone();
+                            let handle = tokio::runtime::Handle::current();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                handle.block_on(async move {
+                                    let mut exp = exp_mem.write().await;
+                                    if let Err(e) = exp.store_experience(&record).await {
+                                        log::warn!("Failed to store experience: {}", e);
+                                    }
+                                })
+                            })
+                            .await;
                         }
                     }
                 }
@@ -763,10 +786,17 @@ impl RemoteMultimodalEngine {
                         total_steps_executed,
                         rounds as u32,
                     );
-                    let mut exp = exp_mem.write().await;
-                    if let Err(e) = exp.store_experience(&record).await {
-                        log::warn!("Failed to store experience: {}", e);
-                    }
+                    let exp_mem = exp_mem.clone();
+                    let handle = tokio::runtime::Handle::current();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        handle.block_on(async move {
+                            let mut exp = exp_mem.write().await;
+                            if let Err(e) = exp.store_experience(&record).await {
+                                log::warn!("Failed to store experience: {}", e);
+                            }
+                        })
+                    })
+                    .await;
                 }
             }
         }
@@ -806,6 +836,7 @@ impl RemoteMultimodalEngine {
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
         use_vision: bool,
+        recalled_context: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err = None;
@@ -825,6 +856,7 @@ impl RemoteMultimodalEngine {
                     action_stuck_rounds,
                     memory,
                     use_vision,
+                    recalled_context,
                 )
                 .await
             {
@@ -859,6 +891,7 @@ impl RemoteMultimodalEngine {
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
         use_vision: bool,
+        recalled_context: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
             best_effort_parse_json_object, extract_assistant_content, extract_usage,
@@ -886,6 +919,11 @@ impl RemoteMultimodalEngine {
 
         // Build system prompt - DEFAULT_SYSTEM_PROMPT is always the base
         let mut system_msg = DEFAULT_SYSTEM_PROMPT.to_string();
+        // Add recalled experience context (from long-term memory)
+        if let Some(ctx) = recalled_context {
+            system_msg.push_str("\n\n");
+            system_msg.push_str(ctx);
+        }
         // Add any extra system prompt content (but never replace the default)
         if let Some(extra) = &self.system_prompt_extra {
             system_msg.push_str("\n\n");

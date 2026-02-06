@@ -207,6 +207,13 @@ pub struct ExperienceMemory {
     pub config: ExperienceMemoryConfig,
 }
 
+// SAFETY: ExperienceMemory is always accessed through Arc<tokio::sync::RwLock<>>,
+// which provides proper synchronization. The non-Send/Sync interiors (rusqlite's
+// RefCell and ffmpeg raw pointers inside MemvidRetriever) are never accessed
+// concurrently — the RwLock guards all access.
+unsafe impl Send for ExperienceMemory {}
+unsafe impl Sync for ExperienceMemory {}
+
 impl std::fmt::Debug for ExperienceMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExperienceMemory")

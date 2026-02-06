@@ -16,6 +16,8 @@ use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 #[cfg(feature = "cookies")]
 use std::sync::Arc;
+#[cfg(all(feature = "cookies", feature = "wreq"))]
+use crate::client::cookie::CookieStore as _;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -28,11 +30,11 @@ lazy_static! {
 #[cfg(feature = "cookies")]
 /// Parse a cookie into a jar. This does nothing without the 'cookies' flag.
 pub fn parse_cookies_with_jar(
-    jar: &Arc<reqwest::cookie::Jar>,
+    jar: &Arc<crate::client::cookie::Jar>,
     cookie_str: &str,
     url: &Url,
 ) -> Result<Vec<CookieParam>, String> {
-    use reqwest::cookie::CookieStore;
+    use crate::client::cookie::CookieStore;
 
     // Retrieve cookies stored in the jar
     if let Some(header_value) = jar.cookies(url) {
@@ -91,7 +93,7 @@ pub fn parse_cookies_with_jar(cookie_str: &str, url: &Url) -> Result<Vec<CookieP
 #[cfg(feature = "cookies")]
 /// Seed jar from cookie header.
 pub fn seed_jar_from_cookie_header(
-    jar: &std::sync::Arc<reqwest::cookie::Jar>,
+    jar: &std::sync::Arc<crate::client::cookie::Jar>,
     cookie_header: &str,
     url: &url::Url,
 ) -> Result<(), String> {
@@ -133,11 +135,11 @@ pub async fn set_page_cookies(
 #[cfg(feature = "cookies")]
 /// Set cookie params from jar.
 pub fn cookie_params_from_jar(
-    jar: &std::sync::Arc<reqwest::cookie::Jar>,
+    jar: &std::sync::Arc<crate::client::cookie::Jar>,
     url: &url::Url,
 ) -> Result<Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>, String> {
     use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-    use reqwest::cookie::CookieStore;
+    use crate::client::cookie::CookieStore;
 
     let Some(header_value) = jar.cookies(url) else {
         return Ok(Vec::new());
@@ -172,7 +174,7 @@ pub fn cookie_params_from_jar(
 /// Handle the browser cookie configurations.
 #[cfg(feature = "cookies")]
 pub async fn set_cookies(
-    jar: &Arc<reqwest::cookie::Jar>,
+    jar: &Arc<crate::client::cookie::Jar>,
     config: &Configuration,
     url_parsed: &Option<Box<Url>>,
     browser: &Browser,
@@ -505,7 +507,7 @@ pub async fn setup_browser_configuration(
 pub async fn launch_browser_base(
     config: &Configuration,
     url_parsed: &Option<Box<Url>>,
-    jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
 ) -> Option<(
     Browser,
     tokio::task::JoinHandle<()>,
@@ -621,7 +623,7 @@ pub async fn launch_browser(
 pub async fn launch_browser_cookies(
     config: &Configuration,
     url_parsed: &Option<Box<Url>>,
-    jar: Option<&Arc<reqwest::cookie::Jar>>,
+    jar: Option<&Arc<crate::client::cookie::Jar>>,
 ) -> Option<(
     Browser,
     tokio::task::JoinHandle<()>,

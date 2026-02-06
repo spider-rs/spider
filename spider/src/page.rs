@@ -2142,7 +2142,7 @@ impl Page {
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
-        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
         remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
@@ -2267,7 +2267,7 @@ impl Page {
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
-        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
         remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     ) -> Self {
         Self::new_base(
@@ -3302,7 +3302,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
-        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
@@ -3717,7 +3717,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         browser: &crate::features::chrome::OnceBrowser,
-        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
@@ -4331,7 +4331,7 @@ impl Page {
         configuration: &crate::configuration::Configuration,
         base: &Option<Box<Url>>,
         page: &crate::features::chrome::OnceBrowser,
-        jar: Option<&std::sync::Arc<reqwest::cookie::Jar>>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<CaseInsensitiveString>, Option<f64>) {
         match self.html.is_some() {
             false => Default::default(),
