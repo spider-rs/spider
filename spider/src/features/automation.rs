@@ -44,7 +44,8 @@ pub use spider_agent::automation::{
     // Observation types
     FormField, FormInfo, InteractiveElement, NavigationOption, PageObservation,
     // Engine and config
-    RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine,
+    ModelEndpoint, RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine,
+    VisionRouteMode,
     // Error types
     EngineError, EngineResult,
     // Helper functions

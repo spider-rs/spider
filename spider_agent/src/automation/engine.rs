@@ -1375,4 +1375,127 @@ mod tests {
         assert_eq!(cloned.api_key, Some("sk-test".to_string()));
         assert_eq!(cloned.cfg.max_rounds, 10);
     }
+
+    // ── Dual-model routing engine tests ──────────────────────────────
+
+    #[test]
+    fn test_engine_dual_model_routing_setup() {
+        let mut engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "gpt-4o",
+            None,
+        );
+        assert!(!engine.has_dual_model_routing());
+
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o")));
+        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o-mini")));
+        assert!(engine.has_dual_model_routing());
+    }
+
+    #[test]
+    fn test_engine_resolve_model_for_round() {
+        let mut engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "primary",
+            None,
+        );
+        engine.api_key = Some("sk-parent".to_string());
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("vision-model")));
+        engine.with_text_model(Some(
+            crate::automation::config::ModelEndpoint::new("text-model")
+                .with_api_url("https://text.api.com")
+                .with_api_key("sk-text"),
+        ));
+
+        // Vision round → vision model, inherits parent URL/key
+        let (url, model, key) = engine.resolve_model_for_round(true);
+        assert_eq!(model, "vision-model");
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(key, Some("sk-parent"));
+
+        // Text round → text model with its own URL/key
+        let (url, model, key) = engine.resolve_model_for_round(false);
+        assert_eq!(model, "text-model");
+        assert_eq!(url, "https://text.api.com");
+        assert_eq!(key, Some("sk-text"));
+    }
+
+    #[test]
+    fn test_engine_should_use_vision_this_round() {
+        let mut engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "gpt-4o",
+            None,
+        );
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o")));
+        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o-mini")));
+        engine.with_vision_route_mode(crate::automation::config::VisionRouteMode::TextFirst);
+
+        // Round 0 → vision
+        assert!(engine.should_use_vision_this_round(0, false, 0, false));
+        // Round 1+ → text
+        assert!(!engine.should_use_vision_this_round(1, false, 0, false));
+        // Stagnation → vision
+        assert!(engine.should_use_vision_this_round(3, true, 0, false));
+        // Stuck ≥ 3 → vision
+        assert!(engine.should_use_vision_this_round(3, false, 3, false));
+        // Force → vision
+        assert!(engine.should_use_vision_this_round(5, false, 0, true));
+    }
+
+    #[test]
+    fn test_engine_no_routing_always_vision() {
+        let engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "gpt-4o",
+            None,
+        );
+        // No dual routing → always returns true
+        assert!(!engine.has_dual_model_routing());
+        assert!(engine.should_use_vision_this_round(0, false, 0, false));
+        assert!(engine.should_use_vision_this_round(99, false, 0, false));
+    }
+
+    #[test]
+    fn test_engine_system_prompt_extraction_only_with_schema() {
+        let mut cfg = RemoteMultimodalConfig::new()
+            .with_extraction(true)
+            .with_max_rounds(1);
+        cfg.extraction_schema = Some(ExtractionSchema::new("products", r#"{"type":"array"}"#));
+        cfg.extraction_prompt = Some("Extract all products".to_string());
+
+        let engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "gpt-4o",
+            None,
+        );
+
+        let compiled = engine.system_prompt_compiled(&cfg);
+        // Should use focused prompt
+        assert!(compiled.contains("data extraction assistant"));
+        // Should include extraction schema and prompt
+        assert!(compiled.contains("EXTRACTION MODE ENABLED"));
+        assert!(compiled.contains("products"));
+        assert!(compiled.contains("Extract all products"));
+    }
+
+    #[test]
+    fn test_engine_system_prompt_multi_round_extraction_uses_default() {
+        // extra_ai_data=true but max_rounds=6 → NOT extraction-only
+        let mut cfg = RemoteMultimodalConfig::default();
+        cfg.extra_ai_data = true;
+        assert!(!cfg.is_extraction_only());
+
+        let engine = RemoteMultimodalEngine::new(
+            "https://api.example.com",
+            "gpt-4o",
+            None,
+        );
+
+        let compiled = engine.system_prompt_compiled(&cfg);
+        // Should use full automation prompt
+        assert!(compiled.contains("ClickPoint"));
+        assert!(compiled.contains("SetViewport"));
+        assert!(compiled.contains("EXTRACTION MODE ENABLED"));
+    }
 }

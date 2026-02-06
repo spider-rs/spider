@@ -301,6 +301,16 @@ path = "remote_multimodal_multi.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
 
 [[example]]
+name = "remote_multimodal_dual"
+path = "remote_multimodal_dual.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
+
+[[example]]
+name = "remote_multimodal_dual_automation"
+path = "remote_multimodal_dual_automation.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/agent_chrome"]
+
+[[example]]
 name = "not_a_robot"
 path = "not_a_robot.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "spider/agent_chrome", "spider/agent_skills"]

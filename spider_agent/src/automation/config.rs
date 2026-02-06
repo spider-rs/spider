@@ -1905,4 +1905,277 @@ mod tests {
             .with_max_rounds(0);
         assert!(cfg.is_extraction_only());
     }
+
+    // ── Dual-model routing tests ─────────────────────────────────────
+
+    #[test]
+    fn test_model_endpoint_new() {
+        let ep = ModelEndpoint::new("gpt-4o-mini");
+        assert_eq!(ep.model_name, "gpt-4o-mini");
+        assert!(ep.api_url.is_none());
+        assert!(ep.api_key.is_none());
+    }
+
+    #[test]
+    fn test_model_endpoint_with_overrides() {
+        let ep = ModelEndpoint::new("gpt-4o")
+            .with_api_url("https://api.openai.com/v1/chat/completions")
+            .with_api_key("sk-test");
+        assert_eq!(ep.model_name, "gpt-4o");
+        assert_eq!(
+            ep.api_url.as_deref(),
+            Some("https://api.openai.com/v1/chat/completions")
+        );
+        assert_eq!(ep.api_key.as_deref(), Some("sk-test"));
+    }
+
+    #[test]
+    fn test_has_dual_model_routing() {
+        // No routing by default
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o");
+        assert!(!cfg.has_dual_model_routing());
+
+        // Vision only
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_vision_model(ModelEndpoint::new("gpt-4o"));
+        assert!(cfg.has_dual_model_routing());
+
+        // Text only
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_text_model(ModelEndpoint::new("gpt-4o-mini"));
+        assert!(cfg.has_dual_model_routing());
+
+        // Both
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+            );
+        assert!(cfg.has_dual_model_routing());
+    }
+
+    #[test]
+    fn test_resolve_model_for_round_no_routing() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_api_key("sk-parent");
+
+        // Without dual routing, always returns primary
+        let (url, model, key) = cfg.resolve_model_for_round(true);
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(key, Some("sk-parent"));
+
+        let (url, model, key) = cfg.resolve_model_for_round(false);
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(key, Some("sk-parent"));
+    }
+
+    #[test]
+    fn test_resolve_model_for_round_dual() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_api_key("sk-parent")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+            );
+
+        // Vision round → vision model, inherits parent URL/key
+        let (url, model, key) = cfg.resolve_model_for_round(true);
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(key, Some("sk-parent"));
+
+        // Text round → text model, inherits parent URL/key
+        let (url, model, key) = cfg.resolve_model_for_round(false);
+        assert_eq!(model, "gpt-4o-mini");
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(key, Some("sk-parent"));
+    }
+
+    #[test]
+    fn test_resolve_model_cross_provider() {
+        // Vision on OpenAI, text on Groq — different URLs and keys
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+        )
+        .with_api_key("sk-openai")
+        .with_vision_model(ModelEndpoint::new("gpt-4o"))
+        .with_text_model(
+            ModelEndpoint::new("llama-3.3-70b-versatile")
+                .with_api_url("https://api.groq.com/openai/v1/chat/completions")
+                .with_api_key("gsk-groq"),
+        );
+
+        // Vision → uses OpenAI (inherits parent)
+        let (url, model, key) = cfg.resolve_model_for_round(true);
+        assert_eq!(url, "https://api.openai.com/v1/chat/completions");
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(key, Some("sk-openai"));
+
+        // Text → uses Groq (endpoint overrides)
+        let (url, model, key) = cfg.resolve_model_for_round(false);
+        assert_eq!(url, "https://api.groq.com/openai/v1/chat/completions");
+        assert_eq!(model, "llama-3.3-70b-versatile");
+        assert_eq!(key, Some("gsk-groq"));
+    }
+
+    #[test]
+    fn test_vision_route_mode_always_primary() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+            )
+            .with_vision_route_mode(VisionRouteMode::AlwaysPrimary);
+
+        // AlwaysPrimary → always vision (true) regardless of round/state
+        assert!(cfg.should_use_vision_this_round(0, false, 0, false));
+        assert!(cfg.should_use_vision_this_round(5, false, 0, false));
+        assert!(cfg.should_use_vision_this_round(10, false, 0, false));
+    }
+
+    #[test]
+    fn test_vision_route_mode_text_first() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+            )
+            .with_vision_route_mode(VisionRouteMode::TextFirst);
+
+        // Round 0 → vision
+        assert!(cfg.should_use_vision_this_round(0, false, 0, false));
+        // Round 1+ (no stagnation) → text
+        assert!(!cfg.should_use_vision_this_round(1, false, 0, false));
+        assert!(!cfg.should_use_vision_this_round(5, false, 0, false));
+        // Stagnation → upgrade to vision
+        assert!(cfg.should_use_vision_this_round(3, true, 0, false));
+        // Stuck ≥ 3 → upgrade to vision
+        assert!(cfg.should_use_vision_this_round(5, false, 3, false));
+        // Force vision override
+        assert!(cfg.should_use_vision_this_round(5, false, 0, true));
+    }
+
+    #[test]
+    fn test_vision_route_mode_vision_first() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+            )
+            .with_vision_route_mode(VisionRouteMode::VisionFirst);
+
+        // Rounds 0-1 → vision
+        assert!(cfg.should_use_vision_this_round(0, false, 0, false));
+        assert!(cfg.should_use_vision_this_round(1, false, 0, false));
+        // Round 2+ → text
+        assert!(!cfg.should_use_vision_this_round(2, false, 0, false));
+        assert!(!cfg.should_use_vision_this_round(5, false, 0, false));
+        // Stagnation → upgrade to vision
+        assert!(cfg.should_use_vision_this_round(5, true, 0, false));
+        // Stuck ≥ 3 → upgrade to vision
+        assert!(cfg.should_use_vision_this_round(5, false, 3, false));
+    }
+
+    #[test]
+    fn test_no_dual_routing_always_returns_true() {
+        // Without dual routing set up, should_use_vision_this_round always returns true
+        // (backwards compatible: every round gets a screenshot)
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o");
+        assert!(!cfg.has_dual_model_routing());
+        assert!(cfg.should_use_vision_this_round(0, false, 0, false));
+        assert!(cfg.should_use_vision_this_round(5, false, 0, false));
+        assert!(cfg.should_use_vision_this_round(99, false, 0, false));
+    }
+
+    #[test]
+    fn test_with_dual_models_builder() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "primary")
+            .with_dual_models(
+                ModelEndpoint::new("vision-model"),
+                ModelEndpoint::new("text-model"),
+            )
+            .with_vision_route_mode(VisionRouteMode::TextFirst);
+
+        assert!(cfg.has_dual_model_routing());
+        assert_eq!(cfg.vision_model.as_ref().unwrap().model_name, "vision-model");
+        assert_eq!(cfg.text_model.as_ref().unwrap().model_name, "text-model");
+        assert_eq!(cfg.vision_route_mode, VisionRouteMode::TextFirst);
+    }
+
+    #[test]
+    fn test_model_endpoint_serde_roundtrip() {
+        let ep = ModelEndpoint::new("gpt-4o")
+            .with_api_url("https://api.openai.com/v1/chat/completions")
+            .with_api_key("sk-test");
+
+        let json = serde_json::to_string(&ep).unwrap();
+        let deserialized: ModelEndpoint = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.model_name, "gpt-4o");
+        assert_eq!(
+            deserialized.api_url.as_deref(),
+            Some("https://api.openai.com/v1/chat/completions")
+        );
+        assert_eq!(deserialized.api_key.as_deref(), Some("sk-test"));
+    }
+
+    #[test]
+    fn test_model_endpoint_serde_minimal() {
+        // Only model_name, no optional fields
+        let json = r#"{"model_name":"gpt-4o-mini"}"#;
+        let ep: ModelEndpoint = serde_json::from_str(json).unwrap();
+
+        assert_eq!(ep.model_name, "gpt-4o-mini");
+        assert!(ep.api_url.is_none());
+        assert!(ep.api_key.is_none());
+    }
+
+    #[test]
+    fn test_vision_route_mode_serde() {
+        // VisionRouteMode should serialize/deserialize properly
+        let mode = VisionRouteMode::TextFirst;
+        let json = serde_json::to_string(&mode).unwrap();
+        let deserialized: VisionRouteMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, VisionRouteMode::TextFirst);
+
+        let mode = VisionRouteMode::VisionFirst;
+        let json = serde_json::to_string(&mode).unwrap();
+        let deserialized: VisionRouteMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, VisionRouteMode::VisionFirst);
+    }
+
+    #[test]
+    fn test_configs_serde_with_dual_models() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_api_key("sk-test")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini")
+                    .with_api_url("https://other.api.com")
+                    .with_api_key("sk-other"),
+            )
+            .with_vision_route_mode(VisionRouteMode::TextFirst);
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let deserialized: RemoteMultimodalConfigs = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.model_name, "gpt-4o");
+        assert!(deserialized.has_dual_model_routing());
+        assert_eq!(
+            deserialized.vision_model.as_ref().unwrap().model_name,
+            "gpt-4o"
+        );
+        assert_eq!(
+            deserialized.text_model.as_ref().unwrap().model_name,
+            "gpt-4o-mini"
+        );
+        assert_eq!(
+            deserialized.text_model.as_ref().unwrap().api_url.as_deref(),
+            Some("https://other.api.com")
+        );
+        assert_eq!(deserialized.vision_route_mode, VisionRouteMode::TextFirst);
+    }
 }
