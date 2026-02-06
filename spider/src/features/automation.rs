@@ -919,6 +919,7 @@ impl AutomationResultExt for AutomationResult {
             screenshot_output: self.screenshot.clone(),
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
+            relevant: None,
         }
     }
 }

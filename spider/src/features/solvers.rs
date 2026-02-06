@@ -307,9 +307,9 @@ pub fn looks_like_imperva_any(html: &[u8]) -> bool {
         || looks_like_hcaptcha_iframe(html)
 }
 
-#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[cfg(feature = "chrome")]
 #[inline]
-/// Is turnstile page? This does nothing without the 'real_browser' feature enabled.
+/// Is turnstile page?
 pub(crate) fn detect_cf_turnstyle(b: &[u8]) -> bool {
     if b.ends_with(CF_END.as_ref()) || b.ends_with(CF_END2.as_ref()) {
         return true;
