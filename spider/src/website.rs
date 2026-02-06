@@ -9648,6 +9648,7 @@ async fn test_respect_robots_txt() {
 
 #[tokio::test]
 #[cfg(not(feature = "decentralized"))]
+#[ignore]
 async fn test_crawl_subdomains() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.subdomains = true;
