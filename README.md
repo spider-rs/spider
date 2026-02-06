@@ -137,6 +137,119 @@ async fn main() {
 }
 ```
 
+## Spider Cloud: Reliable Crawling at Scale
+
+Production crawling means dealing with bot protection, CAPTCHAs, rate limits, and blocked requests. **Spider Cloud** integration adds a reliability layer that handles all of this automatically — no code changes required beyond adding your API key.
+
+> **New to Spider Cloud?** [Sign up at spider.cloud](https://spider.cloud) to get your API key. New accounts receive free credits so you can try it out before committing.
+
+Enable the feature:
+
+```toml
+[dependencies]
+spider = { version = "2", features = ["spider_cloud"] }
+```
+
+### How It Works
+
+When you provide a Spider Cloud API key, your crawler gains access to:
+
+- **Managed proxy rotation** — requests route through `proxy.spider.cloud` with automatic IP rotation, geo-targeting, and residential proxies
+- **Anti-bot bypass** — Cloudflare, Akamai, Imperva, Distil Networks, and generic CAPTCHA challenges are handled transparently
+- **Automatic fallback** — if a direct request fails (403, 429, 503, 5xx), the request is retried through Spider Cloud's unblocking infrastructure
+- **Content-aware detection** — Smart mode inspects response bodies for challenge pages, empty responses, and bot detection markers before you ever see them
+
+### Integration Modes
+
+Choose the mode that fits your workload:
+
+| Mode | Strategy | Best For |
+|------|----------|----------|
+| **Proxy** (default) | Route all traffic through Spider Cloud proxy | General crawling with proxy rotation |
+| **Smart** (recommended) | Proxy by default, auto-fallback to unblocker on bot detection | Production workloads — best balance of speed and reliability |
+| **Fallback** | Direct fetch first, fall back to API on failure | Cost-efficient crawling where most sites work without help |
+| **Unblocker** | All requests through the unblocker API | Sites with aggressive bot protection |
+| **Api** | All requests through the crawl API | Simple scraping, one page at a time |
+
+**Smart mode** is the recommended choice for production. It detects and handles:
+- HTTP 403, 429, 503, and Cloudflare 520-530 errors
+- Cloudflare browser verification challenges
+- CAPTCHA and "verify you are human" pages
+- Distil Networks, Imperva, and Akamai Bot Manager
+- Empty response bodies on HTML pages
+
+### Quick Setup
+
+One line to enable proxy routing:
+
+```rust
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://example.com")
+        .with_spider_cloud("your-api-key")  // Proxy mode (default)
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+}
+```
+
+### Smart Mode (Recommended)
+
+For production, use Smart mode to get automatic fallback when pages are protected:
+
+```rust
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let config = SpiderCloudConfig::new("your-api-key")
+        .with_mode(SpiderCloudMode::Smart);
+
+    let mut website = Website::new("https://protected-site.com")
+        .with_spider_cloud_config(config)
+        .build()
+        .unwrap();
+
+    website.crawl().await;
+}
+```
+
+What happens under the hood in Smart mode:
+
+1. Request goes through `proxy.spider.cloud` (fast, low cost)
+2. If the response is a 403/429/503, a challenge page, or an empty body → automatic retry through the `/unblocker` API
+3. The unblocked content is returned transparently — your code sees a normal page
+
+### CLI Usage
+
+```bash
+spider --url https://example.com \
+  --spider-cloud-key "your-api-key" \
+  --spider-cloud-mode smart
+```
+
+### Extra Parameters
+
+Pass additional options to the Spider Cloud API for fine-grained control:
+
+```rust
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+
+let mut params = hashbrown::HashMap::new();
+params.insert("stealth".into(), serde_json::json!(true));
+params.insert("fingerprint".into(), serde_json::json!(true));
+
+let config = SpiderCloudConfig::new("your-api-key")
+    .with_mode(SpiderCloudMode::Smart)
+    .with_extra_params(params);
+```
+
+> Get started at [spider.cloud](https://spider.cloud) — new signups receive free credits to test the full integration.
+
 ## Get Spider
 
 | Method | Best For |
