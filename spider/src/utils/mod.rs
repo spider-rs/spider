@@ -62,9 +62,9 @@ use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
 
-#[cfg(not(feature = "wreq"))]
+#[cfg(any(not(feature = "wreq"), feature = "cache_request"))]
 use reqwest::{Response, StatusCode};
-#[cfg(feature = "wreq")]
+#[cfg(all(feature = "wreq", not(feature = "cache_request")))]
 use wreq::{Response, StatusCode};
 
 #[cfg(all(not(feature = "cache_request"), not(feature = "wreq")))]
@@ -6078,20 +6078,6 @@ pub(crate) async fn hash_html(html: &[u8]) -> u64 {
     }
 }
 
-#[cfg(feature = "tracing")]
-/// Spawns a new asynchronous task.
-pub(crate) fn spawn_task<F>(task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
-where
-    F: std::future::Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    tokio::task::Builder::new()
-        .name(task_name)
-        .spawn(future)
-        .expect("failed to spawn task")
-}
-
-#[cfg(not(feature = "tracing"))]
 #[allow(unused)]
 /// Spawns a new asynchronous task.
 pub(crate) fn spawn_task<F>(_task_name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
@@ -6102,25 +6088,6 @@ where
     tokio::task::spawn(future)
 }
 
-#[cfg(feature = "tracing")]
-/// Spawn a joinset.
-pub(crate) fn spawn_set<F, T>(
-    task_name: &str,
-    set: &mut tokio::task::JoinSet<T>,
-    future: F,
-) -> tokio::task::AbortHandle
-where
-    F: Future<Output = T>,
-    F: Send + 'static,
-    T: Send + 'static,
-{
-    set.build_task()
-        .name(task_name)
-        .spawn(future)
-        .expect("set should spawn")
-}
-
-#[cfg(not(feature = "tracing"))]
 /// Spawn a joinset.
 pub(crate) fn spawn_set<F, T>(
     _task_name: &str,

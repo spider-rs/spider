@@ -103,7 +103,7 @@ pub fn is_safe_javascript_challenge(page: &Page) -> bool {
         target_os = "visionos",
         target_os = "watchos",
     ),
-    not(feature = "wreq")
+    any(not(feature = "wreq"), feature = "cache_request")
 ))]
 /// Bind connections only on the specified network interface.
 pub fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
@@ -111,7 +111,7 @@ pub fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBu
 }
 
 #[cfg(not(any(
-    feature = "wreq",
+    all(feature = "wreq", not(feature = "cache_request")),
     target_os = "android",
     target_os = "fuchsia",
     target_os = "illumos",
@@ -1561,7 +1561,7 @@ impl Website {
         }
     }
 
-    #[cfg(all(not(feature = "wreq"), not(feature = "decentralized")))]
+    #[cfg(all(any(not(feature = "wreq"), feature = "cache_request"), not(feature = "decentralized")))]
     /// Base client configuration.
     pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -1643,7 +1643,7 @@ impl Website {
         crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
 
-    #[cfg(all(feature = "wreq", not(feature = "decentralized")))]
+    #[cfg(all(feature = "wreq", not(feature = "decentralized"), not(feature = "cache_request")))]
     /// Base client configuration.
     pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();

@@ -132,7 +132,7 @@ lazy_static! {
         .expect("valid tile‑class pattern");
 }
 
-#[cfg(not(feature = "wreq"))]
+#[cfg(any(not(feature = "wreq"), feature = "cache_request"))]
 lazy_static! {
     /// Gemini client – plain reqwest client (no middleware).
     static ref GEMINI_CLIENT: reqwest::Client = {
@@ -142,7 +142,7 @@ lazy_static! {
             .expect("failed to build Gemini client")
     };
 }
-#[cfg(feature = "wreq")]
+#[cfg(all(feature = "wreq", not(feature = "cache_request")))]
 lazy_static! {
     /// Gemini client – plain wreq client (no middleware).
     static ref GEMINI_CLIENT: wreq::Client = {
@@ -210,11 +210,11 @@ lazy_static! {
         .expect("valid lemin patterns");
 }
 
-#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[cfg(feature = "chrome")]
 /// CF prefix scan bytes.
 const CF_PREFIX_SCAN_BYTES: usize = 120;
 
-#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[cfg(feature = "chrome")]
 #[inline(always)]
 /// CF slice prefix.
 fn cf_prefix_slice(b: &[u8]) -> &[u8] {
@@ -225,7 +225,7 @@ fn cf_prefix_slice(b: &[u8]) -> &[u8] {
     }
 }
 
-#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[cfg(feature = "chrome")]
 lazy_static! {
     /// CF end match.
     static ref CF_END: &'static [u8; 62] =

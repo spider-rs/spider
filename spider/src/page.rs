@@ -1159,7 +1159,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
             if should_retry {
                 if let Some(message) = &error_status {
-                    if message.starts_with("error sending request for url ") {
+                    if message
+                        .to_string()
+                        .starts_with("error sending request for url ")
+                    {
                         should_retry = false;
                     }
                 }
@@ -1221,7 +1224,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
     }
 }
 
-#[cfg(feature = "headers")]
+#[cfg(all(feature = "headers", feature = "cookies"))]
 /// Re build the cookies.
 pub fn build_cookie_header_from_set_cookie(page: &Page) -> Option<reqwest::header::HeaderValue> {
     use reqwest::header::HeaderValue;
@@ -1245,7 +1248,7 @@ pub fn build_cookie_header_from_set_cookie(page: &Page) -> Option<reqwest::heade
     }
 }
 
-#[cfg(not(feature = "headers"))]
+#[cfg(not(all(feature = "headers", feature = "cookies")))]
 /// Re build the cookies.
 pub fn build_cookie_header_from_set_cookie(_page: &Page) -> Option<reqwest::header::HeaderValue> {
     None

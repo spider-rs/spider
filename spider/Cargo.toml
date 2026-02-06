@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.44.21"
+version = "2.44.22"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -76,6 +76,7 @@ statrs = { version = "0.18", optional = true }
 aho-corasick = { version = "1" }
 tracing = { version = "0.1", default-features = false, features = [
     "std",
+    "attributes",
 ], optional = true }
 sysinfo = { version = "0.35", default-features = false, features = [
     "system",
@@ -119,7 +120,7 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.44.21"
+version = "2.44.22"
 optional = true
 default-features = false
 
