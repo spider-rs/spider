@@ -59,8 +59,9 @@ pub use spider_agent::automation::{
     // Memory operations
     AutomationMemory, MemoryOperation,
     // System prompts
-    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT,
-    MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
+    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
+    EXTRACTION_ONLY_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT,
+    OBSERVE_SYSTEM_PROMPT,
     // Selector cache
     SelectorCache, SelectorCacheEntry,
     // Config helpers

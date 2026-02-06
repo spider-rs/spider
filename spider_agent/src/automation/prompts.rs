@@ -191,6 +191,34 @@ Rules:
 4. Be precise - extract actual values, don't guess
 "##;
 
+/// Focused system prompt for extraction-only mode (`extra_ai_data=true`, `max_rounds<=1`).
+///
+/// Much smaller than `DEFAULT_SYSTEM_PROMPT` (~400 chars vs ~3000) — no action
+/// bindings, no coordinate system, no automation strategy. This prevents weaker
+/// text models (e.g. `gpt-4o-mini`) from emitting `Fill` steps instead of
+/// populating `extracted`.
+pub const EXTRACTION_ONLY_SYSTEM_PROMPT: &str = r##"
+You are a data extraction assistant. You receive a webpage's text content (URL, title, HTML) and return structured data.
+
+## Output
+Return a single JSON object (no prose):
+```json
+{
+  "label": "brief description of extraction",
+  "done": true,
+  "steps": [],
+  "extracted": { ... }
+}
+```
+
+Rules:
+- `done` MUST be `true` (single-round extraction).
+- `steps` MUST be `[]` (no browser actions).
+- `extracted` contains the structured data from the page.
+- Use `null` for missing values. Be precise — extract actual values, don't guess.
+- JSON only, no markdown or prose.
+"##;
+
 /// System prompt for configuring a web crawler from natural language.
 pub const CONFIGURATION_SYSTEM_PROMPT: &str = r##"
 You are a web crawler configuration assistant. Convert natural language requirements to JSON configuration.
@@ -285,5 +313,37 @@ mod tests {
     fn test_map_system_prompt_nonempty() {
         assert!(!MAP_SYSTEM_PROMPT.is_empty());
         assert!(MAP_SYSTEM_PROMPT.contains("URL"));
+    }
+
+    #[test]
+    fn test_extraction_only_system_prompt_format() {
+        // Must use the same JSON shape as DEFAULT_SYSTEM_PROMPT
+        assert!(EXTRACTION_ONLY_SYSTEM_PROMPT.contains("\"label\""));
+        assert!(EXTRACTION_ONLY_SYSTEM_PROMPT.contains("\"done\""));
+        assert!(EXTRACTION_ONLY_SYSTEM_PROMPT.contains("\"steps\""));
+        assert!(EXTRACTION_ONLY_SYSTEM_PROMPT.contains("\"extracted\""));
+        assert!(EXTRACTION_ONLY_SYSTEM_PROMPT.contains("JSON"));
+    }
+
+    #[test]
+    fn test_extraction_only_system_prompt_no_action_bindings() {
+        // Must NOT contain browser action bindings that confuse weak text models
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("ClickPoint"));
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("Fill"));
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("Navigate"));
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("Evaluate"));
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("ScrollY"));
+        assert!(!EXTRACTION_ONLY_SYSTEM_PROMPT.contains("SetViewport"));
+    }
+
+    #[test]
+    fn test_extraction_only_prompt_much_smaller() {
+        // Extraction prompt should be significantly smaller than default
+        assert!(
+            EXTRACTION_ONLY_SYSTEM_PROMPT.len() < DEFAULT_SYSTEM_PROMPT.len() / 2,
+            "extraction prompt ({}) should be less than half of default ({})",
+            EXTRACTION_ONLY_SYSTEM_PROMPT.len(),
+            DEFAULT_SYSTEM_PROMPT.len(),
+        );
     }
 }

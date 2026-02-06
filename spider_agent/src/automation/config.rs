@@ -1005,6 +1005,13 @@ impl RemoteMultimodalConfig {
         }
     }
 
+    /// Returns `true` when the config is set up for pure data extraction
+    /// (extraction enabled, single round). Used to auto-detect extraction-only
+    /// mode and optimize prompts / screenshot handling.
+    pub fn is_extraction_only(&self) -> bool {
+        self.extra_ai_data && self.max_rounds <= 1
+    }
+
     /// Set whether to include HTML.
     pub fn with_html(mut self, include: bool) -> Self {
         self.include_html = include;
@@ -1868,5 +1875,34 @@ mod tests {
             "gpt-4o",
         );
         assert_eq!(cfg.filter_screenshot(None), None);
+    }
+
+    #[test]
+    fn test_is_extraction_only() {
+        // Default config: extra_ai_data=false, max_rounds=6 → false
+        let cfg = RemoteMultimodalConfig::default();
+        assert!(!cfg.is_extraction_only());
+
+        // Extraction enabled but multi-round → false
+        let cfg = RemoteMultimodalConfig::new()
+            .with_extraction(true)
+            .with_max_rounds(6);
+        assert!(!cfg.is_extraction_only());
+
+        // Single round but no extraction → false
+        let cfg = RemoteMultimodalConfig::new().with_max_rounds(1);
+        assert!(!cfg.is_extraction_only());
+
+        // Extraction + single round → true
+        let cfg = RemoteMultimodalConfig::new()
+            .with_extraction(true)
+            .with_max_rounds(1);
+        assert!(cfg.is_extraction_only());
+
+        // Extraction + zero rounds → true
+        let cfg = RemoteMultimodalConfig::new()
+            .with_extraction(true)
+            .with_max_rounds(0);
+        assert!(cfg.is_extraction_only());
     }
 }

@@ -12,6 +12,7 @@ use super::{
     best_effort_parse_json_object, extract_assistant_content, extract_usage, truncate_utf8_tail,
     AutomationResult, AutomationUsage, ContentAnalysis, EngineError, EngineResult,
     ExtractionSchema, PromptUrlGate, RemoteMultimodalConfig, DEFAULT_SYSTEM_PROMPT,
+    EXTRACTION_ONLY_SYSTEM_PROMPT,
 };
 
 /// Lazy-initialized HTTP client for automation.
@@ -264,10 +265,14 @@ impl RemoteMultimodalEngine {
     }
 
     /// Compile the system prompt with configuration.
-    /// DEFAULT_SYSTEM_PROMPT is always used as the base - cannot be replaced.
+    /// Uses `EXTRACTION_ONLY_SYSTEM_PROMPT` for single-round extraction mode,
+    /// otherwise `DEFAULT_SYSTEM_PROMPT` is always the base.
     pub fn system_prompt_compiled(&self, effective_cfg: &RemoteMultimodalConfig) -> String {
-        // Always start with the default system prompt from spider_agent
-        let mut s = DEFAULT_SYSTEM_PROMPT.to_string();
+        let mut s = if effective_cfg.is_extraction_only() {
+            EXTRACTION_ONLY_SYSTEM_PROMPT.to_string()
+        } else {
+            DEFAULT_SYSTEM_PROMPT.to_string()
+        };
 
         // Add any extra system prompt content (but never replace the default)
         if let Some(extra) = &self.system_prompt_extra {
@@ -1307,6 +1312,26 @@ mod tests {
         let compiled = engine.system_prompt_compiled(&cfg);
         assert!(compiled.contains("EXTRACTION MODE ENABLED"));
         assert!(compiled.contains("products"));
+    }
+
+    #[test]
+    fn test_engine_system_prompt_extraction_only() {
+        let cfg = RemoteMultimodalConfig::new()
+            .with_extraction(true)
+            .with_max_rounds(1);
+        assert!(cfg.is_extraction_only());
+
+        let engine = RemoteMultimodalEngine::new(
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4o",
+            None,
+        );
+
+        let compiled = engine.system_prompt_compiled(&cfg);
+        // Should use focused extraction prompt, not full automation prompt
+        assert!(compiled.contains("data extraction assistant"));
+        assert!(!compiled.contains("ClickPoint"));
+        assert!(!compiled.contains("SetViewport"));
     }
 
     #[test]

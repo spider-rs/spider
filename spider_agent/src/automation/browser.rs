@@ -287,9 +287,15 @@ impl RemoteMultimodalEngine {
             out.push_str("5. Do NOT repeat the same steps again. Your next response MUST contain different actions.\n\n");
         }
 
-        out.push_str(
-            "TASK:\nReturn the next automation steps as a single JSON object (no prose).\n",
-        );
+        if effective_cfg.is_extraction_only() {
+            out.push_str(
+                "TASK:\nExtract structured data from the page above. Return JSON with label, done: true, steps: [], and extracted data.\n",
+            );
+        } else {
+            out.push_str(
+                "TASK:\nReturn the next automation steps as a single JSON object (no prose).\n",
+            );
+        }
 
         out
     }
@@ -363,6 +369,12 @@ impl RemoteMultimodalEngine {
         }
 
         let base_effective_cfg: RemoteMultimodalConfig = self.cfg.clone();
+
+        // Extraction-only optimization: skip screenshots unless explicitly requested.
+        // Saves ~35k tokens per call for vision-capable models doing text extraction.
+        let extraction_only = base_effective_cfg.is_extraction_only();
+        let skip_screenshot_for_extraction =
+            extraction_only && base_effective_cfg.include_screenshot != Some(true);
 
         // capture profiles fallback
         let capture_profiles: Vec<CaptureProfile> =
@@ -486,15 +498,16 @@ impl RemoteMultimodalEngine {
                 Ok::<String, EngineError>(self.title_context(page, &base_effective_cfg).await)
             };
 
-            let (screenshot, html, mut url_now, mut title_now) = if use_vision {
-                let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
-                let (s, h, u, t) =
-                    tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
-                (s, h, u, t)
-            } else {
-                let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
-                (String::new(), h, u, t)
-            };
+            let (screenshot, html, mut url_now, mut title_now) =
+                if use_vision && !skip_screenshot_for_extraction {
+                    let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
+                    let (s, h, u, t) =
+                        tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
+                    (s, h, u, t)
+                } else {
+                    let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
+                    (String::new(), h, u, t)
+                };
 
             // Fallback to the input URL if page.url() is empty/unsupported.
             if url_now.is_empty() {
@@ -895,7 +908,7 @@ impl RemoteMultimodalEngine {
     ) -> EngineResult<AutomationPlan> {
         use super::{
             best_effort_parse_json_object, extract_assistant_content, extract_usage,
-            DEFAULT_SYSTEM_PROMPT,
+            DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
         };
         use serde::Serialize;
 
@@ -917,8 +930,12 @@ impl RemoteMultimodalEngine {
             response_format: Option<serde_json::Value>,
         }
 
-        // Build system prompt - DEFAULT_SYSTEM_PROMPT is always the base
-        let mut system_msg = DEFAULT_SYSTEM_PROMPT.to_string();
+        // Build system prompt — use focused extraction prompt for single-round extraction
+        let mut system_msg = if effective_cfg.is_extraction_only() {
+            EXTRACTION_ONLY_SYSTEM_PROMPT.to_string()
+        } else {
+            DEFAULT_SYSTEM_PROMPT.to_string()
+        };
         // Add recalled experience context (from long-term memory)
         if let Some(ctx) = recalled_context {
             system_msg.push_str("\n\n");
@@ -971,6 +988,45 @@ impl RemoteMultimodalEngine {
                 if !catalog.is_empty() {
                     system_msg.push_str("\n\nAvailable skills (request via memory_ops `request_skill`): ");
                     system_msg.push_str(&catalog.join(", "));
+                }
+            }
+        }
+
+        // In extraction-only mode, inject schema / extraction prompt / relevance
+        // instructions into the system prompt (mirrors engine.rs system_prompt_compiled).
+        if effective_cfg.is_extraction_only() {
+            if let Some(schema) = &effective_cfg.extraction_schema {
+                system_msg.push_str("\n\n---\nExtraction Schema: ");
+                system_msg.push_str(&schema.name);
+                system_msg.push('\n');
+                if let Some(desc) = &schema.description {
+                    system_msg.push_str("Description: ");
+                    system_msg.push_str(desc.trim());
+                    system_msg.push('\n');
+                }
+                system_msg
+                    .push_str("The \"extracted\" field MUST conform to this JSON Schema:\n");
+                system_msg.push_str(&schema.schema);
+                system_msg.push('\n');
+                if schema.strict {
+                    system_msg.push_str("STRICT MODE: Follow the schema exactly.\n");
+                }
+            }
+            if let Some(extraction_prompt) = &effective_cfg.extraction_prompt {
+                system_msg.push_str("\nExtraction instructions: ");
+                system_msg.push_str(extraction_prompt.trim());
+                system_msg.push('\n');
+            }
+            if effective_cfg.relevance_gate {
+                system_msg.push_str("\n---\nRELEVANCE GATE: Include \"relevant\": true|false in your response.\n");
+                if let Some(prompt) = &effective_cfg.relevance_prompt {
+                    system_msg.push_str("Relevance criteria: ");
+                    system_msg.push_str(prompt.trim());
+                    system_msg.push('\n');
+                } else if let Some(ep) = &effective_cfg.extraction_prompt {
+                    system_msg.push_str("Judge relevance against: ");
+                    system_msg.push_str(ep.trim());
+                    system_msg.push('\n');
                 }
             }
         }
@@ -1104,8 +1160,17 @@ impl RemoteMultimodalEngine {
             None
         };
 
-        // Try to get extracted field, or fallback to the entire response when in extraction mode
-        let extracted = parsed.get("extracted").cloned().or_else(|| {
+        // Try to get extracted field, or fallback to the entire response when in extraction mode.
+        // Treat `extracted: {}` (empty object) the same as missing for recovery purposes.
+        let raw_extracted = parsed.get("extracted").cloned().and_then(|v| {
+            if v.as_object().map_or(false, |o| o.is_empty()) {
+                None // empty object → trigger fallback chain
+            } else {
+                Some(v)
+            }
+        });
+
+        let extracted = raw_extracted.or_else(|| {
             // If no explicit "extracted" field but response looks like extracted data
             // (has no standard automation fields), use the whole response
             if parsed.get("label").is_none()
@@ -1132,7 +1197,33 @@ impl RemoteMultimodalEngine {
                 if !extracted_data.is_empty() {
                     Some(serde_json::Value::Object(extracted_data))
                 } else {
-                    None
+                    // Last resort: recover data from Fill steps.
+                    // Weak models sometimes emit Fill actions instead of extracted data.
+                    let mut fill_data = serde_json::Map::new();
+                    for step in &steps {
+                        if let Some(fill) = step.get("Fill") {
+                            if let (Some(sel), Some(val)) =
+                                (fill.get("selector").and_then(|s| s.as_str()), fill.get("value"))
+                            {
+                                // Use the selector (or last segment) as key
+                                let key = sel
+                                    .rsplit_once(' ')
+                                    .map(|(_, last)| last)
+                                    .unwrap_or(sel)
+                                    .trim_start_matches('#')
+                                    .trim_start_matches('.');
+                                if !key.is_empty() {
+                                    fill_data.insert(key.to_string(), val.clone());
+                                }
+                            }
+                        }
+                    }
+                    if !fill_data.is_empty() {
+                        log::debug!("Recovered {} fields from Fill steps", fill_data.len());
+                        Some(serde_json::Value::Object(fill_data))
+                    } else {
+                        None
+                    }
                 }
             } else {
                 None
