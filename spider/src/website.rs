@@ -1561,7 +1561,10 @@ impl Website {
         }
     }
 
-    #[cfg(all(any(not(feature = "wreq"), feature = "cache_request"), not(feature = "decentralized")))]
+    #[cfg(all(
+        any(not(feature = "wreq"), feature = "cache_request"),
+        not(feature = "decentralized")
+    ))]
     /// Base client configuration.
     pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -1643,7 +1646,11 @@ impl Website {
         crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
 
-    #[cfg(all(feature = "wreq", not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[cfg(all(
+        feature = "wreq",
+        not(feature = "decentralized"),
+        not(feature = "cache_request")
+    ))]
     /// Base client configuration.
     pub fn configure_base_client(&self) -> ClientBuilder {
         let policy = self.setup_redirect_policy();
@@ -1760,7 +1767,10 @@ impl Website {
         #[cfg(feature = "spider_cloud")]
         let client = if let Some(ref sc) = self.configuration.spider_cloud {
             if sc.uses_proxy() {
-                match (crate::client::Proxy::all(&sc.proxy_url), reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key))) {
+                match (
+                    crate::client::Proxy::all(&sc.proxy_url),
+                    reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
+                ) {
                     (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
                     _ => client,
                 }
@@ -1840,7 +1850,10 @@ impl Website {
         #[cfg(feature = "spider_cloud")]
         let client = if let Some(ref sc) = self.configuration.spider_cloud {
             if sc.uses_proxy() {
-                match (crate::client::Proxy::all(&sc.proxy_url), reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key))) {
+                match (
+                    crate::client::Proxy::all(&sc.proxy_url),
+                    reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
+                ) {
                     (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
                     _ => client,
                 }
@@ -1966,9 +1979,7 @@ impl Website {
                     crate::client::Proxy::all(&sc.proxy_url),
                     reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
                 ) {
-                    (Ok(proxy), Ok(auth_value)) => {
-                        client.proxy(proxy.custom_http_auth(auth_value))
-                    }
+                    (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
                     _ => client,
                 }
             } else {
@@ -1985,8 +1996,9 @@ impl Website {
         };
 
         let client = match self.configuration.concurrency_limit {
-            Some(limit) => client
-                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit)),
+            Some(limit) => {
+                client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
+            }
             _ => client,
         };
 
@@ -2036,9 +2048,7 @@ impl Website {
                     crate::client::Proxy::all(&sc.proxy_url),
                     reqwest::header::HeaderValue::from_str(&format!("Bearer {}", sc.api_key)),
                 ) {
-                    (Ok(proxy), Ok(auth_value)) => {
-                        client.proxy(proxy.custom_http_auth(auth_value))
-                    }
+                    (Ok(proxy), Ok(auth_value)) => client.proxy(proxy.custom_http_auth(auth_value)),
                     _ => client,
                 }
             } else {
@@ -2057,8 +2067,9 @@ impl Website {
         };
 
         let client = match self.configuration.concurrency_limit {
-            Some(limit) => client
-                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit)),
+            Some(limit) => {
+                client.connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(limit))
+            }
             _ => client,
         };
 
@@ -3634,7 +3645,11 @@ impl Website {
     }
 
     /// Expand links for crawl using WebDriver.
-    #[cfg(all(feature = "webdriver", not(feature = "decentralized"), not(feature = "chrome")))]
+    #[cfg(all(
+        feature = "webdriver",
+        not(feature = "decentralized"),
+        not(feature = "chrome")
+    ))]
     pub async fn crawl_establish_webdriver_one(
         &self,
         client: &Client,
@@ -3655,12 +3670,8 @@ impl Website {
             // Setup stealth events
             crate::features::webdriver::setup_driver_events(driver, &self.configuration).await;
 
-            let mut page = Page::new_page_webdriver(
-                url.unwrap_or(&self.url.inner()),
-                driver,
-                timeout,
-            )
-            .await;
+            let mut page =
+                Page::new_page_webdriver(url.unwrap_or(&self.url.inner()), driver, timeout).await;
 
             let mut retry_count = self.configuration.retry;
 
@@ -3671,12 +3682,8 @@ impl Website {
                 }
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        let next_page = Page::new_page_webdriver(
-                            &self.url.inner(),
-                            driver,
-                            timeout,
-                        )
-                        .await;
+                        let next_page =
+                            Page::new_page_webdriver(&self.url.inner(), driver, timeout).await;
                         page.clone_from(&next_page);
                     })
                     .await
@@ -3684,12 +3691,8 @@ impl Website {
                         log::warn!("backoff timeout {elapsed}");
                     }
                 } else {
-                    let next_page = Page::new_page_webdriver(
-                        &self.url.inner(),
-                        driver,
-                        timeout,
-                    )
-                    .await;
+                    let next_page =
+                        Page::new_page_webdriver(&self.url.inner(), driver, timeout).await;
                     page.clone_from(&next_page);
                 }
             }
@@ -4778,7 +4781,9 @@ impl Website {
         // Drain relevance credits: restore wildcard budget for irrelevant pages
         #[cfg(all(feature = "agent", feature = "serde"))]
         if let Some(ref cfgs) = self.configuration.remote_multimodal {
-            let credits = cfgs.relevance_credits.swap(0, std::sync::atomic::Ordering::Relaxed);
+            let credits = cfgs
+                .relevance_credits
+                .swap(0, std::sync::atomic::Ordering::Relaxed);
             for _ in 0..credits {
                 self.restore_wildcard_budget();
             }
@@ -6257,9 +6262,17 @@ impl Website {
     }
 
     /// Start to crawl website concurrently using WebDriver.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), feature = "webdriver"))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "chrome"),
+        feature = "webdriver"
+    ))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
-    async fn crawl_concurrent_webdriver(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+    async fn crawl_concurrent_webdriver(
+        &mut self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+    ) {
         self.start();
 
         match self.setup_webdriver().await {
@@ -6346,8 +6359,7 @@ impl Website {
                             }
 
                             let semaphore =
-                                get_semaphore(&semaphore, !self.configuration.shared_queue)
-                                    .await;
+                                get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
                             tokio::select! {
                                 biased;
@@ -6535,7 +6547,11 @@ impl Website {
     }
 
     /// Start to crawl website concurrently.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), feature = "webdriver"))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "chrome"),
+        feature = "webdriver"
+    ))]
     pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         // Use WebDriver if configured, otherwise fall back to raw HTTP
         if self.configuration.webdriver_config.is_some() {
@@ -6546,7 +6562,11 @@ impl Website {
     }
 
     /// Start to crawl website concurrently.
-    #[cfg(all(not(feature = "decentralized"), not(feature = "chrome"), not(feature = "webdriver")))]
+    #[cfg(all(
+        not(feature = "decentralized"),
+        not(feature = "chrome"),
+        not(feature = "webdriver")
+    ))]
     pub async fn crawl_concurrent(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.crawl_concurrent_raw(client, handle).await
     }
@@ -8040,7 +8060,9 @@ impl Website {
         url: &str,
         driver: &std::sync::Arc<thirtyfour::WebDriver>,
     ) -> Option<String> {
-        use crate::features::webdriver::{attempt_navigation, get_page_content, setup_driver_events};
+        use crate::features::webdriver::{
+            attempt_navigation, get_page_content, setup_driver_events,
+        };
 
         let timeout = self
             .configuration
@@ -8447,9 +8469,9 @@ impl Website {
     ///     "http://localhost:11434/v1/chat/completions",
     ///     "qwen2.5-vl", // any OpenAI-compatible model id your endpoint understands
     /// )
-    /// .with_api_key(None)
-    /// .with_system_prompt_extra(Some("Never log in. Prefer closing popups and continuing."))
-    /// .with_user_message_extra(Some("Goal: reach the pricing page, then stop."))
+    /// // .with_api_key("your-api-key-if-needed")
+    /// .with_system_prompt_extra("Never log in. Prefer closing popups and continuing.")
+    /// .with_user_message_extra("Goal: reach the pricing page, then stop.")
     /// .with_cfg(RemoteMultimodalConfig {
     ///     // keep HTML smaller if you want lower token usage
     ///     include_html: true,
@@ -8461,7 +8483,7 @@ impl Website {
     ///     post_plan_wait_ms: 400,
     ///     ..Default::default()
     /// })
-    /// .with_concurrency_limit(Some(8));
+    /// .with_concurrency_limit(8);
     ///
     /// // Attach to the crawler configuration
     /// let mut cfg = Configuration::new();
@@ -8469,7 +8491,7 @@ impl Website {
     ///
     /// // Use the configuration in a Website (example)
     /// let mut site = Website::new("https://example.com");
-    /// site.configuration = cfg;
+    /// site.with_config(cfg);
     ///
     /// // Start crawling/scraping as you normally would...
     /// // site.crawl().await?;
@@ -9215,10 +9237,7 @@ impl Website {
         if let Some(ref budget_map) = config.budget {
             let mut budget = hashbrown::HashMap::new();
             for (k, v) in budget_map {
-                budget.insert(
-                    case_insensitive_string::CaseInsensitiveString::new(k),
-                    *v,
-                );
+                budget.insert(case_insensitive_string::CaseInsensitiveString::new(k), *v);
             }
             self.configuration.budget = Some(budget);
         }
@@ -9258,18 +9277,13 @@ impl Website {
         }
         #[cfg(feature = "chrome")]
         {
-            let mut wait_for = self
-                .configuration
-                .wait_for
-                .take()
-                .unwrap_or_default();
+            let mut wait_for = self.configuration.wait_for.take().unwrap_or_default();
 
             if let Some(true) = config.wait_for_idle_network {
-                wait_for.idle_network = Some(
-                    crate::features::chrome_common::WaitForIdleNetwork::new(Some(
-                        std::time::Duration::from_secs(30),
-                    )),
-                );
+                wait_for.idle_network =
+                    Some(crate::features::chrome_common::WaitForIdleNetwork::new(
+                        Some(std::time::Duration::from_secs(30)),
+                    ));
             }
             if let Some(ms) = config.wait_for_delay_ms {
                 wait_for.delay = Some(crate::features::chrome_common::WaitForDelay::new(Some(
@@ -9949,9 +9963,9 @@ mod tests {
     #[test]
     fn test_build_rotated_clients_single_proxy_returns_none() {
         let mut website = Website::new("http://example.com");
-        website.configuration.with_proxies(Some(vec![
-            "http://proxy1.example.com:8080".to_string(),
-        ]));
+        website
+            .configuration
+            .with_proxies(Some(vec!["http://proxy1.example.com:8080".to_string()]));
 
         let rotator = website.build_rotated_clients();
         assert!(

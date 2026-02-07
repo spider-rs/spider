@@ -91,9 +91,7 @@ impl SearchProvider for BingProvider {
         let response = response.map_err(|e| SearchError::RequestFailed(e.to_string()))?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(SearchError::AuthenticationFailed);
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -125,10 +123,7 @@ impl SearchProvider for BingProvider {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                let url = item
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
+                let url = item.get("url").and_then(|v| v.as_str()).unwrap_or_default();
 
                 if url.is_empty() {
                     continue;
@@ -180,8 +175,7 @@ mod tests {
 
     #[test]
     fn test_bing_provider_custom_url() {
-        let provider = BingProvider::new("test-key")
-            .with_api_url("https://custom.api.com/search");
+        let provider = BingProvider::new("test-key").with_api_url("https://custom.api.com/search");
         assert_eq!(provider.endpoint(), "https://custom.api.com/search");
     }
 }

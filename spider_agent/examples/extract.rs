@@ -11,8 +11,8 @@ use spider_agent::Agent;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .expect("OPENAI_API_KEY environment variable required");
+    let api_key =
+        std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY environment variable required");
 
     let agent = Agent::builder()
         .with_openai(api_key, "gpt-4o-mini")

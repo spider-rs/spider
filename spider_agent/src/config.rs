@@ -540,7 +540,8 @@ impl UsageStats {
     /// Add tokens from an LLM response.
     pub fn add_tokens(&self, prompt: u64, completion: u64) {
         self.prompt_tokens.fetch_add(prompt, Ordering::Relaxed);
-        self.completion_tokens.fetch_add(completion, Ordering::Relaxed);
+        self.completion_tokens
+            .fetch_add(completion, Ordering::Relaxed);
     }
 
     /// Increment LLM call count.
@@ -594,8 +595,7 @@ impl UsageStats {
 
     /// Get total tokens used.
     pub fn total_tokens(&self) -> u64 {
-        self.prompt_tokens.load(Ordering::Relaxed)
-            + self.completion_tokens.load(Ordering::Relaxed)
+        self.prompt_tokens.load(Ordering::Relaxed) + self.completion_tokens.load(Ordering::Relaxed)
     }
 
     /// Get a snapshot of all stats.
@@ -712,13 +712,19 @@ impl UsageStats {
 
         if let Some(limit) = limits.max_prompt_tokens {
             if prompt >= limit {
-                return Some(LimitType::PromptTokens { used: prompt, limit });
+                return Some(LimitType::PromptTokens {
+                    used: prompt,
+                    limit,
+                });
             }
         }
 
         if let Some(limit) = limits.max_completion_tokens {
             if completion >= limit {
-                return Some(LimitType::CompletionTokens { used: completion, limit });
+                return Some(LimitType::CompletionTokens {
+                    used: completion,
+                    limit,
+                });
             }
         }
 
@@ -925,10 +931,19 @@ mod tests {
         let limit = LimitType::LlmCalls { used: 10, limit: 5 };
         assert_eq!(format!("{}", limit), "LLM calls (10 used, 5 limit)");
 
-        let limit = LimitType::CustomToolCalls { used: 25, limit: 20 };
-        assert_eq!(format!("{}", limit), "custom tool calls (25 used, 20 limit)");
+        let limit = LimitType::CustomToolCalls {
+            used: 25,
+            limit: 20,
+        };
+        assert_eq!(
+            format!("{}", limit),
+            "custom tool calls (25 used, 20 limit)"
+        );
 
-        let limit = LimitType::TotalTokens { used: 1000, limit: 500 };
+        let limit = LimitType::TotalTokens {
+            used: 1000,
+            limit: 500,
+        };
         assert_eq!(format!("{}", limit), "total tokens (1000 used, 500 limit)");
     }
 }

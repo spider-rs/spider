@@ -81,7 +81,8 @@ pub struct RemoteMultimodalEngine {
     /// When set, the engine recalls relevant past strategies before automation
     /// and stores successful outcomes after completion.
     #[cfg(feature = "memvid")]
-    pub experience_memory: Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
+    pub experience_memory:
+        Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
 }
 
 impl RemoteMultimodalEngine {
@@ -178,7 +179,9 @@ impl RemoteMultimodalEngine {
     #[cfg(feature = "memvid")]
     pub fn with_experience_memory(
         &mut self,
-        memory: Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
+        memory: Option<
+            std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>,
+        >,
     ) -> &mut Self {
         self.experience_memory = memory;
         self
@@ -264,6 +267,75 @@ impl RemoteMultimodalEngine {
         ContentAnalysis::quick_needs_screenshot(html)
     }
 
+    /// Resolve per-URL runtime settings from prompt URL gate.
+    ///
+    /// Returns `None` when the URL is blocked by the gate.
+    fn resolve_runtime_for_url(
+        &self,
+        url: &str,
+    ) -> Option<(
+        RemoteMultimodalConfig,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> {
+        let mut effective_cfg = self.cfg.clone();
+        let mut effective_system_prompt = self.system_prompt.clone();
+        let mut effective_system_prompt_extra = self.system_prompt_extra.clone();
+        let mut effective_user_message_extra = self.user_message_extra.clone();
+
+        if let Some(gate) = &self.prompt_url_gate {
+            let gate_match = gate.match_url(url)?;
+            if let Some(override_cfg) = gate_match {
+                let defaults = super::AutomationConfig::default();
+
+                if override_cfg.max_steps != defaults.max_steps {
+                    effective_cfg.max_rounds = override_cfg.max_steps.max(1);
+                }
+                if override_cfg.max_retries != defaults.max_retries {
+                    effective_cfg.retry.max_attempts = override_cfg.max_retries.max(1);
+                }
+                if override_cfg.capture_screenshots != defaults.capture_screenshots {
+                    effective_cfg.screenshot = override_cfg.capture_screenshots;
+                }
+                if override_cfg.capture_profile != defaults.capture_profile {
+                    effective_cfg.capture_profiles = vec![override_cfg.capture_profile.clone()];
+                }
+                if override_cfg.extract_on_success || override_cfg.extraction_prompt.is_some() {
+                    effective_cfg.extra_ai_data = true;
+                }
+                if let Some(extraction_prompt) = &override_cfg.extraction_prompt {
+                    if !extraction_prompt.trim().is_empty() {
+                        effective_cfg.extraction_prompt = Some(extraction_prompt.clone());
+                    }
+                }
+
+                if let Some(system_prompt) = &override_cfg.system_prompt {
+                    if !system_prompt.trim().is_empty() {
+                        effective_system_prompt = Some(system_prompt.clone());
+                    }
+                }
+                if let Some(system_prompt_extra) = &override_cfg.system_prompt_extra {
+                    if !system_prompt_extra.trim().is_empty() {
+                        effective_system_prompt_extra = Some(system_prompt_extra.clone());
+                    }
+                }
+                if let Some(user_message_extra) = &override_cfg.user_message_extra {
+                    if !user_message_extra.trim().is_empty() {
+                        effective_user_message_extra = Some(user_message_extra.clone());
+                    }
+                }
+            }
+        }
+
+        Some((
+            effective_cfg,
+            effective_system_prompt,
+            effective_system_prompt_extra,
+            effective_user_message_extra,
+        ))
+    }
+
     /// Compile the system prompt with configuration.
     /// Uses `EXTRACTION_ONLY_SYSTEM_PROMPT` for single-round extraction mode,
     /// otherwise `DEFAULT_SYSTEM_PROMPT` is always the base.
@@ -273,6 +345,14 @@ impl RemoteMultimodalEngine {
         } else {
             DEFAULT_SYSTEM_PROMPT.to_string()
         };
+
+        // Always keep the default system prompt first, then append configured guidance.
+        if let Some(base) = &self.system_prompt {
+            if !base.trim().is_empty() {
+                s.push_str("\n\n---\nCONFIGURED SYSTEM INSTRUCTIONS:\n");
+                s.push_str(base.trim());
+            }
+        }
 
         // Add any extra system prompt content (but never replace the default)
         if let Some(extra) = &self.system_prompt_extra {
@@ -322,7 +402,9 @@ impl RemoteMultimodalEngine {
             s.push_str("\n\n---\nRELEVANCE GATE ENABLED:\n");
             s.push_str("Include a \"relevant\": true|false field in your JSON response.\n");
             s.push_str("Set true if the page content is relevant to the extraction/crawl goals.\n");
-            s.push_str("Set false if the page is off-topic, a 404, login wall, or otherwise not useful.\n");
+            s.push_str(
+                "Set false if the page is off-topic, a 404, login wall, or otherwise not useful.\n",
+            );
             if let Some(prompt) = &effective_cfg.relevance_prompt {
                 s.push_str("\nRelevance criteria: ");
                 s.push_str(prompt.trim());
@@ -356,7 +438,10 @@ impl RemoteMultimodalEngine {
     // ── dual-model routing ──────────────────────────────────────────
 
     /// Set the vision model endpoint for dual-model routing.
-    pub fn with_vision_model(&mut self, endpoint: Option<super::config::ModelEndpoint>) -> &mut Self {
+    pub fn with_vision_model(
+        &mut self,
+        endpoint: Option<super::config::ModelEndpoint>,
+    ) -> &mut Self {
         self.vision_model = endpoint;
         self
     }
@@ -476,7 +561,30 @@ impl RemoteMultimodalEngine {
             reasoning: Option<serde_json::Value>,
         }
 
-        let effective_cfg = &self.cfg;
+        let Some((
+            effective_cfg,
+            effective_system_prompt,
+            effective_system_prompt_extra,
+            effective_user_message_extra,
+        )) = self.resolve_runtime_for_url(url)
+        else {
+            return Ok(AutomationResult {
+                label: "url_not_allowed".into(),
+                steps_executed: 0,
+                success: true,
+                error: None,
+                usage: AutomationUsage::default(),
+                extracted: None,
+                screenshot: None,
+                spawn_pages: Vec::new(),
+                relevant: None,
+                reasoning: None,
+            });
+        };
+
+        let mut prompt_engine = self.clone();
+        prompt_engine.system_prompt = effective_system_prompt;
+        prompt_engine.system_prompt_extra = effective_system_prompt_extra;
 
         // Build user prompt with HTML context
         let mut user_text =
@@ -504,10 +612,12 @@ impl RemoteMultimodalEngine {
         user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
         user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
         if effective_cfg.relevance_gate {
-            user_text.push_str("- \"relevant\": true if page is relevant to the goal, false otherwise\n");
+            user_text.push_str(
+                "- \"relevant\": true if page is relevant to the goal, false otherwise\n",
+            );
         }
 
-        if let Some(extra) = &self.user_message_extra {
+        if let Some(extra) = &effective_user_message_extra {
             if !extra.trim().is_empty() {
                 user_text.push_str("\n---\nUSER INSTRUCTIONS:\n");
                 user_text.push_str(extra.trim());
@@ -522,7 +632,7 @@ impl RemoteMultimodalEngine {
                     role: "system".into(),
                     content: vec![ContentBlock {
                         content_type: "text".into(),
-                        text: Some(self.system_prompt_compiled(effective_cfg)),
+                        text: Some(prompt_engine.system_prompt_compiled(&effective_cfg)),
                     }],
                 },
                 Message {
@@ -542,7 +652,7 @@ impl RemoteMultimodalEngine {
             } else {
                 None
             },
-            reasoning: reasoning_payload(effective_cfg),
+            reasoning: reasoning_payload(&effective_cfg),
         };
 
         // Acquire permit before sending
@@ -594,7 +704,12 @@ impl RemoteMultimodalEngine {
 
         // Extract relevance field if gate is enabled
         let relevant = if effective_cfg.relevance_gate {
-            Some(plan_value.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+            Some(
+                plan_value
+                    .get("relevant")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            )
         } else {
             None
         };
@@ -724,7 +839,30 @@ impl RemoteMultimodalEngine {
             reasoning: Option<serde_json::Value>,
         }
 
-        let effective_cfg = &self.cfg;
+        let Some((
+            effective_cfg,
+            effective_system_prompt,
+            effective_system_prompt_extra,
+            effective_user_message_extra,
+        )) = self.resolve_runtime_for_url(url)
+        else {
+            return Ok(AutomationResult {
+                label: "url_not_allowed".into(),
+                steps_executed: 0,
+                success: true,
+                error: None,
+                usage: AutomationUsage::default(),
+                extracted: None,
+                screenshot: None,
+                spawn_pages: Vec::new(),
+                relevant: None,
+                reasoning: None,
+            });
+        };
+
+        let mut prompt_engine = self.clone();
+        prompt_engine.system_prompt = effective_system_prompt;
+        prompt_engine.system_prompt_extra = effective_system_prompt_extra;
 
         // Build user prompt with HTML context
         let mut user_text =
@@ -754,14 +892,16 @@ impl RemoteMultimodalEngine {
         user_text.push_str("- \"steps\": [] (empty, no browser automation)\n");
         user_text.push_str("- \"extracted\": the structured data extracted from the page\n");
         if effective_cfg.relevance_gate {
-            user_text.push_str("- \"relevant\": true if page is relevant to the goal, false otherwise\n");
+            user_text.push_str(
+                "- \"relevant\": true if page is relevant to the goal, false otherwise\n",
+            );
         }
 
         if screenshot_base64.is_some() {
             user_text.push_str("\nIMPORTANT: The screenshot may contain visual information not present in the HTML (iframe content, videos, canvas drawings, dynamically rendered content). Examine the screenshot carefully.\n");
         }
 
-        if let Some(extra) = &self.user_message_extra {
+        if let Some(extra) = &effective_user_message_extra {
             if !extra.trim().is_empty() {
                 user_text.push_str("\n---\nUSER INSTRUCTIONS:\n");
                 user_text.push_str(extra.trim());
@@ -797,7 +937,7 @@ impl RemoteMultimodalEngine {
                     role: "system".into(),
                     content: vec![ContentBlock {
                         content_type: "text".into(),
-                        text: Some(self.system_prompt_compiled(effective_cfg)),
+                        text: Some(prompt_engine.system_prompt_compiled(&effective_cfg)),
                         image_url: None,
                     }],
                 },
@@ -815,7 +955,7 @@ impl RemoteMultimodalEngine {
             } else {
                 None
             },
-            reasoning: reasoning_payload(effective_cfg),
+            reasoning: reasoning_payload(&effective_cfg),
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -866,7 +1006,12 @@ impl RemoteMultimodalEngine {
 
         // Extract relevance field if gate is enabled
         let relevant = if effective_cfg.relevance_gate {
-            Some(plan_value.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+            Some(
+                plan_value
+                    .get("relevant")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            )
         } else {
             None
         };
@@ -1169,12 +1314,18 @@ impl RemoteMultimodalEngine {
     /// Parse tool calls from an LLM response.
     ///
     /// Extracts OpenAI-compatible tool calls from a response JSON.
-    pub fn parse_tool_calls(&self, response: &serde_json::Value) -> Vec<super::tool_calling::ToolCall> {
+    pub fn parse_tool_calls(
+        &self,
+        response: &serde_json::Value,
+    ) -> Vec<super::tool_calling::ToolCall> {
         super::tool_calling::parse_tool_calls(response)
     }
 
     /// Convert tool calls to automation step actions.
-    pub fn tool_calls_to_steps(&self, calls: &[super::tool_calling::ToolCall]) -> Vec<serde_json::Value> {
+    pub fn tool_calls_to_steps(
+        &self,
+        calls: &[super::tool_calling::ToolCall],
+    ) -> Vec<serde_json::Value> {
         super::tool_calling::tool_calls_to_steps(calls)
     }
 
@@ -1290,10 +1441,7 @@ mod tests {
 
     #[test]
     fn test_parse_url_classifications_invalid_json() {
-        assert_eq!(
-            parse_url_classifications("not json", 2),
-            vec![true, true]
-        );
+        assert_eq!(parse_url_classifications("not json", 2), vec![true, true]);
     }
 
     #[test]
@@ -1436,27 +1584,25 @@ mod tests {
 
     #[test]
     fn test_engine_dual_model_routing_setup() {
-        let mut engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
-            "gpt-4o",
-            None,
-        );
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
         assert!(!engine.has_dual_model_routing());
 
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o")));
-        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o-mini")));
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
+            "gpt-4o",
+        )));
+        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new(
+            "gpt-4o-mini",
+        )));
         assert!(engine.has_dual_model_routing());
     }
 
     #[test]
     fn test_engine_resolve_model_for_round() {
-        let mut engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
-            "primary",
-            None,
-        );
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "primary", None);
         engine.api_key = Some("sk-parent".to_string());
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("vision-model")));
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
+            "vision-model",
+        )));
         engine.with_text_model(Some(
             crate::automation::config::ModelEndpoint::new("text-model")
                 .with_api_url("https://text.api.com")
@@ -1478,13 +1624,13 @@ mod tests {
 
     #[test]
     fn test_engine_should_use_vision_this_round() {
-        let mut engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
             "gpt-4o",
-            None,
-        );
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o")));
-        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new("gpt-4o-mini")));
+        )));
+        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new(
+            "gpt-4o-mini",
+        )));
         engine.with_vision_route_mode(crate::automation::config::VisionRouteMode::TextFirst);
 
         // Round 0 → vision
@@ -1501,11 +1647,7 @@ mod tests {
 
     #[test]
     fn test_engine_no_routing_always_vision() {
-        let engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
-            "gpt-4o",
-            None,
-        );
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
         // No dual routing → always returns true
         assert!(!engine.has_dual_model_routing());
         assert!(engine.should_use_vision_this_round(0, false, 0, false));
@@ -1520,11 +1662,7 @@ mod tests {
         cfg.extraction_schema = Some(ExtractionSchema::new("products", r#"{"type":"array"}"#));
         cfg.extraction_prompt = Some("Extract all products".to_string());
 
-        let engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
-            "gpt-4o",
-            None,
-        );
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
 
         let compiled = engine.system_prompt_compiled(&cfg);
         // Should use focused prompt
@@ -1542,16 +1680,58 @@ mod tests {
         cfg.extra_ai_data = true;
         assert!(!cfg.is_extraction_only());
 
-        let engine = RemoteMultimodalEngine::new(
-            "https://api.example.com",
-            "gpt-4o",
-            None,
-        );
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
 
         let compiled = engine.system_prompt_compiled(&cfg);
         // Should use full automation prompt
         assert!(compiled.contains("ClickPoint"));
         assert!(compiled.contains("SetViewport"));
         assert!(compiled.contains("EXTRACTION MODE ENABLED"));
+    }
+
+    #[test]
+    fn test_engine_resolve_runtime_for_url_override() {
+        let mut url_map = std::collections::HashMap::new();
+        let override_cfg = crate::automation::AutomationConfig::new("override goal")
+            .with_max_steps(2)
+            .with_retries(5)
+            .with_system_prompt("override system")
+            .with_system_prompt_extra("override extra")
+            .with_user_message_extra("override user")
+            .with_extraction("extract fields");
+        url_map.insert("https://example.com".to_string(), Box::new(override_cfg));
+        let gate = crate::automation::PromptUrlGate::with_map(url_map);
+
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.with_prompt_url_gate(Some(gate));
+
+        let resolved = engine
+            .resolve_runtime_for_url("https://example.com")
+            .expect("url should be allowed");
+        let (cfg, system_prompt, system_prompt_extra, user_message_extra) = resolved;
+        assert_eq!(cfg.max_rounds, 2);
+        assert_eq!(cfg.retry.max_attempts, 5);
+        assert!(cfg.extra_ai_data);
+        assert_eq!(cfg.extraction_prompt.as_deref(), Some("extract fields"));
+        assert_eq!(system_prompt.as_deref(), Some("override system"));
+        assert_eq!(system_prompt_extra.as_deref(), Some("override extra"));
+        assert_eq!(user_message_extra.as_deref(), Some("override user"));
+    }
+
+    #[test]
+    fn test_engine_resolve_runtime_for_url_blocked() {
+        let mut url_map = std::collections::HashMap::new();
+        url_map.insert(
+            "https://allowed.com".to_string(),
+            Box::new(crate::automation::AutomationConfig::new("allowed")),
+        );
+        let gate = crate::automation::PromptUrlGate::with_map(url_map);
+
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.with_prompt_url_gate(Some(gate));
+
+        assert!(engine
+            .resolve_runtime_for_url("https://blocked.com")
+            .is_none());
     }
 }

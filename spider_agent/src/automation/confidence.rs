@@ -78,7 +78,11 @@ impl ConfidentStep {
     /// Get alternatives sorted by confidence (highest first).
     pub fn sorted_alternatives(&self) -> Vec<&Alternative> {
         let mut alts: Vec<_> = self.alternatives.iter().collect();
-        alts.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        alts.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         alts
     }
 
@@ -96,7 +100,10 @@ impl ConfidentStep {
     /// ```
     pub fn from_json(value: &Value) -> Option<Self> {
         let action = value.get("action")?.clone();
-        let confidence = value.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.5);
+        let confidence = value
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
 
         let alternatives = value
             .get("alternatives")
@@ -158,7 +165,10 @@ impl Alternative {
     /// Parse from JSON.
     pub fn from_json(value: &Value) -> Option<Self> {
         let action = value.get("action")?.clone();
-        let confidence = value.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.3);
+        let confidence = value
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.3);
         let description = value
             .get("description")
             .and_then(|v| v.as_str())
@@ -502,10 +512,7 @@ mod tests {
     fn test_confident_step_creation() {
         let step = ConfidentStep::new(serde_json::json!({"Click": "button"}), 0.85)
             .with_description("Click the button")
-            .with_alternative(Alternative::new(
-                serde_json::json!({"Click": ".btn"}),
-                0.6,
-            ));
+            .with_alternative(Alternative::new(serde_json::json!({"Click": ".btn"}), 0.6));
 
         assert_eq!(step.confidence, 0.85);
         assert!(step.is_confident(0.8));

@@ -11,9 +11,7 @@
 
 extern crate spider;
 
-use spider::features::automation::{
-    ModelEndpoint, RemoteMultimodalConfigs, VisionRouteMode,
-};
+use spider::features::automation::{ModelEndpoint, RemoteMultimodalConfigs, VisionRouteMode};
 use spider::tokio;
 use spider::website::Website;
 
@@ -48,7 +46,7 @@ async fn main() {
     .with_api_key(&api_key)
     .with_dual_models(
         ModelEndpoint::new("qwen/qwen-2.5-vl-72b-instruct"), // vision rounds
-        ModelEndpoint::new("qwen/qwen-2.5-72b-instruct"),     // text rounds
+        ModelEndpoint::new("qwen/qwen-2.5-72b-instruct"),    // text rounds
     )
     .with_vision_route_mode(VisionRouteMode::VisionFirst);
 

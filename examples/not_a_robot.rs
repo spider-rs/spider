@@ -54,8 +54,8 @@ async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     // Get API key from environment variable (loaded from .env or shell)
-    let api_key =
-        std::env::var("OPEN_ROUTER").expect("OPEN_ROUTER environment variable must be set (set in .env or shell)");
+    let api_key = std::env::var("OPEN_ROUTER")
+        .expect("OPEN_ROUTER environment variable must be set (set in .env or shell)");
 
     // Create output directory for screenshots
     let output_dir = Path::new("not_a_robot_results");
@@ -70,10 +70,8 @@ async fn main() {
     // Default to Claude Opus 4.6 (frontier model, excellent vision + reasoning).
     // Override with MODEL env var for other models.
     let model = std::env::var("MODEL").unwrap_or_else(|_| "anthropic/claude-opus-4.6".to_string());
-    let mut mm_config = RemoteMultimodalConfigs::new(
-        "https://openrouter.ai/api/v1/chat/completions",
-        &model,
-    );
+    let mut mm_config =
+        RemoteMultimodalConfigs::new("https://openrouter.ai/api/v1/chat/completions", &model);
 
     // Set the API key
     mm_config.api_key = Some(api_key);
@@ -149,7 +147,8 @@ async fn main() {
                             let current_level = extracted
                                 .get("current_level")
                                 .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as u32;
+                                .unwrap_or(0)
+                                as u32;
 
                             let level_name = extracted
                                 .get("level_name")
@@ -210,10 +209,7 @@ async fn main() {
             if let Some(ref screenshot_b64) = page.screenshot_bytes {
                 let screenshot_path = output_dir_clone.join("final_screenshot.png");
                 if fs::write(&screenshot_path, screenshot_b64).is_ok() {
-                    println!(
-                        "\nFinal screenshot saved to: {}",
-                        screenshot_path.display()
-                    );
+                    println!("\nFinal screenshot saved to: {}", screenshot_path.display());
                 }
             }
 

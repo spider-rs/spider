@@ -1,12 +1,12 @@
 //! Core Agent struct and builder for spider_agent.
 
 use crate::config::{AgentConfig, UsageSnapshot, UsageStats};
-use crate::error::{AgentError, AgentResult};
 #[cfg(feature = "search")]
 use crate::config::{ResearchOptions, SearchOptions};
-use crate::llm::{CompletionOptions, CompletionResponse, LLMProvider, Message};
+use crate::error::{AgentError, AgentResult};
 #[cfg(feature = "search")]
 use crate::llm::TokenUsage;
+use crate::llm::{CompletionOptions, CompletionResponse, LLMProvider, Message};
 use crate::memory::AgentMemory;
 use crate::tools::{CustomTool, CustomToolRegistry, CustomToolResult};
 use std::sync::Arc;
@@ -146,9 +146,11 @@ impl Agent {
             .as_ref()
             .ok_or(AgentError::NotConfigured("LLM provider"))?;
 
-        let _permit = self.llm_semaphore.acquire().await.map_err(|_| {
-            AgentError::Llm("Failed to acquire semaphore".to_string())
-        })?;
+        let _permit = self
+            .llm_semaphore
+            .acquire()
+            .await
+            .map_err(|_| AgentError::Llm("Failed to acquire semaphore".to_string()))?;
 
         let options = CompletionOptions {
             temperature: self.config.temperature,
@@ -225,11 +227,7 @@ impl Agent {
 
         self.usage.increment_fetch_calls();
 
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await?;
+        let response = self.client.get(url).send().await?;
 
         let status = response.status();
         let headers = response.headers().clone();
@@ -260,9 +258,10 @@ impl Agent {
         options: ResearchOptions,
     ) -> AgentResult<ResearchResult> {
         // Search for the topic
-        let search_opts = options.search_options.clone().unwrap_or_else(|| {
-            SearchOptions::new().with_limit(options.max_pages.max(5))
-        });
+        let search_opts = options
+            .search_options
+            .clone()
+            .unwrap_or_else(|| SearchOptions::new().with_limit(options.max_pages.max(5)));
 
         let search_results = self.search_with_options(topic, search_opts).await?;
 
@@ -499,12 +498,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.navigate(url).await
+        browser
+            .navigate(url)
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -516,12 +519,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.html().await
+        browser
+            .html()
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -533,12 +540,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.screenshot().await
+        browser
+            .screenshot()
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -550,29 +561,40 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.clone_page().await
+        browser
+            .clone_page()
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
     /// Open a new page and navigate to URL.
     #[cfg(feature = "chrome")]
-    pub async fn new_page_with_url(&self, url: &str) -> AgentResult<std::sync::Arc<crate::browser::Page>> {
+    pub async fn new_page_with_url(
+        &self,
+        url: &str,
+    ) -> AgentResult<std::sync::Arc<crate::browser::Page>> {
         // Check limits before proceeding
         if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.new_page_with_url(url).await
+        browser
+            .new_page_with_url(url)
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -584,12 +606,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.click(selector).await
+        browser
+            .click(selector)
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -601,12 +627,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let browser = self.browser.as_ref()
+        let browser = self
+            .browser
+            .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        browser.type_text(selector, text).await
+        browser
+            .type_text(selector, text)
+            .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }
 
@@ -633,12 +663,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.navigate(url).await
+        driver
+            .navigate(url)
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -650,12 +684,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.html().await
+        driver
+            .html()
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -667,12 +705,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.screenshot().await
+        driver
+            .screenshot()
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -684,12 +726,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.click(selector).await
+        driver
+            .click(selector)
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -701,12 +747,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.type_text(selector, text).await
+        driver
+            .type_text(selector, text)
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -726,12 +776,16 @@ impl Agent {
             return Err(AgentError::LimitExceeded(limit));
         }
 
-        let driver = self.webdriver.as_ref()
+        let driver = self
+            .webdriver
+            .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
         self.usage.increment_webbrowser_calls();
 
-        driver.new_tab().await
+        driver
+            .new_tab()
+            .await
             .map_err(|e| AgentError::WebDriver(e.to_string()))
     }
 
@@ -746,37 +800,49 @@ impl Agent {
     /// Store data in temp storage.
     #[cfg(feature = "fs")]
     pub fn store_temp(&self, name: &str, data: &[u8]) -> AgentResult<std::path::PathBuf> {
-        let storage = self.temp_storage.as_ref()
+        let storage = self
+            .temp_storage
+            .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.store_bytes(name, data)
+        storage
+            .store_bytes(name, data)
             .map_err(|e| AgentError::Io(e))
     }
 
     /// Store JSON in temp storage.
     #[cfg(feature = "fs")]
-    pub fn store_temp_json(&self, name: &str, data: &serde_json::Value) -> AgentResult<std::path::PathBuf> {
-        let storage = self.temp_storage.as_ref()
+    pub fn store_temp_json(
+        &self,
+        name: &str,
+        data: &serde_json::Value,
+    ) -> AgentResult<std::path::PathBuf> {
+        let storage = self
+            .temp_storage
+            .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.store_json(name, data)
+        storage
+            .store_json(name, data)
             .map_err(|e| AgentError::Io(e))
     }
 
     /// Read data from temp storage.
     #[cfg(feature = "fs")]
     pub fn read_temp(&self, name: &str) -> AgentResult<Vec<u8>> {
-        let storage = self.temp_storage.as_ref()
+        let storage = self
+            .temp_storage
+            .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.read_bytes(name)
-            .map_err(|e| AgentError::Io(e))
+        storage.read_bytes(name).map_err(|e| AgentError::Io(e))
     }
 
     /// Read JSON from temp storage.
     #[cfg(feature = "fs")]
     pub fn read_temp_json(&self, name: &str) -> AgentResult<serde_json::Value> {
-        let storage = self.temp_storage.as_ref()
+        let storage = self
+            .temp_storage
+            .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.read_json(name)
-            .map_err(|e| AgentError::Io(e))
+        storage.read_json(name).map_err(|e| AgentError::Io(e))
     }
 
     // ==================== Helper Methods ====================
@@ -799,7 +865,9 @@ impl Agent {
                 // Remove more elements
                 remove_tags(
                     html,
-                    &["script", "style", "noscript", "svg", "canvas", "video", "audio", "iframe"],
+                    &[
+                        "script", "style", "noscript", "svg", "canvas", "video", "audio", "iframe",
+                    ],
                 )
             }
         }
@@ -865,7 +933,9 @@ impl Agent {
             }
         }
 
-        Err(AgentError::Json(serde_json::from_str::<serde_json::Value>(content).unwrap_err()))
+        Err(AgentError::Json(
+            serde_json::from_str::<serde_json::Value>(content).unwrap_err(),
+        ))
     }
 }
 
@@ -1061,7 +1131,10 @@ impl AgentBuilder {
 
     /// Configure with a WebDriver from existing driver.
     #[cfg(feature = "webdriver")]
-    pub fn with_webdriver_driver(mut self, driver: std::sync::Arc<crate::webdriver::WebDriver>) -> Self {
+    pub fn with_webdriver_driver(
+        mut self,
+        driver: std::sync::Arc<crate::webdriver::WebDriver>,
+    ) -> Self {
         self.webdriver = Some(WebDriverContext::new(driver));
         self
     }

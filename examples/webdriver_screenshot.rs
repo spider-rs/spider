@@ -76,7 +76,11 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     screenshot_website("https://example.com", "example_screenshot.png").await?;
-    screenshot_website("https://choosealicense.com", "choosealicense_screenshot.png").await?;
+    screenshot_website(
+        "https://choosealicense.com",
+        "choosealicense_screenshot.png",
+    )
+    .await?;
 
     Ok(())
 }

@@ -407,8 +407,7 @@ mod tests {
 
     #[test]
     fn test_process_selector_img_element() {
-        let html =
-            Html::parse_fragment(r#"<img src="photo.jpg" alt="A photo">"#);
+        let html = Html::parse_fragment(r#"<img src="photo.jpg" alt="A photo">"#);
         let selector = Selector::parse("img").unwrap();
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
 

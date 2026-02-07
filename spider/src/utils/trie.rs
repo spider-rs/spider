@@ -271,11 +271,20 @@ mod tests {
         trie.insert("http://other.com/api/data", "data");
 
         // Full URL and bare path resolve to same trie node (host stripped)
-        assert_eq!(trie.search("https://example.com/users/profile"), Some(&"profile"));
+        assert_eq!(
+            trie.search("https://example.com/users/profile"),
+            Some(&"profile")
+        );
         assert_eq!(trie.search("/users/profile"), Some(&"profile"));
-        assert_eq!(trie.search("https://any.com/users/settings"), Some(&"settings"));
+        assert_eq!(
+            trie.search("https://any.com/users/settings"),
+            Some(&"settings")
+        );
         assert_eq!(trie.search("/api/data"), Some(&"data"));
-        assert_eq!(trie.search("http://cdn.example.com/api/data"), Some(&"data"));
+        assert_eq!(
+            trie.search("http://cdn.example.com/api/data"),
+            Some(&"data")
+        );
         // Non-existent path
         assert!(trie.search("/users/unknown").is_none());
     }

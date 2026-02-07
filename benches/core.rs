@@ -347,7 +347,9 @@ fn bench_css_extraction(c: &mut Criterion) {
     let html_50kb = generate_html(400);
 
     group.bench_function("css_query_select_map/10_selectors_on_50kb", |b| {
-        b.iter(|| spider_utils::css_query_select_map(black_box(&html_50kb), black_box(&doc_selectors)))
+        b.iter(|| {
+            spider_utils::css_query_select_map(black_box(&html_50kb), black_box(&doc_selectors))
+        })
     });
 
     group.finish();

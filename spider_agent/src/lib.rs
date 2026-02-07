@@ -102,26 +102,30 @@ pub mod temp;
 
 // Re-exports
 pub use agent::{Agent, AgentBuilder, FetchResult, PageExtraction};
-pub use config::{AgentConfig, HtmlCleaningMode, LimitType, ResearchOptions, RetryConfig, SearchOptions, TimeRange, UsageLimits, UsageSnapshot, UsageStats};
+pub use config::{
+    AgentConfig, HtmlCleaningMode, LimitType, ResearchOptions, RetryConfig, SearchOptions,
+    TimeRange, UsageLimits, UsageSnapshot, UsageStats,
+};
 pub use error::{AgentError, AgentResult, SearchError};
-pub use llm::{CompletionOptions, CompletionResponse, LLMProvider, Message, MessageContent, TokenUsage};
+pub use llm::{
+    CompletionOptions, CompletionResponse, LLMProvider, Message, MessageContent, TokenUsage,
+};
 pub use memory::AgentMemory;
 pub use tools::{AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod};
 
 // Automation re-exports - core types
 pub use automation::{
-    ActionRecord, ActionResult, ActionType, ActResult, AutomationConfig, AutomationResult, AutomationUsage,
-    CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep,
-    ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier, ExtractionSchema,
-    FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelEndpoint, ModelPolicy,
-    NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort, RecoveryStrategy, RetryPolicy,
-    SelectorCache, SelectorCacheEntry, StructuredOutputConfig, VisionRouteMode,
+    ActResult, ActionRecord, ActionResult, ActionType, AutomationConfig, AutomationResult,
+    AutomationUsage, CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult,
+    ChainStep, ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier,
+    ExtractionSchema, FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelEndpoint,
+    ModelPolicy, NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort,
+    RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry, StructuredOutputConfig,
+    VisionRouteMode,
 };
 
 // Automation re-exports - engine and configuration
-pub use automation::{
-    RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine,
-};
+pub use automation::{RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine};
 
 // Automation re-exports - engine error types
 pub use automation::{EngineError, EngineResult};
@@ -147,8 +151,8 @@ pub use automation::{AutomationMemory, MemoryOperation};
 
 // Automation re-exports - system prompts
 pub use automation::{
-    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
-    EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
+    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT,
+    MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
 };
 
 // Automation re-exports - concurrent chain types
@@ -175,7 +179,7 @@ pub use automation::{
 // Automation re-exports - planning types
 pub use automation::{
     Checkpoint, CheckpointResult, CheckpointType, ExecutionPlan, PageState, PlanExecutionState,
-    PlanningModeConfig, PlannedStep, ReplanContext,
+    PlannedStep, PlanningModeConfig, ReplanContext,
 };
 
 // Automation re-exports - self-healing types
@@ -249,4 +253,4 @@ pub use automation::{
 pub use webdriver::WebDriverContext;
 
 #[cfg(feature = "fs")]
-pub use temp::{TempStorage, TempFile};
+pub use temp::{TempFile, TempStorage};

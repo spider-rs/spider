@@ -441,9 +441,8 @@ impl RobotFileParser {
             if let Some((left, right)) = ln.split_once(':') {
                 let part0 = left.trim();
                 let part1_raw = right.trim();
-                let part1 =
-                    String::from_utf8(percent_decode(part1_raw.as_bytes()).collect())
-                        .unwrap_or_default();
+                let part1 = String::from_utf8(percent_decode(part1_raw.as_bytes()).collect())
+                    .unwrap_or_default();
 
                 if part0.eq_ignore_ascii_case("user-agent") {
                     if state == 2 {
@@ -754,11 +753,7 @@ mod tests {
     fn test_parser_basic() {
         let mut parser = RobotFileParser::new();
         parser.modified();
-        let lines = vec![
-            "User-agent: *",
-            "Disallow: /private",
-            "Allow: /public",
-        ];
+        let lines = vec!["User-agent: *", "Disallow: /private", "Allow: /public"];
         parser.parse(&lines);
 
         assert!(parser.can_fetch("Googlebot", "https://example.com/public"));
@@ -785,11 +780,7 @@ mod tests {
     fn test_parser_crawl_delay() {
         let mut parser = RobotFileParser::new();
         parser.modified();
-        let lines = vec![
-            "User-agent: testbot",
-            "Crawl-delay: 5",
-            "Disallow: /test",
-        ];
+        let lines = vec!["User-agent: testbot", "Crawl-delay: 5", "Disallow: /test"];
         parser.parse(&lines);
 
         let entries = parser.get_entries();
@@ -859,10 +850,7 @@ mod tests {
     fn test_can_fetch_case_insensitive() {
         let mut parser = RobotFileParser::new();
         parser.modified();
-        let lines = vec![
-            "User-agent: googlebot",
-            "Disallow: /private",
-        ];
+        let lines = vec!["User-agent: googlebot", "Disallow: /private"];
         parser.parse(&lines);
 
         // entry_allowed correctly tests case-insensitive matching
@@ -878,10 +866,7 @@ mod tests {
     fn test_can_fetch_with_version() {
         let mut parser = RobotFileParser::new();
         parser.modified();
-        let lines = vec![
-            "User-agent: googlebot",
-            "Disallow: /secret",
-        ];
+        let lines = vec!["User-agent: googlebot", "Disallow: /secret"];
         parser.parse(&lines);
 
         // "Googlebot/2.1" should match "googlebot" entry (version stripped)
@@ -926,11 +911,7 @@ mod tests {
     fn test_get_crawl_delay_case_insensitive() {
         let mut parser = RobotFileParser::new();
         parser.modified();
-        let lines = vec![
-            "User-agent: slowbot",
-            "Crawl-delay: 10",
-            "Disallow: /test",
-        ];
+        let lines = vec!["User-agent: slowbot", "Crawl-delay: 10", "Disallow: /test"];
         parser.parse(&lines);
 
         let ua = Some(Box::new(CompactString::new("SlowBot/1.0")));

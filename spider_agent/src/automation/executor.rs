@@ -105,9 +105,7 @@ impl ChainExecutor {
             if group.len() == 1 {
                 // Single step - execute directly
                 let step = group.into_iter().next().unwrap();
-                let step_result = self
-                    .execute_step(step, context.clone(), &step_fn)
-                    .await;
+                let step_result = self.execute_step(step, context.clone(), &step_fn).await;
 
                 context.set_previous_result(step_result.success);
                 context.advance();
@@ -168,7 +166,10 @@ impl ChainExecutor {
         let _permit = self.semaphore.acquire().await.ok();
 
         // Execute with timeout
-        let timeout = step.timeout_ms.map(Duration::from_millis).unwrap_or(self.step_timeout);
+        let timeout = step
+            .timeout_ms
+            .map(Duration::from_millis)
+            .unwrap_or(self.step_timeout);
         let step_clone = step.clone();
 
         let result = tokio::time::timeout(timeout, step_fn(step_clone, context)).await;
@@ -207,7 +208,10 @@ impl ChainExecutor {
                 ..context.clone()
             };
             let semaphore = self.semaphore.clone();
-            let timeout = step.timeout_ms.map(Duration::from_millis).unwrap_or(self.step_timeout);
+            let timeout = step
+                .timeout_ms
+                .map(Duration::from_millis)
+                .unwrap_or(self.step_timeout);
             let step_fn = step_fn.clone();
 
             handles.push(tokio::spawn(async move {
@@ -385,7 +389,8 @@ impl ResponseCache {
 
     /// Evict expired entries.
     fn evict_expired(&mut self) {
-        self.entries.retain(|_, entry| entry.created_at.elapsed() < self.ttl);
+        self.entries
+            .retain(|_, entry| entry.created_at.elapsed() < self.ttl);
     }
 
     /// Evict oldest entry.
@@ -438,11 +443,7 @@ impl BatchExecutor {
     }
 
     /// Process items in batches.
-    pub async fn process<T, R, F, Fut>(
-        &self,
-        items: Vec<T>,
-        processor: F,
-    ) -> Vec<R>
+    pub async fn process<T, R, F, Fut>(&self, items: Vec<T>, processor: F) -> Vec<R>
     where
         T: Clone + Send + 'static,
         R: Send + 'static,
@@ -693,9 +694,7 @@ mod tests {
         let executor = BatchExecutor::with_settings(3, 2);
 
         let items: Vec<i32> = (0..10).collect();
-        let results = executor
-            .process(items, |x| async move { x * 2 })
-            .await;
+        let results = executor.process(items, |x| async move { x * 2 }).await;
 
         assert_eq!(results.len(), 10);
     }

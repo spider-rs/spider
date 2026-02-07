@@ -53,18 +53,11 @@ pub(crate) static CHROME_WEBDRIVER_ARGS: &[&str] = &[
 
 /// Firefox WebDriver arguments for headless mode.
 #[cfg(not(feature = "webdriver_headed"))]
-pub(crate) static FIREFOX_WEBDRIVER_ARGS: &[&str] = &[
-    "-headless",
-    "-no-remote",
-    "-new-instance",
-];
+pub(crate) static FIREFOX_WEBDRIVER_ARGS: &[&str] = &["-headless", "-no-remote", "-new-instance"];
 
 /// Firefox WebDriver arguments for headed mode.
 #[cfg(feature = "webdriver_headed")]
-pub(crate) static FIREFOX_WEBDRIVER_ARGS: &[&str] = &[
-    "-no-remote",
-    "-new-instance",
-];
+pub(crate) static FIREFOX_WEBDRIVER_ARGS: &[&str] = &["-no-remote", "-new-instance"];
 
 /// Edge WebDriver arguments for headless mode.
 #[cfg(not(feature = "webdriver_headed"))]

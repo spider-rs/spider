@@ -21,7 +21,6 @@
 // === Remote Multimodal Usage ===
 // Usage 1: AutomationUsage { prompt_tokens: 3223, completion_tokens: 312, total_tokens: 3535, llm_calls: 1, search_calls: 0, fetch_calls: 0, webbrowser_calls: 0, custom_tool_calls: {}, api_calls: 1 }
 
-
 extern crate spider;
 
 use spider::features::automation::RemoteMultimodalConfigs;

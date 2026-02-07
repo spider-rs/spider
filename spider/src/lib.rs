@@ -144,10 +144,10 @@ pub extern crate string_concat;
 pub extern crate strum;
 #[macro_use]
 pub extern crate lazy_static;
-#[cfg(feature = "firewall")]
-pub extern crate spider_firewall;
 #[cfg(feature = "agent")]
 pub extern crate spider_agent;
+#[cfg(feature = "firewall")]
+pub extern crate spider_firewall;
 
 /// Re-export agent types from spider_agent crate.
 #[cfg(feature = "agent")]
@@ -156,11 +156,26 @@ pub mod agent {
     //!
     //! This provides convenient access to the multimodal agent functionality.
     pub use spider_agent::{
-        Agent, AgentBuilder, AgentConfig, AgentError, AgentMemory, AgentResult,
-        FetchResult, HtmlCleaningMode, LimitType, Message, RetryConfig,
-        UsageLimits, UsageSnapshot, UsageStats,
+        Agent,
+        AgentBuilder,
+        AgentConfig,
+        AgentError,
+        AgentMemory,
+        AgentResult,
         // Custom tool types
-        AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod,
+        AuthConfig,
+        CustomTool,
+        CustomToolRegistry,
+        CustomToolResult,
+        FetchResult,
+        HtmlCleaningMode,
+        HttpMethod,
+        LimitType,
+        Message,
+        RetryConfig,
+        UsageLimits,
+        UsageSnapshot,
+        UsageStats,
     };
 
     #[cfg(feature = "agent_openai")]
@@ -173,7 +188,7 @@ pub mod agent {
     pub use spider_agent::WebDriverContext;
 
     #[cfg(feature = "agent_fs")]
-    pub use spider_agent::{TempStorage, TempFile};
+    pub use spider_agent::{TempFile, TempStorage};
 
     #[cfg(any(
         feature = "agent_search_serper",
@@ -182,8 +197,8 @@ pub mod agent {
         feature = "agent_search_tavily"
     ))]
     pub use spider_agent::{
-        ResearchOptions, ResearchResult, SearchOptions, SearchProvider,
-        SearchResult, SearchResults, TimeRange,
+        ResearchOptions, ResearchResult, SearchOptions, SearchProvider, SearchResult,
+        SearchResults, TimeRange,
     };
 
     #[cfg(feature = "agent_search_serper")]

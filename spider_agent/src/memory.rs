@@ -295,7 +295,9 @@ impl AgentMemory {
 
         // Key-value store
         if !self.data.is_empty() {
-            let store: std::collections::HashMap<_, _> = self.data.iter()
+            let store: std::collections::HashMap<_, _> = self
+                .data
+                .iter()
                 .map(|r| (r.key().clone(), r.value().clone()))
                 .collect();
             if let Ok(json) = serde_json::to_string_pretty(&store) {
@@ -314,7 +316,11 @@ impl AgentMemory {
                 .map(|(i, u)| format!("{}. {}", i + 1, u))
                 .collect::<Vec<_>>()
                 .join("\n");
-            parts.push(format!("## Recent URLs (last {})\n{}", recent.len(), url_list));
+            parts.push(format!(
+                "## Recent URLs (last {})\n{}",
+                recent.len(),
+                url_list
+            ));
         }
         drop(urls);
 
@@ -346,7 +352,11 @@ impl AgentMemory {
                 .map(|(i, a)| format!("{}. {}", i + 1, a))
                 .collect::<Vec<_>>()
                 .join("\n");
-            parts.push(format!("## Recent Actions (last {})\n{}", recent.len(), action_list));
+            parts.push(format!(
+                "## Recent Actions (last {})\n{}",
+                recent.len(),
+                action_list
+            ));
         }
         drop(actions);
 

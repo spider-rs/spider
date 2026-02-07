@@ -9,8 +9,7 @@ use std::time::Duration;
 use super::ContentAnalysis;
 
 /// Recovery strategy for handling failures during automation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RecoveryStrategy {
     /// Retry the same action up to max_retries times.
     #[default]
@@ -24,8 +23,7 @@ pub enum RecoveryStrategy {
 }
 
 /// Retry policy for automation operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RetryPolicy {
     /// Maximum number of attempts.
     pub max_attempts: usize,
@@ -80,8 +78,7 @@ impl RetryPolicy {
 }
 
 /// Cost tier for model selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CostTier {
     /// Prefer cheaper/faster models.
     Low,
@@ -93,8 +90,7 @@ pub enum CostTier {
 }
 
 /// Policy for selecting models based on cost/quality tradeoffs.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelPolicy {
     /// Small/cheap model identifier.
     pub small: String,
@@ -157,8 +153,7 @@ impl ModelPolicy {
 ///
 /// When `api_url` or `api_key` is `None`, the parent
 /// [`RemoteMultimodalConfigs`] values are inherited at resolve time.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModelEndpoint {
     /// Model identifier for this endpoint (e.g. "gpt-4o-mini").
     pub model_name: String,
@@ -197,8 +192,7 @@ impl ModelEndpoint {
 ///
 /// Only takes effect when [`RemoteMultimodalConfigs::has_dual_model_routing`]
 /// returns `true` (i.e. at least one of `vision_model` / `text_model` is set).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum VisionRouteMode {
     /// No routing – always use the primary model (current behaviour).
     #[default]
@@ -215,8 +209,7 @@ pub enum VisionRouteMode {
 }
 
 /// Reasoning effort level for models that support explicit reasoning controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
     /// Lower latency/cost reasoning.
@@ -229,8 +222,7 @@ pub enum ReasoningEffort {
 }
 
 /// HTML cleaning profile for content processing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum HtmlCleaningProfile {
     /// Standard cleaning - removes scripts, styles, comments.
     #[default]
@@ -321,9 +313,7 @@ impl HtmlCleaningProfile {
                 }
 
                 // Canvas/video/embeds present - slim
-                if analysis.canvas_count > 0
-                    || analysis.video_count > 1
-                    || analysis.embed_count > 0
+                if analysis.canvas_count > 0 || analysis.video_count > 1 || analysis.embed_count > 0
                 {
                     return HtmlCleaningProfile::Slim;
                 }
@@ -403,7 +393,10 @@ impl HtmlCleaningProfile {
 
     /// Quick check if this profile removes SVGs.
     pub fn removes_svgs(&self) -> bool {
-        matches!(self, HtmlCleaningProfile::Slim | HtmlCleaningProfile::Aggressive)
+        matches!(
+            self,
+            HtmlCleaningProfile::Slim | HtmlCleaningProfile::Aggressive
+        )
     }
 
     /// Quick check if this profile removes video/canvas elements.
@@ -430,8 +423,7 @@ impl HtmlCleaningProfile {
 }
 
 /// Intent for HTML cleaning decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CleaningIntent {
     /// General purpose - balanced cleaning.
     #[default]
@@ -443,8 +435,7 @@ pub enum CleaningIntent {
 }
 
 /// Capture profile for screenshots and HTML.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CaptureProfile {
     /// Capture full page screenshot.
     pub full_page: bool,
@@ -499,8 +490,7 @@ impl CaptureProfile {
 }
 
 /// Clip viewport for screenshots.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipViewport {
     /// X coordinate.
     pub x: f64,
@@ -525,8 +515,7 @@ impl ClipViewport {
 }
 
 /// Main automation configuration.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AutomationConfig {
     /// The goal to achieve.
     pub goal: String,
@@ -698,7 +687,9 @@ impl AutomationConfig {
 
     /// Check if a URL matches success criteria.
     pub fn is_success_url(&self, url: &str) -> bool {
-        self.success_urls.iter().any(|pattern| url.contains(pattern))
+        self.success_urls
+            .iter()
+            .any(|pattern| url.contains(pattern))
     }
 
     /// Check if text matches success criteria.
@@ -723,8 +714,7 @@ impl AutomationConfig {
 ///
 /// The engine should be able to **export this config** to users, and it should
 /// be safe to merge with user-provided prompts.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RemoteMultimodalConfig {
     // -----------------------------------------------------------------
@@ -1195,8 +1185,7 @@ impl RemoteMultimodalConfig {
 /// - System/user prompts
 /// - Runtime configuration
 /// - URL gating
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RemoteMultimodalConfigs {
     /// OpenAI-compatible chat completions URL.
@@ -1533,10 +1522,7 @@ impl RemoteMultimodalConfigs {
         match endpoint {
             Some(ep) => {
                 let url = ep.api_url.as_deref().unwrap_or(&self.api_url);
-                let key = ep
-                    .api_key
-                    .as_deref()
-                    .or(self.api_key.as_deref());
+                let key = ep.api_key.as_deref().or(self.api_key.as_deref());
                 (url, &ep.model_name, key)
             }
             None => (&self.api_url, &self.model_name, self.api_key.as_deref()),
@@ -1562,12 +1548,8 @@ impl RemoteMultimodalConfigs {
         }
         match self.vision_route_mode {
             VisionRouteMode::AlwaysPrimary => true,
-            VisionRouteMode::TextFirst => {
-                round_idx == 0 || stagnated || action_stuck_rounds >= 3
-            }
-            VisionRouteMode::VisionFirst => {
-                round_idx < 2 || stagnated || action_stuck_rounds >= 3
-            }
+            VisionRouteMode::TextFirst => round_idx == 0 || stagnated || action_stuck_rounds >= 3,
+            VisionRouteMode::VisionFirst => round_idx < 2 || stagnated || action_stuck_rounds >= 3,
             VisionRouteMode::AgentDriven => false,
         }
     }
@@ -1644,9 +1626,7 @@ pub fn is_url_allowed(gate: Option<&super::PromptUrlGate>, url: &str) -> bool {
 ///
 /// Returns `Some({"effort":"..."})` if reasoning effort is configured,
 /// otherwise returns `None`.
-pub fn reasoning_payload(
-    cfg: &RemoteMultimodalConfig,
-) -> Option<serde_json::Value> {
+pub fn reasoning_payload(cfg: &RemoteMultimodalConfig) -> Option<serde_json::Value> {
     cfg.reasoning_effort.map(|effort| {
         let effort = match effort {
             ReasoningEffort::Low => "low",
@@ -1733,22 +1713,22 @@ mod tests {
         let cfg = RemoteMultimodalConfig::default();
         assert!(reasoning_payload(&cfg).is_none());
 
-        let cfg = RemoteMultimodalConfig::default()
-            .with_reasoning_effort(Some(ReasoningEffort::Low));
+        let cfg =
+            RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::Low));
         assert_eq!(
             reasoning_payload(&cfg),
             Some(serde_json::json!({ "effort": "low" }))
         );
 
-        let cfg = RemoteMultimodalConfig::default()
-            .with_reasoning_effort(Some(ReasoningEffort::Medium));
+        let cfg =
+            RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::Medium));
         assert_eq!(
             reasoning_payload(&cfg),
             Some(serde_json::json!({ "effort": "medium" }))
         );
 
-        let cfg = RemoteMultimodalConfig::default()
-            .with_reasoning_effort(Some(ReasoningEffort::High));
+        let cfg =
+            RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::High));
         assert_eq!(
             reasoning_payload(&cfg),
             Some(serde_json::json!({ "effort": "high" }))
@@ -1757,10 +1737,10 @@ mod tests {
 
     #[test]
     fn test_merged_config_includes_reasoning_effort() {
-        let base = RemoteMultimodalConfig::default()
-            .with_reasoning_effort(Some(ReasoningEffort::Low));
-        let override_cfg = RemoteMultimodalConfig::default()
-            .with_reasoning_effort(Some(ReasoningEffort::High));
+        let base =
+            RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::Low));
+        let override_cfg =
+            RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::High));
 
         let merged = merged_config(&base, &override_cfg);
         assert_eq!(merged.reasoning_effort, Some(ReasoningEffort::High));
@@ -1773,7 +1753,10 @@ mod tests {
             "qwen2.5-vl",
         );
 
-        assert_eq!(configs.api_url, "http://localhost:11434/v1/chat/completions");
+        assert_eq!(
+            configs.api_url,
+            "http://localhost:11434/v1/chat/completions"
+        );
         assert_eq!(configs.model_name, "qwen2.5-vl");
         assert!(configs.api_key.is_none());
         assert!(configs.system_prompt.is_none());
@@ -1781,14 +1764,18 @@ mod tests {
 
     #[test]
     fn test_remote_multimodal_configs_builder() {
-        let configs = RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o")
-            .with_api_key("sk-test")
-            .with_system_prompt("You are a helpful assistant.")
-            .with_concurrency_limit(5)
-            .with_screenshot(true);
+        let configs =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o")
+                .with_api_key("sk-test")
+                .with_system_prompt("You are a helpful assistant.")
+                .with_concurrency_limit(5)
+                .with_screenshot(true);
 
         assert_eq!(configs.api_key, Some("sk-test".to_string()));
-        assert_eq!(configs.system_prompt, Some("You are a helpful assistant.".to_string()));
+        assert_eq!(
+            configs.system_prompt,
+            Some("You are a helpful assistant.".to_string())
+        );
         assert_eq!(configs.concurrency_limit, Some(5));
         assert!(configs.cfg.screenshot);
     }
@@ -1826,8 +1813,14 @@ mod tests {
         analysis.html_length = 50_000;
 
         assert_eq!(HtmlCleaningProfile::Raw.estimate_savings(&analysis), 0);
-        assert_eq!(HtmlCleaningProfile::Minimal.estimate_savings(&analysis), 15_000);
-        assert_eq!(HtmlCleaningProfile::Slim.estimate_savings(&analysis), 20_000);
+        assert_eq!(
+            HtmlCleaningProfile::Minimal.estimate_savings(&analysis),
+            15_000
+        );
+        assert_eq!(
+            HtmlCleaningProfile::Slim.estimate_savings(&analysis),
+            20_000
+        );
     }
 
     #[test]
@@ -1905,10 +1898,8 @@ mod tests {
     #[test]
     fn test_remote_multimodal_configs_vision_detection() {
         // Vision model
-        let cfg = RemoteMultimodalConfigs::new(
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o",
-        );
+        let cfg =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o");
         assert!(cfg.model_supports_vision());
         assert!(cfg.should_include_screenshot());
 
@@ -1929,10 +1920,8 @@ mod tests {
         assert!(cfg.should_include_screenshot());
 
         // Explicit override to disable screenshots on vision model
-        let mut cfg = RemoteMultimodalConfigs::new(
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o",
-        );
+        let mut cfg =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o");
         cfg.cfg.include_screenshot = Some(false);
         assert!(!cfg.should_include_screenshot());
     }
@@ -1942,10 +1931,8 @@ mod tests {
         let screenshot = "base64data...";
 
         // Vision model - screenshot passes through
-        let cfg = RemoteMultimodalConfigs::new(
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o",
-        );
+        let cfg =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o");
         assert_eq!(cfg.filter_screenshot(Some(screenshot)), Some(screenshot));
 
         // Non-vision model - screenshot filtered out
@@ -1956,10 +1943,8 @@ mod tests {
         assert_eq!(cfg.filter_screenshot(Some(screenshot)), None);
 
         // No screenshot provided
-        let cfg = RemoteMultimodalConfigs::new(
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o",
-        );
+        let cfg =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o");
         assert_eq!(cfg.filter_screenshot(None), None);
     }
 
@@ -2082,17 +2067,15 @@ mod tests {
     #[test]
     fn test_resolve_model_cross_provider() {
         // Vision on OpenAI, text on Groq — different URLs and keys
-        let cfg = RemoteMultimodalConfigs::new(
-            "https://api.openai.com/v1/chat/completions",
-            "gpt-4o",
-        )
-        .with_api_key("sk-openai")
-        .with_vision_model(ModelEndpoint::new("gpt-4o"))
-        .with_text_model(
-            ModelEndpoint::new("llama-3.3-70b-versatile")
-                .with_api_url("https://api.groq.com/openai/v1/chat/completions")
-                .with_api_key("gsk-groq"),
-        );
+        let cfg =
+            RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", "gpt-4o")
+                .with_api_key("sk-openai")
+                .with_vision_model(ModelEndpoint::new("gpt-4o"))
+                .with_text_model(
+                    ModelEndpoint::new("llama-3.3-70b-versatile")
+                        .with_api_url("https://api.groq.com/openai/v1/chat/completions")
+                        .with_api_key("gsk-groq"),
+                );
 
         // Vision → uses OpenAI (inherits parent)
         let (url, model, key) = cfg.resolve_model_for_round(true);
@@ -2186,7 +2169,10 @@ mod tests {
             .with_vision_route_mode(VisionRouteMode::TextFirst);
 
         assert!(cfg.has_dual_model_routing());
-        assert_eq!(cfg.vision_model.as_ref().unwrap().model_name, "vision-model");
+        assert_eq!(
+            cfg.vision_model.as_ref().unwrap().model_name,
+            "vision-model"
+        );
         assert_eq!(cfg.text_model.as_ref().unwrap().model_name, "text-model");
         assert_eq!(cfg.vision_route_mode, VisionRouteMode::TextFirst);
     }

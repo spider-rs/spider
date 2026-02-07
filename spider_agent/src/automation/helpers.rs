@@ -57,7 +57,8 @@ pub fn extract_assistant_content(root: &Value) -> Option<String> {
 pub fn extract_usage(root: &Value) -> AutomationUsage {
     let usage = match root.get("usage") {
         Some(u) => u,
-        None => return AutomationUsage::default(),
+        // Count the LLM call even when the provider omits usage details.
+        None => return AutomationUsage::with_api_calls(0, 0, 1),
     };
 
     let prompt_tokens = usage
@@ -74,9 +75,10 @@ pub fn extract_usage(root: &Value) -> AutomationUsage {
     let _total_tokens = usage
         .get("total_tokens")
         .and_then(|v| v.as_u64())
-        .unwrap_or_else(|| (prompt_tokens + completion_tokens) as u64) as u32;
+        .unwrap_or_else(|| (prompt_tokens + completion_tokens) as u64)
+        as u32;
 
-    AutomationUsage::new(prompt_tokens, completion_tokens)
+    AutomationUsage::with_api_calls(prompt_tokens, completion_tokens, 1)
 }
 
 /// Extract the LAST ```json``` or ``` code block from text.
@@ -461,7 +463,7 @@ mod tests {
     #[test]
     fn test_best_effort_parse_with_prose() {
         let result = best_effort_parse_json_object(
-            "Here's my thinking...\n\nThe answer is: {\"key\": \"value\"}"
+            "Here's my thinking...\n\nThe answer is: {\"key\": \"value\"}",
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["key"], "value");
@@ -472,7 +474,11 @@ mod tests {
         // LLM outputs `}}` instead of `}` after Evaluate strings containing JS code with braces
         let broken = r#"{"label":"test","done":false,"steps":[{"Evaluate":"document.title = JSON.stringify({a:1});"}},{"Wait":300}],"extracted":{"level":7}}"#;
         let result = best_effort_parse_json_object(broken);
-        assert!(result.is_ok(), "Should repair double-brace error: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Should repair double-brace error: {:?}",
+            result.err()
+        );
         let val = result.unwrap();
         assert_eq!(val["label"], "test");
         let steps = val["steps"].as_array().unwrap();

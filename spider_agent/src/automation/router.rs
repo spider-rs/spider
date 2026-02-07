@@ -84,7 +84,11 @@ impl ModelRouter {
         let model = self.policy.model_for_tier(tier).to_string();
         let reason = self.explain_routing(task, tier);
 
-        RoutingDecision { model, tier, reason }
+        RoutingDecision {
+            model,
+            tier,
+            reason,
+        }
     }
 
     /// Analyze task complexity.
@@ -186,11 +190,7 @@ impl ModelRouter {
             reasons.push("standard task");
         }
 
-        format!(
-            "{:?} tier selected: {}",
-            tier,
-            reasons.join(", ")
-        )
+        format!("{:?} tier selected: {}", tier, reasons.join(", "))
     }
 
     /// Quickly route a simple prompt.

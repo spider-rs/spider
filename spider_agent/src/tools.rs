@@ -129,7 +129,11 @@ impl CustomTool {
     }
 
     /// Set basic authentication.
-    pub fn with_basic_auth(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn with_basic_auth(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
         self.auth = AuthConfig::Basic {
             username: username.into(),
             password: password.into(),
@@ -218,8 +222,9 @@ impl CustomTool {
         for (name, value) in &self.headers {
             let header_name = HeaderName::try_from(name.as_str())
                 .map_err(|e| AgentError::Tool(format!("Invalid header name '{}': {}", name, e)))?;
-            let header_value = HeaderValue::from_str(value)
-                .map_err(|e| AgentError::Tool(format!("Invalid header value for '{}': {}", name, e)))?;
+            let header_value = HeaderValue::from_str(value).map_err(|e| {
+                AgentError::Tool(format!("Invalid header value for '{}': {}", name, e))
+            })?;
             headers.insert(header_name, header_value);
         }
 
@@ -411,12 +416,11 @@ mod tests {
 
     #[test]
     fn test_auth_config_variants() {
-        let tool = CustomTool::new("test", "https://example.com")
-            .with_api_key("X-API-Key", "my_key");
+        let tool =
+            CustomTool::new("test", "https://example.com").with_api_key("X-API-Key", "my_key");
         assert!(matches!(tool.auth, AuthConfig::ApiKey { .. }));
 
-        let tool = CustomTool::new("test", "https://example.com")
-            .with_basic_auth("user", "pass");
+        let tool = CustomTool::new("test", "https://example.com").with_basic_auth("user", "pass");
         assert!(matches!(tool.auth, AuthConfig::Basic { .. }));
 
         let tool = CustomTool::new("test", "https://example.com")
@@ -429,8 +433,14 @@ mod tests {
         assert_eq!(HttpMethod::Get.as_reqwest_method(), reqwest::Method::GET);
         assert_eq!(HttpMethod::Post.as_reqwest_method(), reqwest::Method::POST);
         assert_eq!(HttpMethod::Put.as_reqwest_method(), reqwest::Method::PUT);
-        assert_eq!(HttpMethod::Patch.as_reqwest_method(), reqwest::Method::PATCH);
-        assert_eq!(HttpMethod::Delete.as_reqwest_method(), reqwest::Method::DELETE);
+        assert_eq!(
+            HttpMethod::Patch.as_reqwest_method(),
+            reqwest::Method::PATCH
+        );
+        assert_eq!(
+            HttpMethod::Delete.as_reqwest_method(),
+            reqwest::Method::DELETE
+        );
     }
 
     #[test]

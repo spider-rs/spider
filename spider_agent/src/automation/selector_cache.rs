@@ -212,8 +212,7 @@ impl SelectorCache {
 }
 
 /// A single entry in the selector cache.
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SelectorCacheEntry {
     /// The CSS selector that matched.
     pub selector: String,

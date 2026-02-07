@@ -17,10 +17,10 @@ use std::sync::Arc;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let openai_key = std::env::var("OPENAI_API_KEY")
-        .expect("OPENAI_API_KEY environment variable required");
-    let serper_key = std::env::var("SERPER_API_KEY")
-        .expect("SERPER_API_KEY environment variable required");
+    let openai_key =
+        std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY environment variable required");
+    let serper_key =
+        std::env::var("SERPER_API_KEY").expect("SERPER_API_KEY environment variable required");
 
     // Create agent with Arc for concurrent access
     let agent = Arc::new(
@@ -34,7 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Multimodal Agent Example ===\n");
 
     // Store query in memory for session tracking
-    agent.memory_set("session_id", serde_json::json!(uuid::Uuid::new_v4().to_string()));
+    agent.memory_set(
+        "session_id",
+        serde_json::json!(uuid::Uuid::new_v4().to_string()),
+    );
     agent.memory_set("queries_processed", serde_json::json!(0));
 
     // Concurrent searches
@@ -73,13 +76,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Update memory
-    let count = agent.memory_get("queries_processed")
+    let count = agent
+        .memory_get("queries_processed")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    agent.memory_set("queries_processed", serde_json::json!(count + queries.len() as u64));
+    agent.memory_set(
+        "queries_processed",
+        serde_json::json!(count + queries.len() as u64),
+    );
 
     // Extract from a few pages concurrently
-    println!("\n=== Extracting from {} pages ===\n", all_urls.len().min(3));
+    println!(
+        "\n=== Extracting from {} pages ===\n",
+        all_urls.len().min(3)
+    );
 
     let mut extract_handles = Vec::new();
     for url in all_urls.into_iter().take(3) {
@@ -87,10 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         extract_handles.push(tokio::spawn(async move {
             match agent.fetch(&url).await {
                 Ok(fetch) => {
-                    let extraction = agent.extract(
-                        &fetch.html,
-                        "Extract: title, main topic, key points (max 3)"
-                    ).await;
+                    let extraction = agent
+                        .extract(
+                            &fetch.html,
+                            "Extract: title, main topic, key points (max 3)",
+                        )
+                        .await;
                     (url, Some(fetch.status), extraction.ok())
                 }
                 Err(_) => (url, None, None),
@@ -105,8 +117,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Status: {}", status);
         }
         if let Some(data) = extraction {
-            println!("  Extracted: {}", serde_json::to_string(&data).unwrap_or_default()
-                .chars().take(150).collect::<String>());
+            println!(
+                "  Extracted: {}",
+                serde_json::to_string(&data)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(150)
+                    .collect::<String>()
+            );
         }
         println!();
     }

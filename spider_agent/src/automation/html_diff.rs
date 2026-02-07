@@ -179,7 +179,9 @@ impl PageStateDiff {
         // This is a simplified version - a full implementation would parse the DOM
 
         // Hash major sections
-        for tag in &["body", "main", "article", "section", "nav", "header", "footer", "form"] {
+        for tag in &[
+            "body", "main", "article", "section", "nav", "header", "footer", "form",
+        ] {
             if let Some((start, end)) = Self::find_tag_bounds(html, tag) {
                 let content = &html[start..end];
                 let hash = fnv1a64(content.as_bytes());
@@ -477,7 +479,8 @@ impl DiffStats {
             .unwrap_or(original_bytes);
         self.total_condensed_bytes += condensed_bytes;
 
-        self.average_savings = 1.0 - (self.total_condensed_bytes as f64 / self.total_original_bytes as f64);
+        self.average_savings =
+            1.0 - (self.total_condensed_bytes as f64 / self.total_original_bytes as f64);
 
         if result.has_changes() {
             self.rounds_with_changes += 1;
@@ -486,7 +489,8 @@ impl DiffStats {
 
     /// Get overall bytes saved.
     pub fn bytes_saved(&self) -> usize {
-        self.total_original_bytes.saturating_sub(self.total_condensed_bytes)
+        self.total_original_bytes
+            .saturating_sub(self.total_condensed_bytes)
     }
 }
 

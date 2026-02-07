@@ -11,10 +11,10 @@ use spider_agent::{Agent, ResearchOptions, SearchOptions};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let openai_key = std::env::var("OPENAI_API_KEY")
-        .expect("OPENAI_API_KEY environment variable required");
-    let serper_key = std::env::var("SERPER_API_KEY")
-        .expect("SERPER_API_KEY environment variable required");
+    let openai_key =
+        std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY environment variable required");
+    let serper_key =
+        std::env::var("SERPER_API_KEY").expect("SERPER_API_KEY environment variable required");
 
     let agent = Agent::builder()
         .with_openai(openai_key, "gpt-4o-mini")
@@ -61,9 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Token Usage ===");
     println!(
         "Prompt: {}, Completion: {}, Total: {}",
-        research.usage.prompt_tokens,
-        research.usage.completion_tokens,
-        research.usage.total_tokens
+        research.usage.prompt_tokens, research.usage.completion_tokens, research.usage.total_tokens
     );
 
     Ok(())

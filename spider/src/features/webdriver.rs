@@ -23,11 +23,7 @@ window.chrome = { runtime: {} };
 "#;
 
 /// WebDriver control tuple type alias (mirrors BrowserControl).
-pub type WebDriverControl = (
-    Arc<WebDriver>,
-    Option<JoinHandle<()>>,
-    Option<String>,
-);
+pub type WebDriverControl = (Arc<WebDriver>, Option<JoinHandle<()>>, Option<String>);
 
 /// WebDriver controller with RAII cleanup (mirrors BrowserController).
 pub struct WebDriverController {
@@ -69,9 +65,7 @@ impl Drop for WebDriverController {
 }
 
 /// Launch a WebDriver session with the provided configuration.
-pub async fn launch_driver(
-    config: &Configuration,
-) -> Option<WebDriverController> {
+pub async fn launch_driver(config: &Configuration) -> Option<WebDriverController> {
     let webdriver_config = config.webdriver_config.as_ref()?;
     launch_driver_base(webdriver_config, config).await
 }
@@ -115,21 +109,14 @@ pub async fn launch_driver_base(
         webdriver_config.viewport_width,
         webdriver_config.viewport_height,
     ) {
-        if let Err(e) = driver_arc
-            .set_window_rect(0, 0, width, height)
-            .await
-        {
+        if let Err(e) = driver_arc.set_window_rect(0, 0, width, height).await {
             log::warn!("Failed to set viewport: {:?}", e);
         }
     }
 
     // Set up timeouts
     if let Some(timeout) = webdriver_config.timeout {
-        let timeouts = TimeoutConfiguration::new(
-            Some(timeout),
-            Some(timeout),
-            Some(timeout),
-        );
+        let timeouts = TimeoutConfiguration::new(Some(timeout), Some(timeout), Some(timeout));
         if let Err(e) = driver_arc.update_timeouts(timeouts).await {
             log::warn!("Failed to set timeouts: {:?}", e);
         }
@@ -405,12 +392,10 @@ pub async fn attempt_navigation(
     let nav_future = driver.goto(url);
 
     match timeout {
-        Some(t) => {
-            match tokio::time::timeout(*t, nav_future).await {
-                Ok(result) => result,
-                Err(_) => Err(WebDriverError::Timeout("Navigation timeout".to_string())),
-            }
-        }
+        Some(t) => match tokio::time::timeout(*t, nav_future).await {
+            Ok(result) => result,
+            Err(_) => Err(WebDriverError::Timeout("Navigation timeout".to_string())),
+        },
         None => nav_future.await,
     }
 }
@@ -439,7 +424,9 @@ pub async fn take_screenshot(driver: &WebDriver) -> Result<Vec<u8>, WebDriverErr
 /// Take a screenshot (stub without feature).
 #[cfg(not(feature = "webdriver_screenshot"))]
 pub async fn take_screenshot(_driver: &WebDriver) -> Result<Vec<u8>, WebDriverError> {
-    Err(WebDriverError::FatalError("Screenshot feature not enabled".to_string()))
+    Err(WebDriverError::FatalError(
+        "Screenshot feature not enabled".to_string(),
+    ))
 }
 
 /// Execute JavaScript on the page and return the result as a JSON value.
@@ -492,10 +479,7 @@ pub fn get_random_webdriver_viewport() -> (u32, u32) {
 use crate::features::chrome_common::WebAutomation;
 
 /// Run a single WebAutomation action on the WebDriver.
-pub async fn run_automation(
-    driver: &WebDriver,
-    action: &WebAutomation,
-) -> bool {
+pub async fn run_automation(driver: &WebDriver, action: &WebAutomation) -> bool {
     let mut valid = false;
 
     match action {
@@ -516,10 +500,7 @@ pub async fn run_automation(
         }
         WebAutomation::ClickPoint { x, y } => {
             // WebDriver doesn't have direct click at coordinates, use JS
-            let js = format!(
-                "document.elementFromPoint({}, {})?.click()",
-                x, y
-            );
+            let js = format!("document.elementFromPoint({}, {})?.click()", x, y);
             valid = driver.execute(&js, vec![]).await.is_ok();
         }
         WebAutomation::ClickHold { selector, hold_ms } => {
@@ -553,7 +534,11 @@ pub async fn run_automation(
             );
             valid = driver.execute(&js, vec![]).await.is_ok();
         }
-        WebAutomation::ClickDrag { from, to, modifier: _ } => {
+        WebAutomation::ClickDrag {
+            from,
+            to,
+            modifier: _,
+        } => {
             // Simulate drag with JS
             let js = format!(
                 r#"
@@ -572,7 +557,13 @@ pub async fn run_automation(
             );
             valid = driver.execute(&js, vec![]).await.is_ok();
         }
-        WebAutomation::ClickDragPoint { from_x, from_y, to_x, to_y, modifier: _ } => {
+        WebAutomation::ClickDragPoint {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            modifier: _,
+        } => {
             let js = format!(
                 r#"
                 const fromEl = document.elementFromPoint({}, {});
@@ -588,7 +579,8 @@ pub async fn run_automation(
             valid = driver.execute(&js, vec![]).await.is_ok();
         }
         WebAutomation::ClickAllClickable() => {
-            let clickable_selector = "a, button, input[type='button'], input[type='submit'], [onclick], [role='button']";
+            let clickable_selector =
+                "a, button, input[type='button'], input[type='submit'], [onclick], [role='button']";
             if let Ok(eles) = driver.find_all(By::Css(clickable_selector)).await {
                 for ele in eles {
                     let _ = ele.click().await;
@@ -703,7 +695,11 @@ pub async fn run_automation(
             );
             valid = driver.execute(&js, vec![]).await.is_ok();
         }
-        WebAutomation::Screenshot { full_page: _, omit_background: _, output } => {
+        WebAutomation::Screenshot {
+            full_page: _,
+            omit_background: _,
+            output,
+        } => {
             #[cfg(feature = "webdriver_screenshot")]
             {
                 if let Ok(png_data) = driver.screenshot_as_png().await {
@@ -726,22 +722,14 @@ pub async fn run_automation(
 }
 
 /// Run a list of WebAutomation actions on the WebDriver.
-pub async fn run_automation_scripts(
-    driver: &WebDriver,
-    scripts: &[WebAutomation],
-) -> bool {
+pub async fn run_automation_scripts(driver: &WebDriver, scripts: &[WebAutomation]) -> bool {
     let mut valid = false;
 
     for script in scripts {
         if script == &WebAutomation::ValidateChain && !valid {
             break;
         }
-        match tokio::time::timeout(
-            Duration::from_secs(60),
-            run_automation(driver, script),
-        )
-        .await
-        {
+        match tokio::time::timeout(Duration::from_secs(60), run_automation(driver, script)).await {
             Ok(result) => valid = result,
             Err(_) => {
                 log::warn!("Automation script timed out: {:?}", script.name());

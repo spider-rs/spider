@@ -15,9 +15,7 @@
 
 extern crate spider;
 
-use spider::features::automation::{
-    ModelEndpoint, RemoteMultimodalConfigs, VisionRouteMode,
-};
+use spider::features::automation::{ModelEndpoint, RemoteMultimodalConfigs, VisionRouteMode};
 use spider::tokio;
 use spider::website::Website;
 
@@ -56,7 +54,7 @@ async fn main() {
 
     let mm_config = RemoteMultimodalConfigs::new(
         "https://openrouter.ai/api/v1/chat/completions", // default/fallback URL
-        "qwen/qwen-2.5-vl-72b-instruct",                // default/fallback model
+        "qwen/qwen-2.5-vl-72b-instruct",                 // default/fallback model
     )
     .with_api_key(&api_key)
     .with_vision_model(
@@ -89,9 +87,8 @@ async fn main() {
     mm_config.cfg.include_url = true;
     mm_config.cfg.max_rounds = 1;
     mm_config.cfg.request_json_object = true;
-    mm_config.cfg.extraction_prompt = Some(
-        "Extract book details: title, price, availability, UPC, description.".to_string(),
-    );
+    mm_config.cfg.extraction_prompt =
+        Some("Extract book details: title, price, availability, UPC, description.".to_string());
 
     // ── Run ───────────────────────────────────────────────────────────
     let mut website: Website = Website::new(url)

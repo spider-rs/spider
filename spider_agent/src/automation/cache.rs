@@ -69,9 +69,7 @@ impl CacheValue for Vec<u8> {
 impl CacheValue for serde_json::Value {
     fn estimated_size(&self) -> usize {
         // Rough estimate based on JSON serialization
-        serde_json::to_string(self)
-            .map(|s| s.len())
-            .unwrap_or(100)
+        serde_json::to_string(self).map(|s| s.len()).unwrap_or(100)
             + std::mem::size_of::<serde_json::Value>()
     }
 }
@@ -202,7 +200,8 @@ impl<V: CacheValue> SmartCache<V> {
 
         // Remove old entry if exists
         if let Some(old) = entries.remove(&key) {
-            self.current_size.fetch_sub(old.size_bytes, Ordering::Relaxed);
+            self.current_size
+                .fetch_sub(old.size_bytes, Ordering::Relaxed);
         }
 
         entries.insert(key, entry);
@@ -213,7 +212,8 @@ impl<V: CacheValue> SmartCache<V> {
     pub async fn remove(&self, key: &str) -> Option<V> {
         let mut entries = self.entries.write().await;
         if let Some(entry) = entries.remove(key) {
-            self.current_size.fetch_sub(entry.size_bytes, Ordering::Relaxed);
+            self.current_size
+                .fetch_sub(entry.size_bytes, Ordering::Relaxed);
             Some(entry.value)
         } else {
             None
@@ -272,7 +272,8 @@ impl<V: CacheValue> SmartCache<V> {
             .map(|(k, _)| k.clone())
         {
             if let Some(entry) = entries.remove(&lru_key) {
-                self.current_size.fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                self.current_size
+                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
                 self.stats.evictions.fetch_add(1, Ordering::Relaxed);
             }
         }
@@ -305,7 +306,8 @@ impl<V: CacheValue> SmartCache<V> {
 
         for key in expired {
             if let Some(entry) = entries.remove(&key) {
-                self.current_size.fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                self.current_size
+                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
                 self.stats.expirations.fetch_add(1, Ordering::Relaxed);
             }
         }
@@ -338,20 +340,12 @@ pub type JsonCache = SmartCache<serde_json::Value>;
 
 /// Create a bounded HTML cache.
 pub fn html_cache(max_pages: usize, max_mb: usize) -> HtmlCache {
-    SmartCache::with_limits(
-        max_pages,
-        max_mb * 1024 * 1024,
-        Duration::from_secs(300),
-    )
+    SmartCache::with_limits(max_pages, max_mb * 1024 * 1024, Duration::from_secs(300))
 }
 
 /// Create a bounded JSON cache.
 pub fn json_cache(max_entries: usize, max_mb: usize) -> JsonCache {
-    SmartCache::with_limits(
-        max_entries,
-        max_mb * 1024 * 1024,
-        Duration::from_secs(300),
-    )
+    SmartCache::with_limits(max_entries, max_mb * 1024 * 1024, Duration::from_secs(300))
 }
 
 #[cfg(test)]
@@ -369,7 +363,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_smart_cache_eviction() {
-        let cache: SmartCache<String> = SmartCache::with_limits(2, 1024 * 1024, Duration::from_secs(60));
+        let cache: SmartCache<String> =
+            SmartCache::with_limits(2, 1024 * 1024, Duration::from_secs(60));
 
         cache.set("key1", "value1".to_string()).await;
         cache.set("key2", "value2".to_string()).await;
@@ -395,7 +390,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_smart_cache_ttl() {
-        let cache: SmartCache<String> = SmartCache::with_limits(100, 1024 * 1024, Duration::from_millis(50));
+        let cache: SmartCache<String> =
+            SmartCache::with_limits(100, 1024 * 1024, Duration::from_millis(50));
 
         cache.set("key1", "value1".to_string()).await;
 

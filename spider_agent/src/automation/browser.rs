@@ -7,17 +7,15 @@
 use base64::{engine::general_purpose, Engine as _};
 #[cfg(feature = "chrome")]
 use chromiumoxide::{
-    cdp::browser_protocol::page::CaptureScreenshotFormat,
-    layout::Point,
-    page::ScreenshotParams,
+    cdp::browser_protocol::page::CaptureScreenshotFormat, layout::Point, page::ScreenshotParams,
     Page,
 };
 
 use super::{
-    clean_html_with_profile, truncate_utf8_tail, ActResult, AutomationMemory,
-    AutomationResult, AutomationUsage, CaptureProfile, EngineError, EngineResult,
-    HtmlCleaningProfile, MemoryOperation, PageObservation, RemoteMultimodalConfig,
-    RemoteMultimodalEngine,
+    clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_tail, ActResult,
+    ActionToolSchemas, AutomationMemory, AutomationResult, AutomationUsage, CaptureProfile,
+    EngineError, EngineResult, HtmlCleaningProfile, MemoryOperation, PageObservation,
+    RemoteMultimodalConfig, RemoteMultimodalEngine,
 };
 
 /// State signature for stagnation detection.
@@ -85,7 +83,9 @@ impl RemoteMultimodalEngine {
     ) -> EngineResult<String> {
         // Auto-detect text CAPTCHA and apply grayscale for better readability
         // Only apply if input is empty (first view) - don't grayscale after typing
-        let _ = page.evaluate(r#"
+        let _ = page
+            .evaluate(
+                r#"
             (() => {
                 const text = (document.body?.innerText || '').toLowerCase();
                 const input = document.querySelector('input[type="text"], input:not([type])');
@@ -107,7 +107,9 @@ impl RemoteMultimodalEngine {
                     });
                 }
             })()
-        "#).await;
+        "#,
+            )
+            .await;
 
         let params = ScreenshotParams::builder()
             .format(CaptureScreenshotFormat::Png)
@@ -121,13 +123,17 @@ impl RemoteMultimodalEngine {
             .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
 
         // Restore color after screenshot
-        let _ = page.evaluate(r#"
+        let _ = page
+            .evaluate(
+                r#"
             document.documentElement.style.filter = '';
             document.body.style.filter = '';
             document.querySelectorAll('canvas, img, svg, div').forEach(el => {
                 el.style.filter = '';
             });
-        "#).await;
+        "#,
+            )
+            .await;
 
         let b64 = general_purpose::STANDARD.encode(png);
         Ok(format!("data:image/png;base64,{}", b64))
@@ -215,6 +221,7 @@ impl RemoteMultimodalEngine {
         stagnated: bool,
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
+        user_message_extra: Option<&str>,
     ) -> String {
         let mut out = String::with_capacity(
             256 + url_input.len()
@@ -265,7 +272,7 @@ impl RemoteMultimodalEngine {
         }
 
         // Include user instructions if provided
-        if let Some(extra) = &self.user_message_extra {
+        if let Some(extra) = user_message_extra {
             if !extra.trim().is_empty() {
                 out.push_str("---\nUSER INSTRUCTIONS:\n");
                 out.push_str(extra.trim());
@@ -352,9 +359,15 @@ impl RemoteMultimodalEngine {
         url_input: &str,
         mut memory: Option<&mut AutomationMemory>,
     ) -> EngineResult<AutomationResult> {
-        // 0) URL gating check
+        let mut effective_cfg: RemoteMultimodalConfig = self.cfg.clone();
+        let mut effective_system_prompt = self.system_prompt.clone();
+        let mut effective_system_prompt_extra = self.system_prompt_extra.clone();
+        let mut effective_user_message_extra = self.user_message_extra.clone();
+
+        // 0) URL gating check + per-URL override application
         if let Some(gate) = &self.prompt_url_gate {
-            if !gate.is_allowed(url_input) {
+            let gate_match = gate.match_url(url_input);
+            if gate_match.is_none() {
                 return Ok(AutomationResult {
                     label: "url_not_allowed".into(),
                     steps_executed: 0,
@@ -368,42 +381,80 @@ impl RemoteMultimodalEngine {
                     reasoning: None,
                 });
             }
-        }
 
-        let base_effective_cfg: RemoteMultimodalConfig = self.cfg.clone();
+            if let Some(Some(override_cfg)) = gate_match {
+                let defaults = super::AutomationConfig::default();
+
+                if override_cfg.max_steps != defaults.max_steps {
+                    effective_cfg.max_rounds = override_cfg.max_steps.max(1);
+                }
+                if override_cfg.max_retries != defaults.max_retries {
+                    effective_cfg.retry.max_attempts = override_cfg.max_retries.max(1);
+                }
+                if override_cfg.capture_screenshots != defaults.capture_screenshots {
+                    effective_cfg.screenshot = override_cfg.capture_screenshots;
+                }
+                if override_cfg.capture_profile != defaults.capture_profile {
+                    effective_cfg.capture_profiles = vec![override_cfg.capture_profile.clone()];
+                }
+                if override_cfg.extract_on_success || override_cfg.extraction_prompt.is_some() {
+                    effective_cfg.extra_ai_data = true;
+                }
+                if let Some(extraction_prompt) = &override_cfg.extraction_prompt {
+                    if !extraction_prompt.trim().is_empty() {
+                        effective_cfg.extraction_prompt = Some(extraction_prompt.clone());
+                    }
+                }
+
+                if let Some(system_prompt) = &override_cfg.system_prompt {
+                    if !system_prompt.trim().is_empty() {
+                        effective_system_prompt = Some(system_prompt.clone());
+                    }
+                }
+                if let Some(system_prompt_extra) = &override_cfg.system_prompt_extra {
+                    if !system_prompt_extra.trim().is_empty() {
+                        effective_system_prompt_extra = Some(system_prompt_extra.clone());
+                    }
+                }
+                if let Some(user_message_extra) = &override_cfg.user_message_extra {
+                    if !user_message_extra.trim().is_empty() {
+                        effective_user_message_extra = Some(user_message_extra.clone());
+                    }
+                }
+            }
+        }
 
         // Extraction-only optimization: skip screenshots unless explicitly requested.
         // Saves ~35k tokens per call for vision-capable models doing text extraction.
-        let extraction_only = base_effective_cfg.is_extraction_only();
+        let extraction_only = effective_cfg.is_extraction_only();
         let skip_screenshot_for_extraction =
-            extraction_only && base_effective_cfg.include_screenshot != Some(true);
+            extraction_only && effective_cfg.include_screenshot != Some(true);
 
         // capture profiles fallback
-        let capture_profiles: Vec<CaptureProfile> =
-            if base_effective_cfg.capture_profiles.is_empty() {
-                vec![
-                    CaptureProfile {
-                        full_page: false,
-                        omit_background: true,
-                        html_cleaning: HtmlCleaningProfile::Default,
-                        html_max_bytes: base_effective_cfg.html_max_bytes,
-                        attempt_note: Some("default profile 1: viewport screenshot".into()),
-                        ..Default::default()
-                    },
-                    CaptureProfile {
-                        full_page: true,
-                        omit_background: true,
-                        html_cleaning: HtmlCleaningProfile::Aggressive,
-                        html_max_bytes: base_effective_cfg.html_max_bytes,
-                        attempt_note: Some(
-                            "default profile 2: full-page screenshot + aggressive HTML".into(),
-                        ),
-                        ..Default::default()
-                    },
-                ]
-            } else {
-                base_effective_cfg.capture_profiles.clone()
-            };
+        let capture_profiles: Vec<CaptureProfile> = if effective_cfg.capture_profiles.is_empty() {
+            vec![
+                CaptureProfile {
+                    full_page: false,
+                    omit_background: true,
+                    html_cleaning: HtmlCleaningProfile::Default,
+                    html_max_bytes: effective_cfg.html_max_bytes,
+                    attempt_note: Some("default profile 1: viewport screenshot".into()),
+                    ..Default::default()
+                },
+                CaptureProfile {
+                    full_page: true,
+                    omit_background: true,
+                    html_cleaning: HtmlCleaningProfile::Aggressive,
+                    html_max_bytes: effective_cfg.html_max_bytes,
+                    attempt_note: Some(
+                        "default profile 2: full-page screenshot + aggressive HTML".into(),
+                    ),
+                    ..Default::default()
+                },
+            ]
+        } else {
+            effective_cfg.capture_profiles.clone()
+        };
 
         let mut total_steps_executed = 0usize;
         let mut last_label = String::from("automation");
@@ -419,9 +470,6 @@ impl RemoteMultimodalEngine {
         let mut action_stuck_rounds: usize = 0;
         // Dual-model routing: set by `request_vision` memory_op to force vision next round
         let mut force_vision_next_round: bool = false;
-
-        // Effective system_prompt_extra — may be augmented with recalled experience context.
-        let mut effective_system_prompt_extra = self.system_prompt_extra.clone();
 
         // Recall learned strategies from long-term experience memory.
         // Uses spawn_blocking to contain !Send ffmpeg temporaries from memvid-rs.
@@ -445,10 +493,13 @@ impl RemoteMultimodalEngine {
                                 &experiences,
                                 max_context_chars,
                             );
-                            if ctx.is_empty() { None } else {
+                            if ctx.is_empty() {
+                                None
+                            } else {
                                 log::info!(
                                     "Recalled {} strategies ({} chars)",
-                                    experiences.len(), ctx.len(),
+                                    experiences.len(),
+                                    ctx.len(),
                                 );
                                 Some(ctx)
                             }
@@ -475,7 +526,7 @@ impl RemoteMultimodalEngine {
             }
         }
 
-        let rounds = base_effective_cfg.max_rounds.max(1);
+        let rounds = effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
             // pick capture profile by round (clamp to last)
             let cap = capture_profiles
@@ -493,24 +544,23 @@ impl RemoteMultimodalEngine {
             force_vision_next_round = false;
 
             // Capture state – skip screenshot when text-only round
-            let html_fut = self.html_context_with_profile(page, &base_effective_cfg, cap);
-            let url_fut = async {
-                Ok::<String, EngineError>(self.url_context(page, &base_effective_cfg).await)
-            };
-            let title_fut = async {
-                Ok::<String, EngineError>(self.title_context(page, &base_effective_cfg).await)
-            };
+            let html_fut = self.html_context_with_profile(page, &effective_cfg, cap);
+            let url_fut =
+                async { Ok::<String, EngineError>(self.url_context(page, &effective_cfg).await) };
+            let title_fut =
+                async { Ok::<String, EngineError>(self.title_context(page, &effective_cfg).await) };
 
-            let (screenshot, html, mut url_now, mut title_now) =
-                if use_vision && !skip_screenshot_for_extraction {
-                    let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
-                    let (s, h, u, t) =
-                        tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
-                    (s, h, u, t)
-                } else {
-                    let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
-                    (String::new(), h, u, t)
-                };
+            #[allow(unused_mut)]
+            let (screenshot, html, mut url_now, mut title_now) = if use_vision
+                && !skip_screenshot_for_extraction
+            {
+                let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
+                let (s, h, u, t) = tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
+                (s, h, u, t)
+            } else {
+                let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
+                (String::new(), h, u, t)
+            };
 
             // Fallback to the input URL if page.url() is empty/unsupported.
             if url_now.is_empty() {
@@ -539,8 +589,7 @@ impl RemoteMultimodalEngine {
                             let _ = page.evaluate(*js).await;
                         }
                         // Re-capture title after pre_evaluate (JS sets document.title)
-                        let new_title =
-                            self.title_context(page, &base_effective_cfg).await;
+                        let new_title = self.title_context(page, &effective_cfg).await;
                         if !new_title.is_empty() && new_title != title_now {
                             log::debug!(
                                 "Pre-evaluate updated title: '{}' -> '{}'",
@@ -562,8 +611,7 @@ impl RemoteMultimodalEngine {
                     stagnated,
                     action_stuck_rounds,
                     false,
-                )
-            {
+                ) {
                 true // upgraded to vision mid-round
             } else {
                 use_vision
@@ -579,7 +627,7 @@ impl RemoteMultimodalEngine {
             // Ask model (with retry policy) - pass memory as immutable ref for context
             let plan = self
                 .infer_plan_with_retry(
-                    &base_effective_cfg,
+                    &effective_cfg,
                     cap,
                     url_input,
                     &url_now,
@@ -591,7 +639,9 @@ impl RemoteMultimodalEngine {
                     action_stuck_rounds,
                     memory.as_deref(),
                     use_vision,
+                    effective_system_prompt.as_deref(),
                     effective_system_prompt_extra.as_deref(),
+                    effective_user_message_extra.as_deref(),
                 )
                 .await?;
 
@@ -666,7 +716,10 @@ impl RemoteMultimodalEngine {
                                 if let Some(skill_name) = value.as_str() {
                                     if registry.get(skill_name).is_some() {
                                         log::info!("Agent requested skill: {}", skill_name);
-                                        mem.set("_active_skill".to_string(), serde_json::json!(skill_name));
+                                        mem.set(
+                                            "_active_skill".to_string(),
+                                            serde_json::json!(skill_name),
+                                        );
                                     }
                                 }
                             }
@@ -729,7 +782,7 @@ impl RemoteMultimodalEngine {
                 }
             } else if !plan.steps.is_empty() {
                 let (steps_executed, spawn_pages) = self
-                    .execute_steps(page, &plan.steps, &base_effective_cfg)
+                    .execute_steps(page, &plan.steps, &effective_cfg)
                     .await?;
                 total_steps_executed += steps_executed;
                 all_spawn_pages.extend(spawn_pages);
@@ -765,7 +818,7 @@ impl RemoteMultimodalEngine {
                 }
 
                 // Capture final screenshot (enabled by default)
-                let final_screenshot = if base_effective_cfg.screenshot {
+                let final_screenshot = if effective_cfg.screenshot {
                     self.take_final_screenshot(page).await.ok()
                 } else {
                     None
@@ -786,9 +839,9 @@ impl RemoteMultimodalEngine {
             }
 
             // Post-step delay
-            if base_effective_cfg.post_plan_wait_ms > 0 {
+            if effective_cfg.post_plan_wait_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(
-                    base_effective_cfg.post_plan_wait_ms,
+                    effective_cfg.post_plan_wait_ms,
                 ))
                 .await;
             }
@@ -822,7 +875,7 @@ impl RemoteMultimodalEngine {
         }
 
         // Final screenshot after all rounds
-        let final_screenshot = if base_effective_cfg.screenshot {
+        let final_screenshot = if effective_cfg.screenshot {
             self.take_final_screenshot(page).await.ok()
         } else {
             None
@@ -831,8 +884,11 @@ impl RemoteMultimodalEngine {
         Ok(AutomationResult {
             label: last_label,
             steps_executed: total_steps_executed,
-            success: true,
-            error: None,
+            success: false,
+            error: Some(format!(
+                "automation did not complete within {} round(s)",
+                rounds
+            )),
             usage: total_usage,
             extracted: last_extracted,
             screenshot: final_screenshot,
@@ -857,7 +913,9 @@ impl RemoteMultimodalEngine {
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
         use_vision: bool,
-        recalled_context: Option<&str>,
+        base_system_prompt: Option<&str>,
+        system_prompt_extra: Option<&str>,
+        user_message_extra: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err = None;
@@ -877,7 +935,9 @@ impl RemoteMultimodalEngine {
                     action_stuck_rounds,
                     memory,
                     use_vision,
-                    recalled_context,
+                    base_system_prompt,
+                    system_prompt_extra,
+                    user_message_extra,
                 )
                 .await
             {
@@ -912,11 +972,13 @@ impl RemoteMultimodalEngine {
         action_stuck_rounds: usize,
         memory: Option<&AutomationMemory>,
         use_vision: bool,
-        recalled_context: Option<&str>,
+        base_system_prompt: Option<&str>,
+        system_prompt_extra: Option<&str>,
+        user_message_extra: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
-            best_effort_parse_json_object, extract_assistant_content, extract_usage, reasoning_payload,
-            DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
+            best_effort_parse_json_object, extract_assistant_content, extract_usage,
+            reasoning_payload, DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
         };
         use serde::Serialize;
 
@@ -938,6 +1000,10 @@ impl RemoteMultimodalEngine {
             response_format: Option<serde_json::Value>,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tools: Option<Vec<serde_json::Value>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tool_choice: Option<serde_json::Value>,
         }
 
         // Build system prompt — use focused extraction prompt for single-round extraction
@@ -946,20 +1012,28 @@ impl RemoteMultimodalEngine {
         } else {
             DEFAULT_SYSTEM_PROMPT.to_string()
         };
-        // Add recalled experience context (from long-term memory)
-        if let Some(ctx) = recalled_context {
-            system_msg.push_str("\n\n");
-            system_msg.push_str(ctx);
+        if let Some(base) = base_system_prompt {
+            if !base.trim().is_empty() {
+                system_msg.push_str("\n\n---\nCONFIGURED SYSTEM INSTRUCTIONS:\n");
+                system_msg.push_str(base.trim());
+            }
         }
-        // Add any extra system prompt content (but never replace the default)
-        if let Some(extra) = &self.system_prompt_extra {
-            system_msg.push_str("\n\n");
-            system_msg.push_str(extra);
+        if let Some(extra) = system_prompt_extra {
+            if !extra.trim().is_empty() {
+                system_msg.push_str("\n\n---\nADDITIONAL INSTRUCTIONS:\n");
+                system_msg.push_str(extra.trim());
+            }
         }
         // Inject matching skills from the skill registry (limited by config)
         #[cfg(feature = "skills")]
         if let Some(ref registry) = self.skill_registry {
-            log::debug!("Skill registry: {} skills, checking url={} title={} html_len={}", registry.len(), url_now, title_now, html.len());
+            log::debug!(
+                "Skill registry: {} skills, checking url={} title={} html_len={}",
+                registry.len(),
+                url_now,
+                title_now,
+                html.len()
+            );
             let mut skill_ctx = registry.match_context_limited(
                 url_now,
                 title_now,
@@ -987,16 +1061,32 @@ impl RemoteMultimodalEngine {
             }
             if !skill_ctx.is_empty() {
                 // Log which skills matched
-                let matched: Vec<_> = registry.find_matching(url_now, title_now, html).iter().map(|s| s.name.as_str()).collect();
-                log::debug!("Injecting {} skills ({} chars): {:?}", matched.len(), skill_ctx.len(), matched);
+                let matched: Vec<_> = registry
+                    .find_matching(url_now, title_now, html)
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect();
+                log::debug!(
+                    "Injecting {} skills ({} chars): {:?}",
+                    matched.len(),
+                    skill_ctx.len(),
+                    matched
+                );
                 system_msg.push_str("\n\n---\nACTIVATED SKILLS:\n");
                 system_msg.push_str(&skill_ctx);
             } else if !registry.is_empty() {
-                log::debug!("No skills matched for url={} title={} html_len={}", url_now, title_now, html.len());
+                log::debug!(
+                    "No skills matched for url={} title={} html_len={}",
+                    url_now,
+                    title_now,
+                    html.len()
+                );
                 // No skills matched, but skills are available. Show catalog.
                 let catalog: Vec<&str> = registry.skill_names().collect();
                 if !catalog.is_empty() {
-                    system_msg.push_str("\n\nAvailable skills (request via memory_ops `request_skill`): ");
+                    system_msg.push_str(
+                        "\n\nAvailable skills (request via memory_ops `request_skill`): ",
+                    );
                     system_msg.push_str(&catalog.join(", "));
                 }
             }
@@ -1014,8 +1104,7 @@ impl RemoteMultimodalEngine {
                     system_msg.push_str(desc.trim());
                     system_msg.push('\n');
                 }
-                system_msg
-                    .push_str("The \"extracted\" field MUST conform to this JSON Schema:\n");
+                system_msg.push_str("The \"extracted\" field MUST conform to this JSON Schema:\n");
                 system_msg.push_str(&schema.schema);
                 system_msg.push('\n');
                 if schema.strict {
@@ -1028,7 +1117,9 @@ impl RemoteMultimodalEngine {
                 system_msg.push('\n');
             }
             if effective_cfg.relevance_gate {
-                system_msg.push_str("\n---\nRELEVANCE GATE: Include \"relevant\": true|false in your response.\n");
+                system_msg.push_str(
+                    "\n---\nRELEVANCE GATE: Include \"relevant\": true|false in your response.\n",
+                );
                 if let Some(prompt) = &effective_cfg.relevance_prompt {
                     system_msg.push_str("Relevance criteria: ");
                     system_msg.push_str(prompt.trim());
@@ -1053,6 +1144,7 @@ impl RemoteMultimodalEngine {
             stagnated,
             action_stuck_rounds,
             memory,
+            user_message_extra,
         );
 
         // Inject text-only mode hint when dual routing skips screenshot
@@ -1090,8 +1182,32 @@ impl RemoteMultimodalEngine {
             },
         ];
 
-        let response_format = if effective_cfg.request_json_object {
+        let use_tools = !effective_cfg.is_extraction_only()
+            && effective_cfg
+                .tool_calling_mode
+                .should_use_tools(resolved_model);
+
+        let response_format = if use_tools {
+            None
+        } else if effective_cfg.request_json_object {
             Some(serde_json::json!({ "type": "json_object" }))
+        } else {
+            None
+        };
+
+        let tools = if use_tools {
+            Some(
+                ActionToolSchemas::all()
+                    .into_iter()
+                    .filter_map(|tool| serde_json::to_value(tool).ok())
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+
+        let tool_choice = if use_tools {
+            Some(serde_json::json!("auto"))
         } else {
             None
         };
@@ -1103,19 +1219,20 @@ impl RemoteMultimodalEngine {
             max_tokens: Some(effective_cfg.max_tokens as u32),
             response_format,
             reasoning: reasoning_payload(effective_cfg),
+            tools,
+            tool_choice,
         };
 
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
         // Make HTTP request with 2 minute timeout for LLM calls
-        static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(|| {
-                reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(120))
-                    .build()
-                    .unwrap_or_else(|_| reqwest::Client::new())
-            });
+        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new())
+        });
 
         let mut req = CLIENT.post(resolved_api_url).json(&request);
         if let Some(key) = resolved_api_key {
@@ -1135,14 +1252,35 @@ impl RemoteMultimodalEngine {
         }
 
         // Extract content and usage
-        let content = extract_assistant_content(&body)
-            .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
-        log::debug!("LLM response content: {}", content);
-        let mut usage = extract_usage(&body);
-        usage.increment_llm_calls();
+        let content = extract_assistant_content(&body).unwrap_or_default();
+        if !content.is_empty() {
+            log::debug!("LLM response content: {}", content);
+        }
+        let usage = extract_usage(&body);
+
+        let tool_steps = if use_tools {
+            let tool_calls = parse_tool_calls(&body);
+            if !tool_calls.is_empty() {
+                tool_calls_to_steps(&tool_calls)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        if content.trim().is_empty() && tool_steps.is_empty() {
+            return Err(EngineError::MissingField("choices[0].message.content"));
+        }
 
         // Parse JSON response
-        let parsed = if effective_cfg.best_effort_json_extract {
+        let parsed = if content.trim().is_empty() {
+            serde_json::json!({
+                "label": "automation",
+                "done": false,
+                "steps": []
+            })
+        } else if effective_cfg.best_effort_json_extract {
             best_effort_parse_json_object(&content)?
         } else {
             serde_json::from_str(&content)?
@@ -1155,18 +1293,34 @@ impl RemoteMultimodalEngine {
             .unwrap_or("automation")
             .to_string();
 
-        let done = parsed.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+        let done = parsed
+            .get("done")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        let steps = parsed
+        let mut steps = parsed
             .get("steps")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        log::debug!("Parsed plan - label: {}, done: {}, steps: {:?}", label, done, steps);
+        if !tool_steps.is_empty() {
+            steps.extend(tool_steps);
+        }
+        log::debug!(
+            "Parsed plan - label: {}, done: {}, steps: {:?}",
+            label,
+            done,
+            steps
+        );
 
         // Extract relevance field if gate is enabled
         let relevant = if effective_cfg.relevance_gate {
-            Some(parsed.get("relevant").and_then(|v| v.as_bool()).unwrap_or(true))
+            Some(
+                parsed
+                    .get("relevant")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            )
         } else {
             None
         };
@@ -1234,9 +1388,10 @@ impl RemoteMultimodalEngine {
                     let mut fill_data = serde_json::Map::new();
                     for step in &steps {
                         if let Some(fill) = step.get("Fill") {
-                            if let (Some(sel), Some(val)) =
-                                (fill.get("selector").and_then(|s| s.as_str()), fill.get("value"))
-                            {
+                            if let (Some(sel), Some(val)) = (
+                                fill.get("selector").and_then(|s| s.as_str()),
+                                fill.get("value"),
+                            ) {
                                 // Use the selector (or last segment) as key
                                 let key = sel
                                     .rsplit_once(' ')
@@ -1379,7 +1534,12 @@ impl RemoteMultimodalEngine {
                         if let Ok(sv) = elem.scroll_into_view().await {
                             if let Ok(point) = sv.clickable_point().await {
                                 let _ = page.move_mouse_smooth(point).await;
-                                let _ = page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await;
+                                let _ = page
+                                    .click_and_hold(
+                                        point,
+                                        std::time::Duration::from_millis(hold_ms),
+                                    )
+                                    .await;
                                 return true;
                             }
                         }
@@ -1393,7 +1553,9 @@ impl RemoteMultimodalEngine {
                 let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
-                let _ = page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await;
+                let _ = page
+                    .click_and_hold(point, std::time::Duration::from_millis(hold_ms))
+                    .await;
                 true
             }
             "DoubleClick" => {
@@ -1441,7 +1603,10 @@ impl RemoteMultimodalEngine {
                 true
             }
             "ClickAllClickable" => {
-                if let Ok(elements) = page.find_elements(r#"a, button, [onclick], [role="button"]"#).await {
+                if let Ok(elements) = page
+                    .find_elements(r#"a, button, [onclick], [role="button"]"#)
+                    .await
+                {
                     for elem in elements {
                         let _ = elem.click().await;
                     }
@@ -1460,7 +1625,9 @@ impl RemoteMultimodalEngine {
                                 if let Ok(to_elem) = page.find_element(to_sel).await {
                                     if let Ok(to_sv) = to_elem.scroll_into_view().await {
                                         if let Ok(to_point) = to_sv.clickable_point().await {
-                                            let _ = page.click_and_drag_smooth(from_point, to_point).await;
+                                            let _ = page
+                                                .click_and_drag_smooth(from_point, to_point)
+                                                .await;
                                             return true;
                                         }
                                     }
@@ -1476,10 +1643,9 @@ impl RemoteMultimodalEngine {
                 let from_y = value.get("from_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_x = value.get("to_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let to_y = value.get("to_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let _ = page.click_and_drag_smooth(
-                    Point::new(from_x, from_y),
-                    Point::new(to_x, to_y),
-                ).await;
+                let _ = page
+                    .click_and_drag_smooth(Point::new(from_x, from_y), Point::new(to_x, to_y))
+                    .await;
                 true
             }
 
@@ -1491,10 +1657,12 @@ impl RemoteMultimodalEngine {
                     if let Ok(elem) = page.find_element(sel).await {
                         let _ = elem.click().await;
                         // Clear existing value before typing
-                        let _ = page.evaluate(format!(
-                            "document.querySelector('{}').value = ''",
-                            sel.replace('\'', "\\'")
-                        )).await;
+                        let _ = page
+                            .evaluate(format!(
+                                "document.querySelector('{}').value = ''",
+                                sel.replace('\'', "\\'")
+                            ))
+                            .await;
                         let _ = elem.type_str(txt).await;
                         return true;
                     }
@@ -1505,20 +1673,21 @@ impl RemoteMultimodalEngine {
                 let text = value.get("value").and_then(|v| v.as_str());
                 if let Some(txt) = text {
                     // Type into the currently focused element
-                    let _ = page.evaluate(format!(
-                        "document.activeElement.value += '{}'",
-                        txt.replace('\'', "\\'")
-                    )).await;
+                    let _ = page
+                        .evaluate(format!(
+                            "document.activeElement.value += '{}'",
+                            txt.replace('\'', "\\'")
+                        ))
+                        .await;
                     return true;
                 }
                 false
             }
             "Clear" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
-                        "document.querySelector('{}').value = ''",
-                        selector
-                    )).await;
+                    let _ = page
+                        .evaluate(format!("document.querySelector('{}').value = ''", selector))
+                        .await;
                     return true;
                 }
                 false
@@ -1558,12 +1727,16 @@ impl RemoteMultimodalEngine {
             // === Scroll Actions ===
             "ScrollX" => {
                 let pixels = value.as_i64().unwrap_or(0);
-                let _ = page.evaluate(format!("window.scrollBy({}, 0)", pixels)).await;
+                let _ = page
+                    .evaluate(format!("window.scrollBy({}, 0)", pixels))
+                    .await;
                 true
             }
             "ScrollY" => {
                 let pixels = value.as_i64().unwrap_or(300);
-                let _ = page.evaluate(format!("window.scrollBy(0, {})", pixels)).await;
+                let _ = page
+                    .evaluate(format!("window.scrollBy(0, {})", pixels))
+                    .await;
                 true
             }
             "ScrollTo" => {
@@ -1579,13 +1752,17 @@ impl RemoteMultimodalEngine {
             "ScrollToPoint" => {
                 let x = value.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
                 let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-                let _ = page.evaluate(format!("window.scrollTo({}, {})", x, y)).await;
+                let _ = page
+                    .evaluate(format!("window.scrollTo({}, {})", x, y))
+                    .await;
                 true
             }
             "InfiniteScroll" => {
                 let max_scrolls = value.as_u64().unwrap_or(5);
                 for _ in 0..max_scrolls {
-                    let _ = page.evaluate("window.scrollTo(0, document.body.scrollHeight)").await;
+                    let _ = page
+                        .evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        .await;
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 true
@@ -1610,7 +1787,10 @@ impl RemoteMultimodalEngine {
             }
             "WaitForWithTimeout" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
-                let timeout = value.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000);
+                let timeout = value
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(5000);
                 if let Some(sel) = selector {
                     let iterations = timeout / 100;
                     for _ in 0..iterations {
@@ -1640,7 +1820,10 @@ impl RemoteMultimodalEngine {
             }
             "WaitForDom" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
-                let timeout = value.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000);
+                let timeout = value
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(5000);
                 tokio::time::sleep(std::time::Duration::from_millis(timeout.min(5000))).await;
                 if let Some(sel) = selector {
                     return page.find_element(sel).await.is_ok();
@@ -1701,20 +1884,18 @@ impl RemoteMultimodalEngine {
             }
             "Focus" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
-                        "document.querySelector('{}')?.focus()",
-                        selector
-                    )).await;
+                    let _ = page
+                        .evaluate(format!("document.querySelector('{}')?.focus()", selector))
+                        .await;
                     return true;
                 }
                 false
             }
             "Blur" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
-                        "document.querySelector('{}')?.blur()",
-                        selector
-                    )).await;
+                    let _ = page
+                        .evaluate(format!("document.querySelector('{}')?.blur()", selector))
+                        .await;
                     return true;
                 }
                 false
@@ -1744,10 +1925,7 @@ impl RemoteMultimodalEngine {
                         .get("device_scale_factor")
                         .and_then(|v| v.as_f64())
                         .unwrap_or(2.0);
-                    let mobile = obj
-                        .get("mobile")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                    let mobile = obj.get("mobile").and_then(|v| v.as_bool()).unwrap_or(false);
 
                     use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
                     let params = SetDeviceMetricsOverrideParams::new(
@@ -1884,13 +2062,12 @@ Only return the JSON object, no other text."#;
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(|| {
-                reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(120))
-                    .build()
-                    .unwrap_or_else(|_| reqwest::Client::new())
-            });
+        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new())
+        });
 
         let mut req = CLIENT.post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
@@ -1911,15 +2088,18 @@ Only return the JSON object, no other text."#;
 
         let content = extract_assistant_content(&body)
             .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
-        let mut usage = extract_usage(&body);
-        usage.increment_llm_calls();
+        let usage = extract_usage(&body);
 
         let step = best_effort_parse_json_object(&content)?;
 
         // Execute the action
-        let (steps_executed, _spawn_pages) = self.execute_steps(page, &[step.clone()], &self.cfg).await?;
+        let (steps_executed, _spawn_pages) =
+            self.execute_steps(page, &[step.clone()], &self.cfg).await?;
 
-        let action_type = step.get("action").and_then(|v| v.as_str()).map(String::from);
+        let action_type = step
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let description = step
             .get("description")
             .and_then(|v| v.as_str())
@@ -2059,13 +2239,12 @@ Only return the JSON object."#;
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        static CLIENT: std::sync::LazyLock<reqwest::Client> =
-            std::sync::LazyLock::new(|| {
-                reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(120))
-                    .build()
-                    .unwrap_or_else(|_| reqwest::Client::new())
-            });
+        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new())
+        });
 
         let mut req = CLIENT.post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
@@ -2086,13 +2265,14 @@ Only return the JSON object."#;
 
         let content = extract_assistant_content(&body)
             .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
-        let mut usage = extract_usage(&body);
-        usage.increment_llm_calls();
+        let usage = extract_usage(&body);
 
         let parsed = best_effort_parse_json_object(&content)?;
 
         // Build PageObservation from parsed JSON
-        let mut obs = PageObservation::new(&url).with_title(&title).with_usage(usage);
+        let mut obs = PageObservation::new(&url)
+            .with_title(&title)
+            .with_usage(usage);
 
         if let Some(desc) = parsed.get("description").and_then(|v| v.as_str()) {
             obs = obs.with_description(desc);
@@ -2103,7 +2283,10 @@ Only return the JSON object."#;
         }
 
         // Parse interactive elements
-        if let Some(elements) = parsed.get("interactive_elements").and_then(|v| v.as_array()) {
+        if let Some(elements) = parsed
+            .get("interactive_elements")
+            .and_then(|v| v.as_array())
+        {
             for elem in elements {
                 if let Ok(ie) = serde_json::from_value(elem.clone()) {
                     obs.interactive_elements.push(ie);
@@ -2226,10 +2409,7 @@ impl SpawnedPageResult {
 
     /// Get any additional spawn_pages from this page (for recursive crawling).
     pub fn spawn_pages(&self) -> Option<&[String]> {
-        self.result
-            .as_ref()
-            .ok()
-            .map(|r| r.spawn_pages.as_slice())
+        self.result.as_ref().ok().map(|r| r.spawn_pages.as_slice())
     }
 
     /// Get the token usage from this page.
@@ -2243,7 +2423,9 @@ impl SpawnedPageResult {
 /// This allows spider to propagate ChromeEventTracker or similar tracking
 /// from the main page to spawned pages.
 #[cfg(feature = "chrome")]
-pub type PageSetupFn = Box<dyn Fn(&Page) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+pub type PageSetupFn = Box<
+    dyn Fn(&Page) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
+>;
 
 /// Options for configuring spawned page automation.
 ///
@@ -2512,30 +2694,24 @@ pub async fn run_spawn_pages_with_options(
                 None
             };
 
-            // Build page-specific config with options
-            let mut page_cfg = super::RemoteMultimodalConfig::new()
-                .with_max_rounds(options.max_rounds.max(1))
-                .with_screenshot(options.screenshot);
+            // Build page-specific config from the full base config to preserve
+            // routing, schemas, relevance gates, and other production knobs.
+            let mut page_cfgs = (*base_cfgs).clone();
+            let mut page_cfg = page_cfgs.cfg.clone();
+            page_cfg.max_rounds = options.max_rounds.max(1);
+            page_cfg.screenshot = options.screenshot;
 
             // Enable extraction if prompt is provided
             if let Some(ref prompt) = options.extraction_prompt {
-                page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+                page_cfg.extra_ai_data = true;
+                page_cfg.extraction_prompt = Some(prompt.clone());
             }
 
-            let mut page_cfgs = super::RemoteMultimodalConfigs::new(
-                &base_cfgs.api_url,
-                &base_cfgs.model_name,
-            )
-            .with_cfg(page_cfg);
+            page_cfgs.cfg = page_cfg;
 
-            // Copy API key
-            if let Some(ref key) = base_cfgs.api_key {
-                page_cfgs = page_cfgs.with_api_key(key.clone());
-            }
-
-            // Add user message extra if provided
+            // Add/override user message extra if provided
             if let Some(ref msg) = options.user_message_extra {
-                page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+                page_cfgs.user_message_extra = Some(msg.clone());
             }
 
             // Run automation on the new page
@@ -2551,9 +2727,18 @@ pub async fn run_spawn_pages_with_options(
             // Collect bytes data
             let (bytes_transferred, response_map_out) = {
                 let bytes_val = total_bytes.load(Ordering::Relaxed);
-                let bytes = if bytes_val > 0 { Some(bytes_val as f64) } else { None };
+                let bytes = if bytes_val > 0 {
+                    Some(bytes_val as f64)
+                } else {
+                    None
+                };
                 let map = if !response_map.is_empty() {
-                    Some(response_map.iter().map(|e| (e.key().clone(), *e.value() as f64)).collect())
+                    Some(
+                        response_map
+                            .iter()
+                            .map(|e| (e.key().clone(), *e.value() as f64))
+                            .collect(),
+                    )
                 } else {
                     None
                 };
@@ -2674,30 +2859,24 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
                     setup(&new_page).await;
                 }
 
-                // Build page-specific config with options
-                let mut page_cfg = super::RemoteMultimodalConfig::new()
-                    .with_max_rounds(options.max_rounds.max(1))
-                    .with_screenshot(options.screenshot);
+                // Build page-specific config from the full base config to preserve
+                // routing, schemas, relevance gates, and other production knobs.
+                let mut page_cfgs = (*base_cfgs).clone();
+                let mut page_cfg = page_cfgs.cfg.clone();
+                page_cfg.max_rounds = options.max_rounds.max(1);
+                page_cfg.screenshot = options.screenshot;
 
                 // Enable extraction if prompt is provided
                 if let Some(ref prompt) = options.extraction_prompt {
-                    page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+                    page_cfg.extra_ai_data = true;
+                    page_cfg.extraction_prompt = Some(prompt.clone());
                 }
 
-                let mut page_cfgs = super::RemoteMultimodalConfigs::new(
-                    &base_cfgs.api_url,
-                    &base_cfgs.model_name,
-                )
-                .with_cfg(page_cfg);
+                page_cfgs.cfg = page_cfg;
 
-                // Copy API key
-                if let Some(ref key) = base_cfgs.api_key {
-                    page_cfgs = page_cfgs.with_api_key(key.clone());
-                }
-
-                // Add user message extra if provided
+                // Add/override user message extra if provided
                 if let Some(ref msg) = options.user_message_extra {
-                    page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+                    page_cfgs.user_message_extra = Some(msg.clone());
                 }
 
                 // Run automation on the new page
@@ -2836,11 +3015,12 @@ mod tests {
     fn test_spawned_page_result_spawn_pages() {
         let result = SpawnedPageResult {
             url: "https://example.com".to_string(),
-            result: Ok(crate::automation::AutomationResult::success("test", 1)
-                .with_spawn_pages(vec![
+            result: Ok(
+                crate::automation::AutomationResult::success("test", 1).with_spawn_pages(vec![
                     "https://example.com/page1".to_string(),
                     "https://example.com/page2".to_string(),
-                ])),
+                ]),
+            ),
             bytes_transferred: None,
             response_map: None,
         };

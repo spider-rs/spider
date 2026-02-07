@@ -3,8 +3,7 @@
 use super::AutomationUsage;
 
 /// A single step in an action chain.
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChainStep {
     /// The instruction to execute (natural language or action spec).
     pub instruction: String,
@@ -73,8 +72,7 @@ impl ChainStep {
 }
 
 /// Condition for conditional execution in action chains.
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ChainCondition {
     /// Execute if URL contains this string.
     UrlContains(String),
@@ -224,8 +222,7 @@ impl ChainContext {
 }
 
 /// Result of an action chain execution.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChainResult {
     /// Whether all required steps completed successfully.
     pub success: bool,
@@ -302,8 +299,7 @@ impl ChainResult {
 }
 
 /// Result of a single step in an action chain.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChainStepResult {
     /// Step index (0-based).
     pub index: usize,
@@ -417,11 +413,7 @@ impl ChainBuilder {
     }
 
     /// Add a conditional step.
-    pub fn when(
-        mut self,
-        condition: ChainCondition,
-        instruction: impl Into<String>,
-    ) -> Self {
+    pub fn when(mut self, condition: ChainCondition, instruction: impl Into<String>) -> Self {
         self.steps.push(ChainStep::new(instruction).when(condition));
         self
     }
@@ -491,8 +483,7 @@ mod tests {
 
     #[test]
     fn test_chain_condition_evaluate() {
-        let ctx = ChainContext::new("https://example.com/dashboard")
-            .with_text("Welcome, user!");
+        let ctx = ChainContext::new("https://example.com/dashboard").with_text("Welcome, user!");
 
         assert!(ChainCondition::url_contains("dashboard").evaluate(&ctx));
         assert!(ChainCondition::page_contains("Welcome").evaluate(&ctx));
@@ -503,13 +494,13 @@ mod tests {
     fn test_chain_condition_compound() {
         let ctx = ChainContext::new("https://example.com/dashboard");
 
-        let condition = ChainCondition::url_contains("example")
-            .and(ChainCondition::url_contains("dashboard"));
+        let condition =
+            ChainCondition::url_contains("example").and(ChainCondition::url_contains("dashboard"));
 
         assert!(condition.evaluate(&ctx));
 
-        let condition = ChainCondition::url_contains("login")
-            .or(ChainCondition::url_contains("dashboard"));
+        let condition =
+            ChainCondition::url_contains("login").or(ChainCondition::url_contains("dashboard"));
 
         assert!(condition.evaluate(&ctx));
     }
@@ -533,7 +524,10 @@ mod tests {
         let chain = ChainBuilder::new()
             .then("Navigate to login")
             .then("Enter credentials")
-            .when(ChainCondition::element_exists("button.submit"), "Click submit")
+            .when(
+                ChainCondition::element_exists("button.submit"),
+                "Click submit",
+            )
             .build();
 
         assert_eq!(chain.len(), 3);

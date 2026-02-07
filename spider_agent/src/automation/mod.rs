@@ -28,6 +28,8 @@ pub mod executor;
 mod helpers;
 mod html_cleaning;
 mod html_diff;
+#[cfg(feature = "memvid")]
+pub mod long_term_memory;
 mod map_result;
 mod memory_ops;
 mod observation;
@@ -39,8 +41,6 @@ mod selector_cache;
 mod self_healing;
 #[cfg(feature = "skills")]
 pub mod skills;
-#[cfg(feature = "memvid")]
-pub mod long_term_memory;
 mod synthesis;
 mod tool_calling;
 
@@ -48,14 +48,16 @@ mod tool_calling;
 pub use actions::{ActionRecord, ActionResult, ActionType};
 
 // Re-export chain types
-pub use chain::{ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep, ChainStepResult};
+pub use chain::{
+    ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep, ChainStepResult,
+};
 
 // Re-export config types
 pub use config::{
-    is_url_allowed, merged_config, reasoning_payload, supports_vision, AutomationConfig, CaptureProfile,
-    CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelEndpoint, ModelPolicy,
-    ReasoningEffort, RecoveryStrategy, RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy,
-    VisionRouteMode,
+    is_url_allowed, merged_config, reasoning_payload, supports_vision, AutomationConfig,
+    CaptureProfile, CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelEndpoint,
+    ModelPolicy, ReasoningEffort, RecoveryStrategy, RemoteMultimodalConfig,
+    RemoteMultimodalConfigs, RetryPolicy, VisionRouteMode,
 };
 
 // Re-export content analysis
@@ -94,8 +96,7 @@ pub use observation::{
 // Re-export prompts
 pub use prompts::{
     ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
-    EXTRACTION_ONLY_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT,
-    OBSERVE_SYSTEM_PROMPT,
+    EXTRACTION_ONLY_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT, OBSERVE_SYSTEM_PROMPT,
 };
 
 // Re-export selector cache
@@ -125,7 +126,7 @@ pub use html_diff::{
 // Re-export planning types
 pub use planning::{
     Checkpoint, CheckpointResult, CheckpointType, ExecutionPlan, PageState, PlanExecutionState,
-    PlanningModeConfig, PlannedStep, ReplanContext,
+    PlannedStep, PlanningModeConfig, ReplanContext,
 };
 
 // Re-export self-healing types
@@ -157,8 +158,8 @@ pub use concurrent_chain::execute_graph;
 // Re-export long-term memory types (memvid feature)
 #[cfg(feature = "memvid")]
 pub use long_term_memory::{
-    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord,
-    MemoryStats, RecalledExperience,
+    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord, MemoryStats,
+    RecalledExperience,
 };
 
 // Re-export browser functions (chrome feature)
@@ -189,8 +190,7 @@ pub use browser::{
 ///     paths_map: true, // Enable path-prefix matching
 /// };
 /// ```
-#[derive(Debug, Clone, Default, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PromptUrlGate {
     /// Map of URLs to config overrides.
     /// Keys can be exact URLs or path prefixes (if paths_map is true).
@@ -224,7 +224,9 @@ impl PromptUrlGate {
 
     /// Add a URL override.
     pub fn add_override(&mut self, url: impl Into<String>, config: AutomationConfig) {
-        let map = self.prompt_url_map.get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
+        let map = self
+            .prompt_url_map
+            .get_or_insert_with(|| Box::new(std::collections::HashMap::new()));
         map.insert(url.into(), Box::new(config));
     }
 
@@ -278,8 +280,7 @@ impl PromptUrlGate {
 }
 
 /// Token usage tracking for automation operations with granular call tracking.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AutomationUsage {
     /// Prompt tokens used.
     pub prompt_tokens: u32,
@@ -396,7 +397,10 @@ impl AutomationUsage {
 
     /// Increment a custom tool call count by name.
     pub fn increment_custom_tool_calls(&mut self, tool_name: &str) {
-        *self.custom_tool_calls.entry(tool_name.to_string()).or_insert(0) += 1;
+        *self
+            .custom_tool_calls
+            .entry(tool_name.to_string())
+            .or_insert(0) += 1;
         self.api_calls += 1;
     }
 
@@ -452,8 +456,7 @@ impl std::ops::AddAssign for AutomationUsage {
 /// Schema for structured data extraction.
 ///
 /// Define what data to extract from pages with JSON Schema.
-#[derive(Debug, Clone, Default, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExtractionSchema {
     /// Name for the schema (e.g., "product_listing").
     pub name: String,
@@ -500,8 +503,7 @@ impl ExtractionSchema {
 }
 
 /// Configuration for structured output mode.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct StructuredOutputConfig {
     /// Enable structured output mode.
     pub enabled: bool,
@@ -549,8 +551,7 @@ impl StructuredOutputConfig {
 }
 
 /// Result of an automation operation.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AutomationResult {
     /// Label for this automation.
     pub label: String,
@@ -696,11 +697,10 @@ mod tests {
     #[test]
     fn test_automation_result_spawn_pages() {
         // Test with_spawn_pages
-        let result = AutomationResult::success("test", 1)
-            .with_spawn_pages(vec![
-                "https://example.com/page1".to_string(),
-                "https://example.com/page2".to_string(),
-            ]);
+        let result = AutomationResult::success("test", 1).with_spawn_pages(vec![
+            "https://example.com/page1".to_string(),
+            "https://example.com/page2".to_string(),
+        ]);
 
         assert!(result.has_spawn_pages());
         assert_eq!(result.spawn_pages.len(), 2);
@@ -724,11 +724,10 @@ mod tests {
     #[test]
     fn test_automation_result_serialization_with_spawn_pages() {
         // Test that spawn_pages serializes correctly
-        let result = AutomationResult::success("test", 1)
-            .with_spawn_pages(vec![
-                "https://example.com/page1".to_string(),
-                "https://example.com/page2".to_string(),
-            ]);
+        let result = AutomationResult::success("test", 1).with_spawn_pages(vec![
+            "https://example.com/page1".to_string(),
+            "https://example.com/page2".to_string(),
+        ]);
 
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("spawn_pages"));
@@ -758,7 +757,10 @@ mod tests {
     #[test]
     fn test_prompt_url_gate_exact_match() {
         let mut gate = PromptUrlGate::new();
-        gate.add_override("https://example.com/login", AutomationConfig::new("Login handling"));
+        gate.add_override(
+            "https://example.com/login",
+            AutomationConfig::new("Login handling"),
+        );
 
         // Exact match returns override
         assert!(gate.is_allowed("https://example.com/login"));
@@ -773,7 +775,10 @@ mod tests {
     #[test]
     fn test_prompt_url_gate_path_prefix() {
         let mut gate = PromptUrlGate::new().with_paths_map();
-        gate.add_override("https://example.com/admin", AutomationConfig::new("Admin handling"));
+        gate.add_override(
+            "https://example.com/admin",
+            AutomationConfig::new("Admin handling"),
+        );
 
         // Path prefix match
         assert!(gate.is_allowed("https://example.com/admin/users"));

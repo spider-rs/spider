@@ -95,9 +95,7 @@ impl SearchProvider for TavilyProvider {
             .map_err(|e| SearchError::RequestFailed(e.to_string()))?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(SearchError::AuthenticationFailed);
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -125,10 +123,7 @@ impl SearchProvider for TavilyProvider {
                     .get("title")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                let url = item
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
+                let url = item.get("url").and_then(|v| v.as_str()).unwrap_or_default();
 
                 if url.is_empty() {
                     continue;
@@ -188,8 +183,8 @@ mod tests {
 
     #[test]
     fn test_tavily_provider_custom_url() {
-        let provider = TavilyProvider::new("test-key")
-            .with_api_url("https://custom.api.com/search");
+        let provider =
+            TavilyProvider::new("test-key").with_api_url("https://custom.api.com/search");
         assert_eq!(provider.endpoint(), "https://custom.api.com/search");
     }
 }

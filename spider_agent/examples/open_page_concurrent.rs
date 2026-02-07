@@ -103,13 +103,17 @@ Do NOT use Click, Navigate, or any other action. ONLY use OpenPage.
     let result = run_remote_multimodal_with_page(&config, &page, "about:blank").await?;
 
     println!("Automation Result:");
-    println!("  Full result: {:?}", serde_json::to_string_pretty(&serde_json::json!({
-        "label": &result.label,
-        "steps_executed": result.steps_executed,
-        "success": result.success,
-        "spawn_pages": &result.spawn_pages,
-        "extracted": &result.extracted,
-    })).unwrap_or_default());
+    println!(
+        "  Full result: {:?}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "label": &result.label,
+            "steps_executed": result.steps_executed,
+            "success": result.success,
+            "spawn_pages": &result.spawn_pages,
+            "extracted": &result.extracted,
+        }))
+        .unwrap_or_default()
+    );
     println!("  Label: {}", result.label);
     println!("  Steps executed: {}", result.steps_executed);
     println!("  Success: {}", result.success);
@@ -138,18 +142,16 @@ Do NOT use Click, Navigate, or any other action. ONLY use OpenPage.
 
         // Configure what we want from each page
         let options = SpawnPageOptions::new()
-            .with_extraction("Extract the page title, main heading, and a brief description of the page content")
+            .with_extraction(
+                "Extract the page title, main heading, and a brief description of the page content",
+            )
             .with_screenshot(true)
             .with_max_rounds(1)
             .with_page_setup(page_setup)
             .with_track_bytes(true);
 
-        let spawn_results = run_spawn_pages_with_options(
-            &browser,
-            result.spawn_pages,
-            &config,
-            options,
-        ).await;
+        let spawn_results =
+            run_spawn_pages_with_options(&browser, result.spawn_pages, &config, options).await;
 
         // Process results - use the convenient accessor methods
         let mut successes = 0;
@@ -208,7 +210,11 @@ Do NOT use Click, Navigate, or any other action. ONLY use OpenPage.
 
                 successes += 1;
             } else {
-                println!("Page '{}' error: {}", spawn_result.url, spawn_result.error().unwrap_or("unknown"));
+                println!(
+                    "Page '{}' error: {}",
+                    spawn_result.url,
+                    spawn_result.error().unwrap_or("unknown")
+                );
                 failures += 1;
             }
             println!();
@@ -221,7 +227,11 @@ Do NOT use Click, Navigate, or any other action. ONLY use OpenPage.
             println!("Spawned pages total tokens: {}", total_tokens);
         }
         if total_bytes > 0.0 {
-            println!("Total bytes transferred: {:.0} ({:.2} KB)", total_bytes, total_bytes / 1024.0);
+            println!(
+                "Total bytes transferred: {:.0} ({:.2} KB)",
+                total_bytes,
+                total_bytes / 1024.0
+            );
             println!("Total network requests: {}", total_requests);
         }
     } else {
@@ -249,7 +259,8 @@ fn get_api_config() -> Result<(String, String, String), Box<dyn std::error::Erro
         return Ok((
             "https://openrouter.ai/api/v1/chat/completions".to_string(),
             key,
-            std::env::var("MODEL_NAME").unwrap_or_else(|_| "anthropic/claude-3.5-sonnet".to_string()),
+            std::env::var("MODEL_NAME")
+                .unwrap_or_else(|_| "anthropic/claude-3.5-sonnet".to_string()),
         ));
     }
 

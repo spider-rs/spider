@@ -238,7 +238,11 @@ impl MultiPageContext {
     /// Get pages sorted by relevance (highest first).
     pub fn pages_by_relevance(&self) -> Vec<&PageContext> {
         let mut pages: Vec<_> = self.pages.iter().collect();
-        pages.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
+        pages.sort_by(|a, b| {
+            b.relevance
+                .partial_cmp(&a.relevance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         pages
     }
 
@@ -254,7 +258,9 @@ impl MultiPageContext {
     pub fn fit_to_budget(&mut self) {
         // Sort by relevance
         self.pages.sort_by(|a, b| {
-            b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal)
+            b.relevance
+                .partial_cmp(&a.relevance)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Limit to max pages
@@ -263,7 +269,9 @@ impl MultiPageContext {
         }
 
         // Calculate tokens per page
-        let tokens_per_page = self.config.tokens_per_page(self.total_token_budget, self.pages.len());
+        let tokens_per_page = self
+            .config
+            .tokens_per_page(self.total_token_budget, self.pages.len());
 
         // Truncate each page's content to fit
         for page in &mut self.pages {
@@ -344,9 +352,13 @@ impl MultiPageContext {
         }
 
         prompt.push_str("TASK:\n");
-        prompt.push_str("Synthesize the information from all pages above. Return a JSON object with:\n");
+        prompt.push_str(
+            "Synthesize the information from all pages above. Return a JSON object with:\n",
+        );
         prompt.push_str("- synthesis: the combined analysis/answer\n");
-        prompt.push_str("- page_contributions: array of { page_index, contribution } for each page\n");
+        prompt.push_str(
+            "- page_contributions: array of { page_index, contribution } for each page\n",
+        );
         prompt.push_str("- confidence: overall confidence in the synthesis (0.0-1.0)\n");
 
         prompt
@@ -492,14 +504,8 @@ impl PageContribution {
             .get("contribution")
             .and_then(|v| v.as_str())?
             .to_string();
-        let weight = value
-            .get("weight")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5);
-        let url = value
-            .get("url")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let weight = value.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.5);
+        let url = value.get("url").and_then(|v| v.as_str()).map(String::from);
         let key_points = value
             .get("key_points")
             .and_then(|v| v.as_array())
@@ -594,8 +600,8 @@ mod tests {
 
     #[test]
     fn test_fit_to_budget() {
-        let mut ctx = MultiPageContext::new(1000)
-            .with_config(SynthesisConfig::new().with_max_pages(2));
+        let mut ctx =
+            MultiPageContext::new(1000).with_config(SynthesisConfig::new().with_max_pages(2));
 
         ctx.add_page(PageContext::new("https://a.com", 0).with_relevance(0.9));
         ctx.add_page(PageContext::new("https://b.com", 1).with_relevance(0.8));
@@ -611,15 +617,12 @@ mod tests {
 
     #[test]
     fn test_synthesis_result() {
-        let result = SynthesisResult::new(
-            serde_json::json!({"answer": "Combined data"}),
-            0.85,
-        )
-        .with_contributions(vec![
-            PageContribution::new(0, "Provided main data", 0.7),
-            PageContribution::new(1, "Supplementary info", 0.3),
-        ])
-        .with_tokens(500);
+        let result = SynthesisResult::new(serde_json::json!({"answer": "Combined data"}), 0.85)
+            .with_contributions(vec![
+                PageContribution::new(0, "Provided main data", 0.7),
+                PageContribution::new(1, "Supplementary info", 0.3),
+            ])
+            .with_tokens(500);
 
         assert_eq!(result.pages_used, 2);
         assert_eq!(result.confidence, 0.85);
@@ -646,8 +649,7 @@ mod tests {
 
     #[test]
     fn test_to_prompt() {
-        let mut ctx = MultiPageContext::new(10000)
-            .with_goal("Find the best product");
+        let mut ctx = MultiPageContext::new(10000).with_goal("Find the best product");
 
         ctx.add_page(
             PageContext::new("https://a.com", 0)

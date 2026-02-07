@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 // Re-export chromey types
 pub use chromiumoxide::browser::Browser;
-pub use chromiumoxide::page::Page;
 pub use chromiumoxide::error::CdpError;
+pub use chromiumoxide::page::Page;
 
 /// Browser context for managing Chrome pages.
 ///
@@ -54,7 +54,11 @@ impl BrowserContext {
 
     /// Clone the current page context (opens a new page with same URL).
     pub async fn clone_page(&self) -> Result<BrowserContext, CdpError> {
-        let url = self.page.url().await?.unwrap_or_else(|| "about:blank".to_string());
+        let url = self
+            .page
+            .url()
+            .await?
+            .unwrap_or_else(|| "about:blank".to_string());
         let new_page = self.browser.new_page(&url).await?;
         Ok(BrowserContext {
             browser: self.browser.clone(),
@@ -80,20 +84,24 @@ impl BrowserContext {
 
     /// Take a screenshot and return PNG bytes.
     pub async fn screenshot(&self) -> Result<Vec<u8>, CdpError> {
-        self.page.screenshot(
-            chromiumoxide::page::ScreenshotParams::builder()
-                .full_page(true)
-                .build()
-        ).await
+        self.page
+            .screenshot(
+                chromiumoxide::page::ScreenshotParams::builder()
+                    .full_page(true)
+                    .build(),
+            )
+            .await
     }
 
     /// Take a screenshot of the visible viewport.
     pub async fn screenshot_viewport(&self) -> Result<Vec<u8>, CdpError> {
-        self.page.screenshot(
-            chromiumoxide::page::ScreenshotParams::builder()
-                .full_page(false)
-                .build()
-        ).await
+        self.page
+            .screenshot(
+                chromiumoxide::page::ScreenshotParams::builder()
+                    .full_page(false)
+                    .build(),
+            )
+            .await
     }
 
     /// Click an element by selector.
@@ -126,7 +134,9 @@ impl BrowserContext {
         let element = self.page.find_element(selector).await?;
         let point = element.clickable_point().await?;
         self.page.move_mouse_smooth(point).await?;
-        self.page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await?;
+        self.page
+            .click_and_hold(point, std::time::Duration::from_millis(hold_ms))
+            .await?;
         Ok(())
     }
 
@@ -135,29 +145,54 @@ impl BrowserContext {
         use chromiumoxide::layout::Point;
         let point = Point::new(x, y);
         self.page.move_mouse_smooth(point).await?;
-        self.page.click_and_hold(point, std::time::Duration::from_millis(hold_ms)).await?;
+        self.page
+            .click_and_hold(point, std::time::Duration::from_millis(hold_ms))
+            .await?;
         Ok(())
     }
 
     /// Click and drag from one element to another.
-    pub async fn click_drag(&self, from_selector: &str, to_selector: &str, modifier: Option<i64>) -> Result<(), CdpError> {
+    pub async fn click_drag(
+        &self,
+        from_selector: &str,
+        to_selector: &str,
+        modifier: Option<i64>,
+    ) -> Result<(), CdpError> {
         let from_elem = self.page.find_element(from_selector).await?;
         let to_elem = self.page.find_element(to_selector).await?;
 
         let from_point = from_elem.clickable_point().await?;
         let to_point = to_elem.clickable_point().await?;
 
-        self.click_drag_point((from_point.x, from_point.y), (to_point.x, to_point.y), modifier).await
+        self.click_drag_point(
+            (from_point.x, from_point.y),
+            (to_point.x, to_point.y),
+            modifier,
+        )
+        .await
     }
 
     /// Click and drag from one point to another with smooth bezier movement.
-    pub async fn click_drag_point(&self, from: (f64, f64), to: (f64, f64), modifier: Option<i64>) -> Result<(), CdpError> {
+    pub async fn click_drag_point(
+        &self,
+        from: (f64, f64),
+        to: (f64, f64),
+        modifier: Option<i64>,
+    ) -> Result<(), CdpError> {
         use chromiumoxide::layout::Point;
         let from_point = Point::new(from.0, from.1);
         let to_point = Point::new(to.0, to.1);
         match modifier {
-            Some(m) => self.page.click_and_drag_smooth_with_modifier(from_point, to_point, m).await?,
-            None => self.page.click_and_drag_smooth(from_point, to_point).await?,
+            Some(m) => {
+                self.page
+                    .click_and_drag_smooth_with_modifier(from_point, to_point, m)
+                    .await?
+            }
+            None => {
+                self.page
+                    .click_and_drag_smooth(from_point, to_point)
+                    .await?
+            }
         };
         Ok(())
     }
@@ -174,8 +209,14 @@ impl BrowserContext {
                 .length
         "#;
 
-        let count: usize = self.page.evaluate(script).await?.into_value()
-            .map_err(|e| CdpError::ChromeMessage(format!("Failed to count clickable elements: {}", e)))?;
+        let count: usize = self
+            .page
+            .evaluate(script)
+            .await?
+            .into_value()
+            .map_err(|e| {
+                CdpError::ChromeMessage(format!("Failed to count clickable elements: {}", e))
+            })?;
 
         // Click each one (with error handling)
         let click_script = r#"
@@ -188,7 +229,11 @@ impl BrowserContext {
             elements.length
         "#;
 
-        let clicked: usize = self.page.evaluate(click_script).await?.into_value()
+        let clicked: usize = self
+            .page
+            .evaluate(click_script)
+            .await?
+            .into_value()
             .unwrap_or(0);
 
         Ok(clicked.min(count))
@@ -225,9 +270,14 @@ impl BrowserContext {
     }
 
     /// Wait for DOM to stabilize (no mutations for a period).
-    pub async fn wait_for_dom(&self, selector: Option<&str>, timeout_ms: u32) -> Result<(), CdpError> {
+    pub async fn wait_for_dom(
+        &self,
+        selector: Option<&str>,
+        timeout_ms: u32,
+    ) -> Result<(), CdpError> {
         let sel = selector.unwrap_or("body");
-        let script = format!(r#"
+        let script = format!(
+            r#"
             new Promise((resolve, reject) => {{
                 const timeout = {};
                 const target = document.querySelector('{}');
@@ -254,7 +304,9 @@ impl BrowserContext {
                     resolve();
                 }}, timeout);
             }})
-        "#, timeout_ms, sel);
+        "#,
+            timeout_ms, sel
+        );
 
         self.page.evaluate(script).await?;
         Ok(())
@@ -268,8 +320,14 @@ impl BrowserContext {
     }
 
     /// Evaluate JavaScript and return the result.
-    pub async fn evaluate<T: serde::de::DeserializeOwned>(&self, script: &str) -> Result<T, CdpError> {
-        self.page.evaluate(script).await?.into_value()
+    pub async fn evaluate<T: serde::de::DeserializeOwned>(
+        &self,
+        script: &str,
+    ) -> Result<T, CdpError> {
+        self.page
+            .evaluate(script)
+            .await?
+            .into_value()
             .map_err(|e| CdpError::ChromeMessage(format!("JSON conversion error: {}", e)))
     }
 
@@ -314,7 +372,8 @@ impl BrowserContext {
             })
         "#;
 
-        let count: usize = self.page
+        let count: usize = self
+            .page
             .evaluate(format!("({script})({max_scrolls})"))
             .await?
             .into_value()
@@ -333,22 +392,28 @@ impl BrowserContext {
         element.click().await?;
 
         // Clear with keyboard
-        use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
-        self.page.execute(
-            DispatchKeyEventParams::builder()
-                .r#type(DispatchKeyEventType::KeyDown)
-                .key("a")
-                .modifiers(2) // Ctrl/Cmd
-                .build()
-                .unwrap()
-        ).await?;
-        self.page.execute(
-            DispatchKeyEventParams::builder()
-                .r#type(DispatchKeyEventType::KeyUp)
-                .key("a")
-                .build()
-                .unwrap()
-        ).await?;
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchKeyEventParams, DispatchKeyEventType,
+        };
+        self.page
+            .execute(
+                DispatchKeyEventParams::builder()
+                    .r#type(DispatchKeyEventType::KeyDown)
+                    .key("a")
+                    .modifiers(2) // Ctrl/Cmd
+                    .build()
+                    .unwrap(),
+            )
+            .await?;
+        self.page
+            .execute(
+                DispatchKeyEventParams::builder()
+                    .r#type(DispatchKeyEventType::KeyUp)
+                    .key("a")
+                    .build()
+                    .unwrap(),
+            )
+            .await?;
 
         // Type new value
         element.type_str(value).await?;
@@ -356,12 +421,18 @@ impl BrowserContext {
     }
 
     /// Find all elements matching a selector.
-    pub async fn find_elements(&self, selector: &str) -> Result<Vec<chromiumoxide::element::Element>, CdpError> {
+    pub async fn find_elements(
+        &self,
+        selector: &str,
+    ) -> Result<Vec<chromiumoxide::element::Element>, CdpError> {
         self.page.find_elements(selector).await
     }
 
     /// Get element bounding box via JavaScript.
-    pub async fn get_element_bounds(&self, selector: &str) -> Result<Option<(f64, f64, f64, f64)>, CdpError> {
+    pub async fn get_element_bounds(
+        &self,
+        selector: &str,
+    ) -> Result<Option<(f64, f64, f64, f64)>, CdpError> {
         let script = format!(
             r#"
             (function() {{
@@ -374,7 +445,11 @@ impl BrowserContext {
             selector.replace('\'', "\\'")
         );
 
-        let result: Option<Vec<f64>> = self.page.evaluate(script).await?.into_value()
+        let result: Option<Vec<f64>> = self
+            .page
+            .evaluate(script)
+            .await?
+            .into_value()
             .map_err(|e| CdpError::ChromeMessage(format!("Failed to get bounds: {}", e)))?;
 
         Ok(result.and_then(|v| {

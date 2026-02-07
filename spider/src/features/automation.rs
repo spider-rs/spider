@@ -34,40 +34,89 @@
 
 #[cfg(feature = "agent")]
 pub use spider_agent::automation::{
-    // Core types
-    ActionRecord, ActionResult, ActionType, ActResult, AutomationConfig, AutomationResult,
-    AutomationUsage, CaptureProfile, CleaningIntent, ClipViewport, ContentAnalysis, CostTier,
-    ExtractionSchema, HtmlCleaningProfile, ModelPolicy, PromptUrlGate, RecoveryStrategy,
-    RetryPolicy, StructuredOutputConfig,
-    // Chain types
-    ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep, ChainStepResult,
-    // Observation types
-    FormField, FormInfo, InteractiveElement, NavigationOption, PageObservation,
-    // Engine and config
-    ModelEndpoint, RemoteMultimodalConfig, RemoteMultimodalConfigs, RemoteMultimodalEngine,
-    VisionRouteMode,
-    // Error types
-    EngineError, EngineResult,
     // Helper functions
-    best_effort_parse_json_object, extract_assistant_content, extract_last_code_block,
-    extract_last_json_array, extract_last_json_boundaries, extract_last_json_object, extract_usage,
-    fnv1a64, truncate_utf8_tail,
-    // HTML cleaning
-    clean_html, clean_html_base, clean_html_full, clean_html_raw, clean_html_slim,
-    clean_html_with_profile, clean_html_with_profile_and_intent, smart_clean_html,
+    best_effort_parse_json_object,
     // Map result types
-    categories, DiscoveredUrl, MapResult,
-    // Memory operations
-    AutomationMemory, MemoryOperation,
-    // System prompts
-    ACT_SYSTEM_PROMPT, CONFIGURATION_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT,
-    EXTRACTION_ONLY_SYSTEM_PROMPT, EXTRACT_SYSTEM_PROMPT, MAP_SYSTEM_PROMPT,
-    OBSERVE_SYSTEM_PROMPT,
-    // Selector cache
-    SelectorCache, SelectorCacheEntry,
+    categories,
+    // HTML cleaning
+    clean_html,
+    clean_html_base,
+    clean_html_full,
+    clean_html_raw,
+    clean_html_slim,
+    clean_html_with_profile,
+    clean_html_with_profile_and_intent,
+    extract_assistant_content,
+    extract_last_code_block,
+    extract_last_json_array,
+    extract_last_json_boundaries,
+    extract_last_json_object,
+    extract_usage,
+    fnv1a64,
     // Config helpers
-    is_url_allowed, merged_config,
+    is_url_allowed,
+    merged_config,
     // Selector cache (already exported above - SelectorCache, SelectorCacheEntry)
+    smart_clean_html,
+    truncate_utf8_tail,
+    ActResult,
+    // Core types
+    ActionRecord,
+    ActionResult,
+    ActionType,
+    AutomationConfig,
+    // Memory operations
+    AutomationMemory,
+    AutomationResult,
+    AutomationUsage,
+    CaptureProfile,
+    // Chain types
+    ChainBuilder,
+    ChainCondition,
+    ChainContext,
+    ChainResult,
+    ChainStep,
+    ChainStepResult,
+    CleaningIntent,
+    ClipViewport,
+    ContentAnalysis,
+    CostTier,
+    DiscoveredUrl,
+    // Error types
+    EngineError,
+    EngineResult,
+    ExtractionSchema,
+    // Observation types
+    FormField,
+    FormInfo,
+    HtmlCleaningProfile,
+    InteractiveElement,
+    MapResult,
+    MemoryOperation,
+    // Engine and config
+    ModelEndpoint,
+    ModelPolicy,
+    NavigationOption,
+    PageObservation,
+    PromptUrlGate,
+    RecoveryStrategy,
+    RemoteMultimodalConfig,
+    RemoteMultimodalConfigs,
+    RemoteMultimodalEngine,
+    RetryPolicy,
+    // Selector cache
+    SelectorCache,
+    SelectorCacheEntry,
+    StructuredOutputConfig,
+    VisionRouteMode,
+    // System prompts
+    ACT_SYSTEM_PROMPT,
+    CONFIGURATION_SYSTEM_PROMPT,
+    DEFAULT_SYSTEM_PROMPT,
+    EXTRACTION_ONLY_SYSTEM_PROMPT,
+    EXTRACT_SYSTEM_PROMPT,
+    MAP_SYSTEM_PROMPT,
+    OBSERVE_SYSTEM_PROMPT,
 };
 
 // Skills module for dynamic context injection
@@ -80,7 +129,9 @@ pub use spider_agent::automation::cache::{CacheStats, CacheValue, SmartCache};
 #[cfg(feature = "agent")]
 pub use spider_agent::automation::executor::{BatchExecutor, ChainExecutor, PrefetchManager};
 #[cfg(feature = "agent")]
-pub use spider_agent::automation::router::{ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory};
+pub use spider_agent::automation::router::{
+    ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory,
+};
 
 // Browser-specific exports (requires agent + chrome)
 #[cfg(all(feature = "agent", feature = "agent_chrome"))]
@@ -459,7 +510,8 @@ pub async fn run_remote_multimodal_if_enabled(
 
     // Increment relevance credits for irrelevant pages
     if result.relevant == Some(false) {
-        cfgs.relevance_credits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        cfgs.relevance_credits
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     Ok(Some(result))
@@ -524,7 +576,8 @@ pub async fn run_remote_multimodal_extraction(
 
     // Increment relevance credits for irrelevant pages
     if result.relevant == Some(false) {
-        cfgs.relevance_credits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        cfgs.relevance_credits
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     Ok(Some(result))
@@ -642,14 +695,26 @@ pub(crate) async fn prefilter_urls(
     relevant_set
 }
 
-/// Extract a cache key from a URL (path portion only, or full URL if parse fails).
+/// Extract a cache key from a URL including origin + path + query.
+///
+/// This avoids collisions across domains that share the same path.
 #[cfg(all(feature = "agent", feature = "serde"))]
 fn url_to_cache_key(url: &str) -> String {
-    // Try to extract just the path from the URL
-    if let Some(start) = url.find("://") {
-        if let Some(path_start) = url[start + 3..].find('/') {
-            return url[start + 3 + path_start..].to_string();
+    if let Ok(parsed) = url::Url::parse(url) {
+        let mut key = String::new();
+        key.push_str(parsed.scheme());
+        key.push_str("://");
+        key.push_str(parsed.host_str().unwrap_or_default());
+        if let Some(port) = parsed.port() {
+            key.push(':');
+            key.push_str(&port.to_string());
         }
+        key.push_str(parsed.path());
+        if let Some(query) = parsed.query() {
+            key.push('?');
+            key.push_str(query);
+        }
+        return key;
     }
     url.to_string()
 }
@@ -762,7 +827,11 @@ pub async fn process_spawn_pages_with_config(
     let mut handles = Vec::with_capacity(urls.len());
 
     // Check if we should track network events
-    let track_events = spider_config.track_events.as_ref().map(|t| t.responses).unwrap_or(false);
+    let track_events = spider_config
+        .track_events
+        .as_ref()
+        .map(|t| t.responses)
+        .unwrap_or(false);
 
     for url in urls {
         let browser = browser.clone();
@@ -830,30 +899,24 @@ pub async fn process_spawn_pages_with_config(
                 None
             };
 
-            // Build page-specific config with options
-            let mut page_cfg = RemoteMultimodalConfig::new()
-                .with_max_rounds(options.max_rounds.max(1))
-                .with_screenshot(options.screenshot);
+            // Build page-specific config from the full base config to preserve
+            // routing, schemas, relevance gates, and other production knobs.
+            let mut page_cfgs = (*mm_cfgs).clone();
+            let mut page_cfg = page_cfgs.cfg.clone();
+            page_cfg.max_rounds = options.max_rounds.max(1);
+            page_cfg.screenshot = options.screenshot;
 
             // Enable extraction if prompt is provided
             if let Some(ref prompt) = options.extraction_prompt {
-                page_cfg = page_cfg.with_extraction(true).with_extraction_prompt(prompt.clone());
+                page_cfg.extra_ai_data = true;
+                page_cfg.extraction_prompt = Some(prompt.clone());
             }
 
-            let mut page_cfgs = RemoteMultimodalConfigs::new(
-                &mm_cfgs.api_url,
-                &mm_cfgs.model_name,
-            )
-            .with_cfg(page_cfg);
+            page_cfgs.cfg = page_cfg;
 
-            // Copy API key
-            if let Some(ref key) = mm_cfgs.api_key {
-                page_cfgs = page_cfgs.with_api_key(key.clone());
-            }
-
-            // Add user message extra if provided
+            // Add/override user message extra if provided
             if let Some(ref msg) = options.user_message_extra {
-                page_cfgs = page_cfgs.with_user_message_extra(msg.clone());
+                page_cfgs.user_message_extra = Some(msg.clone());
             }
 
             // Run automation on the new page
@@ -868,9 +931,18 @@ pub async fn process_spawn_pages_with_config(
 
             let (bytes_transferred, response_map_out) = {
                 let bytes_val = total_bytes.load(Ordering::Relaxed);
-                let bytes = if bytes_val > 0 { Some(bytes_val as f64) } else { None };
+                let bytes = if bytes_val > 0 {
+                    Some(bytes_val as f64)
+                } else {
+                    None
+                };
                 let map = if !response_map.is_empty() {
-                    Some(response_map.iter().map(|e| (e.key().clone(), *e.value() as f64)).collect())
+                    Some(
+                        response_map
+                            .iter()
+                            .map(|e| (e.key().clone(), *e.value() as f64))
+                            .collect(),
+                    )
                 } else {
                     None
                 };
@@ -971,11 +1043,10 @@ mod tests {
     #[test]
     fn test_automation_result_spawn_pages() {
         // Test that spawn_pages can be set and checked
-        let result = AutomationResult::success("test", 1)
-            .with_spawn_pages(vec![
-                "https://example.com/page1".to_string(),
-                "https://example.com/page2".to_string(),
-            ]);
+        let result = AutomationResult::success("test", 1).with_spawn_pages(vec![
+            "https://example.com/page1".to_string(),
+            "https://example.com/page2".to_string(),
+        ]);
 
         assert!(result.has_spawn_pages());
         assert_eq!(result.spawn_pages.len(), 2);
@@ -996,7 +1067,10 @@ mod tests {
             .with_screenshot(true)
             .with_max_rounds(2);
 
-        assert_eq!(options.extraction_prompt, Some("Extract content".to_string()));
+        assert_eq!(
+            options.extraction_prompt,
+            Some("Extract content".to_string())
+        );
         assert!(options.screenshot);
         assert_eq!(options.max_rounds, 2);
     }
@@ -1050,5 +1124,16 @@ mod tests {
         assert_eq!(result.bytes_transferred.unwrap(), 3072.0);
         assert!(result.response_map.is_some());
         assert_eq!(result.response_map.as_ref().unwrap().len(), 2);
+    }
+
+    #[cfg(all(feature = "agent", feature = "serde"))]
+    #[test]
+    fn test_url_to_cache_key_includes_origin() {
+        let a = url_to_cache_key("https://a.example.com/path");
+        let b = url_to_cache_key("https://b.example.com/path");
+        assert_ne!(a, b);
+
+        let with_query = url_to_cache_key("https://a.example.com/path?x=1&y=2");
+        assert_eq!(with_query, "https://a.example.com/path?x=1&y=2");
     }
 }

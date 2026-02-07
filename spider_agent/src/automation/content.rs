@@ -46,8 +46,7 @@ static SVG_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
 ///
 /// Helps decide whether to rely on HTML text alone or require
 /// a screenshot for accurate extraction.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ContentAnalysis {
     /// Whether the content is "thin" (low text content).
     pub is_thin_content: bool,
@@ -125,9 +124,9 @@ impl ContentAnalysis {
         // Count visual elements using Aho-Corasick (single pass, case-insensitive)
         for mat in VISUAL_ELEMENT_MATCHER.find_iter(html_bytes) {
             match mat.pattern().as_usize() {
-                0 => analysis.iframe_count += 1, // <iframe
-                1 => analysis.video_count += 1,  // <video
-                2 => analysis.canvas_count += 1, // <canvas
+                0 => analysis.iframe_count += 1,    // <iframe
+                1 => analysis.video_count += 1,     // <video
+                2 => analysis.canvas_count += 1,    // <canvas
                 3 | 4 => analysis.embed_count += 1, // <embed, <object
                 _ => {}
             }
@@ -410,7 +409,11 @@ mod tests {
 
         assert!(!analysis.has_visual_elements);
         // With enough text content, no screenshot should be needed
-        assert!(analysis.text_length >= 200, "Expected 200+ chars, got {}", analysis.text_length);
+        assert!(
+            analysis.text_length >= 200,
+            "Expected 200+ chars, got {}",
+            analysis.text_length
+        );
         assert!(!analysis.needs_screenshot);
     }
 
@@ -450,8 +453,12 @@ mod tests {
 
     #[test]
     fn test_quick_needs_screenshot() {
-        assert!(ContentAnalysis::quick_needs_screenshot("<iframe src='x'></iframe>"));
-        assert!(ContentAnalysis::quick_needs_screenshot("<video src='x'></video>"));
+        assert!(ContentAnalysis::quick_needs_screenshot(
+            "<iframe src='x'></iframe>"
+        ));
+        assert!(ContentAnalysis::quick_needs_screenshot(
+            "<video src='x'></video>"
+        ));
         assert!(ContentAnalysis::quick_needs_screenshot("<canvas></canvas>"));
         assert!(ContentAnalysis::quick_needs_screenshot("short"));
 
@@ -470,12 +477,16 @@ mod tests {
     #[test]
     fn test_aho_corasick_visual_elements() {
         // Test Aho-Corasick matcher for visual elements
-        assert!(ContentAnalysis::has_visual_elements_quick("<IFRAME src='test'>"));
+        assert!(ContentAnalysis::has_visual_elements_quick(
+            "<IFRAME src='test'>"
+        ));
         assert!(ContentAnalysis::has_visual_elements_quick("<Video>"));
         assert!(ContentAnalysis::has_visual_elements_quick("<CANVAS>"));
         assert!(ContentAnalysis::has_visual_elements_quick("<embed>"));
         assert!(ContentAnalysis::has_visual_elements_quick("<OBJECT>"));
-        assert!(!ContentAnalysis::has_visual_elements_quick("<div>No visuals</div>"));
+        assert!(!ContentAnalysis::has_visual_elements_quick(
+            "<div>No visuals</div>"
+        ));
     }
 
     #[test]

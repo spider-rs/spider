@@ -6,8 +6,7 @@ use super::AutomationUsage;
 ///
 /// Used by the agent to understand what's on the page and what actions
 /// are available.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PageObservation {
     /// Current page URL.
     pub url: String,
@@ -125,7 +124,9 @@ impl PageObservation {
     pub fn clickable_elements(&self) -> Vec<&InteractiveElement> {
         self.interactive_elements
             .iter()
-            .filter(|e| e.visible && e.enabled && (e.element_type == "button" || e.element_type == "link"))
+            .filter(|e| {
+                e.visible && e.enabled && (e.element_type == "button" || e.element_type == "link")
+            })
             .collect()
     }
 
@@ -139,8 +140,7 @@ impl PageObservation {
 }
 
 /// An interactive element on the page.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct InteractiveElement {
     /// CSS selector for this element.
     pub selector: String,
@@ -284,8 +284,7 @@ impl InteractiveElement {
 }
 
 /// Information about a form on the page.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FormInfo {
     /// CSS selector for the form.
     pub selector: String,
@@ -347,8 +346,7 @@ impl FormInfo {
 }
 
 /// A field in a form.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FormField {
     /// Field name attribute.
     pub name: String,
@@ -408,8 +406,7 @@ impl FormField {
 }
 
 /// Result of a single action execution via `act()`.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ActResult {
     /// Whether the action was executed successfully.
     pub success: bool,
@@ -468,8 +465,7 @@ impl ActResult {
 }
 
 /// A navigation option on the page.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NavigationOption {
     /// Link text.
     pub text: String,
@@ -486,7 +482,11 @@ pub struct NavigationOption {
 
 impl NavigationOption {
     /// Create a new navigation option.
-    pub fn new(text: impl Into<String>, url: impl Into<String>, selector: impl Into<String>) -> Self {
+    pub fn new(
+        text: impl Into<String>,
+        url: impl Into<String>,
+        selector: impl Into<String>,
+    ) -> Self {
         Self {
             text: text.into(),
             url: url.into(),
@@ -544,7 +544,11 @@ mod tests {
     fn test_form_info() {
         let form = FormInfo::new("form#login")
             .with_action("/login")
-            .add_field(FormField::new("email", "email").required().with_label("Email"))
+            .add_field(
+                FormField::new("email", "email")
+                    .required()
+                    .with_label("Email"),
+            )
             .add_field(FormField::new("password", "password").required());
 
         assert_eq!(form.required_fields().len(), 2);

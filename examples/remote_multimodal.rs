@@ -8,7 +8,6 @@
 //! OPEN_ROUTER=your-api-key cargo run --example remote_multimodal --features "spider/sync spider/chrome"
 //! ```
 
-
 // EXAMPLE output
 // === Page Received ===
 // URL: https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html
@@ -30,7 +29,6 @@
 
 //         <meta http-equiv="content-type" content="text/html; charset=UTF-8">
 //    ...
-
 
 extern crate spider;
 

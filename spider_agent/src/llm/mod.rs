@@ -67,9 +67,7 @@ impl Message {
         Self {
             role: "user".to_string(),
             content: MessageContent::MultiPart(vec![
-                ContentPart::Text {
-                    text: text.into(),
-                },
+                ContentPart::Text { text: text.into() },
                 ContentPart::ImageUrl {
                     image_url: ImageUrl {
                         url: format!("data:image/png;base64,{}", image_base64.into()),
@@ -113,19 +111,17 @@ impl MessageContent {
     pub fn full_text(&self) -> String {
         match self {
             Self::Text(s) => s.clone(),
-            Self::MultiPart(parts) => {
-                parts
-                    .iter()
-                    .filter_map(|p| {
-                        if let ContentPart::Text { text } = p {
-                            Some(text.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            }
+            Self::MultiPart(parts) => parts
+                .iter()
+                .filter_map(|p| {
+                    if let ContentPart::Text { text } = p {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
         }
     }
 
@@ -138,7 +134,9 @@ impl MessageContent {
     pub fn has_images(&self) -> bool {
         match self {
             Self::Text(_) => false,
-            Self::MultiPart(parts) => parts.iter().any(|p| matches!(p, ContentPart::ImageUrl { .. })),
+            Self::MultiPart(parts) => parts
+                .iter()
+                .any(|p| matches!(p, ContentPart::ImageUrl { .. })),
         }
     }
 }

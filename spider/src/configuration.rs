@@ -8,9 +8,11 @@ pub use crate::features::chrome_common::{
 };
 pub use crate::features::gemini_common::GeminiConfigs;
 pub use crate::features::openai_common::GPTConfigs;
-pub use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 #[cfg(feature = "search")]
-pub use crate::features::search::{SearchError, SearchOptions, SearchResult, SearchResults, TimeRange};
+pub use crate::features::search::{
+    SearchError, SearchOptions, SearchResult, SearchResults, TimeRange,
+};
+pub use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 use crate::utils::get_domain_from_url;
 use crate::utils::BasicCachePolicy;
 use crate::website::CronType;
@@ -547,20 +549,29 @@ impl Configuration {
             .filter(|&n| n > 0)
             .map(|n| std::sync::Arc::new(tokio::sync::Semaphore::new(n)));
 
-        Some(
-            crate::features::automation::RemoteMultimodalEngine::new(
-                cfgs.api_url.clone(),
-                cfgs.model_name.clone(),
-                cfgs.system_prompt.clone(),
-            )
-            .with_api_key(cfgs.api_key.as_deref())
-            .with_system_prompt_extra(cfgs.system_prompt_extra.as_deref())
-            .with_user_message_extra(cfgs.user_message_extra.as_deref())
-            .with_remote_multimodal_config(cfgs.cfg.clone())
-            .with_prompt_url_gate(cfgs.prompt_url_gate.clone())
-            .with_semaphore(sem)
-            .to_owned(),
+        #[allow(unused_mut)]
+        let mut engine = crate::features::automation::RemoteMultimodalEngine::new(
+            cfgs.api_url.clone(),
+            cfgs.model_name.clone(),
+            cfgs.system_prompt.clone(),
         )
+        .with_api_key(cfgs.api_key.as_deref())
+        .with_system_prompt_extra(cfgs.system_prompt_extra.as_deref())
+        .with_user_message_extra(cfgs.user_message_extra.as_deref())
+        .with_remote_multimodal_config(cfgs.cfg.clone())
+        .with_prompt_url_gate(cfgs.prompt_url_gate.clone())
+        .with_vision_model(cfgs.vision_model.clone())
+        .with_text_model(cfgs.text_model.clone())
+        .with_vision_route_mode(cfgs.vision_route_mode)
+        .with_semaphore(sem)
+        .to_owned();
+
+        #[cfg(feature = "agent_skills")]
+        if let Some(ref registry) = cfgs.skill_registry {
+            engine.with_skill_registry(Some(registry.clone()));
+        }
+
+        Some(engine)
     }
 
     /// Determine if the agent should be set to a Chrome Agent.
@@ -1837,13 +1848,22 @@ pub struct SpiderCloudConfig {
     #[cfg_attr(feature = "serde", serde(default))]
     pub mode: SpiderCloudMode,
     /// API base URL (default: `https://api.spider.cloud`).
-    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_api_url"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "SpiderCloudConfig::default_api_url")
+    )]
     pub api_url: String,
     /// Proxy URL (default: `https://proxy.spider.cloud`).
-    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_proxy_url"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "SpiderCloudConfig::default_proxy_url")
+    )]
     pub proxy_url: String,
     /// Return format for API mode (default: `"raw"` to get original HTML).
-    #[cfg_attr(feature = "serde", serde(default = "SpiderCloudConfig::default_return_format"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "SpiderCloudConfig::default_return_format")
+    )]
     pub return_format: String,
     /// Extra params forwarded in API mode (e.g. `stealth`, `fingerprint`, `cache`).
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
@@ -1899,7 +1919,10 @@ impl SpiderCloudConfig {
     }
 
     /// Set extra params for API mode.
-    pub fn with_extra_params(mut self, params: hashbrown::HashMap<String, serde_json::Value>) -> Self {
+    pub fn with_extra_params(
+        mut self,
+        params: hashbrown::HashMap<String, serde_json::Value>,
+    ) -> Self {
         self.extra_params = Some(params);
         self
     }
@@ -1920,7 +1943,7 @@ impl SpiderCloudConfig {
     pub fn should_fallback(&self, status_code: u16, body: Option<&[u8]>) -> bool {
         match self.mode {
             SpiderCloudMode::Api | SpiderCloudMode::Unblocker => false, // already using API
-            SpiderCloudMode::Proxy => false, // proxy-only, no fallback
+            SpiderCloudMode::Proxy => false,                            // proxy-only, no fallback
             SpiderCloudMode::Fallback | SpiderCloudMode::Smart => {
                 // Status code triggers
                 if matches!(status_code, 403 | 429 | 503 | 520..=530) {
@@ -1946,8 +1969,7 @@ impl SpiderCloudConfig {
 
                         // Cloudflare challenge
                         if lower.contains("cf-browser-verification")
-                            || lower.contains("cloudflare")
-                                && lower.contains("challenge-platform")
+                            || lower.contains("cloudflare") && lower.contains("challenge-platform")
                         {
                             return true;
                         }
@@ -1955,8 +1977,7 @@ impl SpiderCloudConfig {
                         // Generic CAPTCHA / bot detection markers
                         if lower.contains("captcha") && lower.contains("challenge")
                             || lower.contains("please verify you are a human")
-                            || lower.contains("access denied")
-                                && lower.contains("automated")
+                            || lower.contains("access denied") && lower.contains("automated")
                             || lower.contains("bot detection")
                         {
                             return true;
@@ -1965,8 +1986,7 @@ impl SpiderCloudConfig {
                         // Distil Networks / Imperva / Akamai patterns
                         if lower.contains("distil_r_captcha")
                             || lower.contains("_imperva")
-                            || lower.contains("akamai")
-                                && lower.contains("bot manager")
+                            || lower.contains("akamai") && lower.contains("bot manager")
                         {
                             return true;
                         }
@@ -2079,9 +2099,7 @@ mod tests {
     #[test]
     fn test_configuration_whitelist_setup() {
         let mut config = Configuration::default();
-        config.whitelist_url = Some(vec![
-            "https://example.com/public".into(),
-        ]);
+        config.whitelist_url = Some(vec!["https://example.com/public".into()]);
         assert_eq!(config.whitelist_url.as_ref().unwrap().len(), 1);
     }
 
@@ -2113,11 +2131,9 @@ mod tests {
         config.budget = Some(budget);
         assert!(config.budget.is_some());
         assert_eq!(
-            config
-                .budget
-                .as_ref()
-                .unwrap()
-                .get(&case_insensitive_string::CaseInsensitiveString::from("/path")),
+            config.budget.as_ref().unwrap().get(
+                &case_insensitive_string::CaseInsensitiveString::from("/path")
+            ),
             Some(&100u32)
         );
     }
@@ -2127,5 +2143,41 @@ mod tests {
     fn test_allow_list_set_default() {
         let allow_list = AllowListSet::default();
         assert!(allow_list.0.is_empty());
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn test_build_remote_multimodal_engine_preserves_dual_models() {
+        use crate::features::automation::{
+            ModelEndpoint, RemoteMultimodalConfigs, VisionRouteMode,
+        };
+
+        let mut config = Configuration::default();
+        let mm = RemoteMultimodalConfigs::new(
+            "https://api.example.com/v1/chat/completions",
+            "primary-model",
+        )
+        .with_vision_model(ModelEndpoint::new("vision-model").with_api_key("vision-key"))
+        .with_text_model(
+            ModelEndpoint::new("text-model")
+                .with_api_url("https://text.example.com/v1/chat/completions")
+                .with_api_key("text-key"),
+        )
+        .with_vision_route_mode(VisionRouteMode::TextFirst);
+        config.remote_multimodal = Some(Box::new(mm));
+
+        let engine = config
+            .build_remote_multimodal_engine()
+            .expect("engine should be built");
+
+        assert_eq!(
+            engine.vision_model.as_ref().map(|m| m.model_name.as_str()),
+            Some("vision-model")
+        );
+        assert_eq!(
+            engine.text_model.as_ref().map(|m| m.model_name.as_str()),
+            Some("text-model")
+        );
+        assert_eq!(engine.vision_route_mode, VisionRouteMode::TextFirst);
     }
 }

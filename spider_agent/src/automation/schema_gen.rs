@@ -283,7 +283,10 @@ fn merge_schemas(schemas: &[Value]) -> Value {
     // If all schemas are same type, merge
     let first_type = schemas[0].get("type").and_then(|t| t.as_str());
 
-    if schemas.iter().all(|s| s.get("type").and_then(|t| t.as_str()) == first_type) {
+    if schemas
+        .iter()
+        .all(|s| s.get("type").and_then(|t| t.as_str()) == first_type)
+    {
         match first_type {
             Some("object") => merge_object_schemas(schemas),
             Some("array") => merge_array_schemas(schemas),
@@ -492,7 +495,10 @@ mod tests {
 
         let schema = infer_schema(&obj);
         assert_eq!(schema["properties"]["user"]["type"], "object");
-        assert_eq!(schema["properties"]["user"]["properties"]["tags"]["type"], "array");
+        assert_eq!(
+            schema["properties"]["user"]["properties"]["tags"]["type"],
+            "array"
+        );
     }
 
     #[test]
@@ -576,11 +582,7 @@ mod tests {
 
     #[test]
     fn test_to_extraction_schema() {
-        let generated = GeneratedSchema::new(
-            json!({"type": "object"}),
-            "my_schema",
-        )
-        .strict();
+        let generated = GeneratedSchema::new(json!({"type": "object"}), "my_schema").strict();
 
         let extraction = generated.to_extraction_schema();
         assert_eq!(extraction.name, "my_schema");

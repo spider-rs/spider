@@ -52,7 +52,9 @@ async fn live_serper_search_smoke() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|v| !v.trim().is_empty())
         .expect("RUN_LIVE_TESTS is enabled, but SERPER_API_KEY is missing");
 
-    let agent = spider_agent::Agent::builder().with_search_serper(key).build()?;
+    let agent = spider_agent::Agent::builder()
+        .with_search_serper(key)
+        .build()?;
     let results = agent.search("Spider Cloud web crawler").await?;
     assert!(!results.results.is_empty());
 

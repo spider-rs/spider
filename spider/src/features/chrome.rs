@@ -1,3 +1,5 @@
+#[cfg(all(feature = "cookies", feature = "wreq"))]
+use crate::client::cookie::CookieStore as _;
 use crate::features::chrome_args::CHROME_ARGS;
 use crate::utils::{detect_chrome::get_detect_chrome_executable, log};
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
@@ -16,8 +18,6 @@ use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 #[cfg(feature = "cookies")]
 use std::sync::Arc;
-#[cfg(all(feature = "cookies", feature = "wreq"))]
-use crate::client::cookie::CookieStore as _;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -138,8 +138,8 @@ pub fn cookie_params_from_jar(
     jar: &std::sync::Arc<crate::client::cookie::Jar>,
     url: &url::Url,
 ) -> Result<Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>, String> {
-    use chromiumoxide::cdp::browser_protocol::network::CookieParam;
     use crate::client::cookie::CookieStore;
+    use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 
     let Some(header_value) = jar.cookies(url) else {
         return Ok(Vec::new());

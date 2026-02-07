@@ -118,9 +118,7 @@ impl SearchProvider for SerperProvider {
         })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(SearchError::AuthenticationFailed);
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -201,8 +199,8 @@ mod tests {
 
     #[test]
     fn test_serper_provider_custom_url() {
-        let provider = SerperProvider::new("test-key")
-            .with_api_url("https://custom.api.com/search");
+        let provider =
+            SerperProvider::new("test-key").with_api_url("https://custom.api.com/search");
         assert_eq!(provider.endpoint(), "https://custom.api.com/search");
     }
 }

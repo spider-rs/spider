@@ -11,12 +11,10 @@ use spider_agent::{Agent, SearchOptions};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let api_key = std::env::var("SERPER_API_KEY")
-        .expect("SERPER_API_KEY environment variable required");
+    let api_key =
+        std::env::var("SERPER_API_KEY").expect("SERPER_API_KEY environment variable required");
 
-    let agent = Agent::builder()
-        .with_search_serper(api_key)
-        .build()?;
+    let agent = Agent::builder().with_search_serper(api_key).build()?;
 
     // Basic search
     println!("Searching for 'rust web frameworks'...\n");

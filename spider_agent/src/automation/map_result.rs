@@ -5,8 +5,7 @@
 use super::AutomationUsage;
 
 /// Result of the `map()` API call for page discovery.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MapResult {
     /// The URLs discovered on the page.
     pub urls: Vec<DiscoveredUrl>,
@@ -69,7 +68,11 @@ impl MapResult {
     /// Get URLs sorted by relevance (highest first).
     pub fn urls_by_relevance(&self) -> Vec<&DiscoveredUrl> {
         let mut urls: Vec<_> = self.urls.iter().collect();
-        urls.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
+        urls.sort_by(|a, b| {
+            b.relevance
+                .partial_cmp(&a.relevance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         urls
     }
 
@@ -88,8 +91,7 @@ impl MapResult {
 }
 
 /// A discovered URL with AI-generated metadata.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveredUrl {
     /// The URL.
     pub url: String,
@@ -213,8 +215,7 @@ mod tests {
 
     #[test]
     fn test_map_result() {
-        let mut result = MapResult::with_summary("Test page")
-            .with_relevance(0.75);
+        let mut result = MapResult::with_summary("Test page").with_relevance(0.75);
 
         result.add_url(DiscoveredUrl::new("https://example.com/a").with_relevance(0.9));
         result.add_url(DiscoveredUrl::new("https://example.com/b").with_relevance(0.5));

@@ -394,7 +394,11 @@ impl ExecutionPlan {
         let steps = value
             .get("steps")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| PlannedStep::from_json(v)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| PlannedStep::from_json(v))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let confidence = value
@@ -445,7 +449,10 @@ impl ExecutionPlan {
 
     /// Get steps that have checkpoints.
     pub fn steps_with_checkpoints(&self) -> Vec<&PlannedStep> {
-        self.steps.iter().filter(|s| s.checkpoint.is_some()).collect()
+        self.steps
+            .iter()
+            .filter(|s| s.checkpoint.is_some())
+            .collect()
     }
 
     /// Get critical steps.
@@ -738,8 +745,14 @@ mod tests {
     #[test]
     fn test_execution_plan() {
         let plan = ExecutionPlan::new("Login to dashboard")
-            .add_step(PlannedStep::new("s1", serde_json::json!({"Fill": {"selector": "input", "value": "user"}})))
-            .add_step(PlannedStep::new("s2", serde_json::json!({"Click": "button"})))
+            .add_step(PlannedStep::new(
+                "s1",
+                serde_json::json!({"Fill": {"selector": "input", "value": "user"}}),
+            ))
+            .add_step(PlannedStep::new(
+                "s2",
+                serde_json::json!({"Click": "button"}),
+            ))
             .with_confidence(0.85)
             .complete();
 
@@ -771,8 +784,8 @@ mod tests {
         let passed = CheckpointResult::passed(checkpoint.clone(), 100);
         assert!(passed.passed);
 
-        let failed = CheckpointResult::failed(checkpoint, "URL did not match", 200)
-            .with_actual("/error");
+        let failed =
+            CheckpointResult::failed(checkpoint, "URL did not match", 200).with_actual("/error");
         assert!(!failed.passed);
         assert_eq!(failed.actual_value, Some("/error".to_string()));
     }

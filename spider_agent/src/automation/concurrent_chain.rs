@@ -47,7 +47,8 @@ impl DependentStep {
 
     /// Add multiple dependencies.
     pub fn depends_on_all(mut self, step_ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.depends_on.extend(step_ids.into_iter().map(|s| s.into()));
+        self.depends_on
+            .extend(step_ids.into_iter().map(|s| s.into()));
         self
     }
 
@@ -269,10 +270,9 @@ impl DependencyGraph {
             if step.depends_on.is_empty() {
                 graph.ready.push_back(step.id.clone());
             } else {
-                graph.waiting.insert(
-                    step.id.clone(),
-                    step.depends_on.iter().cloned().collect(),
-                );
+                graph
+                    .waiting
+                    .insert(step.id.clone(), step.depends_on.iter().cloned().collect());
             }
         }
 
@@ -701,9 +701,9 @@ mod tests {
 
     #[test]
     fn test_graph_missing_dependency() {
-        let steps = vec![
-            DependentStep::new("a", serde_json::json!({"Click": "a"})).depends_on("nonexistent"),
-        ];
+        let steps =
+            vec![DependentStep::new("a", serde_json::json!({"Click": "a"}))
+                .depends_on("nonexistent")];
 
         let result = DependencyGraph::new(steps);
         assert!(result.is_err());
@@ -789,10 +789,7 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.steps_executed, 1);
 
-        result.record(
-            "step2".to_string(),
-            StepResult::failure("Error"),
-        );
+        result.record("step2".to_string(), StepResult::failure("Error"));
         assert!(!result.success);
         assert_eq!(result.steps_executed, 2);
         assert_eq!(result.first_error, Some("Error".to_string()));
@@ -823,10 +820,8 @@ mod tests {
         let mut graph = DependencyGraph::new(steps).expect("valid graph");
         let config = ConcurrentChainConfig::new().with_max_parallel(2);
 
-        let result = execute_graph(&mut graph, &config, |_step| async {
-            StepResult::success()
-        })
-        .await;
+        let result =
+            execute_graph(&mut graph, &config, |_step| async { StepResult::success() }).await;
 
         assert!(result.success);
         assert_eq!(result.steps_executed, 3);

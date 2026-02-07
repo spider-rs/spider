@@ -13,10 +13,10 @@ use std::time::Instant;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let openai_key = std::env::var("OPENAI_API_KEY")
-        .expect("OPENAI_API_KEY environment variable required");
-    let serper_key = std::env::var("SERPER_API_KEY")
-        .expect("SERPER_API_KEY environment variable required");
+    let openai_key =
+        std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY environment variable required");
+    let serper_key =
+        std::env::var("SERPER_API_KEY").expect("SERPER_API_KEY environment variable required");
 
     // Create agent with Arc for sharing across tasks
     let agent = Arc::new(
@@ -80,10 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n---\n");
     println!("Fetching and extracting from multiple URLs concurrently...\n");
 
-    let urls = vec![
-        "https://example.com",
-        "https://httpbin.org/html",
-    ];
+    let urls = vec!["https://example.com", "https://httpbin.org/html"];
 
     let start = Instant::now();
     let mut handles = Vec::new();
@@ -98,7 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Extract (this will use the LLM semaphore)
             let extracted = agent
-                .extract(&fetch_result.html, "Extract the main content and any headings")
+                .extract(
+                    &fetch_result.html,
+                    "Extract the main content and any headings",
+                )
                 .await?;
 
             Ok::<_, spider_agent::AgentError>((url, extracted))

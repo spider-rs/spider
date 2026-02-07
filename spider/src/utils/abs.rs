@@ -237,7 +237,10 @@ mod tests {
         let base = parse_absolute_url("https://example.com").unwrap();
         let href = "/page?key=value&other=123";
         let result = convert_abs_path(&base, href);
-        assert_eq!(result.as_str(), "https://example.com/page?key=value&other=123");
+        assert_eq!(
+            result.as_str(),
+            "https://example.com/page?key=value&other=123"
+        );
     }
 
     #[test]

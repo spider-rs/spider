@@ -559,6 +559,8 @@ pub struct Page {
     /// The extra data from the remote multimodal automation (extraction results, etc.).
     /// Works with both Chrome and HTTP-only crawls.
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
+    /// URLs requested by automation to spawn as additional pages.
+    pub spawn_pages: Option<Vec<String>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
@@ -625,6 +627,8 @@ pub struct Page {
     /// The extra data from the remote multimodal automation (extraction results, etc.).
     /// Works with both Chrome and HTTP-only crawls.
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
+    /// URLs requested by automation to spawn as additional pages.
+    pub spawn_pages: Option<Vec<String>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
@@ -703,6 +707,12 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     page.waf_check = new_page.waf_check;
     page.should_retry = new_page.should_retry;
     page.signature = new_page.signature;
+    if let Some(mut new_spawn_pages) = new_page.spawn_pages {
+        match page.spawn_pages.as_mut() {
+            Some(existing) => existing.append(&mut new_spawn_pages),
+            None => page.spawn_pages = Some(new_spawn_pages),
+        }
+    }
     page.metadata = new_page.metadata;
 }
 
@@ -1195,6 +1205,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         extra_gemini_data: res.extra_gemini_data,
         remote_multimodal_usage: res.remote_multimodal_usage,
         extra_remote_multimodal_data: res.extra_remote_multimodal_data,
+        spawn_pages: res.spawn_pages,
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
@@ -1223,6 +1234,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         final_redirect_destination: res.final_url,
         status_code: res.status_code,
         metadata: res.metadata,
+        spawn_pages: res.spawn_pages,
         error_status: match res.error_for_status {
             Some(e) => match e {
                 Ok(_) => None,
@@ -1439,7 +1451,7 @@ impl Page {
         driver: &std::sync::Arc<thirtyfour::WebDriver>,
         timeout: Option<std::time::Duration>,
     ) -> Self {
-        use crate::features::webdriver::{attempt_navigation, get_page_content, get_current_url};
+        use crate::features::webdriver::{attempt_navigation, get_current_url, get_page_content};
 
         // Navigate to the URL
         if let Err(e) = attempt_navigation(url, driver, &timeout).await {
@@ -1458,15 +1470,13 @@ impl Page {
 
         // Get page content
         match get_page_content(driver).await {
-            Ok(content) => {
-                Page {
-                    html: Some(Box::new(content.into_bytes())),
-                    url: url.into(),
-                    status_code: StatusCode::OK,
-                    final_redirect_destination: final_url,
-                    ..Default::default()
-                }
-            }
+            Ok(content) => Page {
+                html: Some(Box::new(content.into_bytes())),
+                url: url.into(),
+                status_code: StatusCode::OK,
+                final_redirect_destination: final_url,
+                ..Default::default()
+            },
             Err(e) => {
                 log::error!("Failed to get WebDriver page content: {:?}", e);
                 Page {
@@ -1492,8 +1502,8 @@ impl Page {
         automation_scripts: &Option<crate::features::chrome_common::AutomationScripts>,
     ) -> Self {
         use crate::features::webdriver::{
-            attempt_navigation, get_page_content, get_current_url,
-            run_execution_scripts, run_url_automation_scripts,
+            attempt_navigation, get_current_url, get_page_content, run_execution_scripts,
+            run_url_automation_scripts,
         };
 
         // Navigate to the URL
@@ -1546,15 +1556,13 @@ impl Page {
 
         // Get page content
         match get_page_content(driver).await {
-            Ok(content) => {
-                Page {
-                    html: Some(Box::new(content.into_bytes())),
-                    url: url.into(),
-                    status_code: StatusCode::OK,
-                    final_redirect_destination: final_url,
-                    ..Default::default()
-                }
-            }
+            Ok(content) => Page {
+                html: Some(Box::new(content.into_bytes())),
+                url: url.into(),
+                status_code: StatusCode::OK,
+                final_redirect_destination: final_url,
+                ..Default::default()
+            },
             Err(e) => {
                 log::error!("Failed to get WebDriver page content: {:?}", e);
                 Page {
@@ -1567,7 +1575,6 @@ impl Page {
             }
         }
     }
-
 
     /// New page with rewriter
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
@@ -4636,7 +4643,10 @@ fn test_metadata_via_build_with_parse() {
     let page = build_with_parse("https://example.com/page", page_response);
     let page_metadata = page.get_metadata();
 
-    assert!(page_metadata.is_some(), "Page should have metadata after build_with_parse");
+    assert!(
+        page_metadata.is_some(),
+        "Page should have metadata after build_with_parse"
+    );
 
     let meta = page_metadata.as_ref().unwrap();
     assert_eq!(
@@ -4662,7 +4672,10 @@ fn test_page_without_metadata() {
     let page = build("https://example.com", page_response);
     let page_metadata = page.get_metadata();
 
-    assert!(page_metadata.is_none(), "Page without metadata should return None");
+    assert!(
+        page_metadata.is_none(),
+        "Page without metadata should return None"
+    );
 }
 
 /// Test metadata extraction using new_page_streaming_from_bytes with crafted HTML.
@@ -4976,9 +4989,18 @@ async fn test_metadata_special_characters() {
     );
 
     let meta = page_metadata.as_ref().unwrap();
-    assert!(meta.title.is_some(), "Title with special chars should be extracted");
-    assert!(meta.description.is_some(), "Description with special chars should be extracted");
-    assert!(meta.image.is_some(), "Image URL with special chars should be extracted");
+    assert!(
+        meta.title.is_some(),
+        "Title with special chars should be extracted"
+    );
+    assert!(
+        meta.description.is_some(),
+        "Description with special chars should be extracted"
+    );
+    assert!(
+        meta.image.is_some(),
+        "Image URL with special chars should be extracted"
+    );
 }
 
 /// Test metadata with unicode content.
@@ -5180,11 +5202,11 @@ async fn test_metadata_chrome_real_page() {
         .as_ref()
         .expect("metadata should be present for chrome feature test");
     assert!(meta.title.as_deref() == Some("Chrome Metadata Test"));
-    assert!(meta.automation.is_some(), "automation metadata should be present");
-    assert_eq!(
-        meta.automation.as_ref().expect("automation data").len(),
-        1
+    assert!(
+        meta.automation.is_some(),
+        "automation metadata should be present"
     );
+    assert_eq!(meta.automation.as_ref().expect("automation data").len(), 1);
 }
 
 // ============================================================================
@@ -5240,7 +5262,10 @@ fn test_remote_addr_field() {
     let page_response = PageResponse {
         content: Some(Box::new(b"<html></html>".to_vec())),
         status_code: StatusCode::OK,
-        remote_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)),
+        remote_addr: Some(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            8080,
+        )),
         ..Default::default()
     };
 
@@ -5522,7 +5547,10 @@ fn test_decentralized_page() {
     let page = Page::default();
 
     // Default Page should have empty links
-    assert!(page.links.is_empty(), "Default Page should have empty links");
+    assert!(
+        page.links.is_empty(),
+        "Default Page should have empty links"
+    );
 
     // Decentralized Page has external_domains_caseless field
     assert!(
@@ -5552,6 +5580,64 @@ fn test_smart_feature() {
     );
 }
 
+#[test]
+#[cfg(not(feature = "decentralized"))]
+fn test_build_preserves_spawn_pages() {
+    use crate::utils::PageResponse;
+
+    let page = build(
+        "https://example.com",
+        PageResponse {
+            status_code: StatusCode::OK,
+            spawn_pages: Some(vec![
+                "https://example.com/a".to_string(),
+                "https://example.com/b".to_string(),
+            ]),
+            ..Default::default()
+        },
+    );
+
+    let spawn_pages = page.spawn_pages.expect("spawn_pages should be preserved");
+    assert_eq!(spawn_pages.len(), 2);
+    assert_eq!(spawn_pages[0], "https://example.com/a");
+    assert_eq!(spawn_pages[1], "https://example.com/b");
+}
+
+#[test]
+#[cfg(all(feature = "smart", not(feature = "decentralized")))]
+fn test_page_assign_merges_spawn_pages() {
+    use crate::utils::PageResponse;
+
+    let mut page = build(
+        "https://example.com",
+        PageResponse {
+            status_code: StatusCode::OK,
+            spawn_pages: Some(vec!["https://example.com/root".to_string()]),
+            ..Default::default()
+        },
+    );
+
+    let new_page = build(
+        "https://example.com",
+        PageResponse {
+            status_code: StatusCode::OK,
+            spawn_pages: Some(vec![
+                "https://example.com/x".to_string(),
+                "https://example.com/y".to_string(),
+            ]),
+            ..Default::default()
+        },
+    );
+
+    page_assign(&mut page, new_page);
+
+    let spawn_pages = page.spawn_pages.expect("spawn_pages should be merged");
+    assert_eq!(spawn_pages.len(), 3);
+    assert!(spawn_pages.contains(&"https://example.com/root".to_string()));
+    assert!(spawn_pages.contains(&"https://example.com/x".to_string()));
+    assert!(spawn_pages.contains(&"https://example.com/y".to_string()));
+}
+
 /// Test page_links field exists and works correctly.
 #[test]
 #[cfg(not(feature = "decentralized"))]
@@ -5567,7 +5653,10 @@ fn test_page_links_field() {
     let mut page = build("https://example.com", page_response);
 
     // page_links should be None initially
-    assert!(page.page_links.is_none(), "page_links should be None initially");
+    assert!(
+        page.page_links.is_none(),
+        "page_links should be None initially"
+    );
 
     // Set page_links
     let mut links = HashSet::new();

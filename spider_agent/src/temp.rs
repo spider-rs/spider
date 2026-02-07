@@ -69,8 +69,7 @@ impl TempStorage {
     /// Read JSON from a stored file.
     pub fn read_json(&self, name: &str) -> io::Result<serde_json::Value> {
         let content = self.read_string(name)?;
-        serde_json::from_str(&content)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     /// Check if a file exists in storage.
@@ -172,8 +171,7 @@ impl TempFile {
     /// Read contents as string.
     pub fn read_string(&mut self) -> io::Result<String> {
         let bytes = self.read_all()?;
-        String::from_utf8(bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     /// Persist the file (returns the path and prevents automatic cleanup).

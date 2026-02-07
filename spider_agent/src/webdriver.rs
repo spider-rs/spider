@@ -7,8 +7,8 @@
 //! - JavaScript execution
 
 use std::sync::Arc;
-use thirtyfour::prelude::*;
 use thirtyfour::error::WebDriverError;
+use thirtyfour::prelude::*;
 
 /// Result type for WebDriver operations.
 pub type WebDriverResult<T> = Result<T, WebDriverError>;
@@ -100,13 +100,20 @@ impl WebDriverContext {
     }
 
     /// Get an element's attribute value.
-    pub async fn get_attribute(&self, selector: &str, attr: &str) -> WebDriverResult<Option<String>> {
+    pub async fn get_attribute(
+        &self,
+        selector: &str,
+        attr: &str,
+    ) -> WebDriverResult<Option<String>> {
         let element = self.find_element(selector).await?;
         element.attr(attr).await
     }
 
     /// Execute JavaScript and return the result as JSON.
-    pub async fn execute<T: serde::de::DeserializeOwned>(&self, script: &str) -> WebDriverResult<T> {
+    pub async fn execute<T: serde::de::DeserializeOwned>(
+        &self,
+        script: &str,
+    ) -> WebDriverResult<T> {
         let ret = self.driver.execute(script, vec![]).await?;
         ret.convert()
     }
@@ -122,18 +129,28 @@ impl WebDriverContext {
         let elem = self
             .driver
             .query(By::Css(selector))
-            .wait(std::time::Duration::from_secs(timeout_secs), std::time::Duration::from_millis(100))
+            .wait(
+                std::time::Duration::from_secs(timeout_secs),
+                std::time::Duration::from_millis(100),
+            )
             .first()
             .await?;
         Ok(elem)
     }
 
     /// Wait for element to be clickable.
-    pub async fn wait_for_clickable(&self, selector: &str, timeout_secs: u64) -> WebDriverResult<WebElement> {
+    pub async fn wait_for_clickable(
+        &self,
+        selector: &str,
+        timeout_secs: u64,
+    ) -> WebDriverResult<WebElement> {
         let elem = self
             .driver
             .query(By::Css(selector))
-            .wait(std::time::Duration::from_secs(timeout_secs), std::time::Duration::from_millis(100))
+            .wait(
+                std::time::Duration::from_secs(timeout_secs),
+                std::time::Duration::from_millis(100),
+            )
             .and_clickable()
             .first()
             .await?;
@@ -226,6 +243,4 @@ impl std::fmt::Debug for WebDriverContext {
 }
 
 // Re-export useful types
-pub use thirtyfour::{
-    By, Cookie, WebDriver, WebElement, WindowHandle,
-};
+pub use thirtyfour::{By, Cookie, WebDriver, WebElement, WindowHandle};

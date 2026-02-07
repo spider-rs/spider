@@ -93,9 +93,7 @@ impl SearchProvider for BraveProvider {
         let response = response.map_err(|e| SearchError::RequestFailed(e.to_string()))?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(SearchError::AuthenticationFailed);
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -117,17 +115,17 @@ impl SearchProvider for BraveProvider {
         // Extract web results
         let mut results = SearchResults::new(query);
 
-        if let Some(web) = json.get("web").and_then(|v| v.get("results")).and_then(|v| v.as_array())
+        if let Some(web) = json
+            .get("web")
+            .and_then(|v| v.get("results"))
+            .and_then(|v| v.as_array())
         {
             for (i, item) in web.iter().enumerate() {
                 let title = item
                     .get("title")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                let url = item
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
+                let url = item.get("url").and_then(|v| v.as_str()).unwrap_or_default();
 
                 if url.is_empty() {
                     continue;
@@ -170,8 +168,7 @@ mod tests {
 
     #[test]
     fn test_brave_provider_custom_url() {
-        let provider = BraveProvider::new("test-key")
-            .with_api_url("https://custom.api.com/search");
+        let provider = BraveProvider::new("test-key").with_api_url("https://custom.api.com/search");
         assert_eq!(provider.endpoint(), "https://custom.api.com/search");
     }
 }

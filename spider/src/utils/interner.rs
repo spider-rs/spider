@@ -390,10 +390,7 @@ mod tests {
         );
         assert!(links.is_empty());
 
-        bucket.extend_with_new_links(
-            &mut links,
-            CaseInsensitiveString::from("https://new.com"),
-        );
+        bucket.extend_with_new_links(&mut links, CaseInsensitiveString::from("https://new.com"));
         assert_eq!(links.len(), 1);
         assert!(links.contains(&CaseInsensitiveString::from("https://new.com")));
     }

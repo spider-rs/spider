@@ -63,12 +63,7 @@ impl ExperienceRecord {
         rounds: u32,
     ) -> Self {
         // Extract domain pattern from URL
-        let url_pattern = url
-            .split('/')
-            .take(3)
-            .collect::<Vec<_>>()
-            .join("/")
-            + "/*";
+        let url_pattern = url.split('/').take(3).collect::<Vec<_>>().join("/") + "/*";
 
         // Extract title keywords (non-trivial words)
         let title_keywords: Vec<String> = label
@@ -233,7 +228,10 @@ impl ExperienceMemory {
     ///
     /// If the directory doesn't exist, it will be created.
     /// If existing `.jsonl` / `.mp4` / `.db` files are found, they are loaded.
-    pub async fn new(dir: impl Into<PathBuf>, config: ExperienceMemoryConfig) -> std::io::Result<Self> {
+    pub async fn new(
+        dir: impl Into<PathBuf>,
+        config: ExperienceMemoryConfig,
+    ) -> std::io::Result<Self> {
         let dir = dir.into();
         tokio::fs::create_dir_all(&dir).await?;
 
@@ -315,10 +313,13 @@ impl ExperienceMemory {
             if !self.video_path.exists() || !self.index_path.exists() {
                 return Ok(Vec::new());
             }
-            self.retriever = Some(memvid_rs::MemvidRetriever::new(
-                self.video_path.to_string_lossy().as_ref(),
-                self.index_path.to_string_lossy().as_ref(),
-            ).await?);
+            self.retriever = Some(
+                memvid_rs::MemvidRetriever::new(
+                    self.video_path.to_string_lossy().as_ref(),
+                    self.index_path.to_string_lossy().as_ref(),
+                )
+                .await?,
+            );
         }
 
         let retriever = self.retriever.as_mut().expect("retriever loaded");
@@ -337,10 +338,7 @@ impl ExperienceMemory {
 
             // Find the best matching record for this search result
             if let Some(record) = Self::match_record_to_search_result(&all_records, text) {
-                experiences.push(RecalledExperience {
-                    record,
-                    relevance,
-                });
+                experiences.push(RecalledExperience { record, relevance });
             }
         }
 
@@ -507,8 +505,12 @@ impl ExperienceMemory {
 
         // Encode and build index
         let mut encoder = memvid_rs::MemvidEncoder::new(None).await?;
-        encoder.add_text(&combined_text, chunk_size, overlap).await?;
-        encoder.build_video(&video_path_str, &index_path_str).await?;
+        encoder
+            .add_text(&combined_text, chunk_size, overlap)
+            .await?;
+        encoder
+            .build_video(&video_path_str, &index_path_str)
+            .await?;
 
         self.dirty = false;
         self.retriever = None; // will be reloaded on next recall
@@ -631,22 +633,20 @@ mod tests {
 
     #[test]
     fn test_recall_to_context_formatting() {
-        let experiences = vec![
-            RecalledExperience {
-                record: ExperienceRecord {
-                    challenge_type: "grid-selection".to_string(),
-                    url_pattern: "https://example.com/*".to_string(),
-                    title_keywords: vec!["select".to_string()],
-                    html_signals: vec![],
-                    strategy_summary: "Click grid tiles matching description".to_string(),
-                    steps_json: "[]".to_string(),
-                    outcome: ExperienceOutcome::Success,
-                    rounds_taken: 2,
-                    timestamp: 1700000000,
-                },
-                relevance: 0.82,
+        let experiences = vec![RecalledExperience {
+            record: ExperienceRecord {
+                challenge_type: "grid-selection".to_string(),
+                url_pattern: "https://example.com/*".to_string(),
+                title_keywords: vec!["select".to_string()],
+                html_signals: vec![],
+                strategy_summary: "Click grid tiles matching description".to_string(),
+                steps_json: "[]".to_string(),
+                outcome: ExperienceOutcome::Success,
+                rounds_taken: 2,
+                timestamp: 1700000000,
             },
-        ];
+            relevance: 0.82,
+        }];
 
         let ctx = ExperienceMemory::recall_to_context(&experiences, 2000);
         assert!(ctx.contains("Learned Strategies"));

@@ -445,9 +445,8 @@ impl HealedSelectorCache {
     /// Remove expired entries.
     pub fn cleanup(&mut self, max_age_secs: u64) {
         let now = std::time::Instant::now();
-        self.cache.retain(|_, v| {
-            now.duration_since(v.created_at).as_secs() < max_age_secs
-        });
+        self.cache
+            .retain(|_, v| now.duration_since(v.created_at).as_secs() < max_age_secs);
     }
 }
 
@@ -625,13 +624,9 @@ mod tests {
 
     #[test]
     fn test_healing_diagnosis() {
-        let diag = HealingDiagnosis::new(
-            "The class name was changed",
-            "button.btn-submit",
-            0.85,
-        )
-        .with_alternatives(vec!["button[type='submit']".to_string()])
-        .with_issue_type(SelectorIssueType::DynamicId);
+        let diag = HealingDiagnosis::new("The class name was changed", "button.btn-submit", 0.85)
+            .with_alternatives(vec!["button[type='submit']".to_string()])
+            .with_issue_type(SelectorIssueType::DynamicId);
 
         assert!(diag.is_confident(0.8));
         assert!(!diag.is_confident(0.9));
@@ -657,7 +652,10 @@ mod tests {
     fn test_healing_result() {
         let success = HealingResult::success("button.new-class", 2, 500);
         assert!(success.success);
-        assert_eq!(success.working_selector, Some("button.new-class".to_string()));
+        assert_eq!(
+            success.working_selector,
+            Some("button.new-class".to_string())
+        );
 
         let failure = HealingResult::failure("No working selector found", 3, 1000);
         assert!(!failure.success);
@@ -684,10 +682,8 @@ mod tests {
         let mut stats = HealingStats::new();
 
         let result = HealingResult::success("btn", 2, 300)
-            .with_diagnoses(vec![
-                HealingDiagnosis::new("Issue 1", "sel1", 0.5)
-                    .with_issue_type(SelectorIssueType::DynamicId),
-            ]);
+            .with_diagnoses(vec![HealingDiagnosis::new("Issue 1", "sel1", 0.5)
+                .with_issue_type(SelectorIssueType::DynamicId)]);
 
         stats.record(&result);
 
@@ -698,7 +694,8 @@ mod tests {
 
     #[test]
     fn test_extract_html_context() {
-        let html = "<html><body><main><form><input><button>Submit</button></form></main></body></html>";
+        let html =
+            "<html><body><main><form><input><button>Submit</button></form></main></body></html>";
         let context = extract_html_context(html, 50);
         assert!(context.len() <= 100); // Accounts for wrapper text
     }

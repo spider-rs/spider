@@ -9,8 +9,7 @@ use std::collections::HashMap;
 ///
 /// These operations allow the model to persist data across automation rounds
 /// without requiring external storage.
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum MemoryOperation {
     /// Store a value in memory.
@@ -52,8 +51,7 @@ pub enum MemoryOperation {
 /// // Memory is serialized and included in LLM context each round
 /// let context = memory.to_context_string();
 /// ```
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AutomationMemory {
     /// Key-value store for persistent data across rounds.
     #[serde(default)]

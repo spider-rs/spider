@@ -8,8 +8,6 @@
 //! OPEN_ROUTER=your-api-key cargo run --example remote_multimodal_benchmark --features "spider/sync spider/chrome"
 //! ```
 
-
-
 // ==================================================================================================================================
 // BENCHMARK RESULTS
 // ==================================================================================================================================
@@ -80,13 +78,7 @@ struct BenchmarkResult {
 }
 
 /// Expected fields for the book extraction test
-const EXPECTED_FIELDS: &[&str] = &[
-    "title",
-    "price",
-    "availability",
-    "description",
-    "upc",
-];
+const EXPECTED_FIELDS: &[&str] = &["title", "price", "availability", "description", "upc"];
 
 /// Validate the extraction output and return (quality_score, fields_found)
 fn validate_extraction(content_str: &str) -> (u8, Vec<String>) {
@@ -105,9 +97,15 @@ fn validate_extraction(content_str: &str) -> (u8, Vec<String>) {
     let has_upc = content_lower.contains("a897fe39b1053632");
 
     let mut bonus = 0u8;
-    if has_title { bonus += 10; }
-    if has_price { bonus += 10; }
-    if has_upc { bonus += 10; }
+    if has_title {
+        bonus += 10;
+    }
+    if has_price {
+        bonus += 10;
+    }
+    if has_upc {
+        bonus += 10;
+    }
 
     let base_score = (fields_found.len() as f64 / EXPECTED_FIELDS.len() as f64 * 70.0) as u8;
     let quality_score = (base_score + bonus).min(100);
@@ -172,11 +170,7 @@ fn get_models() -> Vec<ModelConfig> {
     ]
 }
 
-async fn benchmark_model(
-    api_key: &str,
-    url: &str,
-    model: &ModelConfig,
-) -> BenchmarkResult {
+async fn benchmark_model(api_key: &str, url: &str, model: &ModelConfig) -> BenchmarkResult {
     println!("\n[{}] Testing {}...", model.tier, model.name);
 
     let mut mm_config = RemoteMultimodalConfigs::new(
@@ -239,7 +233,14 @@ async fn benchmark_model(
             }
         }
 
-        (prompt_tokens, completion_tokens, total_tokens, success, error, content_str)
+        (
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            success,
+            error,
+            content_str,
+        )
     });
 
     let start = Instant::now();
@@ -251,7 +252,9 @@ async fn benchmark_model(
 
     // Get results from the spawned task
     let (prompt_tokens, completion_tokens, total_tokens, success, error, content_output) =
-        results_handle.await.unwrap_or((0, 0, 0, false, Some("Task failed".to_string()), None));
+        results_handle
+            .await
+            .unwrap_or((0, 0, 0, false, Some("Task failed".to_string()), None));
 
     // Validate extraction quality
     let (quality_score, fields_found) = if let Some(ref content) = content_output {
@@ -264,7 +267,13 @@ async fn benchmark_model(
     let estimated_cost = (prompt_tokens as f64 * model.input_cost_per_m / 1_000_000.0)
         + (completion_tokens as f64 * model.output_cost_per_m / 1_000_000.0);
 
-    let status_icon = if success && quality_score >= 70 { "✓" } else if success { "~" } else { "✗" };
+    let status_icon = if success && quality_score >= 70 {
+        "✓"
+    } else if success {
+        "~"
+    } else {
+        "✗"
+    };
     println!(
         "  {} Completed in {:.2}s | Tokens: {} | Quality: {}% | Est. cost: ${:.6}",
         status_icon,
@@ -369,17 +378,20 @@ fn print_results_table(results: &[BenchmarkResult]) {
         }
 
         // Best value (quality per dollar)
-        if let Some(best_value) = successful
-            .iter()
-            .filter(|r| r.estimated_cost > 0.0)
-            .max_by(|a, b| {
-                let a_val = a.quality_score as f64 / a.estimated_cost;
-                let b_val = b.quality_score as f64 / b.estimated_cost;
-                a_val.partial_cmp(&b_val).unwrap()
-            })
+        if let Some(best_value) =
+            successful
+                .iter()
+                .filter(|r| r.estimated_cost > 0.0)
+                .max_by(|a, b| {
+                    let a_val = a.quality_score as f64 / a.estimated_cost;
+                    let b_val = b.quality_score as f64 / b.estimated_cost;
+                    a_val.partial_cmp(&b_val).unwrap()
+                })
         {
-            println!("  🎯 Best value: {} ({}% quality, ${:.6})",
-                best_value.model_name, best_value.quality_score, best_value.estimated_cost);
+            println!(
+                "  🎯 Best value: {} ({}% quality, ${:.6})",
+                best_value.model_name, best_value.quality_score, best_value.estimated_cost
+            );
         }
 
         // Highest quality
@@ -396,8 +408,11 @@ fn print_results_table(results: &[BenchmarkResult]) {
     let budget: Vec<_> = successful.iter().filter(|r| r.tier == "budget").collect();
 
     if !top_tier.is_empty() && !budget.is_empty() {
-        let avg_top_time: f64 =
-            top_tier.iter().map(|r| r.duration.as_secs_f64()).sum::<f64>() / top_tier.len() as f64;
+        let avg_top_time: f64 = top_tier
+            .iter()
+            .map(|r| r.duration.as_secs_f64())
+            .sum::<f64>()
+            / top_tier.len() as f64;
         let avg_budget_time: f64 =
             budget.iter().map(|r| r.duration.as_secs_f64()).sum::<f64>() / budget.len() as f64;
         let avg_top_cost: f64 =

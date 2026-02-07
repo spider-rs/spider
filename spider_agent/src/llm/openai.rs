@@ -85,9 +85,7 @@ impl LLMProvider for OpenAIProvider {
             .await?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(AgentError::Llm("Authentication failed".to_string()));
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -95,10 +93,7 @@ impl LLMProvider for OpenAIProvider {
         }
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AgentError::Llm(format!(
-                "HTTP {}: {}",
-                status, error_text
-            )));
+            return Err(AgentError::Llm(format!("HTTP {}: {}", status, error_text)));
         }
 
         // Parse response
@@ -118,8 +113,10 @@ impl LLMProvider for OpenAIProvider {
         let usage = if let Some(u) = json.get("usage") {
             TokenUsage {
                 prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-                    as u32,
+                completion_tokens: u
+                    .get("completion_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32,
                 total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
             }
         } else {
@@ -153,6 +150,9 @@ mod tests {
     fn test_openai_provider_custom_url() {
         let provider = OpenAIProvider::new("sk-test", "gpt-4o")
             .with_api_url("https://custom.api.com/v1/chat/completions");
-        assert_eq!(provider.api_url, "https://custom.api.com/v1/chat/completions");
+        assert_eq!(
+            provider.api_url,
+            "https://custom.api.com/v1/chat/completions"
+        );
     }
 }

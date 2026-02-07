@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.44.28"
+version = "2.44.29"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"

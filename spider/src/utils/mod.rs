@@ -2910,7 +2910,9 @@ pub async fn fetch_page_html_chrome_base(
             }
 
             if remote_multimodal.is_some() && !base_timeout.is_zero() {
-                use crate::features::automation::{run_remote_multimodal_if_enabled, AutomationResultExt};
+                use crate::features::automation::{
+                    run_remote_multimodal_if_enabled, AutomationResultExt,
+                };
 
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
@@ -2931,7 +2933,10 @@ pub async fn fetch_page_html_chrome_base(
                             // Store usage on page_response
                             match page_response.remote_multimodal_usage.as_mut() {
                                 Some(v) => v.push(result.usage.clone()),
-                                None => page_response.remote_multimodal_usage = Some(vec![result.usage.clone()]),
+                                None => {
+                                    page_response.remote_multimodal_usage =
+                                        Some(vec![result.usage.clone()])
+                                }
                             }
 
                             // Store extracted data if available
@@ -2939,7 +2944,10 @@ pub async fn fetch_page_html_chrome_base(
                                 let automation_result = result.to_automation_results();
                                 match page_response.extra_remote_multimodal_data.as_mut() {
                                     Some(v) => v.push(automation_result),
-                                    None => page_response.extra_remote_multimodal_data = Some(vec![automation_result]),
+                                    None => {
+                                        page_response.extra_remote_multimodal_data =
+                                            Some(vec![automation_result])
+                                    }
                                 }
                             }
 
@@ -2947,7 +2955,9 @@ pub async fn fetch_page_html_chrome_base(
                             if !result.spawn_pages.is_empty() {
                                 match page_response.spawn_pages.as_mut() {
                                     Some(v) => v.extend(result.spawn_pages.clone()),
-                                    None => page_response.spawn_pages = Some(result.spawn_pages.clone()),
+                                    None => {
+                                        page_response.spawn_pages = Some(result.spawn_pages.clone())
+                                    }
                                 }
                             }
 
@@ -3965,10 +3975,7 @@ pub async fn fetch_page_html_spider_cloud(
         .post(&api_endpoint)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
-        .header(
-            "User-Agent",
-            concat!("spider/", env!("CARGO_PKG_VERSION")),
-        )
+        .header("User-Agent", concat!("spider/", env!("CARGO_PKG_VERSION")))
         .json(&body)
         .send()
         .await;
@@ -3991,10 +3998,8 @@ pub async fn fetch_page_html_spider_cloud(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or_default();
 
-                            let item_status = first
-                                .get("status")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(200) as u16;
+                            let item_status =
+                                first.get("status").and_then(|v| v.as_u64()).unwrap_or(200) as u16;
 
                             let final_url = first
                                 .get("url")
@@ -6254,7 +6259,9 @@ mod tests {
     fn test_detect_open_resty_forbidden() {
         let body = b"<html><head><title>403 Forbidden</title></head>\n<body>\n<center><h1>403 Forbidden</h1></center>\n<hr><center>openresty</center>";
         assert!(detect_open_resty_forbidden(body));
-        assert!(!detect_open_resty_forbidden(b"<html><body>OK</body></html>"));
+        assert!(!detect_open_resty_forbidden(
+            b"<html><body>OK</body></html>"
+        ));
     }
 
     #[test]
@@ -6263,7 +6270,9 @@ mod tests {
         let openresty = b"<html><head><title>403 Forbidden</title></head>\n<body>\n<center><h1>403 Forbidden</h1></center>\n<hr><center>openresty</center>";
         assert!(detect_hard_forbidden_content(openresty));
         // Normal content
-        assert!(!detect_hard_forbidden_content(b"<html><body>Hello</body></html>"));
+        assert!(!detect_hard_forbidden_content(
+            b"<html><body>Hello</body></html>"
+        ));
     }
 
     #[test]
@@ -6278,14 +6287,22 @@ mod tests {
 
     #[test]
     fn test_detect_antibot_from_url() {
-        assert!(detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform").is_some());
+        assert!(
+            detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform").is_some()
+        );
         assert!(detect_antibot_from_url("https://example.com/page").is_none());
     }
 
     #[test]
     fn test_flip_http_https() {
-        assert_eq!(flip_http_https("http://example.com"), Some("https://example.com".to_string()));
-        assert_eq!(flip_http_https("https://example.com"), Some("http://example.com".to_string()));
+        assert_eq!(
+            flip_http_https("http://example.com"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            flip_http_https("https://example.com"),
+            Some("http://example.com".to_string())
+        );
         assert_eq!(flip_http_https("ftp://example.com"), None);
     }
 
@@ -6337,8 +6354,14 @@ mod tests {
 
     #[test]
     fn test_get_domain_from_url() {
-        assert_eq!(get_domain_from_url("https://example.com/path"), "example.com");
-        assert_eq!(get_domain_from_url("https://sub.example.com/path"), "sub.example.com");
+        assert_eq!(
+            get_domain_from_url("https://example.com/path"),
+            "example.com"
+        );
+        assert_eq!(
+            get_domain_from_url("https://sub.example.com/path"),
+            "sub.example.com"
+        );
     }
 
     #[test]
@@ -6374,10 +6397,7 @@ mod tests {
 
     #[test]
     fn test_prepare_url_https_passthrough() {
-        assert_eq!(
-            prepare_url("https://example.com"),
-            "https://example.com"
-        );
+        assert_eq!(prepare_url("https://example.com"), "https://example.com");
     }
 
     #[test]
@@ -6395,10 +6415,7 @@ mod tests {
 
     #[test]
     fn test_prepare_url_bare_domain_with_path() {
-        assert_eq!(
-            prepare_url("example.com/page"),
-            "https://example.com/page"
-        );
+        assert_eq!(prepare_url("example.com/page"), "https://example.com/page");
     }
 
     #[test]
@@ -6413,15 +6430,24 @@ mod tests {
     fn test_crawl_duration_expired() {
         // None timeout → not expired
         assert!(!crawl_duration_expired(&None, &None));
-        assert!(!crawl_duration_expired(&Some(Duration::from_secs(10)), &None));
+        assert!(!crawl_duration_expired(
+            &Some(Duration::from_secs(10)),
+            &None
+        ));
         assert!(!crawl_duration_expired(&None, &Some(Instant::now())));
 
         // Very long timeout → not expired
         let start = Some(Instant::now());
-        assert!(!crawl_duration_expired(&Some(Duration::from_secs(3600)), &start));
+        assert!(!crawl_duration_expired(
+            &Some(Duration::from_secs(3600)),
+            &start
+        ));
 
         // Zero timeout → expired immediately
-        assert!(crawl_duration_expired(&Some(Duration::from_secs(0)), &start));
+        assert!(crawl_duration_expired(
+            &Some(Duration::from_secs(0)),
+            &start
+        ));
     }
 
     #[test]

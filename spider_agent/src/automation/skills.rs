@@ -31,8 +31,7 @@ pub use spider_skills::{Skill, SkillRegistry, SkillTrigger};
 
 /// Configuration for loading skills from an S3-compatible bucket.
 #[cfg(feature = "skills_s3")]
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct S3SkillSource {
     /// S3 bucket name.
     pub bucket: String,
@@ -133,22 +132,28 @@ pub fn builtin_web_challenges() -> SkillRegistry {
 
     // Image grid selection (e.g., "select all stop signs", "select all vegetables")
     registry.add(
-        Skill::new("image-grid-selection", "Select matching images from a grid challenge")
-            .with_trigger(SkillTrigger::html_contains("grid-item"))
-            .with_trigger(SkillTrigger::html_contains("challenge-grid"))
-            .with_trigger(SkillTrigger::title_contains("select all"))
-            .with_priority(5)
-            .with_content(IMAGE_GRID_SKILL)
+        Skill::new(
+            "image-grid-selection",
+            "Select matching images from a grid challenge",
+        )
+        .with_trigger(SkillTrigger::html_contains("grid-item"))
+        .with_trigger(SkillTrigger::html_contains("challenge-grid"))
+        .with_trigger(SkillTrigger::title_contains("select all"))
+        .with_priority(5)
+        .with_content(IMAGE_GRID_SKILL),
     );
 
     // Rotation puzzle — pre_evaluate reads rotation state, model clicks tiles
     registry.add(
-        Skill::new("rotation-puzzle", "Rotate an image or element to the correct orientation")
-            .with_trigger(SkillTrigger::title_contains("rotat"))
-            .with_trigger(SkillTrigger::html_contains("rotating-item"))
-            .with_priority(5)
-            .with_pre_evaluate(ROTATION_PRE_EVALUATE_JS)
-            .with_content(ROTATION_SKILL_SIMPLIFIED)
+        Skill::new(
+            "rotation-puzzle",
+            "Rotate an image or element to the correct orientation",
+        )
+        .with_trigger(SkillTrigger::title_contains("rotat"))
+        .with_trigger(SkillTrigger::html_contains("rotating-item"))
+        .with_priority(5)
+        .with_pre_evaluate(ROTATION_PRE_EVALUATE_JS)
+        .with_content(ROTATION_SKILL_SIMPLIFIED),
     );
 
     // Tic-tac-toe / XOXO — high priority to override image-grid when both match
@@ -162,7 +167,7 @@ pub fn builtin_web_challenges() -> SkillRegistry {
             .with_trigger(SkillTrigger::html_contains("cell-disabled"))
             .with_priority(10)
             .with_pre_evaluate(TTT_PRE_EVALUATE_JS)
-            .with_content(TTT_SKILL_SIMPLIFIED)
+            .with_content(TTT_SKILL_SIMPLIFIED),
     );
 
     // Word search — higher priority than image-grid since word-search pages also have grid-item
@@ -174,27 +179,33 @@ pub fn builtin_web_challenges() -> SkillRegistry {
             .with_trigger(SkillTrigger::html_contains("word-search"))
             .with_priority(8)
             .with_pre_evaluate(WORD_SEARCH_PRE_EVALUATE_JS)
-            .with_content(WORD_SEARCH_SKILL_SIMPLIFIED)
+            .with_content(WORD_SEARCH_SKILL_SIMPLIFIED),
     );
 
     // Text CAPTCHA / math challenges / distorted text
     registry.add(
-        Skill::new("text-captcha", "Solve text-based CAPTCHAs, distorted text, and math challenges")
-            .with_trigger(SkillTrigger::html_contains("captcha-input"))
-            .with_trigger(SkillTrigger::html_contains("captcha-text"))
-            .with_trigger(SkillTrigger::title_contains("wiggles"))
-            .with_priority(3)
-            .with_content(TEXT_CAPTCHA_SKILL)
+        Skill::new(
+            "text-captcha",
+            "Solve text-based CAPTCHAs, distorted text, and math challenges",
+        )
+        .with_trigger(SkillTrigger::html_contains("captcha-input"))
+        .with_trigger(SkillTrigger::html_contains("captcha-text"))
+        .with_trigger(SkillTrigger::title_contains("wiggles"))
+        .with_priority(3)
+        .with_content(TEXT_CAPTCHA_SKILL),
     );
 
     // Slider / drag challenges
     registry.add(
-        Skill::new("slider-drag", "Solve slider and drag-to-position challenges")
-            .with_trigger(SkillTrigger::html_contains("slider-track"))
-            .with_trigger(SkillTrigger::html_contains("slider-handle"))
-            .with_trigger(SkillTrigger::html_contains("range-slider"))
-            .with_priority(4)
-            .with_content(SLIDER_DRAG_SKILL)
+        Skill::new(
+            "slider-drag",
+            "Solve slider and drag-to-position challenges",
+        )
+        .with_trigger(SkillTrigger::html_contains("slider-track"))
+        .with_trigger(SkillTrigger::html_contains("slider-handle"))
+        .with_trigger(SkillTrigger::html_contains("range-slider"))
+        .with_priority(4)
+        .with_content(SLIDER_DRAG_SKILL),
     );
 
     // Checkbox / simple click challenges (L1 of not-a-robot)
@@ -203,7 +214,7 @@ pub fn builtin_web_challenges() -> SkillRegistry {
             .with_trigger(SkillTrigger::html_contains("captcha-checkbox"))
             .with_trigger(SkillTrigger::html_contains("checkbox-label"))
             .with_priority(2)
-            .with_content(CHECKBOX_SKILL)
+            .with_content(CHECKBOX_SKILL),
     );
 
     registry
@@ -216,7 +227,10 @@ pub fn builtin_web_challenges() -> SkillRegistry {
 /// Name conflicts: S3 skills replace any existing skill with the same name.
 /// Returns the count of successfully loaded skills.
 #[cfg(feature = "skills_s3")]
-pub async fn load_from_s3(registry: &mut SkillRegistry, source: &S3SkillSource) -> Result<usize, S3SkillError> {
+pub async fn load_from_s3(
+    registry: &mut SkillRegistry,
+    source: &S3SkillSource,
+) -> Result<usize, S3SkillError> {
     let sdk_config = {
         let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
         if let Some(ref region) = source.region {
@@ -258,9 +272,7 @@ pub async fn load_from_s3(registry: &mut SkillRegistry, source: &S3SkillSource) 
                 };
 
                 // Filter by extension
-                let matches_ext = exts.iter().any(|ext| {
-                    key.ends_with(&format!(".{}", ext))
-                });
+                let matches_ext = exts.iter().any(|ext| key.ends_with(&format!(".{}", ext)));
                 if !matches_ext {
                     continue;
                 }
@@ -284,11 +296,9 @@ pub async fn load_from_s3(registry: &mut SkillRegistry, source: &S3SkillSource) 
 
                 // Parse based on extension
                 let skill = if key.ends_with(".json") {
-                    serde_json::from_str::<Skill>(&text).map_err(|e| {
-                        S3SkillError::ParseError {
-                            key: key.to_string(),
-                            reason: e.to_string(),
-                        }
+                    serde_json::from_str::<Skill>(&text).map_err(|e| S3SkillError::ParseError {
+                        key: key.to_string(),
+                        reason: e.to_string(),
                     })?
                 } else {
                     // Markdown
@@ -629,9 +639,11 @@ Use Evaluate to click found cells programmatically."#;
         assert!(skill.pre_evaluate.is_none());
 
         // Builder sets it
-        let skill = Skill::new("test", "test skill")
-            .with_pre_evaluate("document.title='HELLO'");
-        assert_eq!(skill.pre_evaluate.as_deref(), Some("document.title='HELLO'"));
+        let skill = Skill::new("test", "test skill").with_pre_evaluate("document.title='HELLO'");
+        assert_eq!(
+            skill.pre_evaluate.as_deref(),
+            Some("document.title='HELLO'")
+        );
 
         // from_markdown leaves it None
         let md = "---\nname: foo\n---\ncontent";
@@ -674,24 +686,55 @@ Use Evaluate to click found cells programmatically."#;
     #[test]
     fn test_builtin_ttt_has_pre_evaluate() {
         let registry = builtin_web_challenges();
-        let ttt = registry.get("tic-tac-toe").expect("tic-tac-toe skill missing");
-        assert!(ttt.pre_evaluate.is_some(), "TTT should have pre_evaluate JS");
+        let ttt = registry
+            .get("tic-tac-toe")
+            .expect("tic-tac-toe skill missing");
+        assert!(
+            ttt.pre_evaluate.is_some(),
+            "TTT should have pre_evaluate JS"
+        );
         let js = ttt.pre_evaluate.as_deref().unwrap();
-        assert!(js.contains("TTT:"), "TTT pre_evaluate should set title with TTT: prefix");
-        assert!(js.contains("cell-selected"), "TTT pre_evaluate should use cell-selected selector");
-        assert!(js.contains("cell-disabled"), "TTT pre_evaluate should use cell-disabled selector");
-        assert!(js.contains("TTT_ERR"), "TTT pre_evaluate should have error handling");
+        assert!(
+            js.contains("TTT:"),
+            "TTT pre_evaluate should set title with TTT: prefix"
+        );
+        assert!(
+            js.contains("cell-selected"),
+            "TTT pre_evaluate should use cell-selected selector"
+        );
+        assert!(
+            js.contains("cell-disabled"),
+            "TTT pre_evaluate should use cell-disabled selector"
+        );
+        assert!(
+            js.contains("TTT_ERR"),
+            "TTT pre_evaluate should have error handling"
+        );
     }
 
     #[test]
     fn test_builtin_word_search_has_pre_evaluate() {
         let registry = builtin_web_challenges();
-        let ws = registry.get("word-search").expect("word-search skill missing");
-        assert!(ws.pre_evaluate.is_some(), "Word search should have pre_evaluate JS");
+        let ws = registry
+            .get("word-search")
+            .expect("word-search skill missing");
+        assert!(
+            ws.pre_evaluate.is_some(),
+            "Word search should have pre_evaluate JS"
+        );
         let js = ws.pre_evaluate.as_deref().unwrap();
-        assert!(js.contains("WS:"), "WS pre_evaluate should set title with WS: prefix");
-        assert!(js.contains("word-search-grid-item"), "WS pre_evaluate should use word-search-grid-item selector");
-        assert!(js.contains("WS_ERR"), "WS pre_evaluate should have error handling");
+        assert!(
+            js.contains("WS:"),
+            "WS pre_evaluate should set title with WS: prefix"
+        );
+        assert!(
+            js.contains("word-search-grid-item"),
+            "WS pre_evaluate should use word-search-grid-item selector"
+        );
+        assert!(
+            js.contains("WS_ERR"),
+            "WS pre_evaluate should have error handling"
+        );
     }
 
     #[test]
@@ -718,14 +761,20 @@ Use Evaluate to click found cells programmatically."#;
 
         // Word search may allow Evaluate as fallback when words aren't auto-detected
         let ws = registry.get("word-search").unwrap();
-        assert!(ws.content.contains("ClickDragPoint"), "WS skill should mention ClickDragPoint");
+        assert!(
+            ws.content.contains("ClickDragPoint"),
+            "WS skill should mention ClickDragPoint"
+        );
         assert!(ws.pre_evaluate.is_some(), "WS should have pre_evaluate JS");
 
         // Rotation simplified content should NOT contain Evaluate JS
         let rot = registry.get("rotation-puzzle").unwrap();
         assert!(rot.content.contains("Do NOT write any Evaluate JS"));
         assert!(!rot.content.contains("querySelectorAll"));
-        assert!(rot.pre_evaluate.is_some(), "Rotation should have pre_evaluate JS");
+        assert!(
+            rot.pre_evaluate.is_some(),
+            "Rotation should have pre_evaluate JS"
+        );
     }
 
     #[test]
@@ -733,8 +782,15 @@ Use Evaluate to click found cells programmatically."#;
         let registry = builtin_web_challenges();
 
         // Image grid, text-captcha, slider, checkbox should NOT have pre_evaluate
-        for name in &["image-grid-selection", "text-captcha", "slider-drag", "checkbox-click"] {
-            let skill = registry.get(name).unwrap_or_else(|| panic!("{} missing", name));
+        for name in &[
+            "image-grid-selection",
+            "text-captcha",
+            "slider-drag",
+            "checkbox-click",
+        ] {
+            let skill = registry
+                .get(name)
+                .unwrap_or_else(|| panic!("{} missing", name));
             assert!(
                 skill.pre_evaluate.is_none(),
                 "{} should NOT have pre_evaluate",

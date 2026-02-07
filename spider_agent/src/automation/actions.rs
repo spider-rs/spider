@@ -3,8 +3,7 @@
 use super::AutomationUsage;
 
 /// Types of actions that can be performed.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ActionType {
     /// Navigate to a URL.
     Navigate,
@@ -194,8 +193,7 @@ impl std::fmt::Display for ActionType {
 }
 
 /// Result of an action execution.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ActionResult {
     /// Whether the action succeeded.
     pub success: bool,
@@ -285,8 +283,7 @@ impl ActionResult {
 }
 
 /// Record of an action taken during automation.
-#[derive(Debug, Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ActionRecord {
     /// Step number (1-indexed).
     pub step: usize,
@@ -372,12 +369,24 @@ mod tests {
     fn test_action_type_display() {
         assert_eq!(ActionType::Click.to_string(), "click");
         assert_eq!(ActionType::Navigate.to_string(), "navigate");
-        assert_eq!(ActionType::Custom("foo".to_string()).to_string(), "custom:foo");
-        assert_eq!(ActionType::ClickAll("button".to_string()).to_string(), "click_all:button");
+        assert_eq!(
+            ActionType::Custom("foo".to_string()).to_string(),
+            "custom:foo"
+        );
+        assert_eq!(
+            ActionType::ClickAll("button".to_string()).to_string(),
+            "click_all:button"
+        );
         assert_eq!(ActionType::ScrollX(100).to_string(), "scroll_x:100");
         assert_eq!(ActionType::ScrollY(-50).to_string(), "scroll_y:-50");
-        assert_eq!(ActionType::InfiniteScroll(5).to_string(), "infinite_scroll:5");
-        assert_eq!(ActionType::WaitFor(".modal".to_string()).to_string(), "wait_for:.modal");
+        assert_eq!(
+            ActionType::InfiniteScroll(5).to_string(),
+            "infinite_scroll:5"
+        );
+        assert_eq!(
+            ActionType::WaitFor(".modal".to_string()).to_string(),
+            "wait_for:.modal"
+        );
         assert_eq!(ActionType::ValidateChain.to_string(), "validate_chain");
     }
 }
