@@ -1243,7 +1243,7 @@ pub struct RemoteMultimodalConfigs {
     pub relevance_credits: Arc<std::sync::atomic::AtomicU32>,
     /// Cache of URL path → relevant classification to avoid re-classifying.
     #[serde(skip)]
-    pub url_prefilter_cache: Arc<std::sync::RwLock<std::collections::HashMap<String, bool>>>,
+    pub url_prefilter_cache: Arc<dashmap::DashMap<String, bool>>,
 }
 
 impl PartialEq for RemoteMultimodalConfigs {
@@ -1287,7 +1287,7 @@ impl Default for RemoteMultimodalConfigs {
             s3_skill_source: None,
             semaphore: Self::default_semaphore(),
             relevance_credits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            url_prefilter_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            url_prefilter_cache: Arc::new(dashmap::DashMap::new()),
         }
     }
 }

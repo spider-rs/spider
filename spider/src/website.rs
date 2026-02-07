@@ -10002,7 +10002,9 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 1)])));
 
+    let start = tokio::time::Instant::now();
     website.crawl_smart().await;
+    let elapsed = start.elapsed();
 
     assert_eq!(website.initial_status_code, StatusCode::OK);
     assert!(website.initial_html_length > 0);
@@ -10010,6 +10012,11 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
     assert!(
         website.links_visited.contains(&target_url.into()),
         "expected smart crawl to visit the cached target"
+    );
+
+    eprintln!(
+        "crawl_smart cached latency: {}ms",
+        elapsed.as_millis()
     );
 }
 

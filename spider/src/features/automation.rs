@@ -610,23 +610,17 @@ pub(crate) async fn prefilter_urls(
         hashbrown::HashSet::with_capacity(urls.len());
     let mut uncached: Vec<CaseInsensitiveString> = Vec::new();
 
-    {
-        let cache = match cfgs.url_prefilter_cache.read() {
-            Ok(c) => c,
-            Err(_) => return urls.clone(), // poisoned lock fallback
-        };
-        for url in urls {
-            let path = url_to_cache_key(url.inner().as_str());
-            match cache.get(&path) {
-                Some(true) => {
-                    relevant_set.insert(url.clone());
-                }
-                Some(false) => {
-                    // cached as irrelevant — skip
-                }
-                None => {
-                    uncached.push(url.clone());
-                }
+    for url in urls {
+        let path = url_to_cache_key(url.inner().as_str());
+        match cfgs.url_prefilter_cache.get(&path).map(|v| *v.value()) {
+            Some(true) => {
+                relevant_set.insert(url.clone());
+            }
+            Some(false) => {
+                // cached as irrelevant — skip
+            }
+            None => {
+                uncached.push(url.clone());
             }
         }
     }
@@ -674,18 +668,9 @@ pub(crate) async fn prefilter_urls(
         };
 
         // Update cache and build relevant set
-        let mut cache = match cfgs.url_prefilter_cache.write() {
-            Ok(c) => c,
-            Err(_) => {
-                // poisoned lock — include all
-                relevant_set.extend(batch.iter().cloned());
-                continue;
-            }
-        };
-
         for (url, &is_relevant) in batch.iter().zip(classifications.iter()) {
             let path = url_to_cache_key(url.inner().as_str());
-            cache.insert(path, is_relevant);
+            cfgs.url_prefilter_cache.insert(path, is_relevant);
             if is_relevant {
                 relevant_set.insert(url.clone());
             }
@@ -1022,6 +1007,7 @@ impl AutomationResultExt for AutomationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use case_insensitive_string::CaseInsensitiveString;
 
     #[test]
     fn test_prompt_configuration_default() {
@@ -1135,5 +1121,81 @@ mod tests {
 
         let with_query = url_to_cache_key("https://a.example.com/path?x=1&y=2");
         assert_eq!(with_query, "https://a.example.com/path?x=1&y=2");
+    }
+
+    #[cfg(all(feature = "agent", feature = "serde"))]
+    #[tokio::test]
+    async fn test_prefilter_urls_returns_cached_relevance_without_network() {
+        use hashbrown::HashSet;
+
+        let mut cfgs = RemoteMultimodalConfigs::new("http://localhost:65535", "test-model");
+        cfgs.cfg.relevance_gate = true;
+        cfgs.cfg.url_prefilter = true;
+
+        let urls: HashSet<CaseInsensitiveString> = [
+            "https://a.example.com/p/1",
+            "https://b.example.com/p/2",
+            "https://c.example.com/p/3",
+        ]
+        .into_iter()
+        .map(CaseInsensitiveString::from)
+        .collect();
+
+        cfgs.url_prefilter_cache
+            .insert(url_to_cache_key("https://a.example.com/p/1"), true);
+        cfgs.url_prefilter_cache
+            .insert(url_to_cache_key("https://b.example.com/p/2"), false);
+        cfgs.url_prefilter_cache
+            .insert(url_to_cache_key("https://c.example.com/p/3"), true);
+
+        let filtered = prefilter_urls(&cfgs, &urls).await;
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.contains(&CaseInsensitiveString::from(
+            "https://a.example.com/p/1"
+        )));
+        assert!(filtered.contains(&CaseInsensitiveString::from(
+            "https://c.example.com/p/3"
+        )));
+        assert!(!filtered.contains(&CaseInsensitiveString::from(
+            "https://b.example.com/p/2"
+        )));
+    }
+
+    #[cfg(all(feature = "agent", feature = "serde"))]
+    #[tokio::test]
+    async fn test_prefilter_urls_concurrent_cached_reads_are_stable() {
+        use hashbrown::HashSet;
+        use std::sync::Arc;
+
+        let mut cfgs = RemoteMultimodalConfigs::new("http://localhost:65535", "test-model");
+        cfgs.cfg.relevance_gate = true;
+        cfgs.cfg.url_prefilter = true;
+        cfgs.cfg.url_prefilter_batch_size = 64;
+
+        let urls: HashSet<CaseInsensitiveString> = (0..120usize)
+            .map(|i| format!("https://example.com/p/{i}"))
+            .map(CaseInsensitiveString::from)
+            .collect();
+
+        for (idx, url) in urls.iter().enumerate() {
+            cfgs.url_prefilter_cache
+                .insert(url_to_cache_key(url.inner().as_str()), idx % 2 == 0);
+        }
+
+        let cfgs = Arc::new(cfgs);
+        let urls = Arc::new(urls);
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..32usize {
+            let cfgs = cfgs.clone();
+            let urls = urls.clone();
+            tasks.spawn(async move { prefilter_urls(&cfgs, &urls).await.len() });
+        }
+
+        while let Some(res) = tasks.join_next().await {
+            let len = res.expect("prefilter task should not panic");
+            assert_eq!(len, 60);
+        }
     }
 }

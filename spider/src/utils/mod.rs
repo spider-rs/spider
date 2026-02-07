@@ -6689,4 +6689,102 @@ mod tests {
         );
         assert!(content.contains("cached-response"));
     }
+
+    #[cfg(feature = "cache_chrome_hybrid")]
+    #[tokio::test]
+    async fn test_fetch_page_html_raw_cached_performance_seeded_vs_network() {
+        use std::collections::HashMap;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::Duration as StdDuration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local delayed server");
+        let addr = listener.local_addr().expect("read local addr");
+
+        let response_body = "<html><body>network-delayed-response</body></html>".to_string();
+        let response_body_clone = response_body.clone();
+
+        let server_thread = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept local connection");
+            let mut request_buf = [0_u8; 1024];
+            let _ = stream.read(&mut request_buf);
+            std::thread::sleep(StdDuration::from_millis(350));
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_clone.len(),
+                response_body_clone
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .expect("write delayed response");
+            stream.flush().expect("flush delayed response");
+        });
+
+        let target_url = format!("http://{}/perf-cache-test", addr);
+
+        let client = reqwest_middleware::ClientBuilder::new(
+            reqwest::ClientBuilder::new()
+                .build()
+                .expect("build reqwest client"),
+        )
+        .build();
+
+        let network_start = tokio::time::Instant::now();
+        let network_page = fetch_page_html_raw(&target_url, &client).await;
+        let network_duration = network_start.elapsed();
+
+        server_thread
+            .join()
+            .expect("join delayed local server thread");
+
+        assert_eq!(network_page.status_code, StatusCode::OK);
+
+        let cache_key = create_cache_key_raw(&target_url, None, None);
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+        let http_response = HttpResponse {
+            body: response_body.into_bytes(),
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(&target_url).expect("valid cache url"),
+            version: HttpVersion::Http11,
+        };
+
+        let mut request_headers = HashMap::new();
+        request_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+        let cache_options = Some(CacheOptions::SkipBrowser);
+        let cache_policy = None;
+
+        let cached_start = tokio::time::Instant::now();
+        let cached_page =
+            fetch_page_html_raw_cached(&target_url, &client, cache_options, &cache_policy).await;
+        let cached_duration = cached_start.elapsed();
+
+        assert_eq!(cached_page.status_code, StatusCode::OK);
+        assert!(
+            cached_duration < network_duration,
+            "expected cached path to be faster (network={}ms cached={}ms)",
+            network_duration.as_millis(),
+            cached_duration.as_millis()
+        );
+
+        let cached_secs = cached_duration.as_secs_f64().max(0.000_001);
+        let speedup = network_duration.as_secs_f64() / cached_secs;
+
+        eprintln!(
+            "cache performance: network={}ms cached={}ms speedup={:.2}x",
+            network_duration.as_millis(),
+            cached_duration.as_millis(),
+            speedup
+        );
+    }
 }

@@ -151,27 +151,54 @@ impl<V: CacheValue> SmartCache<V> {
 
     /// Get a value from the cache.
     pub async fn get(&self, key: &str) -> Option<V> {
-        let mut entries = self.entries.write().await;
+        let now = Instant::now();
+        let mut saw_expired = false;
 
-        if let Some(entry) = entries.get_mut(key) {
-            // Check expiration
-            if entry.created_at.elapsed() > entry.ttl {
-                let size = entry.size_bytes;
-                entries.remove(key);
-                self.current_size.fetch_sub(size, Ordering::Relaxed);
-                self.stats.expirations.fetch_add(1, Ordering::Relaxed);
-                self.stats.misses.fetch_add(1, Ordering::Relaxed);
-                return None;
+        {
+            let entries = self.entries.read().await;
+            if let Some(entry) = entries.get(key) {
+                if now.duration_since(entry.created_at) <= entry.ttl {
+                    let value = entry.value.clone();
+                    drop(entries);
+
+                    // Best-effort metadata touch. We avoid awaiting a write lock on every hit.
+                    if let Ok(mut entries) = self.entries.try_write() {
+                        if let Some(entry) = entries.get_mut(key) {
+                            if now.duration_since(entry.created_at) <= entry.ttl {
+                                entry.last_accessed = now;
+                                entry.access_count = entry.access_count.saturating_add(1);
+                            }
+                        }
+                    }
+
+                    self.stats.hits.fetch_add(1, Ordering::Relaxed);
+                    return Some(value);
+                }
+
+                saw_expired = true;
             }
-
-            entry.last_accessed = Instant::now();
-            entry.access_count += 1;
-            self.stats.hits.fetch_add(1, Ordering::Relaxed);
-            Some(entry.value.clone())
-        } else {
-            self.stats.misses.fetch_add(1, Ordering::Relaxed);
-            None
         }
+
+        if saw_expired {
+            let mut entries = self.entries.write().await;
+            if let Some(entry) = entries.get(key) {
+                if now.duration_since(entry.created_at) > entry.ttl {
+                    let size = entry.size_bytes;
+                    entries.remove(key);
+                    self.current_size.fetch_sub(size, Ordering::Relaxed);
+                    self.stats.expirations.fetch_add(1, Ordering::Relaxed);
+                    self.stats.misses.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+
+                let value = entry.value.clone();
+                self.stats.hits.fetch_add(1, Ordering::Relaxed);
+                return Some(value);
+            }
+        }
+
+        self.stats.misses.fetch_add(1, Ordering::Relaxed);
+        None
     }
 
     /// Set a value in the cache.
@@ -184,8 +211,26 @@ impl<V: CacheValue> SmartCache<V> {
         let key = key.into();
         let size = value.estimated_size() + key.len() + std::mem::size_of::<CacheEntry<V>>();
 
-        // Ensure we have space
-        self.ensure_space(size).await;
+        let mut entries = self.entries.write().await;
+
+        // Remove old entry if exists
+        if let Some(old) = entries.remove(&key) {
+            self.current_size
+                .fetch_sub(old.size_bytes, Ordering::Relaxed);
+        }
+
+        // Enforce entry count and size limits while holding the write lock.
+        while entries.len() >= self.max_entries {
+            if !self.evict_lru_locked(&mut entries) {
+                break;
+            }
+        }
+
+        while self.current_size.load(Ordering::Relaxed) + size > self.max_size_bytes {
+            if !self.evict_lru_locked(&mut entries) {
+                break;
+            }
+        }
 
         let entry = CacheEntry {
             value,
@@ -195,14 +240,6 @@ impl<V: CacheValue> SmartCache<V> {
             ttl,
             access_count: 1,
         };
-
-        let mut entries = self.entries.write().await;
-
-        // Remove old entry if exists
-        if let Some(old) = entries.remove(&key) {
-            self.current_size
-                .fetch_sub(old.size_bytes, Ordering::Relaxed);
-        }
 
         entries.insert(key, entry);
         self.current_size.fetch_add(size, Ordering::Relaxed);
@@ -247,49 +284,22 @@ impl<V: CacheValue> SmartCache<V> {
         &self.stats
     }
 
-    /// Ensure there's enough space for a new entry.
-    async fn ensure_space(&self, needed_bytes: usize) {
-        // Check entry count
-        let entry_count = self.entries.read().await.len();
-        if entry_count >= self.max_entries {
-            self.evict_lru().await;
-        }
-
-        // Check size limit
-        let current = self.current_size.load(Ordering::Relaxed);
-        if current + needed_bytes > self.max_size_bytes {
-            self.evict_until_space(needed_bytes).await;
-        }
-    }
-
-    /// Evict the least recently used entry.
-    async fn evict_lru(&self) {
-        let mut entries = self.entries.write().await;
-
-        if let Some(lru_key) = entries
+    fn evict_lru_locked(&self, entries: &mut HashMap<String, CacheEntry<V>>) -> bool {
+        let Some(lru_key) = entries
             .iter()
             .min_by_key(|(_, e)| e.last_accessed)
             .map(|(k, _)| k.clone())
-        {
-            if let Some(entry) = entries.remove(&lru_key) {
-                self.current_size
-                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
-                self.stats.evictions.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
+        else {
+            return false;
+        };
 
-    /// Evict entries until we have enough space.
-    async fn evict_until_space(&self, needed_bytes: usize) {
-        let target = self.max_size_bytes.saturating_sub(needed_bytes);
-
-        while self.current_size.load(Ordering::Relaxed) > target {
-            self.evict_lru().await;
-
-            // Safety: don't loop forever
-            if self.entries.read().await.is_empty() {
-                break;
-            }
+        if let Some(entry) = entries.remove(&lru_key) {
+            self.current_size
+                .fetch_sub(entry.size_bytes, Ordering::Relaxed);
+            self.stats.evictions.fetch_add(1, Ordering::Relaxed);
+            true
+        } else {
+            false
         }
     }
 
@@ -419,5 +429,76 @@ mod tests {
         assert_eq!(stats.hits(), 2);
         assert_eq!(stats.misses(), 1);
         assert!((stats.hit_rate() - 0.666).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_smart_cache_concurrent_reads_and_writes() {
+        let cache: Arc<SmartCache<String>> = Arc::new(SmartCache::with_limits(
+            1024,
+            16 * 1024 * 1024,
+            Duration::from_secs(120),
+        ));
+
+        cache.set("shared", "v0".to_string()).await;
+
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for reader_idx in 0..64usize {
+            let cache = cache.clone();
+            tasks.spawn(async move {
+                let mut observed = 0usize;
+                for _ in 0..250usize {
+                    if cache.get("shared").await.is_some() {
+                        observed += 1;
+                    }
+                }
+                (reader_idx, observed)
+            });
+        }
+
+        for writer_idx in 0..8usize {
+            let cache = cache.clone();
+            tasks.spawn(async move {
+                for round in 0..120usize {
+                    let value = format!("writer-{writer_idx}-round-{round}");
+                    cache.set("shared", value).await;
+                }
+                (writer_idx, 120usize)
+            });
+        }
+
+        while let Some(joined) = tasks.join_next().await {
+            assert!(joined.is_ok(), "task panicked under concurrency");
+        }
+
+        assert!(cache.get("shared").await.is_some());
+        assert!(cache.len().await <= 1024);
+        assert!(cache.stats().hits() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_smart_cache_concurrent_eviction_stays_bounded() {
+        let cache: Arc<SmartCache<String>> =
+            Arc::new(SmartCache::with_limits(64, 64 * 1024, Duration::from_secs(120)));
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for worker in 0..24usize {
+            let cache = cache.clone();
+            tasks.spawn(async move {
+                for n in 0..180usize {
+                    let key = format!("w{worker}-k{n}");
+                    let value = "x".repeat(256);
+                    cache.set(key, value).await;
+                }
+            });
+        }
+
+        while let Some(joined) = tasks.join_next().await {
+            assert!(joined.is_ok(), "worker panicked during eviction stress");
+        }
+
+        assert!(cache.len().await <= 64);
+        // leave headroom for accounting overhead
+        assert!(cache.size_bytes() <= (64 * 1024) + 4096);
     }
 }
