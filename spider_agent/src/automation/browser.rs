@@ -67,6 +67,7 @@ pub(crate) struct AutomationPlan {
     pub memory_ops: Vec<MemoryOperation>,
     pub usage: AutomationUsage,
     pub relevant: Option<bool>,
+    pub reasoning: Option<String>,
 }
 
 #[cfg(feature = "chrome")]
@@ -364,6 +365,7 @@ impl RemoteMultimodalEngine {
                     screenshot: None,
                     spawn_pages: Vec::new(),
                     relevant: None,
+                    reasoning: None,
                 });
             }
         }
@@ -409,6 +411,7 @@ impl RemoteMultimodalEngine {
         let mut total_usage = AutomationUsage::default();
         let mut last_extracted: Option<serde_json::Value> = None;
         let mut last_relevant: Option<bool> = None;
+        let mut last_reasoning: Option<String> = None;
         let mut all_spawn_pages: Vec<String> = Vec::new();
         // Stuck-loop detection: track hashed step sequences across rounds
         let mut recent_step_hashes: std::collections::VecDeque<u64> =
@@ -679,6 +682,9 @@ impl RemoteMultimodalEngine {
             if plan.relevant.is_some() {
                 last_relevant = plan.relevant;
             }
+            if plan.reasoning.is_some() {
+                last_reasoning = plan.reasoning.clone();
+            }
 
             // Save extracted data if present
             if plan.extracted.is_some() {
@@ -775,6 +781,7 @@ impl RemoteMultimodalEngine {
                     screenshot: final_screenshot,
                     spawn_pages: all_spawn_pages,
                     relevant: last_relevant,
+                    reasoning: last_reasoning,
                 });
             }
 
@@ -831,6 +838,7 @@ impl RemoteMultimodalEngine {
             screenshot: final_screenshot,
             spawn_pages: all_spawn_pages,
             relevant: last_relevant,
+            reasoning: last_reasoning,
         })
     }
 
@@ -1162,6 +1170,21 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
+        let reasoning = parsed.get("reasoning").and_then(|v| {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                return if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+            if v.is_null() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        });
 
         // Try to get extracted field, or fallback to the entire response when in extraction mode.
         // Treat `extracted: {}` (empty object) the same as missing for recovery purposes.
@@ -1191,7 +1214,13 @@ impl RemoteMultimodalEngine {
                         // Skip known automation fields
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
+                            "label"
+                                | "done"
+                                | "steps"
+                                | "memory_ops"
+                                | "extracted"
+                                | "relevant"
+                                | "reasoning"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -1252,6 +1281,7 @@ impl RemoteMultimodalEngine {
             memory_ops,
             usage,
             relevant,
+            reasoning,
         })
     }
 

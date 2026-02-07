@@ -598,6 +598,21 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
+        let reasoning = plan_value.get("reasoning").and_then(|v| {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                return if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+            if v.is_null() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        });
 
         // Try to get extracted field, or fallback to the entire response
         let extracted = plan_value.get("extracted").cloned().or_else(|| {
@@ -618,7 +633,13 @@ impl RemoteMultimodalEngine {
                         // Skip known automation fields
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
+                            "label"
+                                | "done"
+                                | "steps"
+                                | "memory_ops"
+                                | "extracted"
+                                | "relevant"
+                                | "reasoning"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -642,6 +663,7 @@ impl RemoteMultimodalEngine {
             screenshot: None,
             spawn_pages: Vec::new(),
             relevant,
+            reasoning,
         })
     }
 
@@ -848,6 +870,21 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
+        let reasoning = plan_value.get("reasoning").and_then(|v| {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                return if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+            if v.is_null() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        });
 
         // Try to get extracted field, or fallback to the entire response
         let extracted = plan_value.get("extracted").cloned().or_else(|| {
@@ -865,7 +902,13 @@ impl RemoteMultimodalEngine {
                     for (key, value) in obj {
                         if !matches!(
                             key.as_str(),
-                            "label" | "done" | "steps" | "memory_ops" | "extracted" | "relevant"
+                            "label"
+                                | "done"
+                                | "steps"
+                                | "memory_ops"
+                                | "extracted"
+                                | "relevant"
+                                | "reasoning"
                         ) {
                             extracted_data.insert(key.clone(), value.clone());
                         }
@@ -889,6 +932,7 @@ impl RemoteMultimodalEngine {
             screenshot: None,
             spawn_pages: Vec::new(),
             relevant,
+            reasoning,
         })
     }
 

@@ -582,6 +582,9 @@ pub struct AutomationResult {
     /// None = relevance gate not enabled; Some(false) = irrelevant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relevant: Option<bool>,
+    /// Optional reasoning text if the model returned it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 impl AutomationResult {
@@ -643,6 +646,12 @@ impl AutomationResult {
     /// Set relevance flag.
     pub fn with_relevant(mut self, relevant: Option<bool>) -> Self {
         self.relevant = relevant;
+        self
+    }
+
+    /// Set optional reasoning text.
+    pub fn with_reasoning(mut self, reasoning: Option<String>) -> Self {
+        self.reasoning = reasoning;
         self
     }
 }

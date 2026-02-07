@@ -364,6 +364,12 @@ pub struct AutomationResults {
     /// Whether the page is relevant to crawl goals.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relevant: Option<bool>,
+    /// Number of automation steps executed, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps_executed: Option<usize>,
+    /// Optional reasoning text returned by the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 /// Results from automation operations (extraction, observation, etc.).
@@ -382,6 +388,10 @@ pub struct AutomationResults {
     pub usage: Option<crate::features::automation::AutomationUsage>,
     /// Whether the page is relevant to crawl goals.
     pub relevant: Option<bool>,
+    /// Number of automation steps executed, when available.
+    pub steps_executed: Option<usize>,
+    /// Optional reasoning text returned by the model.
+    pub reasoning: Option<String>,
 }
 
 /// Page-level metadata extracted from HTML.
@@ -5044,6 +5054,8 @@ fn test_automation_results_structure() {
         error: None,
         usage: None,
         relevant: None,
+        steps_executed: None,
+        reasoning: None,
     };
 
     assert_eq!(automation_result.input, "Test prompt");
@@ -5062,6 +5074,8 @@ fn test_metadata_with_automation() {
         error: None,
         usage: None,
         relevant: None,
+        steps_executed: None,
+        reasoning: None,
     }];
 
     let metadata = Metadata {
@@ -5094,6 +5108,8 @@ fn test_set_metadata_preserves_automation() {
         error: None,
         usage: None,
         relevant: None,
+        steps_executed: None,
+        reasoning: None,
     }];
 
     let existing_metadata = Metadata {
@@ -5138,6 +5154,8 @@ async fn test_metadata_chrome_real_page() {
         error: None,
         usage: None,
         relevant: Some(true),
+        steps_executed: Some(1),
+        reasoning: Some("CTA extracted from main hero section".to_string()),
     }];
 
     let metadata = Metadata {

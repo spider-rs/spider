@@ -138,6 +138,8 @@ pub struct AutomationResult {
     pub spawn_pages: Vec<String>,
     /// Whether the page is relevant to crawl goals.
     pub relevant: Option<bool>,
+    /// Optional reasoning text if returned by the model.
+    pub reasoning: Option<String>,
 }
 
 /// Engine error type (stub when agent feature not enabled).
@@ -499,6 +501,7 @@ pub async fn run_remote_multimodal_extraction(
                 screenshot: None,
                 spawn_pages: Vec::new(),
                 relevant: None,
+                reasoning: None,
             }));
         }
     }
@@ -672,6 +675,12 @@ impl AutomationResultExt for AutomationResult {
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
             relevant: self.relevant,
+            steps_executed: (self.steps_executed > 0).then_some(self.steps_executed),
+            reasoning: self
+                .reasoning
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
     }
 }
@@ -686,6 +695,12 @@ impl AutomationResultExt for AutomationResult {
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
             relevant: self.relevant,
+            steps_executed: (self.steps_executed > 0).then_some(self.steps_executed),
+            reasoning: self
+                .reasoning
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
     }
 }
@@ -922,6 +937,12 @@ impl AutomationResultExt for AutomationResult {
             error: self.error.clone(),
             usage: Some(self.usage.clone()),
             relevant: None,
+            steps_executed: (self.steps_executed > 0).then_some(self.steps_executed),
+            reasoning: self
+                .reasoning
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
     }
 }
