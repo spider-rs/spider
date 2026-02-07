@@ -3965,6 +3965,10 @@ pub async fn fetch_page_html_spider_cloud(
         .post(&api_endpoint)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
+        .header(
+            "User-Agent",
+            concat!("spider/", env!("CARGO_PKG_VERSION")),
+        )
         .json(&body)
         .send()
         .await;
