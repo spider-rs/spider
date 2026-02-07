@@ -93,7 +93,10 @@ fn summarize_usage(value: &serde_json::Value) -> String {
         .unwrap_or_else(|| "n/a".to_string());
     let total_cost = first
         .get("costs")
-        .and_then(|v| v.get("total_cost_formatted").or_else(|| v.get("total_cost")))
+        .and_then(|v| {
+            v.get("total_cost_formatted")
+                .or_else(|| v.get("total_cost"))
+        })
         .map(|v| v.to_string())
         .unwrap_or_else(|| "n/a".to_string());
 
@@ -107,7 +110,8 @@ fn build_flows(prompt: &str, enable_ai_routes: bool) -> Vec<ToolFlow> {
     let p = prompt.to_ascii_lowercase();
     let run_all = contains_any(&p, &["all flows", "all tools", "everything"]);
 
-    let seed_url = extract_first_url(prompt).unwrap_or_else(|| "https://books.toscrape.com/".into());
+    let seed_url =
+        extract_first_url(prompt).unwrap_or_else(|| "https://books.toscrape.com/".into());
     let detail_url = if seed_url.contains("books.toscrape.com") {
         "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html".to_string()
     } else {
@@ -314,7 +318,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flows = build_flows(&prompt, enable_ai_routes);
     println!("Planned {} tool call(s):", flows.len());
     for flow in &flows {
-        println!("- {} ({})", tool_name(&tool_prefix, flow.suffix), flow.description);
+        println!(
+            "- {} ({})",
+            tool_name(&tool_prefix, flow.suffix),
+            flow.description
+        );
     }
     println!();
 
@@ -331,7 +339,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if result.success {
                     let json_value = serde_json::from_str::<serde_json::Value>(&result.body)
                         .unwrap_or(serde_json::Value::Null);
-                    println!("  ok: HTTP {} | {}", result.status, summarize_usage(&json_value));
+                    println!(
+                        "  ok: HTTP {} | {}",
+                        result.status,
+                        summarize_usage(&json_value)
+                    );
                 } else {
                     println!(
                         "  failed: HTTP {} body={}",
@@ -348,7 +360,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let usage = agent.usage();
     println!("\n=== Agent Usage Snapshot ===");
-    println!("Total custom tool calls: {}", usage.total_custom_tool_calls());
+    println!(
+        "Total custom tool calls: {}",
+        usage.total_custom_tool_calls()
+    );
     for (tool, count) in &usage.custom_tool_calls {
         println!("- {}: {}", tool, count);
     }

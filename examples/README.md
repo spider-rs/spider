@@ -85,6 +85,10 @@ Use chrome hybrid caching. [Chrome Cache Hybrid](./cache_chrome_hybrid.rs).
 
 - `cargo run --example advanced_configuration`
 
+End-to-end remote cache warm + skip-browser return path using `HYBRID_CACHE_ENDPOINT` (index_cache_server / hybrid_cache_server). [Remote Cache Skip Browser](./cache_remote_skip_browser.rs).
+
+- `HYBRID_CACHE_ENDPOINT=http://127.0.0.1:8080 cargo run --example cache_remote_skip_browser --features="spider/sync spider/chrome spider/chrome_remote_cache" -- https://example.com/`
+
 Use URL globbing for a domain. [URL Globbing](./url_glob.rs).
 
 - `cargo run --example glob --features glob`

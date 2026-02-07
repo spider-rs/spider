@@ -272,7 +272,9 @@ fn build_steps(prompt: &str, seed_url: &str, query: &str, opts: &PlanOptions) ->
     steps
 }
 
-fn summarize_json_payload(payload: &serde_json::Value) -> (Option<u64>, Option<u64>, Option<String>) {
+fn summarize_json_payload(
+    payload: &serde_json::Value,
+) -> (Option<u64>, Option<u64>, Option<String>) {
     let first = if let Some(arr) = payload.as_array() {
         arr.first().unwrap_or(payload)
     } else {
@@ -283,7 +285,10 @@ fn summarize_json_payload(payload: &serde_json::Value) -> (Option<u64>, Option<u
     let duration = first.get("duration_elapsed_ms").and_then(|v| v.as_u64());
     let total_cost = first
         .get("costs")
-        .and_then(|v| v.get("total_cost_formatted").or_else(|| v.get("total_cost")))
+        .and_then(|v| {
+            v.get("total_cost_formatted")
+                .or_else(|| v.get("total_cost"))
+        })
         .map(|v| v.to_string());
 
     (status, duration, total_cost)
@@ -321,7 +326,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let seed_url = extract_first_url(&prompt).unwrap_or_else(|| "https://books.toscrape.com/".into());
+    let seed_url =
+        extract_first_url(&prompt).unwrap_or_else(|| "https://books.toscrape.com/".into());
     let query = query_from_prompt(&prompt, &seed_url);
 
     let cloud_cfg = SpiderCloudToolConfig::new(api_key)
@@ -357,11 +363,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let body = step.body.to_string();
         println!("Running {} ({})", name, step.description);
 
-        match agent.execute_custom_tool(&name, None, None, Some(&body)).await {
+        match agent
+            .execute_custom_tool(&name, None, None, Some(&body))
+            .await
+        {
             Ok(result) => {
-                let parsed =
-                    serde_json::from_str::<serde_json::Value>(&result.body).unwrap_or(serde_json::Value::Null);
-                let (status_field, duration_elapsed_ms, total_cost) = summarize_json_payload(&parsed);
+                let parsed = serde_json::from_str::<serde_json::Value>(&result.body)
+                    .unwrap_or(serde_json::Value::Null);
+                let (status_field, duration_elapsed_ms, total_cost) =
+                    summarize_json_payload(&parsed);
 
                 let preview = preview_from_body(&result.body, 240);
                 println!("  -> success={} http={}", result.success, result.status);

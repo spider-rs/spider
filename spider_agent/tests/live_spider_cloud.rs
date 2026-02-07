@@ -25,7 +25,10 @@ fn summarize_response_usage(value: &serde_json::Value) -> String {
 
     let total_cost = first
         .get("costs")
-        .and_then(|v| v.get("total_cost_formatted").or_else(|| v.get("total_cost")))
+        .and_then(|v| {
+            v.get("total_cost_formatted")
+                .or_else(|| v.get("total_cost"))
+        })
         .map(|v| v.to_string())
         .unwrap_or_else(|| "n/a".to_string());
 

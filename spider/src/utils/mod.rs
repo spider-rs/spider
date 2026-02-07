@@ -3858,6 +3858,17 @@ fn build_error_page_response(target_url: &str, err: RequestError) -> PageRespons
     page_response
 }
 
+#[inline]
+/// Build a cached page response from HTML.
+fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
+    PageResponse {
+        content: Some(Box::new(html.as_bytes().to_vec().into())),
+        status_code: StatusCode::OK,
+        final_url: Some(target_url.to_string()),
+        ..Default::default()
+    }
+}
+
 /// Error chain handshake failure.
 fn error_chain_contains_handshake_failure(err: &RequestError) -> bool {
     if err.to_string().to_lowercase().contains("handshake failure") {
@@ -3927,6 +3938,30 @@ async fn fetch_page_html_raw_base(
 
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
+    fetch_page_html_raw_base(target_url, client, false).await
+}
+
+/// Perform a network request to a resource and return a cached response immediately when available.
+pub async fn fetch_page_html_raw_cached(
+    target_url: &str,
+    client: &Client,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>,
+) -> PageResponse {
+    let duration = if cfg!(feature = "time") {
+        Some(tokio::time::Instant::now())
+    } else {
+        None
+    };
+
+    if let Some(cached_html) =
+        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
+    {
+        let mut response = build_cached_html_page_response(target_url, &cached_html);
+        set_page_response_duration(&mut response, duration);
+        return response;
+    }
+
     fetch_page_html_raw_base(target_url, client, false).await
 }
 
@@ -4566,6 +4601,23 @@ impl BasicCachePolicy {
     }
 }
 
+#[cfg(any(
+    feature = "cache",
+    feature = "cache_mem",
+    feature = "chrome_remote_cache"
+))]
+#[inline]
+fn decode_cached_html_bytes(body: &[u8], accept_lang: Option<&str>) -> Option<String> {
+    if is_binary_file(body) {
+        return None;
+    }
+
+    Some(match accept_lang {
+        Some(lang) if !lang.is_empty() => auto_encoder::encode_bytes_from_language(body, lang),
+        _ => auto_encoder::auto_encode_bytes(body),
+    })
+}
+
 #[cfg(any(feature = "cache", feature = "cache_mem"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn get_cached_url_base(
@@ -4602,20 +4654,16 @@ pub async fn get_cached_url_base(
     if let Ok(cache_result) = result {
         if let Ok(Some((http_response, stored_policy))) = cache_result {
             if allow_stale || !stored_policy.is_stale(now) {
-                let body = http_response.body;
-                if !auto_encoder::is_binary_file(&body) {
-                    let accept_lang = http_response
-                        .headers
-                        .get("accept-language")
-                        .and_then(|h| if h.is_empty() { None } else { Some(h) })
-                        .map_or("", |v| v);
-
-                    return Some(if !accept_lang.is_empty() {
-                        auto_encoder::encode_bytes_from_language(&body, accept_lang)
-                    } else {
-                        auto_encoder::auto_encode_bytes(&body)
-                    });
-                }
+                return decode_cached_html_bytes(
+                    &http_response.body,
+                    http_response.headers.get("accept-language").and_then(|h| {
+                        if h.is_empty() {
+                            None
+                        } else {
+                            Some(h.as_str())
+                        }
+                    }),
+                );
             }
         }
     }
@@ -4623,7 +4671,96 @@ pub async fn get_cached_url_base(
     None
 }
 
-#[cfg(any(feature = "cache", feature = "cache_mem"))]
+#[cfg(all(
+    feature = "chrome_remote_cache",
+    not(any(feature = "cache", feature = "cache_mem"))
+))]
+/// Perform a network request to a resource extracting all content as text streaming via chrome.
+pub async fn get_cached_url_base(
+    target_url: &str,
+    cache_options: Option<CacheOptions>,
+    cache_policy: &Option<BasicCachePolicy>, // optional override/behavior
+) -> Option<String> {
+    let auth_opt = match cache_options {
+        Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+        Some(CacheOptions::Authorized(token))
+        | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
+        Some(CacheOptions::No) | None => return None,
+    };
+
+    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
+    let now = match cache_policy {
+        Some(BasicCachePolicy::Period(t)) => *t,
+        _ => std::time::SystemTime::now(),
+    };
+
+    let cache_site =
+        chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt.as_deref());
+    let make_session_key = |url: &str| format!("GET:{}", url);
+
+    let try_get = |url: &str| {
+        chromiumoxide::cache::remote::get_session_cache_item(&cache_site, &make_session_key(url))
+            .and_then(|(http_response, stored_policy)| {
+                if allow_stale || !stored_policy.is_stale(now) {
+                    let accept_lang = http_response
+                        .headers
+                        .get("accept-language")
+                        .or_else(|| http_response.headers.get("Accept-Language"))
+                        .map(|h| h.as_str());
+
+                    decode_cached_html_bytes(&http_response.body, accept_lang)
+                } else {
+                    None
+                }
+            })
+    };
+
+    if let Some(body) = try_get(target_url) {
+        return Some(body);
+    }
+
+    let alt_url: Option<String> = if target_url.ends_with('/') {
+        let trimmed = target_url.trim_end_matches('/');
+        if trimmed.is_empty() || trimmed == target_url {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    } else {
+        let mut s = String::with_capacity(target_url.len() + 1);
+        s.push_str(target_url);
+        s.push('/');
+        Some(s)
+    };
+
+    if let Some(alt) = &alt_url {
+        if let Some(body) = try_get(alt) {
+            return Some(body);
+        }
+    }
+
+    // Pull from the remote cache server once, then retry local session lookup.
+    chromiumoxide::cache::remote::get_cache_site(target_url, auth_opt.as_deref(), Some("true"))
+        .await;
+
+    if let Some(body) = try_get(target_url) {
+        return Some(body);
+    }
+
+    if let Some(alt) = alt_url {
+        if let Some(body) = try_get(&alt) {
+            return Some(body);
+        }
+    }
+
+    None
+}
+
+#[cfg(any(
+    feature = "cache",
+    feature = "cache_mem",
+    feature = "chrome_remote_cache"
+))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn get_cached_url(
     target_url: &str,
@@ -4658,7 +4795,11 @@ pub async fn get_cached_url(
     None
 }
 
-#[cfg(all(not(feature = "cache"), not(feature = "cache_mem")))]
+#[cfg(all(
+    not(feature = "cache"),
+    not(feature = "cache_mem"),
+    not(feature = "chrome_remote_cache")
+))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn get_cached_url(
     _target_url: &str,
@@ -4870,13 +5011,22 @@ async fn _fetch_page_html_chrome(
         None
     };
 
+    let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = if resource.is_some() {
         resource
     } else {
         get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
     };
 
-    let cached = !cached_html.is_none();
+    if skip_browser {
+        if let Some(html) = cached_html.as_deref() {
+            let mut page_response = build_cached_html_page_response(target_url, html);
+            set_page_response_duration(&mut page_response, duration);
+            return page_response;
+        }
+    }
+
+    let cached = cached_html.is_some();
 
     let mut page_response = match &page {
         page => {
@@ -6486,5 +6636,57 @@ mod tests {
             create_cache_key_raw("https://example.com", None, Some("token123")),
             "GET:https://example.com:token123"
         );
+    }
+
+    #[cfg(feature = "cache_chrome_hybrid")]
+    #[tokio::test]
+    async fn test_fetch_page_html_raw_cached_uses_seeded_cache_entry() {
+        use std::collections::HashMap;
+
+        let target_url = "https://cache-unit-test.invalid/path";
+        let cache_key = create_cache_key_raw(target_url, None, None);
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("accept-language".to_string(), "en-US".to_string());
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+        let body = b"<html><body>cached-response</body></html>".to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers.clone(),
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+
+        let mut request_headers = HashMap::new();
+        request_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+        let client = reqwest_middleware::ClientBuilder::new(
+            reqwest::ClientBuilder::new()
+                .build()
+                .expect("build reqwest client"),
+        )
+        .build();
+
+        let cache_options = Some(CacheOptions::Yes);
+        let cache_policy = None;
+
+        let page =
+            fetch_page_html_raw_cached(target_url, &client, cache_options, &cache_policy).await;
+        assert_eq!(page.status_code, StatusCode::OK);
+
+        let content = String::from_utf8_lossy(
+            page.content
+                .as_ref()
+                .expect("cached response content")
+                .as_ref(),
+        );
+        assert!(content.contains("cached-response"));
     }
 }

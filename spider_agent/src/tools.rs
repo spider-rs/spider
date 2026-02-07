@@ -236,7 +236,10 @@ impl SpiderCloudToolConfig {
     }
 
     fn auth_tool(&self, tool: CustomTool) -> CustomTool {
-        if self.auth_header.eq_ignore_ascii_case(DEFAULT_SPIDER_CLOUD_AUTH_HEADER) {
+        if self
+            .auth_header
+            .eq_ignore_ascii_case(DEFAULT_SPIDER_CLOUD_AUTH_HEADER)
+        {
             // Accept env inputs like `SPIDER_CLOUD_API_KEY=...` and
             // `SPIDER_CLOUD_API_KEY=Bearer ...` without double-prefixing.
             let token = strip_bearer_prefix(&self.api_key).to_string();
@@ -256,7 +259,10 @@ impl SpiderCloudToolConfig {
             .with_method(HttpMethod::Post)
             .with_content_type("application/json")
             .with_timeout(Duration::from_secs(self.timeout_secs))
-            .with_header("User-Agent", format!("spider_agent/{}", env!("CARGO_PKG_VERSION")));
+            .with_header(
+                "User-Agent",
+                format!("spider_agent/{}", env!("CARGO_PKG_VERSION")),
+            );
         self.auth_tool(tool)
     }
 

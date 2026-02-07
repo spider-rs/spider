@@ -1110,14 +1110,14 @@ impl Configuration {
         self
     }
 
-    #[cfg(feature = "cache_request")]
+    #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.cache = cache;
         self
     }
 
-    #[cfg(not(feature = "cache_request"))]
+    #[cfg(not(any(feature = "cache_request", feature = "chrome_remote_cache")))]
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, _cache: bool) -> &mut Self {
         self
@@ -1694,6 +1694,17 @@ impl Configuration {
         feature = "chrome",
         not(any(feature = "cache_request", feature = "chrome_remote_cache"))
     ))]
+    pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
+        None
+    }
+
+    /// Get the cache option to use for the run when chrome/cache features are disabled.
+    #[cfg(not(any(
+        feature = "cache_request",
+        feature = "chrome_remote_cache",
+        feature = "chrome"
+    )))]
+    #[allow(dead_code)]
     pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {
         None
     }

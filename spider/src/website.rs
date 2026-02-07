@@ -4131,7 +4131,13 @@ impl Website {
             let mut page = if let Some(seeded_page) = self.build_seed_page() {
                 seeded_page
             } else {
-                Page::new_page(&url, &client).await
+                Page::new_page_with_cache(
+                    &url,
+                    &client,
+                    self.configuration.get_cache_options(),
+                    &self.configuration.cache_policy,
+                )
+                .await
             };
 
             let mut retry_count = self.configuration.retry;
@@ -4156,7 +4162,13 @@ impl Website {
                             )
                             .await;
                         } else {
-                            let next_page = Page::new_page(url, &client).await;
+                            let next_page = Page::new_page_with_cache(
+                                url,
+                                &client,
+                                self.configuration.get_cache_options(),
+                                &self.configuration.cache_policy,
+                            )
+                            .await;
                             page.clone_from(&next_page);
                         };
                     })
@@ -4176,7 +4188,15 @@ impl Website {
                         )
                         .await
                     } else {
-                        page.clone_from(&Page::new_page(url, &client).await);
+                        page.clone_from(
+                            &Page::new_page_with_cache(
+                                url,
+                                &client,
+                                self.configuration.get_cache_options(),
+                                &self.configuration.cache_policy,
+                            )
+                            .await,
+                        );
                     }
                 }
             }
@@ -6839,8 +6859,13 @@ impl Website {
                                     };
 
                                     let url = link_result.0.as_ref();
-                                    let mut page =
-                                        Page::new_page(&url, &shared.0).await;
+                                    let mut page = Page::new_page_with_cache(
+                                        &url,
+                                        &shared.0,
+                                        shared.4.get_cache_options(),
+                                        &shared.4.cache_policy,
+                                    )
+                                    .await;
 
                                     let mut retry_count = shared.4.retry;
 
@@ -6863,7 +6888,13 @@ impl Website {
                                                     )
                                                     .await;
                                                 } else {
-                                                    let next_page =  Page::new_page(url, &shared.0).await;
+                                                    let next_page = Page::new_page_with_cache(
+                                                        url,
+                                                        &shared.0,
+                                                        shared.4.get_cache_options(),
+                                                        &shared.4.cache_policy,
+                                                    )
+                                                    .await;
 
                                                     page.clone_from(&next_page)
                                                 };
@@ -6885,7 +6916,12 @@ impl Website {
                                                 .await;
                                             } else {
                                                 page.clone_from(
-                                                    &Page::new_page(url, &shared.0)
+                                                    &Page::new_page_with_cache(
+                                                        url,
+                                                        &shared.0,
+                                                        shared.4.get_cache_options(),
+                                                        &shared.4.cache_policy,
+                                                    )
                                                         .await,
                                                 );
                                             }
@@ -7953,9 +7989,17 @@ impl Website {
                             if crawl {
                                 let client = client.clone();
                                 let tx = tx.clone();
+                                let cache_options = self.configuration.get_cache_options();
+                                let cache_policy = self.configuration.cache_policy.clone();
 
                                 crate::utils::spawn_task("page_fetch", async move {
-                                    let mut page = Page::new_page(&link.inner(), &client).await;
+                                    let mut page = Page::new_page_with_cache(
+                                        &link.inner(),
+                                        &client,
+                                        cache_options.clone(),
+                                        &cache_policy,
+                                    )
+                                    .await;
 
                                     let mut retry_count = retry;
 
@@ -7964,7 +8008,13 @@ impl Website {
                                             tokio::time::sleep(timeout).await;
                                         }
                                         page.clone_from(
-                                            &Page::new_page(link.inner(), &client).await,
+                                            &Page::new_page_with_cache(
+                                                link.inner(),
+                                                &client,
+                                                cache_options.clone(),
+                                                &cache_policy,
+                                            )
+                                            .await,
                                         );
                                         retry_count -= 1;
                                     }
@@ -8526,6 +8576,12 @@ impl Website {
     /// Cache the page following HTTP rules. This method does nothing if the `cache` feature is not enabled.
     pub fn with_caching(&mut self, cache: bool) -> &mut Self {
         self.configuration.with_caching(cache);
+        self
+    }
+
+    /// Skip browser rendering entirely if cached content exists.
+    pub fn with_cache_skip_browser(&mut self, skip: bool) -> &mut Self {
+        self.configuration.with_cache_skip_browser(skip);
         self
     }
 

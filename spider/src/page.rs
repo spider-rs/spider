@@ -6,10 +6,9 @@ use crate::utils::abs::convert_abs_path;
 use crate::utils::templates::EMPTY_HTML_BASIC;
 use crate::utils::{
     css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
-    get_domain_from_url, hash_html, networking_capable, PageResponse, RequestError,
+    get_domain_from_url, hash_html, networking_capable, BasicCachePolicy, CacheOptions,
+    PageResponse, RequestError,
 };
-#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-use crate::utils::{BasicCachePolicy, CacheOptions};
 use crate::CaseInsensitiveString;
 use crate::Client;
 use crate::RelativeSelectors;
@@ -1425,6 +1424,21 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page(url: &str, client: &Client) -> Self {
         let page_resource: PageResponse = crate::utils::fetch_page_html_raw(url, client).await;
+
+        build(url, page_resource)
+    }
+
+    /// Instantiate a new page using cache options when available.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_with_cache(
+        url: &str,
+        client: &Client,
+        cache_options: Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
+    ) -> Self {
+        let page_resource: PageResponse =
+            crate::utils::fetch_page_html_raw_cached(url, client, cache_options, cache_policy)
+                .await;
 
         build(url, page_resource)
     }

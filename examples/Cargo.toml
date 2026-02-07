@@ -88,6 +88,15 @@ required-features = [
 ]
 
 [[example]]
+name = "cache_remote_skip_browser"
+path = "cache_remote_skip_browser.rs"
+required-features = [
+    "spider/sync",
+    "spider/chrome",
+    "spider/chrome_remote_cache",
+]
+
+[[example]]
 name = "rss"
 path = "rss.rs"
 required-features = ["spider/sync"]

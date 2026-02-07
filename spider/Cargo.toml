@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.44.30"
+version = "2.44.31"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -120,7 +120,7 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.44.30"
+version = "2.44.31"
 optional = true
 default-features = false
 
@@ -241,9 +241,9 @@ chrome_headless_new = ["chrome"]
 chrome_simd = ["chrome", "chromey/simd", "simd"]
 chrome_tls_connection = ["chrome", "chromey/chrome_tls_connection"]
 chrome_serde_stacker = ["chrome", "chromey/serde_stacker"]
-chrome_remote_cache = ["chrome", "chromey/_cache"]
+chrome_remote_cache = ["chrome", "cache_mem", "chromey/_cache", "chromey/cache_mem"]
 chrome_remote_cache_disk = ["chrome_remote_cache", "chromey/cache"]
-chrome_remote_cache_mem = ["chrome_remote_cache", "chromey/cache_mem"]
+chrome_remote_cache_mem = ["chrome_remote_cache"]
 cookies = ["reqwest/cookies", "dep:cookie"]
 cron = ["dep:async_job", "dep:chrono", "dep:cron", "dep:async-trait"]
 smart = ["chrome", "chrome_intercept"]

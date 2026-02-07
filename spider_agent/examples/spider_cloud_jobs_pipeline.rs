@@ -72,7 +72,10 @@ fn summarize_usage(value: &serde_json::Value) -> String {
         .unwrap_or_else(|| "n/a".to_string());
     let total_cost = first
         .get("costs")
-        .and_then(|v| v.get("total_cost_formatted").or_else(|| v.get("total_cost")))
+        .and_then(|v| {
+            v.get("total_cost_formatted")
+                .or_else(|| v.get("total_cost"))
+        })
         .map(|v| v.to_string())
         .unwrap_or_else(|| "n/a".to_string());
 
@@ -217,7 +220,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let body = step.body.to_string();
         println!("Running {} ({})", name, step.description);
 
-        match agent.execute_custom_tool(&name, None, None, Some(&body)).await {
+        match agent
+            .execute_custom_tool(&name, None, None, Some(&body))
+            .await
+        {
             Ok(result) => {
                 if !result.success {
                     println!(
@@ -230,7 +236,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let parsed = serde_json::from_str::<serde_json::Value>(&result.body)
                     .unwrap_or(serde_json::Value::Null);
-                println!("  ok: HTTP {} | {}", result.status, summarize_usage(&parsed));
+                println!(
+                    "  ok: HTTP {} | {}",
+                    result.status,
+                    summarize_usage(&parsed)
+                );
                 println!(
                     "  preview: {}",
                     result.body.chars().take(180).collect::<String>()
@@ -242,7 +252,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let usage = agent.usage();
     println!("\n=== Usage Snapshot ===");
-    println!("Total custom tool calls: {}", usage.total_custom_tool_calls());
+    println!(
+        "Total custom tool calls: {}",
+        usage.total_custom_tool_calls()
+    );
     for (tool, count) in &usage.custom_tool_calls {
         println!("- {}: {}", tool, count);
     }
