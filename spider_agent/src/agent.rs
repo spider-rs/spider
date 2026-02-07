@@ -8,7 +8,7 @@ use crate::error::{AgentError, AgentResult};
 use crate::llm::TokenUsage;
 use crate::llm::{CompletionOptions, CompletionResponse, LLMProvider, Message};
 use crate::memory::AgentMemory;
-use crate::tools::{CustomTool, CustomToolRegistry, CustomToolResult};
+use crate::tools::{CustomTool, CustomToolRegistry, CustomToolResult, SpiderCloudToolConfig};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -480,6 +480,17 @@ impl Agent {
     /// Get the custom tool registry for direct access.
     pub fn custom_tool_registry(&self) -> &CustomToolRegistry {
         &self.custom_tools
+    }
+
+    /// Register Spider Cloud routes as custom tools.
+    ///
+    /// Core routes (`/crawl`, `/scrape`, `/search`, `/links`, `/transform`,
+    /// `/unblocker`) are enabled by default. AI routes are gated and disabled
+    /// by default.
+    ///
+    /// Returns the number of tools registered.
+    pub fn register_spider_cloud(&self, config: SpiderCloudToolConfig) -> usize {
+        self.custom_tools.register_spider_cloud(&config)
     }
 
     // ==================== Browser Methods ====================
@@ -1003,6 +1014,7 @@ pub struct PageExtraction {
 pub struct AgentBuilder {
     config: AgentConfig,
     llm: Option<Box<dyn LLMProvider>>,
+    spider_cloud: Option<SpiderCloudToolConfig>,
     #[cfg(feature = "search")]
     search_provider: Option<Box<dyn SearchProvider>>,
     #[cfg(feature = "chrome")]
@@ -1019,6 +1031,7 @@ impl AgentBuilder {
         Self {
             config: AgentConfig::default(),
             llm: None,
+            spider_cloud: None,
             #[cfg(feature = "search")]
             search_provider: None,
             #[cfg(feature = "chrome")]
@@ -1066,6 +1079,24 @@ impl AgentBuilder {
         self.llm = Some(Box::new(
             crate::llm::OpenAIProvider::new(api_key, model).with_api_url(api_url),
         ));
+        self
+    }
+
+    /// Register Spider Cloud tools using an API key.
+    ///
+    /// Registers `/crawl`, `/scrape`, `/search`, `/links`, `/transform`, and
+    /// `/unblocker`.
+    /// AI routes remain disabled unless enabled in `with_spider_cloud_config`.
+    pub fn with_spider_cloud(mut self, api_key: impl Into<String>) -> Self {
+        self.spider_cloud = Some(SpiderCloudToolConfig::new(api_key));
+        self
+    }
+
+    /// Register Spider Cloud tools using a full config.
+    ///
+    /// Use this when you need custom API URL, route toggles, or AI route gating.
+    pub fn with_spider_cloud_config(mut self, config: SpiderCloudToolConfig) -> Self {
+        self.spider_cloud = Some(config);
         self
     }
 
@@ -1155,6 +1186,11 @@ impl AgentBuilder {
             None
         };
 
+        let custom_tools = CustomToolRegistry::new();
+        if let Some(cfg) = self.spider_cloud.as_ref() {
+            custom_tools.register_spider_cloud(cfg);
+        }
+
         Ok(Agent {
             llm: self.llm,
             client,
@@ -1170,8 +1206,46 @@ impl AgentBuilder {
             llm_semaphore: semaphore,
             config: self.config,
             usage: Arc::new(UsageStats::new()),
-            custom_tools: CustomToolRegistry::new(),
+            custom_tools,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builder_registers_spider_cloud_default_routes() {
+        let agent = Agent::builder()
+            .with_spider_cloud("sk_spider_cloud")
+            .build()
+            .expect("agent should build");
+
+        let tools = agent.list_custom_tools();
+        assert!(tools.contains(&"spider_cloud_crawl".to_string()));
+        assert!(tools.contains(&"spider_cloud_scrape".to_string()));
+        assert!(tools.contains(&"spider_cloud_search".to_string()));
+        assert!(tools.contains(&"spider_cloud_links".to_string()));
+        assert!(tools.contains(&"spider_cloud_transform".to_string()));
+        assert!(tools.contains(&"spider_cloud_unblocker".to_string()));
+        assert!(!tools.contains(&"spider_cloud_ai_scrape".to_string()));
+    }
+
+    #[test]
+    fn test_builder_registers_spider_cloud_ai_routes_when_enabled() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud").with_enable_ai_routes(true);
+        let agent = Agent::builder()
+            .with_spider_cloud_config(cfg)
+            .build()
+            .expect("agent should build");
+
+        let tools = agent.list_custom_tools();
+        assert!(tools.contains(&"spider_cloud_ai_crawl".to_string()));
+        assert!(tools.contains(&"spider_cloud_ai_scrape".to_string()));
+        assert!(tools.contains(&"spider_cloud_ai_search".to_string()));
+        assert!(tools.contains(&"spider_cloud_ai_browser".to_string()));
+        assert!(tools.contains(&"spider_cloud_ai_links".to_string()));
     }
 }
 

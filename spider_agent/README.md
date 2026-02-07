@@ -173,8 +173,91 @@ Agent::builder()
     .with_system_prompt("You are a helpful assistant")
     .with_max_concurrent_llm_calls(10)
     .with_openai(api_key, model)
+    .with_spider_cloud("spider-cloud-api-key")
     .with_search_serper(api_key)
     .build()
+```
+
+### Spider Cloud Tool Inheritance
+
+You can register Spider Cloud routes as custom tools directly from the builder.
+
+```rust
+use spider_agent::Agent;
+
+let agent = Agent::builder()
+    .with_spider_cloud("spider-cloud-api-key")
+    .build()?;
+
+// Available tools:
+// - spider_cloud_crawl
+// - spider_cloud_scrape
+// - spider_cloud_search
+// - spider_cloud_links
+// - spider_cloud_transform
+// - spider_cloud_unblocker
+```
+
+For full control (custom API URL, toggles, AI subscription gating), use `SpiderCloudToolConfig`:
+
+```rust
+use spider_agent::{Agent, SpiderCloudToolConfig};
+
+let spider_cloud = SpiderCloudToolConfig::new("spider-cloud-api-key")
+    .with_api_url("https://api.spider.cloud")
+    .with_tool_name_prefix("spider_cloud")
+    .with_enable_ai_routes(true); // Only enable if your plan includes /ai/* routes
+
+let agent = Agent::builder()
+    .with_spider_cloud_config(spider_cloud)
+    .build()?;
+```
+
+AI routes are disabled by default because they require a paid subscription:
+https://spider.cloud/ai/pricing
+
+Prompt-driven route orchestration example:
+
+```bash
+SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_prompt_flows \
+  -- "run all flows for https://books.toscrape.com/ including search scrape crawl links transform unblocker"
+```
+
+To include AI routes (`/ai/crawl`, `/ai/scrape`, `/ai/search`, `/ai/browser`, `/ai/links`), enable both:
+- config/env gate: `SPIDER_CLOUD_ENABLE_AI_ROUTES=1`
+- prompt intent: include text like `include ai routes`
+
+End-to-end release example (single-prompt pipeline + report):
+
+```bash
+SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_end_to_end \
+  -- "Find top travel books on https://books.toscrape.com and return structured product fields"
+```
+
+Additional real-world examples:
+
+```bash
+# E-commerce competitor intelligence
+SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_ecommerce_competitor \
+  -- "https://books.toscrape.com/" "travel books"
+
+# Job market intelligence pipeline
+SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_jobs_pipeline \
+  -- "rust engineer remote" "https://remoteok.com/remote-rust-jobs"
+```
+
+Notes:
+- For markdown/text/raw/commonmark/bytes, use route-level `return_format`; transform is optional.
+- For binary assets (PDF/images/files), `return_format: "bytes"` preserves fidelity.
+- Run transform only when you explicitly need post-processing (`SPIDER_CLOUD_INCLUDE_TRANSFORM=1` in the examples).
+
+You can also point this at any compatible endpoint (not only `api.spider.cloud`) and
+use your own naming convention:
+
+```rust
+let spider_cloud = SpiderCloudToolConfig::new("provider-key")
+    .with_api_url("https://my-gateway.example.com/v1")
+    .with_tool_name_prefix("web_api"); // tools become web_api_search, web_api_scrape, etc.
 ```
 
 ## Advanced Configuration

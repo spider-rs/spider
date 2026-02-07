@@ -8,6 +8,17 @@
 //! ```bash
 //! OPEN_ROUTER=your-api-key cargo run --example remote_multimodal_dual_automation --features "spider/sync spider/chrome spider/agent_chrome"
 //! ```
+//!
+//! EXAMPLE output
+//! === Page Received ===
+//! URL: https://books.toscrape.com/
+//!
+//! === AI Results ===
+//! Result 1:
+//!   Content: {"extracted":{"title":"A Light in the Attic","price":"£51.77","availability":"In stock (22 available)"},"steps":[{"Click":{"selector":"article.product_pod h3 a"}}]}
+//!   Tokens: 3541 prompt + 296 completion = 3837 total (2 LLM calls)
+//!
+//! === Completed in 5.31s ===
 
 extern crate spider;
 

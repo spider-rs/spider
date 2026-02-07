@@ -8,6 +8,19 @@ use std::time::Duration;
 
 use crate::error::{AgentError, AgentResult};
 
+const DEFAULT_SPIDER_CLOUD_API_URL: &str = "https://api.spider.cloud";
+const DEFAULT_SPIDER_CLOUD_AUTH_HEADER: &str = "Authorization";
+const DEFAULT_TOOL_PREFIX: &str = "spider_cloud";
+
+fn strip_bearer_prefix(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("bearer ") {
+        trimmed[7..].trim_start()
+    } else {
+        trimmed
+    }
+}
+
 /// HTTP method for API calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HttpMethod {
@@ -63,6 +76,267 @@ pub enum AuthConfig {
         /// Header value.
         value: String,
     },
+}
+
+/// Configuration for Spider Cloud tool registration.
+///
+/// By default this registers core routes:
+/// - `/crawl`
+/// - `/scrape`
+/// - `/search`
+/// - `/links`
+/// - `/transform`
+/// - `/unblocker`
+///
+/// AI routes are disabled by default and must be explicitly enabled with
+/// `with_enable_ai_routes(true)` because they require a Spider Cloud AI plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpiderCloudToolConfig {
+    /// Spider Cloud API key.
+    pub api_key: String,
+    /// Spider Cloud API base URL.
+    pub api_url: String,
+    /// Prefix used for registered tool names.
+    ///
+    /// Default: `spider_cloud`, resulting in names like `spider_cloud_scrape`.
+    /// Set to empty string for unprefixed names (`scrape`, `search`, etc.).
+    pub tool_name_prefix: String,
+    /// Header used for API key auth. Defaults to `Authorization`.
+    pub auth_header: String,
+    /// Whether to use `Bearer <key>` formatting for the Authorization header.
+    ///
+    /// Spider Cloud expects raw `Authorization: <key>` by default, so this is
+    /// `false` unless explicitly enabled.
+    pub use_bearer_auth: bool,
+    /// Request timeout in seconds for each tool call.
+    pub timeout_secs: u64,
+    /// Register `/crawl`.
+    pub include_crawl: bool,
+    /// Register `/scrape`.
+    pub include_scrape: bool,
+    /// Register `/search`.
+    pub include_search: bool,
+    /// Register `/links`.
+    pub include_links: bool,
+    /// Register `/transform`.
+    pub include_transform: bool,
+    /// Register `/unblocker`.
+    pub include_unblocker: bool,
+    /// Register `/ai/*` routes.
+    ///
+    /// These routes require a paid Spider Cloud AI subscription:
+    /// https://spider.cloud/ai/pricing
+    pub enable_ai_routes: bool,
+}
+
+impl Default for SpiderCloudToolConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            api_url: DEFAULT_SPIDER_CLOUD_API_URL.to_string(),
+            tool_name_prefix: DEFAULT_TOOL_PREFIX.to_string(),
+            auth_header: DEFAULT_SPIDER_CLOUD_AUTH_HEADER.to_string(),
+            use_bearer_auth: false,
+            timeout_secs: 60,
+            include_crawl: true,
+            include_scrape: true,
+            include_search: true,
+            include_links: true,
+            include_transform: true,
+            include_unblocker: true,
+            enable_ai_routes: false,
+        }
+    }
+}
+
+impl SpiderCloudToolConfig {
+    /// Create a Spider Cloud config with core routes enabled.
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Set Spider Cloud API base URL.
+    pub fn with_api_url(mut self, api_url: impl Into<String>) -> Self {
+        self.api_url = api_url.into();
+        self
+    }
+
+    /// Set the prefix for generated tool names.
+    ///
+    /// Example:
+    /// - prefix `spider_cloud` -> `spider_cloud_search`
+    /// - prefix `web_api` -> `web_api_search`
+    /// - empty prefix -> `search`
+    pub fn with_tool_name_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.tool_name_prefix = prefix.into();
+        self
+    }
+
+    /// Set auth header name. Use non-default header names for custom gateways.
+    pub fn with_auth_header(mut self, auth_header: impl Into<String>) -> Self {
+        self.auth_header = auth_header.into();
+        self
+    }
+
+    /// Enable/disable Bearer formatting for Authorization auth.
+    ///
+    /// When `true`, sends `Authorization: Bearer <key>`.
+    /// When `false` (default), sends `Authorization: <key>`.
+    pub fn with_bearer_auth(mut self, enabled: bool) -> Self {
+        self.use_bearer_auth = enabled;
+        self
+    }
+
+    /// Set timeout in seconds for each registered tool.
+    pub fn with_timeout_secs(mut self, timeout_secs: u64) -> Self {
+        self.timeout_secs = timeout_secs.max(1);
+        self
+    }
+
+    /// Enable or disable `/unblocker` route registration.
+    pub fn with_unblocker(mut self, enabled: bool) -> Self {
+        self.include_unblocker = enabled;
+        self
+    }
+
+    /// Enable or disable `/transform` route registration.
+    pub fn with_transform(mut self, enabled: bool) -> Self {
+        self.include_transform = enabled;
+        self
+    }
+
+    /// Enable or disable AI route registration.
+    ///
+    /// AI routes require a paid Spider Cloud AI plan:
+    /// https://spider.cloud/ai/pricing
+    pub fn with_enable_ai_routes(mut self, enabled: bool) -> Self {
+        self.enable_ai_routes = enabled;
+        self
+    }
+
+    fn endpoint(&self, route: &str) -> String {
+        format!(
+            "{}/{}",
+            self.api_url.trim_end_matches('/'),
+            route.trim_start_matches('/')
+        )
+    }
+
+    fn tool_name(&self, suffix: &str) -> String {
+        let prefix = self.tool_name_prefix.trim().trim_end_matches('_');
+        if prefix.is_empty() {
+            suffix.to_string()
+        } else {
+            format!("{}_{}", prefix, suffix)
+        }
+    }
+
+    fn auth_tool(&self, tool: CustomTool) -> CustomTool {
+        if self.auth_header.eq_ignore_ascii_case(DEFAULT_SPIDER_CLOUD_AUTH_HEADER) {
+            // Accept env inputs like `SPIDER_CLOUD_API_KEY=...` and
+            // `SPIDER_CLOUD_API_KEY=Bearer ...` without double-prefixing.
+            let token = strip_bearer_prefix(&self.api_key).to_string();
+            if self.use_bearer_auth {
+                tool.with_bearer_auth(token)
+            } else {
+                tool.with_api_key(self.auth_header.clone(), token)
+            }
+        } else {
+            tool.with_api_key(self.auth_header.clone(), self.api_key.trim().to_string())
+        }
+    }
+
+    fn build_tool(&self, name: &str, route: &str, description: &str) -> CustomTool {
+        let tool = CustomTool::new(name, self.endpoint(route))
+            .with_description(description)
+            .with_method(HttpMethod::Post)
+            .with_content_type("application/json")
+            .with_timeout(Duration::from_secs(self.timeout_secs))
+            .with_header("User-Agent", format!("spider_agent/{}", env!("CARGO_PKG_VERSION")));
+        self.auth_tool(tool)
+    }
+
+    /// Build Spider Cloud tools from this configuration.
+    pub fn to_custom_tools(&self) -> Vec<CustomTool> {
+        let mut tools = Vec::new();
+
+        if self.include_crawl {
+            tools.push(self.build_tool(
+                &self.tool_name("crawl"),
+                "crawl",
+                "Spider Cloud /crawl endpoint for crawling and extraction.",
+            ));
+        }
+        if self.include_scrape {
+            tools.push(self.build_tool(
+                &self.tool_name("scrape"),
+                "scrape",
+                "Spider Cloud /scrape endpoint for page scraping and extraction.",
+            ));
+        }
+        if self.include_search {
+            tools.push(self.build_tool(
+                &self.tool_name("search"),
+                "search",
+                "Spider Cloud /search endpoint for web search plus page retrieval.",
+            ));
+        }
+        if self.include_links {
+            tools.push(self.build_tool(
+                &self.tool_name("links"),
+                "links",
+                "Spider Cloud /links endpoint for link extraction only.",
+            ));
+        }
+        if self.include_transform {
+            tools.push(self.build_tool(
+                &self.tool_name("transform"),
+                "transform",
+                "Spider Cloud /transform endpoint for structured content transformation.",
+            ));
+        }
+        if self.include_unblocker {
+            tools.push(self.build_tool(
+                &self.tool_name("unblocker"),
+                "unblocker",
+                "Spider Cloud /unblocker endpoint for anti-bot bypass and hard-to-reach pages.",
+            ));
+        }
+
+        if self.enable_ai_routes {
+            tools.push(self.build_tool(
+                &self.tool_name("ai_crawl"),
+                "ai/crawl",
+                "Spider Cloud /ai/crawl endpoint for AI-guided crawling (AI subscription required).",
+            ));
+            tools.push(self.build_tool(
+                &self.tool_name("ai_scrape"),
+                "ai/scrape",
+                "Spider Cloud /ai/scrape endpoint for AI-guided scraping (AI subscription required).",
+            ));
+            tools.push(self.build_tool(
+                &self.tool_name("ai_search"),
+                "ai/search",
+                "Spider Cloud /ai/search endpoint for AI-enhanced search (AI subscription required).",
+            ));
+            tools.push(self.build_tool(
+                &self.tool_name("ai_browser"),
+                "ai/browser",
+                "Spider Cloud /ai/browser endpoint for AI browser automation (AI subscription required).",
+            ));
+            tools.push(self.build_tool(
+                &self.tool_name("ai_links"),
+                "ai/links",
+                "Spider Cloud /ai/links endpoint for AI link extraction (AI subscription required).",
+            ));
+        }
+
+        tools
+    }
 }
 
 /// Configuration for a custom tool (external API call).
@@ -291,6 +565,18 @@ impl CustomToolRegistry {
         self.tools.clear();
     }
 
+    /// Register Spider Cloud tools from a shared config.
+    ///
+    /// Returns the number of tools registered.
+    pub fn register_spider_cloud(&self, config: &SpiderCloudToolConfig) -> usize {
+        let tools = config.to_custom_tools();
+        let count = tools.len();
+        for tool in tools {
+            self.register(tool);
+        }
+        count
+    }
+
     /// Execute a custom tool.
     pub async fn execute(
         &self,
@@ -456,5 +742,137 @@ mod tests {
         assert_eq!(result.tool_name, "my_api");
         assert_eq!(result.status, 200);
         assert!(result.success);
+    }
+
+    #[test]
+    fn test_spider_cloud_tools_default_routes_only() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud");
+        let tools = cfg.to_custom_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert_eq!(tools.len(), 6);
+        assert!(names.contains(&"spider_cloud_crawl"));
+        assert!(names.contains(&"spider_cloud_scrape"));
+        assert!(names.contains(&"spider_cloud_search"));
+        assert!(names.contains(&"spider_cloud_links"));
+        assert!(names.contains(&"spider_cloud_transform"));
+        assert!(names.contains(&"spider_cloud_unblocker"));
+
+        assert!(!names.contains(&"spider_cloud_ai_crawl"));
+        assert!(!names.contains(&"spider_cloud_ai_scrape"));
+        assert!(!names.contains(&"spider_cloud_ai_search"));
+        assert!(!names.contains(&"spider_cloud_ai_browser"));
+        assert!(!names.contains(&"spider_cloud_ai_links"));
+
+        // Default auth should be raw Authorization header (not Bearer).
+        let crawl = tools
+            .iter()
+            .find(|t| t.name == "spider_cloud_crawl")
+            .expect("crawl tool");
+        assert!(matches!(
+            crawl.auth,
+            AuthConfig::ApiKey {
+                ref header,
+                ref key
+            } if header == "Authorization" && key == "sk_spider_cloud"
+        ));
+    }
+
+    #[test]
+    fn test_spider_cloud_tools_with_ai_subscription_enabled() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud").with_enable_ai_routes(true);
+        let tools = cfg.to_custom_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert_eq!(tools.len(), 11);
+        assert!(names.contains(&"spider_cloud_ai_crawl"));
+        assert!(names.contains(&"spider_cloud_ai_scrape"));
+        assert!(names.contains(&"spider_cloud_ai_search"));
+        assert!(names.contains(&"spider_cloud_ai_browser"));
+        assert!(names.contains(&"spider_cloud_ai_links"));
+    }
+
+    #[test]
+    fn test_spider_cloud_registry_registration() {
+        let registry = CustomToolRegistry::new();
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud")
+            .with_unblocker(true)
+            .with_transform(true)
+            .with_enable_ai_routes(false);
+        let count = registry.register_spider_cloud(&cfg);
+
+        assert_eq!(count, 6);
+        assert!(registry.contains("spider_cloud_crawl"));
+        assert!(registry.contains("spider_cloud_transform"));
+        assert!(registry.contains("spider_cloud_unblocker"));
+        assert!(!registry.contains("spider_cloud_ai_scrape"));
+    }
+
+    #[test]
+    fn test_spider_cloud_bearer_auth_opt_in() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud").with_bearer_auth(true);
+        let tools = cfg.to_custom_tools();
+        let crawl = tools
+            .iter()
+            .find(|t| t.name == "spider_cloud_crawl")
+            .expect("crawl tool");
+        assert!(matches!(crawl.auth, AuthConfig::Bearer(ref t) if t == "sk_spider_cloud"));
+    }
+
+    #[test]
+    fn test_spider_cloud_strips_bearer_prefix_in_default_mode() {
+        let cfg = SpiderCloudToolConfig::new("Bearer sk_spider_cloud");
+        let tools = cfg.to_custom_tools();
+        let crawl = tools
+            .iter()
+            .find(|t| t.name == "spider_cloud_crawl")
+            .expect("crawl tool");
+        assert!(matches!(
+            crawl.auth,
+            AuthConfig::ApiKey {
+                ref header,
+                ref key
+            } if header == "Authorization" && key == "sk_spider_cloud"
+        ));
+    }
+
+    #[test]
+    fn test_spider_cloud_bearer_opt_in_avoids_double_prefix() {
+        let cfg = SpiderCloudToolConfig::new("Bearer sk_spider_cloud").with_bearer_auth(true);
+        let tools = cfg.to_custom_tools();
+        let crawl = tools
+            .iter()
+            .find(|t| t.name == "spider_cloud_crawl")
+            .expect("crawl tool");
+        assert!(matches!(crawl.auth, AuthConfig::Bearer(ref t) if t == "sk_spider_cloud"));
+    }
+
+    #[test]
+    fn test_spider_cloud_custom_prefix_and_api_url() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud")
+            .with_api_url("https://custom.provider.local/v1")
+            .with_tool_name_prefix("web_api")
+            .with_enable_ai_routes(false);
+        let tools = cfg.to_custom_tools();
+
+        let transform = tools
+            .iter()
+            .find(|t| t.name == "web_api_transform")
+            .expect("transform tool with custom prefix");
+        assert_eq!(
+            transform.base_url,
+            "https://custom.provider.local/v1/transform"
+        );
+    }
+
+    #[test]
+    fn test_spider_cloud_empty_prefix_uses_plain_names() {
+        let cfg = SpiderCloudToolConfig::new("sk_spider_cloud").with_tool_name_prefix("");
+        let tools = cfg.to_custom_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(names.contains(&"crawl"));
+        assert!(names.contains(&"search"));
+        assert!(names.contains(&"transform"));
     }
 }

@@ -173,6 +173,7 @@ pub mod agent {
         LimitType,
         Message,
         RetryConfig,
+        SpiderCloudToolConfig,
         UsageLimits,
         UsageSnapshot,
         UsageStats,

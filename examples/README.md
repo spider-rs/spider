@@ -116,3 +116,29 @@ or setting multiple actions to drive the browser
 or to get custom data from the GPT with JS scripts if needed.
 
 - `OPENAI_API_KEY=replace_me_with_key cargo run --example openai_extra`
+
+## Remote Multimodal (OpenRouter / Vision+Text)
+
+Single page extraction from a book details page [Remote Multimodal Scrape](./remote_multimodal_scrape.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_scrape --features "spider/sync spider/chrome spider/agent_chrome"`
+
+Multi-page extraction by crawling from a category page [Remote Multimodal Multi](./remote_multimodal_multi.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_multi --features "spider/sync spider/chrome spider/agent_chrome"`
+
+Dual-model routing (vision + text model split) [Remote Multimodal Dual](./remote_multimodal_dual.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_dual --features "spider/sync spider/chrome spider/agent_chrome"`
+
+Dual-model multi-round automation [Remote Multimodal Dual Automation](./remote_multimodal_dual_automation.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_dual_automation --features "spider/sync spider/chrome spider/agent_chrome"`
+
+Quote extraction with structured JSON output [Remote Multimodal Quotes](./remote_multimodal_quotes.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_quotes --features "spider/sync spider/chrome spider/agent_chrome"`
+
+Listing page product extraction [Remote Multimodal Listing](./remote_multimodal_listing.rs).
+
+- `OPEN_ROUTER=replace_me_with_key cargo run --example remote_multimodal_listing --features "spider/sync spider/chrome spider/agent_chrome"`

@@ -12,6 +12,17 @@
 //! ```bash
 //! OPEN_ROUTER=your-api-key cargo run --example remote_multimodal_dual --features "spider/sync spider/chrome spider/agent_chrome"
 //! ```
+//!
+//! EXAMPLE output
+//! === Page Received ===
+//! URL: https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html
+//!
+//! === AI Extraction Results ===
+//! Result 1:
+//!   Content: {"title":"A Light in the Attic","price":"£51.77","availability":"In stock (22 available)","upc":"a897fe39b1053632"}
+//!   Usage: AutomationUsage { prompt_tokens: 2860, completion_tokens: 168, total_tokens: 3028, llm_calls: 1, search_calls: 0, fetch_calls: 0, webbrowser_calls: 0, custom_tool_calls: {}, api_calls: 1 }
+//!
+//! === Completed in 2.48s ===
 
 extern crate spider;
 
