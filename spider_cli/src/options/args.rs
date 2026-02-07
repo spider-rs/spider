@@ -1,5 +1,5 @@
 use crate::options::sub_command::Commands;
-use clap::Parser;
+use clap::{ArgAction, Parser};
 
 /// program to crawl a website and gather valid web urls.
 #[derive(Parser)]
@@ -57,6 +57,12 @@ pub struct Cli {
     /// Gather all content that relates to the domain like css,jss, and etc.
     #[clap(long)]
     pub full_resources: bool,
+    /// Use browser rendering mode (headless) for crawl/scrape/download. Requires the `chrome` feature.
+    #[clap(long, conflicts_with = "http")]
+    pub headless: bool,
+    /// Force HTTP-only mode (no browser rendering), even when built with `chrome`.
+    #[clap(long, action = ArgAction::SetTrue, conflicts_with = "headless")]
+    pub http: bool,
     /// The proxy url to use.
     #[clap(short, long)]
     pub proxy_url: Option<String>,

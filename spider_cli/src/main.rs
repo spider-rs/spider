@@ -112,6 +112,28 @@ fn log_website_status(website: &Website) {
     eprintln!("{url:?} - {msg}.");
 }
 
+/// Crawl based on runtime mode selection.
+async fn crawl_with_mode(website: &mut Website, headless: bool) {
+    #[cfg(feature = "chrome")]
+    {
+        if headless {
+            website.crawl().await;
+        } else {
+            website.crawl_raw().await;
+        }
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    {
+        if headless {
+            eprintln!(
+                "Warning: --headless requested, but this binary was built without the `chrome` feature; using HTTP mode."
+            );
+        }
+        website.crawl().await;
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -177,6 +199,7 @@ async fn main() {
     }
 
     let return_headers = cli.return_headers;
+    let use_headless = cli.headless && !cli.http;
 
     match website
         .build()
@@ -197,7 +220,7 @@ async fn main() {
                     let mut stdout = tokio::io::stdout();
 
                     tokio::spawn(async move {
-                        website.crawl().await;
+                        crawl_with_mode(&mut website, use_headless).await;
                         log_website_status(&website);
                     });
 
@@ -229,7 +252,7 @@ async fn main() {
                     let download_path = PathBuf::from(tmp_path);
 
                     tokio::spawn(async move {
-                        website.crawl().await;
+                        crawl_with_mode(&mut website, use_headless).await;
                         log_website_status(&website);
                     });
 
@@ -285,7 +308,7 @@ async fn main() {
                     }
 
                     tokio::spawn(async move {
-                        website.crawl().await;
+                        crawl_with_mode(&mut website, use_headless).await;
                         log_website_status(&website);
                     });
 

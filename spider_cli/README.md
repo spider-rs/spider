@@ -22,21 +22,29 @@ apt install pkg-config
 The CLI is a binary so do not add it to your `Cargo.toml` file.
 
 ```sh
-# without headless
+# default install (includes chrome support)
 cargo install spider_cli
-# with headless
-cargo install -F chrome spider_cli
-# with smart mode defaults to HTTP and Headless when needed
+# optional smart mode (HTTP first, browser fallback)
 cargo install -F smart spider_cli
 ```
 
 ## Cli
 
-The following can also be ran via command line to run the crawler.
-If you need loging pass in the `-v` flag.
+Run crawls with explicit runtime mode control:
 
 ```sh
+# HTTP mode (default)
 spider --url https://choosealicense.com crawl --output-links
+```
+
+```sh
+# Browser mode on demand
+spider --url https://choosealicense.com --headless crawl --output-links
+```
+
+```sh
+# Force HTTP-only even in chrome-enabled builds
+spider --url https://choosealicense.com --http crawl --output-links
 ```
 
 Crawl and output all links visited to a file.
@@ -72,24 +80,36 @@ spider --url https://choosealicense.com --full-resources crawl -o
 ```sh
 The fastest web crawler CLI written in Rust.
 
-Usage: spider [OPTIONS] --url <DOMAIN> [COMMAND]
+Usage: spider [OPTIONS] --url <URL> [COMMAND]
 
 Commands:
   crawl     Crawl the website extracting links
-  scrape    Scrape the website extracting html and links
+  scrape    Scrape the website extracting html and links returning the output as jsonl
   download  Download html markup to destination
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -d, --url <DOMAIN>                Domain to crawl
+  -u, --url <URL>                      The website URL to crawl
   -r, --respect-robots-txt             Respect robots.txt file
   -s, --subdomains                     Allow sub-domain crawling
   -t, --tld                            Allow all tlds for domain
+  -H, --return-headers                 Return page headers (requires `headers` feature)
   -v, --verbose                        Print page visited on standard output
   -D, --delay <DELAY>                  Polite crawling delay in milli seconds
-  -b, --blacklist-url <BLACKLIST_URL>  Comma seperated string list of pages to not crawl or regex with feature enabled
-  -u, --user-agent <USER_AGENT>        User-Agent
-  -B, --budget <BUDGET>                Crawl Budget
+      --limit <LIMIT>                  The max pages allowed to crawl
+      --blacklist-url <BLACKLIST_URL>  Comma-separated deny list for URLs
+  -a, --agent <AGENT>                  User-Agent
+  -B, --budget <BUDGET>                Crawl budget rules
+  -E, --external-domains <EXTERNAL_DOMAINS>  External domains to include
+  -b, --block-images                   Block image rendering when using Chrome
+  -d, --depth <DEPTH>                  Crawl depth limit
+      --accept-invalid-certs           Dangerously accept invalid certficates
+      --full-resources                 Gather css/js and other page resources
+      --headless                       Use browser rendering mode (headless)
+      --http                           Force HTTP-only mode (no browser rendering)
+  -p, --proxy-url <PROXY_URL>          The proxy url to use
+      --spider-cloud-key <SPIDER_CLOUD_KEY>    Spider Cloud API key
+      --spider-cloud-mode <SPIDER_CLOUD_MODE>  proxy|api|unblocker|fallback|smart
   -h, --help                           Print help
   -V, --version                        Print version
 ```

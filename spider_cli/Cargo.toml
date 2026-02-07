@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.44.25"
+version = "2.44.26"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -39,7 +39,7 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = ["status_code"]
+default = ["status_code", "chrome"]
 jemalloc = ["tikv-jemallocator"]
 regex = ["spider/regex"]
 chrome_intercept = ["spider/chrome_intercept"]
