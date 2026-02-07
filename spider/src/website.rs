@@ -3761,13 +3761,15 @@ impl Website {
         {
             let link = self.url.inner();
 
-            let mut page = Page::new(
+            let mut page = Page::new_page_with_cache(
                 &if http_worker && link.starts_with("https") {
                     link.replacen("https", "http", 1)
                 } else {
                     link.to_string()
                 },
                 &client,
+                self.configuration.get_cache_options(),
+                &self.configuration.cache_policy,
             )
             .await;
 
@@ -3828,13 +3830,15 @@ impl Website {
                 continue;
             }
 
-            let mut page = Page::new(
+            let mut page = Page::new_page_with_cache(
                 &if http_worker && link.as_ref().starts_with("https") {
                     link.inner().replacen("https", "http", 1).to_string()
                 } else {
                     link.inner().to_string()
                 },
                 &client,
+                self.configuration.get_cache_options(),
+                &self.configuration.cache_policy,
             )
             .await;
 
@@ -9956,6 +9960,56 @@ async fn test_cache() {
         fresh_duration.as_millis() > cached_duration.as_millis() * 5,
         "{:?}",
         cached_duration
+    );
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "smart",
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/cache-smart-test";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+    let body =
+        b"<html><head><title>Cached Smart Test</title></head><body>cached</body></html>".to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid cache test url"),
+        version: HttpVersion::Http11,
+    };
+
+    let mut request_headers = StdHashMap::new();
+    request_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    website.crawl_smart().await;
+
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+    assert!(!website.initial_page_should_retry);
+    assert!(
+        website.links_visited.contains(&target_url.into()),
+        "expected smart crawl to visit the cached target"
     );
 }
 
