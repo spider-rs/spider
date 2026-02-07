@@ -214,6 +214,20 @@ pub enum VisionRouteMode {
     AgentDriven,
 }
 
+/// Reasoning effort level for models that support explicit reasoning controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    /// Lower latency/cost reasoning.
+    Low,
+    /// Balanced reasoning effort.
+    #[default]
+    Medium,
+    /// Higher quality reasoning at higher latency/cost.
+    High,
+}
+
 /// HTML cleaning profile for content processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -749,6 +763,12 @@ pub struct RemoteMultimodalConfig {
     pub request_json_object: bool,
     /// Best-effort JSON extraction (strip fences / extract `{...}`).
     pub best_effort_json_extract: bool,
+    /// Optional explicit reasoning effort for supported models/endpoints.
+    ///
+    /// When set, outbound requests include `reasoning: {"effort":"low|medium|high"}`.
+    /// Leave `None` to avoid sending provider-specific reasoning controls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
 
     // -----------------------------------------------------------------
     // Skills injection limits
@@ -916,6 +936,7 @@ impl Default for RemoteMultimodalConfig {
             max_tokens: 1024,
             request_json_object: true,
             best_effort_json_extract: true,
+            reasoning_effort: None,
             max_rounds: 6,
             retry: RetryPolicy::default(),
             model_policy: ModelPolicy::default(),
@@ -1033,6 +1054,12 @@ impl RemoteMultimodalConfig {
     /// Set max tokens.
     pub fn with_max_tokens(mut self, tokens: u16) -> Self {
         self.max_tokens = tokens;
+        self
+    }
+
+    /// Set explicit reasoning effort for supported models/endpoints.
+    pub fn with_reasoning_effort(mut self, effort: Option<ReasoningEffort>) -> Self {
+        self.reasoning_effort = effort;
         self
     }
 
@@ -1571,6 +1598,7 @@ pub fn merged_config(
     out.max_tokens = override_cfg.max_tokens;
     out.request_json_object = override_cfg.request_json_object;
     out.best_effort_json_extract = override_cfg.best_effort_json_extract;
+    out.reasoning_effort = override_cfg.reasoning_effort;
 
     out.max_rounds = override_cfg.max_rounds;
     out.post_plan_wait_ms = override_cfg.post_plan_wait_ms;
@@ -1610,6 +1638,23 @@ pub fn is_url_allowed(gate: Option<&super::PromptUrlGate>, url: &str) -> bool {
         Some(g) => g.is_allowed(url),
         None => true,
     }
+}
+
+/// Build a provider-compatible reasoning payload when configured.
+///
+/// Returns `Some({"effort":"..."})` if reasoning effort is configured,
+/// otherwise returns `None`.
+pub fn reasoning_payload(
+    cfg: &RemoteMultimodalConfig,
+) -> Option<serde_json::Value> {
+    cfg.reasoning_effort.map(|effort| {
+        let effort = match effort {
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+        };
+        serde_json::json!({ "effort": effort })
+    })
 }
 
 #[cfg(test)]
@@ -1659,6 +1704,7 @@ mod tests {
         assert_eq!(cfg.max_tokens, 1024);
         assert!(cfg.request_json_object);
         assert!(cfg.best_effort_json_extract);
+        assert!(cfg.reasoning_effort.is_none());
         assert_eq!(cfg.max_rounds, 6);
         assert!(cfg.screenshot);
         assert!(!cfg.extra_ai_data);
@@ -1669,15 +1715,55 @@ mod tests {
         let cfg = RemoteMultimodalConfig::new()
             .with_html(false)
             .with_temperature(0.5)
+            .with_reasoning_effort(Some(ReasoningEffort::High))
             .with_max_rounds(10)
             .with_extraction(true)
             .with_extraction_prompt("Extract products");
 
         assert!(!cfg.include_html);
         assert_eq!(cfg.temperature, 0.5);
+        assert_eq!(cfg.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(cfg.max_rounds, 10);
         assert!(cfg.extra_ai_data);
         assert_eq!(cfg.extraction_prompt, Some("Extract products".to_string()));
+    }
+
+    #[test]
+    fn test_reasoning_payload_helper() {
+        let cfg = RemoteMultimodalConfig::default();
+        assert!(reasoning_payload(&cfg).is_none());
+
+        let cfg = RemoteMultimodalConfig::default()
+            .with_reasoning_effort(Some(ReasoningEffort::Low));
+        assert_eq!(
+            reasoning_payload(&cfg),
+            Some(serde_json::json!({ "effort": "low" }))
+        );
+
+        let cfg = RemoteMultimodalConfig::default()
+            .with_reasoning_effort(Some(ReasoningEffort::Medium));
+        assert_eq!(
+            reasoning_payload(&cfg),
+            Some(serde_json::json!({ "effort": "medium" }))
+        );
+
+        let cfg = RemoteMultimodalConfig::default()
+            .with_reasoning_effort(Some(ReasoningEffort::High));
+        assert_eq!(
+            reasoning_payload(&cfg),
+            Some(serde_json::json!({ "effort": "high" }))
+        );
+    }
+
+    #[test]
+    fn test_merged_config_includes_reasoning_effort() {
+        let base = RemoteMultimodalConfig::default()
+            .with_reasoning_effort(Some(ReasoningEffort::Low));
+        let override_cfg = RemoteMultimodalConfig::default()
+            .with_reasoning_effort(Some(ReasoningEffort::High));
+
+        let merged = merged_config(&base, &override_cfg);
+        assert_eq!(merged.reasoning_effort, Some(ReasoningEffort::High));
     }
 
     #[test]

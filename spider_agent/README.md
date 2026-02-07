@@ -137,6 +137,17 @@ OPENAI_API_KEY=xxx SERPER_API_KEY=xxx cargo run --example research --features "o
 OPENAI_API_KEY=xxx SERPER_API_KEY=xxx cargo run --example concurrent --features "openai search_serper"
 ```
 
+## Verification
+
+From the repository root:
+
+```bash
+cargo check --workspace
+cargo test -p spider_agent
+cargo test -p spider_agent --features "openai search_serper"
+RUN_LIVE_TESTS=1 cargo test -p spider_agent --features "openai search_serper" --test live_env_smoke -- --nocapture
+```
+
 ## API Reference
 
 ### Agent
@@ -185,18 +196,21 @@ let config = RemoteMultimodalConfig::fast_with_planning();
 
 // Manual configuration for fine-grained control:
 use spider_agent::{
-    ToolCallingMode, HtmlDiffMode,
+    ToolCallingMode, HtmlDiffMode, ReasoningEffort,
     PlanningModeConfig, SelfHealingConfig, ConfidenceRetryStrategy,
 };
 
 let config = RemoteMultimodalConfig::default()
     .with_tool_calling_mode(ToolCallingMode::Auto)
     .with_html_diff_mode(HtmlDiffMode::Auto)
+    .with_reasoning_effort(Some(ReasoningEffort::Medium))
     .with_planning_mode(PlanningModeConfig::default())
     .with_self_healing(SelfHealingConfig::default())
     .with_confidence_strategy(ConfidenceRetryStrategy::default())
     .with_concurrent_execution(true);
 ```
+
+`reasoning_effort` is optional and only sent when configured, so OpenAI-compatible providers that do not support reasoning controls remain unaffected.
 
 ### Concurrent Action Chains
 

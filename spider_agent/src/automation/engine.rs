@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use super::{
-    best_effort_parse_json_object, extract_assistant_content, extract_usage, truncate_utf8_tail,
-    AutomationResult, AutomationUsage, ContentAnalysis, EngineError, EngineResult,
-    ExtractionSchema, PromptUrlGate, RemoteMultimodalConfig, DEFAULT_SYSTEM_PROMPT,
+    best_effort_parse_json_object, extract_assistant_content, extract_usage, reasoning_payload,
+    truncate_utf8_tail, AutomationResult, AutomationUsage, ContentAnalysis, EngineError,
+    EngineResult, ExtractionSchema, PromptUrlGate, RemoteMultimodalConfig, DEFAULT_SYSTEM_PROMPT,
     EXTRACTION_ONLY_SYSTEM_PROMPT,
 };
 
@@ -472,6 +472,8 @@ impl RemoteMultimodalEngine {
             #[serde(skip_serializing_if = "Option::is_none")]
             #[serde(rename = "response_format")]
             response_format: Option<ResponseFormat>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reasoning: Option<serde_json::Value>,
         }
 
         let effective_cfg = &self.cfg;
@@ -540,6 +542,7 @@ impl RemoteMultimodalEngine {
             } else {
                 None
             },
+            reasoning: reasoning_payload(effective_cfg),
         };
 
         // Acquire permit before sending
@@ -695,6 +698,8 @@ impl RemoteMultimodalEngine {
             max_tokens: u16,
             #[serde(skip_serializing_if = "Option::is_none")]
             response_format: Option<ResponseFormat>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reasoning: Option<serde_json::Value>,
         }
 
         let effective_cfg = &self.cfg;
@@ -788,6 +793,7 @@ impl RemoteMultimodalEngine {
             } else {
                 None
             },
+            reasoning: reasoning_payload(effective_cfg),
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -914,6 +920,8 @@ impl RemoteMultimodalEngine {
             max_tokens: u16,
             #[serde(skip_serializing_if = "Option::is_none")]
             response_format: Option<ResponseFormat>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reasoning: Option<serde_json::Value>,
         }
 
         let request_body = InferenceRequest {
@@ -937,6 +945,7 @@ impl RemoteMultimodalEngine {
             } else {
                 None
             },
+            reasoning: reasoning_payload(&self.cfg),
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -1014,6 +1023,8 @@ impl RemoteMultimodalEngine {
             messages: Vec<Message>,
             temperature: f32,
             max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reasoning: Option<serde_json::Value>,
         }
 
         let request_body = InferenceRequest {
@@ -1030,6 +1041,7 @@ impl RemoteMultimodalEngine {
             ],
             temperature: 0.0,
             max_tokens,
+            reasoning: reasoning_payload(&self.cfg),
         };
 
         let _permit = self.acquire_llm_permit().await;

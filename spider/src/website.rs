@@ -2521,9 +2521,9 @@ impl Website {
             let mut p = Page::default();
             p.url = url.to_string();
             p.status_code = status;
-            #[cfg(feature = "page_error_status_details")]
+            #[cfg(not(feature = "page_error_status_details"))]
             {
-                p.error_for_status = Some(Err(_err));
+                p.error_status = Some(_err.to_string());
             }
             p
         };
@@ -2920,9 +2920,9 @@ impl Website {
                     let mut page = Page::default();
                     page.url = target.to_string();
                     page.status_code = StatusCode::BAD_GATEWAY;
-                    #[cfg(feature = "page_error_status_details")]
+                    #[cfg(not(feature = "page_error_status_details"))]
                     {
-                        page.error_for_status = Some(Err(e));
+                        page.error_status = Some(e.to_string());
                     }
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return;
@@ -3114,10 +3114,10 @@ impl Website {
                                     p.url = target_url.to_string();
                                     p.status_code = StatusCode::BAD_GATEWAY;
                                     if let Some(e) = last_err {
-                                                    #[cfg(feature = "page_error_status_details")]
-                                                    {
-                                                        p.error_for_status = Some(Err(e));
-                                                    }
+                                        #[cfg(not(feature = "page_error_status_details"))]
+                                        {
+                                            p.error_status = Some(e.to_string());
+                                        }
                                     }
                                     p
                                 };

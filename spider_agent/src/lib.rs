@@ -114,7 +114,7 @@ pub use automation::{
     CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult, ChainStep,
     ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier, ExtractionSchema,
     FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelEndpoint, ModelPolicy,
-    NavigationOption, PageObservation, PromptUrlGate, RecoveryStrategy, RetryPolicy,
+    NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort, RecoveryStrategy, RetryPolicy,
     SelectorCache, SelectorCacheEntry, StructuredOutputConfig, VisionRouteMode,
 };
 

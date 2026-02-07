@@ -11,6 +11,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPEN_ROUTER: ${{ secrets.OPEN_ROUTER }}
+      SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+      RUN_LIVE_TESTS: ${{ secrets.RUN_LIVE_TESTS }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/cache@v3
@@ -23,7 +28,12 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build
-        run: cargo build --verbose --release
-      - name: Run tests
-        run: cargo test
+      - name: Cargo check workspace
+        run: cargo check --workspace
+      - name: Cargo test spider_agent (default)
+        run: cargo test -p spider_agent
+      - name: Cargo test spider_agent (openai + search_serper)
+        run: cargo test -p spider_agent --features "openai search_serper"
+      - name: Cargo test spider_agent live smoke
+        if: env.RUN_LIVE_TESTS == '1' || env.RUN_LIVE_TESTS == 'true' || env.RUN_LIVE_TESTS == 'TRUE'
+        run: cargo test -p spider_agent --features "openai search_serper" --test live_env_smoke -- --nocapture

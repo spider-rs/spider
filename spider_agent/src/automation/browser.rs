@@ -907,7 +907,7 @@ impl RemoteMultimodalEngine {
         recalled_context: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
-            best_effort_parse_json_object, extract_assistant_content, extract_usage,
+            best_effort_parse_json_object, extract_assistant_content, extract_usage, reasoning_payload,
             DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
         };
         use serde::Serialize;
@@ -928,6 +928,8 @@ impl RemoteMultimodalEngine {
             max_tokens: Option<u32>,
             #[serde(skip_serializing_if = "Option::is_none")]
             response_format: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reasoning: Option<serde_json::Value>,
         }
 
         // Build system prompt — use focused extraction prompt for single-round extraction
@@ -1092,6 +1094,7 @@ impl RemoteMultimodalEngine {
             temperature: Some(effective_cfg.temperature),
             max_tokens: Some(effective_cfg.max_tokens as u32),
             response_format,
+            reasoning: reasoning_payload(effective_cfg),
         };
 
         // Acquire semaphore if configured

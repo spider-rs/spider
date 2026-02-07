@@ -4396,30 +4396,43 @@ pub const TEST_AGENT_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CAR
 ))]
 #[tokio::test]
 async fn test_headers() {
+    use crate::utils::PageResponse;
     use reqwest::header::HeaderName;
     use reqwest::header::HeaderValue;
 
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .unwrap();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("server"),
+        HeaderValue::from_static("GitHub.com"),
+    );
+    headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
 
-    let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new_page(link_result, &client).await;
+    let page = build(
+        "https://choosealicense.com/",
+        PageResponse {
+            content: Some(Box::new(b"<html></html>".to_vec())),
+            headers: Some(headers),
+            status_code: StatusCode::OK,
+            ..Default::default()
+        },
+    );
 
-    let headers = page.headers.expect("There should be some headers!");
+    let headers = page.headers.expect("There should be some headers");
 
     assert_eq!(
         headers
             .get(HeaderName::from_static("server"))
-            .expect("There should be a server header value!"),
+            .expect("There should be a server header value"),
         HeaderValue::from_static("GitHub.com")
     );
 
     assert_eq!(
         headers
             .get(HeaderName::from_static("content-type"))
-            .expect("There should be a content-type value!"),
+            .expect("There should be a content-type value"),
         HeaderValue::from_static("text/html; charset=utf-8")
     );
 }
@@ -4431,13 +4444,18 @@ async fn test_headers() {
     not(feature = "cache_request")
 ))]
 async fn parse_links() {
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .unwrap();
+    use crate::utils::PageResponse;
 
     let link_result = "https://choosealicense.com/";
-    let mut page = Page::new(link_result, &client).await;
+    let html = br#"<html><body><a href="/about/">About</a></body></html>"#;
+    let mut page = build_with_parse(
+        link_result,
+        PageResponse {
+            content: Some(Box::new(html.to_vec())),
+            status_code: StatusCode::OK,
+            ..Default::default()
+        },
+    );
     let selector = get_page_selectors(link_result, false, false);
 
     let links = page.links(&selector, &None).await;
@@ -4459,12 +4477,14 @@ async fn parse_links() {
     not(feature = "cache_request")
 ))]
 async fn test_status_code() {
-    let client = Client::builder()
-        .user_agent(TEST_AGENT_NAME)
-        .build()
-        .unwrap();
-    let link_result = "https://choosealicense.com/does-not-exist";
-    let page: Page = Page::new(link_result, &client).await;
+    use crate::utils::PageResponse;
+    let page = build(
+        "https://choosealicense.com/does-not-exist",
+        PageResponse {
+            status_code: StatusCode::NOT_FOUND,
+            ..Default::default()
+        },
+    );
 
     assert_eq!(page.status_code.as_u16(), 404);
 }
@@ -5023,6 +5043,7 @@ fn test_automation_results_structure() {
         screenshot_output: Some("base64_screenshot_data".to_string()),
         error: None,
         usage: None,
+        relevant: None,
     };
 
     assert_eq!(automation_result.input, "Test prompt");
@@ -5040,6 +5061,7 @@ fn test_metadata_with_automation() {
         screenshot_output: None,
         error: None,
         usage: None,
+        relevant: None,
     }];
 
     let metadata = Metadata {
@@ -5071,6 +5093,7 @@ fn test_set_metadata_preserves_automation() {
         screenshot_output: None,
         error: None,
         usage: None,
+        relevant: None,
     }];
 
     let existing_metadata = Metadata {
@@ -5105,33 +5128,44 @@ fn test_set_metadata_preserves_automation() {
     not(feature = "cache_request")
 ))]
 async fn test_metadata_chrome_real_page() {
-    use crate::website::Website;
+    use crate::utils::PageResponse;
 
-    let mut website = Website::new("https://choosealicense.com")
-        .with_limit(1)
-        .build()
-        .unwrap();
+    // Keep this deterministic: verify chrome-gated metadata plumbing without external network.
+    let automation_results = vec![AutomationResults {
+        input: "Extract CTA".to_string(),
+        content_output: serde_json::json!({"cta": "Sign up"}),
+        screenshot_output: Some("base64_screenshot_data".to_string()),
+        error: None,
+        usage: None,
+        relevant: Some(true),
+    }];
 
-    let mut rx = website.subscribe(16).unwrap();
+    let metadata = Metadata {
+        title: Some(CompactString::from("Chrome Metadata Test")),
+        description: Some(CompactString::from("Description available")),
+        image: Some(CompactString::from("https://example.com/image.png")),
+        automation: Some(automation_results),
+    };
 
-    let handle = tokio::spawn(async move {
-        let mut metadata_found = false;
-        while let Ok(page) = rx.recv().await {
-            if page.get_metadata().is_some() {
-                metadata_found = true;
-                break;
-            }
-        }
-        metadata_found
-    });
+    let page = build(
+        "https://example.com",
+        PageResponse {
+            content: Some(Box::new(b"<html></html>".to_vec())),
+            status_code: StatusCode::OK,
+            metadata: Some(Box::new(metadata)),
+            ..Default::default()
+        },
+    );
 
-    website.crawl().await;
-    website.unsubscribe();
-
-    let metadata_found = handle.await.unwrap();
-    assert!(
-        metadata_found,
-        "At least one page should have metadata when crawling with chrome"
+    let meta = page
+        .get_metadata()
+        .as_ref()
+        .expect("metadata should be present for chrome feature test");
+    assert!(meta.title.as_deref() == Some("Chrome Metadata Test"));
+    assert!(meta.automation.is_some(), "automation metadata should be present");
+    assert_eq!(
+        meta.automation.as_ref().expect("automation data").len(),
+        1
     );
 }
 
