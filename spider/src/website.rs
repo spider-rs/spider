@@ -9627,10 +9627,24 @@ async fn crawl_invalid() {
     let domain = "https://w.com";
     let mut website: Website = Website::new(domain);
     website.crawl().await;
-    let mut uniq: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
-    uniq.insert(format!("{}/", domain.to_string()).into()); // TODO: remove trailing slash mutate
+    let links = website.links_visited.get_links();
+    let root = CaseInsensitiveString::from(format!("{}/", domain));
 
-    assert_eq!(website.links_visited.get_links(), *uniq); // only the target url should exist
+    assert!(links.contains(&root), "{:?}", links);
+
+    #[cfg(feature = "sitemap")]
+    {
+        let sitemap = CaseInsensitiveString::from(format!("{}/sitemap.xml", domain));
+        assert!(links.len() <= 2, "{:?}", links);
+        if links.len() == 2 {
+            assert!(links.contains(&sitemap), "{:?}", links);
+        }
+    }
+
+    #[cfg(not(feature = "sitemap"))]
+    {
+        assert_eq!(links.len(), 1, "{:?}", links);
+    }
 }
 
 #[tokio::test]

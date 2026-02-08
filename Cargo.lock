@@ -1121,8 +1121,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.44.34",
- "spider_utils 2.44.34",
+ "spider 2.44.35",
+ "spider_utils 2.44.35",
 ]
 
 [[package]]
@@ -7698,7 +7698,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.44.34"
+version = "2.44.35"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7774,7 +7774,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.44.34"
+version = "2.44.35"
 dependencies = [
  "aho-corasick",
  "async-openai 0.29.6",
@@ -7844,7 +7844,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.44.34"
+version = "2.44.35"
 dependencies = [
  "clap",
  "env_logger",
@@ -7852,7 +7852,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.44.34",
+ "spider 2.44.35",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -7860,7 +7860,7 @@ dependencies = [
 
 [[package]]
 name = "spider_examples"
-version = "2.37.104"
+version = "2.37.105"
 dependencies = [
  "console-subscriber",
  "convert_case 0.6.0",
@@ -7868,7 +7868,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.44.34",
+ "spider 2.44.35",
  "spider_transformations",
  "spider_utils 2.44.32",
 ]
@@ -7995,7 +7995,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.44.34"
+version = "2.44.35"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -8011,11 +8011,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.44.34"
+version = "2.44.35"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.44.34",
+ "spider 2.44.35",
  "warp",
 ]
 

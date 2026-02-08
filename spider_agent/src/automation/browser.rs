@@ -74,6 +74,56 @@ impl RemoteMultimodalEngine {
     // Capture helpers
     // -----------------------------------------------------------------
 
+    /// Whether this round should include screenshot capture/input.
+    ///
+    /// This enforces text-only behavior when the resolved round model does not
+    /// support vision, while still honoring explicit `include_screenshot` overrides.
+    #[inline]
+    fn should_include_screenshot_for_round(
+        &self,
+        effective_cfg: &RemoteMultimodalConfig,
+        use_vision: bool,
+    ) -> bool {
+        if !use_vision {
+            return false;
+        }
+        match effective_cfg.include_screenshot {
+            Some(explicit) => explicit,
+            None => {
+                let (_, model_name, _) = self.resolve_model_for_round(use_vision);
+                super::config::supports_vision(model_name)
+            }
+        }
+    }
+
+    /// Apply a text-only flavor to the system prompt for rounds where no image
+    /// is provided. This keeps action bindings intact while removing screenshot
+    /// expectations that can mislead text-only models.
+    #[inline]
+    fn apply_text_only_prompt_flavor(system_msg: &mut String, can_request_vision: bool) {
+        const SCREENSHOT_INPUT_LINE: &str =
+            "- Screenshot of current page state (may be omitted in text-only rounds)\n";
+        const TEXT_ONLY_INPUT_LINE: &str =
+            "- No screenshot is provided this round; use URL/title/HTML context.\n";
+
+        if system_msg.contains(SCREENSHOT_INPUT_LINE) {
+            *system_msg = system_msg.replacen(SCREENSHOT_INPUT_LINE, TEXT_ONLY_INPUT_LINE, 1);
+        }
+
+        if system_msg.contains("→ visible in screenshot") {
+            *system_msg =
+                system_msg.replace("→ visible in screenshot", "→ visible in next round context");
+        }
+
+        if can_request_vision {
+            system_msg.push_str("\n\n---\nMODE: TEXT-ONLY (no screenshot this round). Use HTML context and memory to decide actions. If you need visual information, set `{\"op\":\"set\",\"key\":\"request_vision\",\"value\":true}` in memory_ops to receive a screenshot next round.\n");
+        } else {
+            system_msg.push_str(
+                "\n\n---\nMODE: TEXT-ONLY (no screenshot available for this model/config). Use HTML context and memory only.\n",
+            );
+        }
+    }
+
     /// Capture screenshot as data URL with profile settings.
     /// Automatically applies grayscale filter for text CAPTCHAs to improve readability.
     pub(crate) async fn screenshot_as_data_url_with_profile(
@@ -544,7 +594,11 @@ impl RemoteMultimodalEngine {
             // Reset per-round force flag
             force_vision_next_round = false;
 
-            // Capture state – skip screenshot when text-only round
+            // Capture state – skip screenshot when this round is text-only
+            let include_screenshot_this_round = use_vision
+                && !skip_screenshot_for_extraction
+                && self.should_include_screenshot_for_round(&effective_cfg, use_vision);
+
             let html_fut = self.html_context_with_profile(page, &effective_cfg, cap);
             let url_fut =
                 async { Ok::<String, EngineError>(self.url_context(page, &effective_cfg).await) };
@@ -552,9 +606,7 @@ impl RemoteMultimodalEngine {
                 async { Ok::<String, EngineError>(self.title_context(page, &effective_cfg).await) };
 
             #[allow(unused_mut)]
-            let (screenshot, html, mut url_now, mut title_now) = if use_vision
-                && !skip_screenshot_for_extraction
-            {
+            let (screenshot, html, mut url_now, mut title_now) = if include_screenshot_this_round {
                 let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
                 let (s, h, u, t) = tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
                 (s, h, u, t)
@@ -619,7 +671,10 @@ impl RemoteMultimodalEngine {
             };
 
             // Late screenshot capture when upgrading to vision after stagnation detected
-            let screenshot = if use_vision && screenshot.is_empty() {
+            let include_screenshot_this_round = use_vision
+                && !skip_screenshot_for_extraction
+                && self.should_include_screenshot_for_round(&effective_cfg, use_vision);
+            let screenshot = if include_screenshot_this_round && screenshot.is_empty() {
                 self.screenshot_as_data_url_with_profile(page, cap).await?
             } else {
                 screenshot
@@ -1135,6 +1190,10 @@ impl RemoteMultimodalEngine {
             }
         }
 
+        if screenshot.is_empty() {
+            Self::apply_text_only_prompt_flavor(&mut system_msg, self.has_dual_model_routing());
+        }
+
         // Build user prompt
         let user_text = self.build_user_prompt(
             effective_cfg,
@@ -1149,11 +1208,6 @@ impl RemoteMultimodalEngine {
             memory,
             user_message_extra,
         );
-
-        // Inject text-only mode hint when dual routing skips screenshot
-        if self.has_dual_model_routing() && !use_vision {
-            system_msg.push_str("\n\n---\nMODE: TEXT-ONLY (no screenshot this round). Use HTML context and memory to decide actions. If you need visual information, set `{\"op\":\"set\",\"key\":\"request_vision\",\"value\":true}` in memory_ops to receive a screenshot next round.\n");
-        }
 
         // Build user content – omit image_url block when text-only
         let user_content = if use_vision && !screenshot.is_empty() {
@@ -2926,6 +2980,7 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automation::DEFAULT_SYSTEM_PROMPT;
 
     #[test]
     fn test_spawn_page_options_default() {
@@ -3086,5 +3141,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_text_only_prompt_flavor_preserves_bindings() {
+        let mut prompt = DEFAULT_SYSTEM_PROMPT.to_string();
+        RemoteMultimodalEngine::apply_text_only_prompt_flavor(&mut prompt, false);
+
+        assert!(prompt.contains("No screenshot is provided this round"));
+        assert!(!prompt
+            .contains("- Screenshot of current page state (may be omitted in text-only rounds)"));
+        // Keep explicit bindings/format rules for accuracy.
+        assert!(prompt.contains("ClickPoint"));
+        assert!(prompt.contains("SetViewport"));
+        assert!(prompt.contains("JSON only"));
+    }
+
+    #[test]
+    fn test_should_include_screenshot_for_round_respects_model_capability() {
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-3.5-turbo", None);
+        let cfg = RemoteMultimodalConfig::default();
+        assert!(!engine.should_include_screenshot_for_round(&cfg, true));
+
+        let vision_engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        assert!(vision_engine.should_include_screenshot_for_round(&cfg, true));
+    }
+
+    #[test]
+    fn test_should_include_screenshot_for_round_honors_override() {
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-3.5-turbo", None);
+        let cfg_true = RemoteMultimodalConfig {
+            include_screenshot: Some(true),
+            ..Default::default()
+        };
+        assert!(engine.should_include_screenshot_for_round(&cfg_true, true));
+
+        let cfg_false = RemoteMultimodalConfig {
+            include_screenshot: Some(false),
+            ..Default::default()
+        };
+        assert!(!engine.should_include_screenshot_for_round(&cfg_false, true));
     }
 }
